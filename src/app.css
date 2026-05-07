@@ -35,13 +35,13 @@
   --activity-bg:          #333333;
   --activity-hover:       #3c3c3c;
   --activity-foreground:  #ffffff;
-  --activity-inactive:    #858585;
+  --activity-inactive:    #aaaaaa;
   --activity-activeBorder:#ffffff;
 
   /* ---- Text ---- */
-  --text-primary:    #cccccc;
-  --text-secondary:  #969696;
-  --text-muted:      #6e6e6e;
+  --text-primary:    #ffffff;
+  --text-secondary:  #dddddd;
+  --text-muted:      #888888;
   --text-link:       #4fc1ff;
 
   /* ---- Accent ---- */
@@ -49,13 +49,13 @@
   --accent-hover: #1a8ae8;
 
   /* ---- Borders ---- */
-  --border:       #3c3c3c;
-  --border-light: #2d2d2d;
+  --border:       #454545;
+  --border-light: #333333;
 
   /* ---- Scrollbar ---- */
   --scrollbar-bg:   transparent;
-  --scrollbar-thumb:#424242;
-  --scrollbar-hover:#4e4e4e;
+  --scrollbar-thumb:#505050;
+  --scrollbar-hover:#606060;
 
   /* ---- Status bar ---- */
   --status-bg: #0078d4;

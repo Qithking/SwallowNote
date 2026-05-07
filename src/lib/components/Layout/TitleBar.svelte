@@ -32,12 +32,13 @@
     await appWindow.close();
   }
 
-  async function handleStartDrag(e: MouseEvent) {
+  async function handleStartDrag() {
     if (!appWindow) return;
-    // 只在标题栏空白区域拖拽，不在按钮和菜单上拖拽
-    const target = e.target as HTMLElement;
-    if (target.closest('button') || target.closest('.menu-item')) return;
-    await appWindow.startDragging();
+    try {
+      await appWindow.startDragging();
+    } catch (err) {
+      console.error('Failed to start dragging:', err);
+    }
   }
 
   function toggleMenu(menu: string) {
@@ -81,10 +82,10 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="title-bar" onclick={handleStartDrag}>
+<div class="title-bar" role="toolbar" ondblclick={handleToggleMaximize}>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="title-left" onclick={stopPropagation}>
+  <div class="title-left drag-region" onmousedown={handleStartDrag}>
     <!-- App icon -->
     <div class="app-icon" title="SwallowNote">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -221,7 +222,7 @@
     </nav>
   </div>
 
-  <div class="title-center">SwallowNote</div>
+  <div class="title-center drag-region">SwallowNote</div>
 
   <div class="title-right" onclick={stopPropagation}>
     <button type="button" class="window-btn minimize" onclick={handleMinimize} title="最小化">
@@ -264,7 +265,6 @@
     font-size: 12px;
     user-select: none;
     flex-shrink: 0;
-    -webkit-app-region: drag;
     border-radius: 8px 8px 0 0;
   }
 
@@ -272,7 +272,13 @@
     display: flex;
     align-items: center;
     height: 100%;
-    -webkit-app-region: no-drag;
+  }
+
+  .drag-region {
+    flex: 1;
+    height: 100%;
+    -webkit-app-region: drag;
+    cursor: default;
   }
 
   .app-icon {
@@ -310,6 +316,7 @@
     align-items: center;
     transition: background 0.08s;
     font-family: inherit;
+    -webkit-text-fill-color: var(--text-primary);
   }
 
   .menu-btn:hover,
@@ -356,7 +363,7 @@
   }
 
   .menu-shortcut {
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 11px;
     margin-left: 24px;
     white-space: nowrap;
@@ -372,7 +379,7 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 11px;
     pointer-events: none;
     white-space: nowrap;
@@ -382,7 +389,6 @@
     display: flex;
     align-items: center;
     height: 100%;
-    -webkit-app-region: no-drag;
   }
 
   .window-btn {

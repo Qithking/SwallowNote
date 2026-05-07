@@ -425,7 +425,8 @@
   }
   .empty-logo {
     margin-bottom: 24px;
-    opacity: 0.3;
+    opacity: 0.6;
+    color: var(--text-primary);
   }
   .empty-title {
     font-size: 28px; font-weight: 300;
@@ -434,7 +435,7 @@
     letter-spacing: -0.5px;
   }
   .empty-subtitle {
-    font-size: 13px; color: var(--text-muted);
+    font-size: 13px; color: var(--text-secondary);
     margin-bottom: 28px;
   }
   .empty-actions { margin-bottom: 0; }
@@ -467,7 +468,7 @@
   .shortcuts-title {
     font-size: 12px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 12px;
@@ -478,6 +479,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    color: var(--text-primary);
   }
 
   .shortcut-row {
@@ -485,6 +487,11 @@
     align-items: center;
     gap: 4px;
     font-size: 12px;
+    color: var(--text-primary);
+  }
+
+  .shortcut-row > span:not(.shortcut-desc) {
+    color: var(--text-secondary);
   }
 
   kbd {
@@ -502,7 +509,7 @@
   }
 
   .shortcut-desc {
-    color: var(--text-muted);
+    color: var(--text-secondary);
     margin-left: 8px;
     flex: 1;
   }
