@@ -2,6 +2,7 @@
   import type { FileNode } from '../../types/file';
   import { expandedNodes, selectedNode, selectNode, loadDirectory } from '../../stores/fileStore';
   import FileTreeNode from './FileTreeNode.svelte';
+  import { FolderOpen, Folder, FileText, FileCode, FileJson, FileImage, FileType, ChevronRight } from 'lucide-svelte';
 
   let { node, depth = 0 }: { node: FileNode; depth?: number } = $props();
 
@@ -54,40 +55,29 @@
     document.dispatchEvent(event);
   }
 
-  function getIcon() {
+  function getFileIconColor(): string {
+    const n = node.name.toLowerCase();
+    if (n.endsWith('.md')) return '#4fc1ff';
+    if (n.endsWith('.json')) return '#ce9178';
+    if (n.endsWith('.js') || n.endsWith('.jsx') || n.endsWith('.mjs')) return '#dcdcaa';
+    if (n.endsWith('.ts') || n.endsWith('.tsx')) return '#569cd6';
+    if (n.endsWith('.css') || n.endsWith('.scss') || n.endsWith('.less')) return '#519aba';
+    if (n.endsWith('.html') || n.endsWith('.htm')) return '#e44d26';
+    if (n.endsWith('.svg') || n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.webp')) return '#c586c0';
+    if (n.endsWith('.yaml') || n.endsWith('.yml')) return '#6a9955';
+    return '#969696';
+  }
+
+  function getFileIcon() {
     const n = node.name.toLowerCase();
     if (node.is_directory) {
-      return isExpanded
-        ? `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1H2.5A1.5 1.5 0 0 0 1 2.5v11A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 13.5 3H9L8 1z" opacity="0.8"/></svg>`
-        : `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1H2.5A1.5 1.5 0 0 0 1 2.5v11A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 13.5 3H9L8 1z" opacity="0.6"/></svg>`;
+      return isExpanded ? FolderOpen : Folder;
     }
-    // File icons per extension
-    if (n.endsWith('.md')) {
-      return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#4fc1ff" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#4fc1ff"/><path d="M5 8h6M5 10h4" stroke="#4fc1ff" opacity="0.6"/></svg>`;
-    }
-    if (n.endsWith('.json')) {
-      return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#ce9178" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#ce9178"/><path d="M6 9l-1 1 1 1M10 9l1 1-1 1" opacity="0.7"/></svg>`;
-    }
-    if (n.endsWith('.js') || n.endsWith('.jsx') || n.endsWith('.mjs')) {
-      return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#dcdcaa" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#dcdcaa"/><text x="4" y="12" font-size="8" fill="#dcdcaa" font-weight="bold">JS</text></svg>`;
-    }
-    if (n.endsWith('.ts') || n.endsWith('.tsx')) {
-      return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#569cd6" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#569cd6"/><text x="4" y="11" font-size="7" fill="#569cd6" font-weight="bold">TS</text></svg>`;
-    }
-    if (n.endsWith('.css') || n.endsWith('.scss') || n.endsWith('.less')) {
-      return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#519aba" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#519aba"/><text x="4" y="12" font-size="8" fill="#519aba" font-weight="bold">#</text></svg>`;
-    }
-    if (n.endsWith('.html') || n.endsWith('.htm')) {
-      return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#e44d26" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#e44d26"/><text x="4" y="12" font-size="7" fill="#e44d26" font-weight="bold">H</text></svg>`;
-    }
-    if (n.endsWith('.svg') || n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.webp')) {
-      return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#c586c0" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#c586c0"/><circle cx="8" cy="9" r="2" fill="#c586c0" opacity="0.5"/></svg>`;
-    }
-    if (n.endsWith('.yaml') || n.endsWith('.yml')) {
-      return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#6a9955" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#6a9955"/><path d="M5 11l3-5 3 5" opacity="0.7"/></svg>`;
-    }
-    // Default file icon
-    return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#969696" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#969696"/></svg>`;
+    if (n.endsWith('.json')) return FileJson;
+    if (n.endsWith('.js') || n.endsWith('.jsx') || n.endsWith('.ts') || n.endsWith('.tsx') || n.endsWith('.mjs')) return FileCode;
+    if (n.endsWith('.svg') || n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.webp')) return FileImage;
+    if (n.endsWith('.css') || n.endsWith('.scss') || n.endsWith('.less') || n.endsWith('.html') || n.endsWith('.htm') || n.endsWith('.yaml') || n.endsWith('.yml')) return FileType;
+    return FileText;
   }
 </script>
 
@@ -109,15 +99,19 @@
       title={isExpanded ? '折叠' : '展开'}
       aria-label={isExpanded ? '折叠' : '展开'}
     >
-      <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" class:rotated={isExpanded}>
-        <path d="M3 1l5 4-5 4" stroke="currentColor" stroke-width="1.2" fill="none"/>
-      </svg>
+      <ChevronRight size={10} strokeWidth={1.5} class={isExpanded ? 'rotated' : ''} />
     </button>
   {:else}
     <span class="toggle-spacer"></span>
   {/if}
 
-  <span class="node-icon">{@html getIcon()}</span>
+  <span class="node-icon">
+    {#if node.is_directory}
+      <svelte:component this={getFileIcon()} size={16} strokeWidth={1.5} color={isExpanded ? '#cccccc' : '#aaaaaa'} />
+    {:else}
+      <svelte:component this={getFileIcon()} size={16} strokeWidth={1.5} color={getFileIconColor()} />
+    {/if}
+  </span>
   <span class="node-name">{node.name}</span>
 
   {#if isLoading}
@@ -170,7 +164,7 @@
     padding: 0;
     transition: transform 0.08s;
   }
-  .toggle-btn svg.rotated { transform: rotate(90deg); }
+  .toggle-btn :global(svg.rotated) { transform: rotate(90deg); }
   .toggle-btn:hover { color: #969696; }
 
   .toggle-spacer { width: 16px; flex-shrink: 0; }

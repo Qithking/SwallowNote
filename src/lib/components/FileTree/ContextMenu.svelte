@@ -3,6 +3,7 @@
   import { FileService } from '../../services/fileService';
   import { refreshDirectory, rootPath } from '../../stores/fileStore';
   import { get } from 'svelte/store';
+  import { FilePlus, FolderPlus, Pencil, Trash2, Copy, Link } from 'lucide-svelte';
 
   let visible = $state(false);
   let x = $state(0);
@@ -143,50 +144,30 @@
   >
     {#if targetNode?.is_directory}
       <button class="menu-item" role="menuitem" onclick={handleNewFile}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="12" y1="18" x2="12" y2="12"/>
-          <line x1="9" y1="15" x2="15" y2="15"/>
-        </svg>
+        <FilePlus size={14} strokeWidth={1.5} />
         新建文件
       </button>
       <button class="menu-item" role="menuitem" onclick={handleNewFolder}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          <line x1="12" y1="11" x2="12" y2="17"/>
-          <line x1="9" y1="14" x2="15" y2="14"/>
-        </svg>
+        <FolderPlus size={14} strokeWidth={1.5} />
         新建文件夹
       </button>
       <div class="menu-separator"></div>
     {/if}
     <button class="menu-item" role="menuitem" onclick={handleRename}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-      </svg>
+      <Pencil size={14} strokeWidth={1.5} />
       重命名
     </button>
     <button class="menu-item danger" role="menuitem" onclick={handleDelete}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="3 6 5 6 21 6"/>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-      </svg>
+      <Trash2 size={14} strokeWidth={1.5} />
       删除
     </button>
     <div class="menu-separator"></div>
     <button class="menu-item" role="menuitem" onclick={handleCopyPath}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-      </svg>
+      <Copy size={14} strokeWidth={1.5} />
       复制路径
     </button>
     <button class="menu-item" role="menuitem" onclick={handleCopyRelativePath}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-      </svg>
+      <Link size={14} strokeWidth={1.5} />
       复制相对路径
     </button>
   </div>

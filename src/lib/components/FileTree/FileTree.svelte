@@ -7,6 +7,7 @@
   import { FileService } from '../../services/fileService';
   import type { FileNode } from '../../types/file';
   import { get } from 'svelte/store';
+  import { FilePlus, FolderPlus, RefreshCw, FolderOpen } from 'lucide-svelte';
 
   let rootNodes = $state<FileNode[]>([]);
   let isLoading = $state(false);
@@ -102,12 +103,7 @@
         title="新建文件"
         disabled={!$rootPath}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="12" y1="18" x2="12" y2="12"/>
-          <line x1="9" y1="15" x2="15" y2="15"/>
-        </svg>
+        <FilePlus size={14} strokeWidth={2} />
       </button>
       <button
         type="button"
@@ -116,11 +112,7 @@
         title="新建文件夹"
         disabled={!$rootPath}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          <line x1="12" y1="11" x2="12" y2="17"/>
-          <line x1="9" y1="14" x2="15" y2="14"/>
-        </svg>
+        <FolderPlus size={14} strokeWidth={2} />
       </button>
       <button
         type="button"
@@ -129,10 +121,7 @@
         title="刷新"
         disabled={!$rootPath}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 4 23 10 17 10"/>
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-        </svg>
+        <RefreshCw size={14} strokeWidth={2} />
       </button>
     </div>
   </div>
@@ -140,9 +129,7 @@
   <div class="tree-content">
     {#if !$rootPath}
       <div class="empty-state">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6e6e6e" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-        </svg>
+        <FolderOpen size={32} strokeWidth={1} color="#6e6e6e" />
         <p class="empty-hint">尚未打开文件夹</p>
         <button type="button" class="open-folder-btn" onclick={handleOpenFolder}>
           打开文件夹

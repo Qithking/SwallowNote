@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { open } from '@tauri-apps/plugin-dialog';
   import { setRootPath } from '../../stores/fileStore';
+  import { FileText, Minus, Square, Copy, X } from 'lucide-svelte';
 
   let appWindow: Awaited<ReturnType<typeof import('@tauri-apps/api/window').getCurrentWindow>> | null = null;
 
@@ -88,12 +89,7 @@
   <div class="title-left drag-region" onmousedown={handleStartDrag}>
     <!-- App icon -->
     <div class="app-icon" title="SwallowNote">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-        <line x1="16" y1="13" x2="8" y2="13"/>
-        <line x1="16" y1="17" x2="8" y2="17"/>
-      </svg>
+      <FileText size={16} strokeWidth={1.5} />
     </div>
 
     <!-- Menu items -->
@@ -226,30 +222,17 @@
 
   <div class="title-right" onclick={stopPropagation}>
     <button type="button" class="window-btn minimize" onclick={handleMinimize} title="最小化">
-      <svg width="10" height="10" viewBox="0 0 10 10">
-        <line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1"/>
-      </svg>
+      <Minus size={10} strokeWidth={1.5} />
     </button>
     <button type="button" class="window-btn maximize" onclick={handleToggleMaximize} title={isMaximized ? '向下还原' : '最大化'}>
       {#if isMaximized}
-        <!-- svelte-ignore a11y_missing_attribute -->
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <rect x="1.5" y="2.5" width="6" height="6" fill="none" stroke="currentColor" stroke-width="1"/>
-          <polyline points="3,2.5 3,1 9,1 9,7 7.5,7" fill="none" stroke="currentColor" stroke-width="1"/>
-        </svg>
+        <Copy size={10} strokeWidth={1.5} />
       {:else}
-        <!-- svelte-ignore a11y_missing_attribute -->
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1"/>
-        </svg>
+        <Square size={10} strokeWidth={1.5} />
       {/if}
     </button>
     <button type="button" class="window-btn close" onclick={handleClose} title="关闭" aria-label="关闭">
-      <!-- svelte-ignore a11y_missing_attribute -->
-      <svg width="10" height="10" viewBox="0 0 10 10">
-        <line x1="0" y1="0" x2="10" y2="10" stroke="currentColor" stroke-width="1.2"/>
-        <line x1="10" y1="0" x2="0" y2="10" stroke="currentColor" stroke-width="1.2"/>
-      </svg>
+      <X size={10} strokeWidth={1.5} />
     </button>
   </div>
 </div>

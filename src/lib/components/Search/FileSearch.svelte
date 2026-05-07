@@ -5,6 +5,7 @@
   import { FileService } from '../../services/fileService';
   import type { FileNode } from '../../types/file';
   import Fuse from 'fuse.js';
+  import { Search, FileText } from 'lucide-svelte';
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -73,9 +74,8 @@
     return text.slice(0, idx) + '<strong>' + text.slice(idx, idx + q.length) + '</strong>' + text.slice(idx + q.length);
   }
 
-  function fileIcon(name: string): string {
-    if (name.endsWith('.md')) return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#4fc1ff" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4" stroke="#4fc1ff"/><path d="M5 8h6M5 10h4" stroke="#4fc1ff" opacity="0.6"/></svg>`;
-    return `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 1h8l4 4v9.5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 14.5V1z"/><path d="M10 1v4h4"/></svg>`;
+  function isMarkdown(name: string): boolean {
+    return name.endsWith('.md');
   }
 </script>
 
@@ -88,9 +88,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="quick-open-dialog" onclick={(e) => e.stopPropagation()} onkeydown={handleKeydown} role="document">
     <div class="quick-open-input-wrapper">
-      <svg class="quick-open-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-      </svg>
+      <Search class="quick-open-search-icon" size={18} strokeWidth={2} />
       <input
         bind:this={searchInput}
         type="text"
@@ -111,7 +109,9 @@
             role="button"
             tabindex="-1"
           >
-            <span class="result-icon">{@html fileIcon(result.name)}</span>
+            <span class="result-icon">
+              <FileText size={16} strokeWidth={1.2} color={isMarkdown(result.name) ? '#4fc1ff' : 'currentColor'} />
+            </span>
             <div class="result-info">
               <span class="result-name">{@html highlightMatch(result.name, query)}</span>
               <span class="result-path">{@html highlightMatch(result.path, query)}</span>
