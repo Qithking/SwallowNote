@@ -3,11 +3,11 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import { setRootPath } from '../../stores/fileStore';
   import { FileText, Minus, Square, Copy, X } from 'lucide-svelte';
+  import * as Menubar from '$lib/components/ui/menubar';
 
   let appWindow: Awaited<ReturnType<typeof import('@tauri-apps/api/window').getCurrentWindow>> | null = null;
 
   let isMaximized = $state(false);
-  let openMenu = $state<string | null>(null);
 
   onMount(async () => {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
@@ -42,14 +42,6 @@
     }
   }
 
-  function toggleMenu(menu: string) {
-    openMenu = openMenu === menu ? null : menu;
-  }
-
-  function closeMenu() {
-    openMenu = null;
-  }
-
   async function handleOpenFolder() {
     try {
       const selected = await open({
@@ -63,162 +55,140 @@
     } catch (err) {
       console.error('Failed to open folder:', err);
     }
-    closeMenu();
+  }
+
+  function handleAction(action: () => void) {
+    action();
   }
 
   function stopPropagation(e: MouseEvent) {
     e.stopPropagation();
   }
-
-  function handleAction(action: () => void) {
-    return (e: MouseEvent) => {
-      e.stopPropagation();
-      action();
-      closeMenu();
-    };
-  }
 </script>
-
-<svelte:window onclick={closeMenu} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="title-bar" role="toolbar" ondblclick={handleToggleMaximize}>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="title-left drag-region" onmousedown={handleStartDrag}>
-    <!-- App icon -->
-    <div class="app-icon" title="SwallowNote">
+  <div class="title-left">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="app-icon drag-region" onmousedown={handleStartDrag} title="SwallowNote">
       <FileText size={16} strokeWidth={1.5} />
     </div>
 
     <!-- Menu items -->
-    <nav class="menu-bar">
-      <div class="menu-item" class:active={openMenu === 'file'}>
-        <button type="button" class="menu-btn" onclick={() => toggleMenu('file')}>文件</button>
-        {#if openMenu === 'file'}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="menu-dropdown" onclick={stopPropagation}>
-            <button type="button" class="menu-action" onclick={handleOpenFolder}>
-              <span>打开文件夹</span>
-              <span class="menu-shortcut">Ctrl+K Ctrl+O</span>
-            </button>
-            <div class="menu-separator"></div>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.dispatchEvent(new Event('app:save')))}>
-              <span>保存</span>
-              <span class="menu-shortcut">Ctrl+S</span>
-            </button>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.dispatchEvent(new Event('app:save-all')))}>
-              <span>全部保存</span>
-              <span class="menu-shortcut">Ctrl+Shift+S</span>
-            </button>
-            <div class="menu-separator"></div>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.dispatchEvent(new Event('app:close-tab')))}>
-              <span>关闭编辑器</span>
-              <span class="menu-shortcut">Ctrl+W</span>
-            </button>
-          </div>
-        {/if}
-      </div>
+    <Menubar.Root class="menubar-root">
+      <Menubar.Menu>
+        <Menubar.Trigger class="menu-trigger">文件</Menubar.Trigger>
+        <Menubar.Content>
+          <Menubar.Item onclick={handleOpenFolder}>
+            打开文件夹
+            <Menubar.Shortcut>Ctrl+K Ctrl+O</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Separator />
+          <Menubar.Item onclick={() => handleAction(() => document.dispatchEvent(new Event('app:save')))}>
+            保存
+            <Menubar.Shortcut>Ctrl+S</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Item onclick={() => handleAction(() => document.dispatchEvent(new Event('app:save-all')))}>
+            全部保存
+            <Menubar.Shortcut>Ctrl+Shift+S</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Separator />
+          <Menubar.Item onclick={() => handleAction(() => document.dispatchEvent(new Event('app:close-tab')))}>
+            关闭编辑器
+            <Menubar.Shortcut>Ctrl+W</Menubar.Shortcut>
+          </Menubar.Item>
+        </Menubar.Content>
+      </Menubar.Menu>
 
-      <div class="menu-item" class:active={openMenu === 'edit'}>
-        <button type="button" class="menu-btn" onclick={() => toggleMenu('edit')}>编辑</button>
-        {#if openMenu === 'edit'}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="menu-dropdown" onclick={stopPropagation}>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.execCommand('undo'))}>
-              <span>撤销</span>
-              <span class="menu-shortcut">Ctrl+Z</span>
-            </button>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.execCommand('redo'))}>
-              <span>重做</span>
-              <span class="menu-shortcut">Ctrl+Shift+Z</span>
-            </button>
-            <div class="menu-separator"></div>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.execCommand('cut'))}>
-              <span>剪切</span>
-              <span class="menu-shortcut">Ctrl+X</span>
-            </button>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.execCommand('copy'))}>
-              <span>复制</span>
-              <span class="menu-shortcut">Ctrl+C</span>
-            </button>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.execCommand('paste'))}>
-              <span>粘贴</span>
-              <span class="menu-shortcut">Ctrl+V</span>
-            </button>
-            <div class="menu-separator"></div>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.execCommand('findAll'))}>
-              <span>查找</span>
-              <span class="menu-shortcut">Ctrl+F</span>
-            </button>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.dispatchEvent(new Event('app:search')))}>
-              <span>快速打开文件</span>
-              <span class="menu-shortcut">Ctrl+P</span>
-            </button>
-          </div>
-        {/if}
-      </div>
+      <Menubar.Menu>
+        <Menubar.Trigger class="menu-trigger">编辑</Menubar.Trigger>
+        <Menubar.Content>
+          <Menubar.Item onclick={() => handleAction(() => document.execCommand('undo'))}>
+            撤销
+            <Menubar.Shortcut>Ctrl+Z</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Item onclick={() => handleAction(() => document.execCommand('redo'))}>
+            重做
+            <Menubar.Shortcut>Ctrl+Shift+Z</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Separator />
+          <Menubar.Item onclick={() => handleAction(() => document.execCommand('cut'))}>
+            剪切
+            <Menubar.Shortcut>Ctrl+X</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Item onclick={() => handleAction(() => document.execCommand('copy'))}>
+            复制
+            <Menubar.Shortcut>Ctrl+C</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Item onclick={() => handleAction(() => document.execCommand('paste'))}>
+            粘贴
+            <Menubar.Shortcut>Ctrl+V</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Separator />
+          <Menubar.Item onclick={() => handleAction(() => document.execCommand('findAll'))}>
+            查找
+            <Menubar.Shortcut>Ctrl+F</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Item onclick={() => handleAction(() => document.dispatchEvent(new Event('app:search')))}>
+            快速打开文件
+            <Menubar.Shortcut>Ctrl+P</Menubar.Shortcut>
+          </Menubar.Item>
+        </Menubar.Content>
+      </Menubar.Menu>
 
-      <div class="menu-item" class:active={openMenu === 'view'}>
-        <button type="button" class="menu-btn" onclick={() => toggleMenu('view')}>视图</button>
-        {#if openMenu === 'view'}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="menu-dropdown" onclick={stopPropagation}>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.dispatchEvent(new Event('app:toggle-sidebar')))}>
-              <span>切换侧边栏</span>
-              <span class="menu-shortcut">Ctrl+B</span>
-            </button>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.dispatchEvent(new Event('app:search')))}>
-              <span>快速打开</span>
-              <span class="menu-shortcut">Ctrl+P</span>
-            </button>
-            <div class="menu-separator"></div>
-            <button type="button" class="menu-action" onclick={handleAction(() => { document.body.style.zoom = String((parseFloat(document.body.style.zoom || '1') + 0.1)); })}>
-              <span>放大</span>
-              <span class="menu-shortcut">Ctrl++</span>
-            </button>
-            <button type="button" class="menu-action" onclick={handleAction(() => { document.body.style.zoom = String((parseFloat(document.body.style.zoom || '1') - 0.1)); })}>
-              <span>缩小</span>
-              <span class="menu-shortcut">Ctrl+-</span>
-            </button>
-            <button type="button" class="menu-action" onclick={handleAction(() => { document.body.style.zoom = '1'; })}>
-              <span>重置缩放</span>
-              <span class="menu-shortcut">Ctrl+0</span>
-            </button>
-            <div class="menu-separator"></div>
-            <button type="button" class="menu-action" onclick={handleToggleMaximize}>
-              <span>{isMaximized ? '退出全屏' : '全屏'}</span>
-              <span class="menu-shortcut">F11</span>
-            </button>
-          </div>
-        {/if}
-      </div>
+      <Menubar.Menu>
+        <Menubar.Trigger class="menu-trigger">视图</Menubar.Trigger>
+        <Menubar.Content>
+          <Menubar.Item onclick={() => handleAction(() => document.dispatchEvent(new Event('app:toggle-sidebar')))}>
+            切换侧边栏
+            <Menubar.Shortcut>Ctrl+B</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Item onclick={() => handleAction(() => document.dispatchEvent(new Event('app:search')))}>
+            快速打开
+            <Menubar.Shortcut>Ctrl+P</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Separator />
+          <Menubar.Item onclick={() => handleAction(() => { document.body.style.zoom = String((parseFloat(document.body.style.zoom || '1') + 0.1)); })}>
+            放大
+            <Menubar.Shortcut>Ctrl++</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Item onclick={() => handleAction(() => { document.body.style.zoom = String((parseFloat(document.body.style.zoom || '1') - 0.1)); })}>
+            缩小
+            <Menubar.Shortcut>Ctrl+-</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Item onclick={() => handleAction(() => { document.body.style.zoom = '1'; })}>
+            重置缩放
+            <Menubar.Shortcut>Ctrl+0</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Separator />
+          <Menubar.Item onclick={handleToggleMaximize}>
+            {isMaximized ? '退出全屏' : '全屏'}
+            <Menubar.Shortcut>F11</Menubar.Shortcut>
+          </Menubar.Item>
+        </Menubar.Content>
+      </Menubar.Menu>
 
-      <div class="menu-item" class:active={openMenu === 'help'}>
-        <button type="button" class="menu-btn" onclick={() => toggleMenu('help')}>帮助</button>
-        {#if openMenu === 'help'}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="menu-dropdown" onclick={stopPropagation}>
-            <button type="button" class="menu-action" onclick={handleAction(() => document.dispatchEvent(new Event('app:settings')))}>
-              <span>设置</span>
-              <span class="menu-shortcut">Ctrl+,</span>
-            </button>
-            <div class="menu-separator"></div>
-            <button type="button" class="menu-action" onclick={handleAction(() => { window.open('https://github.com/swallownote', '_blank'); })}>
-              <span>关于 SwallowNote</span>
-            </button>
-          </div>
-        {/if}
-      </div>
-    </nav>
+      <Menubar.Menu>
+        <Menubar.Trigger class="menu-trigger">帮助</Menubar.Trigger>
+        <Menubar.Content>
+          <Menubar.Item onclick={() => handleAction(() => document.dispatchEvent(new Event('app:settings')))}>
+            设置
+            <Menubar.Shortcut>Ctrl+,</Menubar.Shortcut>
+          </Menubar.Item>
+          <Menubar.Separator />
+          <Menubar.Item onclick={() => handleAction(() => { window.open('https://github.com/swallownote', '_blank'); })}>
+            关于 SwallowNote
+          </Menubar.Item>
+        </Menubar.Content>
+      </Menubar.Menu>
+    </Menubar.Root>
   </div>
 
-  <div class="title-center drag-region">SwallowNote</div>
+  <div class="title-center">SwallowNote</div>
 
   <div class="title-right" onclick={stopPropagation}>
     <button type="button" class="window-btn minimize" onclick={handleMinimize} title="最小化">
@@ -257,104 +227,20 @@
   }
 
   .drag-region {
-    flex: 1;
-    height: 100%;
     -webkit-app-region: drag;
     cursor: default;
   }
 
-  .app-icon {
-    width: 46px;
+  /* Menubar root - explicitly non-draggable so clicks work */
+  :global(.menubar-root) {
+    -webkit-app-region: no-drag;
     height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-secondary);
   }
 
-  .menu-bar {
-    display: flex;
-    align-items: center;
-    height: 100%;
-    gap: 0;
-  }
-
-  .menu-item {
-    position: relative;
-    height: 100%;
-    display: flex;
-    align-items: center;
-  }
-
-  .menu-btn {
-    height: 100%;
-    padding: 0 8px;
-    border: none;
-    background: transparent;
-    color: var(--text-primary);
+  /* Menu trigger - non-conflicting styles only */
+  :global(.menu-trigger) {
     font-size: 12px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    transition: background 0.08s;
-    font-family: inherit;
-    -webkit-text-fill-color: var(--text-primary);
-  }
-
-  .menu-btn:hover,
-  .menu-item.active .menu-btn {
-    background: rgba(255,255,255,0.08);
-  }
-
-  .menu-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    min-width: 220px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 4px 0;
-    z-index: 1000;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-  }
-
-  .menu-action {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 20px;
-    border: none;
-    background: transparent;
-    color: var(--text-primary);
-    font-size: 12px;
-    cursor: pointer;
-    text-align: left;
-    font-family: inherit;
-    transition: background 0.08s;
-  }
-
-  .menu-action:hover {
-    background: var(--accent);
-    color: #ffffff;
-  }
-
-  .menu-action:hover .menu-shortcut {
-    color: rgba(255,255,255,0.7);
-  }
-
-  .menu-shortcut {
-    color: var(--text-secondary);
-    font-size: 11px;
-    margin-left: 24px;
-    white-space: nowrap;
-  }
-
-  .menu-separator {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 8px;
+    -webkit-app-region: no-drag;
   }
 
   .title-center {

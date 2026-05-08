@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { DropdownMenu as DropdownMenuPrimitive } from "bits-ui";
+	import { Menubar as MenubarPrimitive } from "bits-ui";
 
 	let {
 		ref = $bindable(null),
@@ -7,15 +7,15 @@
 		inset,
 		variant = "default",
 		...restProps
-	}: DropdownMenuPrimitive.ItemProps & {
+	}: MenubarPrimitive.ItemProps & {
 		inset?: boolean;
 		variant?: "default" | "destructive";
 	} = $props();
 </script>
 
-<DropdownMenuPrimitive.Item
+<MenubarPrimitive.Item
 	bind:ref
-	data-slot="dropdown-menu-item"
+	data-slot="menubar-item"
 	data-inset={inset}
 	data-variant={variant}
 	class={className}
