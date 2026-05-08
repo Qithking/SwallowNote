@@ -94,7 +94,7 @@
 
 <div class="file-tree">
   <div class="section-header">
-    <span class="section-title">EXPLORER</span>
+    <span class="section-title">资源管理器</span>
     <div class="section-actions">
       <button
         type="button"

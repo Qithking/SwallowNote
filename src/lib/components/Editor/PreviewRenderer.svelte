@@ -1,17 +1,143 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { FileText, FileCode } from 'lucide-svelte';
-  import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } from '@milkdown/core';
-  import { commonmark } from '@milkdown/preset-commonmark';
-  import { gfm } from '@milkdown/preset-gfm';
+  import { defaultValueCtx, Editor, rootCtx, editorViewCtx, commandsCtx } from '@milkdown/kit/core';
+  import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
+  import { commonmark } from '@milkdown/kit/preset/commonmark';
+  import { gfm } from '@milkdown/kit/preset/gfm';
+  import { codeBlockComponent, codeBlockConfig } from '@milkdown/kit/component/code-block';
+  import { languages } from '@codemirror/language-data';
+  import { basicSetup } from 'codemirror';
+  import { oneDark } from '@codemirror/theme-one-dark';
+  import { defaultKeymap } from '@codemirror/commands';
+  import { keymap } from '@codemirror/view';
+  import { activeTabId, updateTabContent } from '../../stores/fileStore';
+  import { get } from 'svelte/store';
+  import '@milkdown/kit/prose/view/style/prosemirror.css';
 
   let { content = '', scrollSync = false, isMarkdown = false } = $props();
 
-  let milkdownContainer: HTMLDivElement;
-  let editorInstance: Editor | null = null;
+  let editorInstance: any = null;
+  let lastSyncedContent = '';
+
+  // Slash menu state
+  let slashMenuVisible = $state(false);
+  let slashMenuX = $state(0);
+  let slashMenuY = $state(0);
+  let slashFilter = $state('');
+  let slashSelectedIndex = $state(0);
+
+  const slashCommands = [
+    { id: 'paragraph', label: 'Text', icon: 'T', desc: 'Plain text' },
+    { id: 'h1', label: 'Heading 1', icon: 'H1', desc: 'Big heading' },
+    { id: 'h2', label: 'Heading 2', icon: 'H2', desc: 'Medium heading' },
+    { id: 'h3', label: 'Heading 3', icon: 'H3', desc: 'Small heading' },
+    { id: 'bullet-list', label: 'Bullet List', icon: '•', desc: 'Unordered list' },
+    { id: 'ordered-list', label: 'Numbered List', icon: '1.', desc: 'Ordered list' },
+    { id: 'code-block', label: 'Code Block', icon: '</>', desc: 'Code block' },
+    { id: 'blockquote', label: 'Quote', icon: '"', desc: 'Block quote' },
+    { id: 'divider', label: 'Divider', icon: '—', desc: 'Horizontal rule' },
+  ];
+
+  let filteredCommands = $derived(
+    slashCommands.filter((cmd) =>
+      cmd.label.toLowerCase().includes(slashFilter.toLowerCase())
+    )
+  );
+
+  function showSlashMenu() {
+    if (!editorInstance) return;
+    try {
+      const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
+      if (!view) return;
+      const { from } = view.state.selection;
+      const coords = view.coordsAtPos(from);
+      slashMenuX = coords.left;
+      slashMenuY = coords.bottom + 8;
+      slashMenuVisible = true;
+      slashFilter = '';
+      slashSelectedIndex = 0;
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function hideSlashMenu() {
+    slashMenuVisible = false;
+    slashFilter = '';
+    slashSelectedIndex = 0;
+  }
+
+  function executeSlashCommand(cmd: typeof slashCommands[0]) {
+    if (!editorInstance) return;
+    try {
+      const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
+      if (!view) return;
+
+      // Delete the slash character and filter text
+      const deleteFrom = view.state.selection.from - (slashFilter.length + 1);
+      view.dispatch(view.state.tr.delete(deleteFrom, view.state.selection.from));
+
+      // Execute command
+      switch (cmd.id) {
+        case 'paragraph':
+          view.dispatch(view.state.tr.setBlockType(view.state.selection.from, view.state.selection.to, view.state.schema.nodes.paragraph));
+          break;
+        case 'h1':
+          view.dispatch(view.state.tr.setBlockType(view.state.selection.from, view.state.selection.to, view.state.schema.nodes.heading, { level: 1 }));
+          break;
+        case 'h2':
+          view.dispatch(view.state.tr.setBlockType(view.state.selection.from, view.state.selection.to, view.state.schema.nodes.heading, { level: 2 }));
+          break;
+        case 'h3':
+          view.dispatch(view.state.tr.setBlockType(view.state.selection.from, view.state.selection.to, view.state.schema.nodes.heading, { level: 3 }));
+          break;
+        case 'code-block':
+          view.dispatch(view.state.tr.setBlockType(view.state.selection.from, view.state.selection.to, view.state.schema.nodes.code_block));
+          break;
+        case 'blockquote':
+          view.dispatch(view.state.tr.setBlockType(view.state.selection.from, view.state.selection.to, view.state.schema.nodes.paragraph));
+          view.dispatch(view.state.tr.wrapIn(view.state.schema.nodes.blockquote));
+          break;
+        case 'bullet-list':
+          view.dispatch(view.state.tr.wrapIn(view.state.schema.nodes.bullet_list));
+          break;
+        case 'ordered-list':
+          view.dispatch(view.state.tr.wrapIn(view.state.schema.nodes.ordered_list));
+          break;
+        case 'divider':
+          view.dispatch(view.state.tr.replaceSelectionWith(view.state.schema.nodes.horizontal_rule.create()));
+          break;
+      }
+    } catch (e) {
+      console.warn('Slash command failed:', e);
+    }
+    hideSlashMenu();
+    editorInstance.action((ctx: any) => ctx.get(editorViewCtx))?.focus();
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (!slashMenuVisible) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      slashSelectedIndex = (slashSelectedIndex + 1) % filteredCommands.length;
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      slashSelectedIndex = (slashSelectedIndex - 1 + filteredCommands.length) % filteredCommands.length;
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filteredCommands[slashSelectedIndex]) {
+        executeSlashCommand(filteredCommands[slashSelectedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      hideSlashMenu();
+    }
+  }
 
   async function initMilkdown(markdownContent: string) {
-    if (!milkdownContainer || !isMarkdown) return;
+    if (!isMarkdown) return;
 
     // Destroy existing instance first
     if (editorInstance) {
@@ -19,29 +145,79 @@
       editorInstance = null;
     }
 
-    // Clear container
-    if (milkdownContainer) {
-      milkdownContainer.innerHTML = '';
-    }
+    lastSyncedContent = markdownContent;
 
     editorInstance = await Editor.make()
-      .config((ctx) => {
-        ctx.set(rootCtx, milkdownContainer);
+      .config((ctx: any) => {
+        ctx.set(rootCtx, '#milkdown-editor');
         ctx.set(defaultValueCtx, markdownContent);
-        ctx.set(editorViewOptionsCtx, {
-          editable: () => false,
+        ctx.update(codeBlockConfig.key, (defaultConfig: any) => ({
+          ...defaultConfig,
+          languages,
+          extensions: [basicSetup, oneDark, keymap.of(defaultKeymap)],
+          renderLanguage: (language: string, selected: boolean) =>
+            selected ? `✔ ${language}` : language,
+        }));
+        ctx.get(listenerCtx).markdownUpdated((_ctx: any, markdown: string, _prev: string) => {
+          if (markdown !== lastSyncedContent) {
+            lastSyncedContent = markdown;
+            const tabId = get(activeTabId);
+            if (tabId) {
+              updateTabContent(tabId, markdown);
+            }
+          }
         });
       })
       .use(commonmark)
       .use(gfm)
+      .use(codeBlockComponent)
+      .use(listener)
       .create();
+
+    // After editor is created, add keydown listener for slash detection
+    const editorDom = document.querySelector('#milkdown-editor .ProseMirror');
+    if (editorDom) {
+      editorDom.addEventListener('keydown', handleKeydown);
+
+      // Listen for slash input
+      editorDom.addEventListener('input', () => {
+        if (!editorInstance) return;
+        try {
+          const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
+          if (!view) return;
+          const { from } = view.state.selection;
+          const textBefore = view.state.doc.textBetween(
+            Math.max(0, from - 20),
+            from,
+            '\n'
+          );
+          const slashMatch = textBefore.match(/\/([^\s]*)$/);
+          if (slashMatch) {
+            slashFilter = slashMatch[1];
+            showSlashMenu();
+          } else {
+            if (slashMenuVisible) hideSlashMenu();
+          }
+        } catch (e) {
+          // ignore
+        }
+      });
+    }
   }
 
-  onMount(() => {
-    if (content && isMarkdown) {
-      initMilkdown(content);
+  // 响应式处理内容变化
+  $effect(() => {
+    const currentContent = content;
+    const isMd = isMarkdown;
+    if (currentContent && isMd) {
+      // 跳过编辑器自身触发的更新，避免重复初始化
+      if (currentContent === lastSyncedContent && editorInstance) return;
+      initMilkdown(currentContent);
     }
+  });
 
+  // 清理编辑器实例
+  onMount(() => {
     return () => {
       if (editorInstance) {
         editorInstance.destroy();
@@ -49,16 +225,9 @@
       }
     };
   });
-
-  // 响应式处理内容变化
-  $effect(() => {
-    const currentContent = content;
-    const isMd = isMarkdown;
-    if (currentContent && isMd && milkdownContainer) {
-      initMilkdown(currentContent);
-    }
-  });
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <div class="preview-renderer" class:scroll-sync={scrollSync}>
   <div class="preview-content">
@@ -68,8 +237,8 @@
         <p>该文件不支持预览</p>
         <span class="hint">仅 Markdown 文件支持预览</span>
       </div>
-    {:else if content}
-      <div class="milkdown-wrapper" bind:this={milkdownContainer}></div>
+    {:else if isMarkdown}
+      <div id="milkdown-editor"></div>
     {:else}
       <div class="empty-preview">
         <FileText size={28} strokeWidth={1} opacity={0.4} />
@@ -78,6 +247,28 @@
     {/if}
   </div>
 </div>
+
+{#if slashMenuVisible && filteredCommands.length > 0}
+  <div
+    class="slash-menu"
+    style="left: {slashMenuX}px; top: {slashMenuY}px;"
+  >
+    <div class="slash-menu-list">
+      {#each filteredCommands as cmd, idx}
+        <div
+          class="slash-menu-item"
+          class:active={idx === slashSelectedIndex}
+          on:click={() => executeSlashCommand(cmd)}
+          on:mouseenter={() => (slashSelectedIndex = idx)}
+        >
+          <span class="slash-icon">{cmd.icon}</span>
+          <span class="slash-label">{cmd.label}</span>
+          <span class="slash-desc">{cmd.desc}</span>
+        </div>
+      {/each}
+    </div>
+  </div>
+{/if}
 
 <style>
   .preview-renderer {
@@ -121,114 +312,108 @@
     opacity: 0.6;
   }
 
-  .milkdown-wrapper {
+  #milkdown-editor {
     height: 100%;
     overflow: auto;
-  }
-
-  .milkdown-wrapper :global(.milkdown) {
-    height: 100%;
     padding: 32px 40px;
     max-width: 780px;
     margin: 0 auto;
     box-sizing: border-box;
   }
 
-  .milkdown-wrapper :global(.milkdown-editor) {
-    height: 100%;
+  #milkdown-editor :global(.milkdown) {
+    min-height: 100%;
+  }
+
+  #milkdown-editor :global(.ProseMirror) {
+    min-height: 100%;
     outline: none;
   }
 
-  .markdown-body {
-    font-size: 15px;
-    line-height: 1.8;
-    color: #d4d4d4;
-  }
-
-  .markdown-body :global(h1) {
+  #milkdown-editor :global(.ProseMirror p) { margin: 0.8em 0; }
+  #milkdown-editor :global(.ProseMirror h1) {
     font-size: 2em; margin: 0.8em 0 0.5em;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0.3em;
-    font-weight: 500;
-    color: #e0e0e0;
+    border-bottom: 1px solid var(--border); padding-bottom: 0.3em; font-weight: 500;
   }
-  .markdown-body :global(h2) {
+  #milkdown-editor :global(.ProseMirror h2) {
     font-size: 1.5em; margin: 0.8em 0 0.5em;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0.2em;
-    font-weight: 500;
-    color: #e0e0e0;
+    border-bottom: 1px solid var(--border); padding-bottom: 0.2em; font-weight: 500;
   }
-  .markdown-body :global(h3) { font-size:1.17em; margin:1em 0 0.5em; font-weight:500; color:#d4d4d4; }
-  .markdown-body :global(h4) { font-size:1em; margin:1.2em 0 0.5em; font-weight:500; color:#d4d4d4; }
-  .markdown-body :global(p) { margin: 0.8em 0; }
-  .markdown-body :global(ul), .markdown-body :global(ol) { margin:0.8em 0; padding-left:2em; }
-  .markdown-body :global(li) { margin: 0.3em 0; }
-  .markdown-body :global(blockquote) {
-    margin:1em 0; padding:0.5em 1.2em;
-    border-left:3px solid #0078d4;
-    background: rgba(255,255,255,0.03);
-    color: #969696;
+  #milkdown-editor :global(.ProseMirror h3) {
+    font-size: 1.17em; margin: 1em 0 0.5em; font-weight: 500;
   }
-  .markdown-body :global(code) {
-    background: rgba(255,255,255,0.06);
-    padding:2px 6px; border-radius:3px;
-    font-family: var(--font-mono);
-    color: #ce9178; font-size:0.9em;
+  #milkdown-editor :global(.ProseMirror code) {
+    background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 3px;
+    font-family: var(--font-mono); color: #ce9178; font-size: 0.9em;
   }
-  .markdown-body :global(pre) {
-    background: #1a1a1a; padding:16px;
-    border-radius:6px; overflow-x:auto;
-    margin:1em 0; border:1px solid var(--border);
+  #milkdown-editor :global(.ProseMirror pre) {
+    background: #1a1a1a; padding: 16px; border-radius: 6px;
+    overflow-x: auto; margin: 1em 0; border: 1px solid var(--border);
   }
-  .markdown-body :global(pre code) { background:none; padding:0; font-size:13px; color:#d4d4d4; line-height:1.5; }
-  .markdown-body :global(table) { border-collapse:collapse; margin:1em 0; width:100%; font-size:14px; }
-  .markdown-body :global(th), .markdown-body :global(td) { border:1px solid var(--border); padding:8px 12px; text-align:left; }
-  .markdown-body :global(th) { background:rgba(255,255,255,0.04); font-weight:600; color:#d4d4d4; }
-  .markdown-body :global(tr:nth-child(even)) { background:rgba(255,255,255,0.02); }
-  .markdown-body :global(img) { max-width:100%; height:auto; border-radius:4px; }
-  .markdown-body :global(a) { color:#4fc1ff; text-decoration:none; }
-  .markdown-body :global(a:hover) { text-decoration:underline; }
-  .markdown-body :global(hr) { border:none; border-top:1px solid var(--border); margin:2em 0; }
-  .markdown-body :global(strong) { font-weight:500; color:#e0e0e0; }
-  .markdown-body :global(em) { color:#c586c0; }
-  .markdown-body :global(del) { color:#6e6e6e; }
+  #milkdown-editor :global(.ProseMirror pre code) {
+    background: none; padding: 0; font-size: 13px; color: #d4d4d4; line-height: 1.5;
+  }
+  #milkdown-editor :global(.ProseMirror blockquote) {
+    margin: 1em 0; padding: 0.5em 1.2em;
+    border-left: 3px solid #0078d4; background: rgba(255,255,255,0.03); color: #969696;
+  }
+  #milkdown-editor :global(.ProseMirror ul),
+  #milkdown-editor :global(.ProseMirror ol) { margin: 0.8em 0; padding-left: 2em; }
+  #milkdown-editor :global(.ProseMirror li) { margin: 0.3em 0; }
+  #milkdown-editor :global(.ProseMirror hr) { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
 
-  /* ===========================================================
-     Dark theme overrides
-     =========================================================== */
-  :global([data-theme="dark"]) .preview-renderer { background: #1e1e1e; }
-  :global([data-theme="dark"]) .markdown-body { color: #d4d4d4; }
-  :global([data-theme="dark"]) .markdown-body :global(h1),
-  :global([data-theme="dark"]) .markdown-body :global(h2),
-  :global([data-theme="dark"]) .markdown-body :global(h3),
-  :global([data-theme="dark"]) .markdown-body :global(h4),
-  :global([data-theme="dark"]) .markdown-body :global(strong) { color: #e0e0e0; }
-  :global([data-theme="dark"]) .markdown-body :global(blockquote) { background: rgba(255,255,255,0.03); color: #969696; }
-  :global([data-theme="dark"]) .markdown-body :global(code) { background: rgba(255,255,255,0.06); color: #ce9178; }
-  :global([data-theme="dark"]) .markdown-body :global(pre) { background: #1a1a1a; }
-  :global([data-theme="dark"]) .markdown-body :global(pre code) { color: #d4d4d4; }
-  :global([data-theme="dark"]) .markdown-body :global(th) { background: rgba(255,255,255,0.04); color: #d4d4d4; }
-  :global([data-theme="dark"]) .markdown-body :global(a) { color: #4fc1ff; }
-  :global([data-theme="dark"]) .markdown-body :global(em) { color: #c586c0; }
-  :global([data-theme="dark"]) .markdown-body :global(del) { color: #6e6e6e; }
+  /* Slash Menu */
+  .slash-menu {
+    position: fixed;
+    z-index: 10000;
+    background: var(--bg-secondary, #2d2d2d);
+    border: 1px solid var(--border, #404040);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    min-width: 260px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 4px;
+  }
 
-  /* ===========================================================
-     Light theme overrides
-     =========================================================== */
-  :global([data-theme="light"]) .preview-renderer { background: #ffffff; }
-  :global([data-theme="light"]) .markdown-body { color: #1f1f1f; }
-  :global([data-theme="light"]) .markdown-body :global(h1),
-  :global([data-theme="light"]) .markdown-body :global(h2),
-  :global([data-theme="light"]) .markdown-body :global(h3),
-  :global([data-theme="light"]) .markdown-body :global(h4),
-  :global([data-theme="light"]) .markdown-body :global(strong) { color: #111111; }
-  :global([data-theme="light"]) .markdown-body :global(blockquote) { background: #f5f5f5; color: #616161; }
-  :global([data-theme="light"]) .markdown-body :global(code) { background: #f0f0f0; color: #a31515; }
-  :global([data-theme="light"]) .markdown-body :global(pre) { background: #f6f8fa; }
-  :global([data-theme="light"]) .markdown-body :global(pre code) { color: #1f1f1f; }
-  :global([data-theme="light"]) .markdown-body :global(th) { background: #f0f0f0; color: #1f1f1f; }
-  :global([data-theme="light"]) .markdown-body :global(a) { color: #0078d4; }
-  :global([data-theme="light"]) .markdown-body :global(em) { color: #795e26; }
-  :global([data-theme="light"]) .markdown-body :global(del) { color: #999999; }
+  .slash-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .slash-menu-item:hover,
+  .slash-menu-item.active {
+    background: var(--bg-hover, rgba(255,255,255,0.08));
+  }
+
+  .slash-icon {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-primary, #1e1e1e);
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary, #fff);
+    border: 1px solid var(--border, #404040);
+    flex-shrink: 0;
+  }
+
+  .slash-label {
+    font-size: 14px;
+    color: var(--text-primary, #fff);
+    flex: 1;
+  }
+
+  .slash-desc {
+    font-size: 12px;
+    color: var(--text-muted, #888);
+  }
 </style>

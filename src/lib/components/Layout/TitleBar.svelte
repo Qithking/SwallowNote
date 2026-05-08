@@ -68,13 +68,14 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="title-bar" role="toolbar" ondblclick={handleToggleMaximize}>
+<div class="title-bar" role="toolbar" ondblclick={handleToggleMaximize} onmousedown={handleStartDrag}>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="title-left">
+  <div class="title-left" title="SwallowNote">
+
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="app-icon drag-region" onmousedown={handleStartDrag} title="SwallowNote">
+    <div class="app-icon" title="SwallowNote">
       <FileText size={16} strokeWidth={1.5} />
     </div>
 
@@ -188,9 +189,7 @@
     </Menubar.Root>
   </div>
 
-  <div class="title-center">SwallowNote</div>
-
-  <div class="title-right" onclick={stopPropagation}>
+  <div class="title-right" onmousedown={stopPropagation}>
     <button type="button" class="window-btn minimize" onclick={handleMinimize} title="最小化">
       <Minus size={10} strokeWidth={1.5} />
     </button>
@@ -218,6 +217,7 @@
     font-size: 12px;
     user-select: none;
     flex-shrink: 0;
+    cursor: default;
   }
 
   .title-left {
@@ -226,9 +226,13 @@
     height: 100%;
   }
 
-  .drag-region {
-    -webkit-app-region: drag;
-    cursor: default;
+  .app-icon {
+    -webkit-app-region: no-drag;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 100%;
   }
 
   /* Menubar root - explicitly non-draggable so clicks work */
@@ -237,9 +241,9 @@
     height: 100%;
   }
 
-  /* Menu trigger - non-conflicting styles only */
+  /* Menu trigger */
   :global(.menu-trigger) {
-    font-size: 12px;
+    font-size: 13px;
     -webkit-app-region: no-drag;
   }
 
@@ -257,6 +261,7 @@
     display: flex;
     align-items: center;
     height: 100%;
+    -webkit-app-region: no-drag;
   }
 
   .window-btn {
