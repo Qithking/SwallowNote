@@ -119,7 +119,7 @@
           onclick={setExplorer}
           title="资源管理器 (Ctrl+Shift+E)"
         >
-          <Folder size={24} strokeWidth={1.5} />
+          <Folder size={20} strokeWidth={1.5} />
         </button>
         <button
           type="button"
@@ -128,7 +128,7 @@
           onclick={openSearch}
           title="搜索 (Ctrl+P)"
         >
-          <Search size={24} strokeWidth={1.5} />
+          <Search size={20} strokeWidth={1.5} />
         </button>
         <button
           type="button"
@@ -137,7 +137,7 @@
           onclick={setGit}
           title="源代码管理 (Ctrl+Shift+G)"
         >
-          <GitBranch size={24} strokeWidth={1.5} />
+          <GitBranch size={20} strokeWidth={1.5} />
         </button>
       </div>
       <div class="activity-bottom">
@@ -147,7 +147,7 @@
           onclick={handleOpenFolder}
           title="打开文件夹"
         >
-          <FolderPlus size={24} strokeWidth={1.5} />
+          <FolderPlus size={20} strokeWidth={1.5} />
         </button>
         <button
           type="button"
@@ -155,7 +155,7 @@
           onclick={openSettings}
           title="设置 (Ctrl+,)"
         >
-          <Settings size={24} strokeWidth={1.5} />
+          <Settings size={20} strokeWidth={1.5} />
         </button>
       </div>
     </nav>
@@ -295,7 +295,6 @@
     inset: 0;
     display: flex; flex-direction: column;
     overflow: hidden;
-    border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     background: var(--bg-primary);
   }
@@ -306,7 +305,7 @@
 
   /* ==================== Activity Bar ==================== */
   .activity-bar {
-    width: 48px; min-width: 48px;
+    width: 42px; min-width: 42px;
     background: var(--activity-bg);
     display: flex; flex-direction: column;
     align-items: center;
@@ -330,7 +329,7 @@
   }
 
   .activity-btn {
-    width: 48px; height: 48px;
+    width: 42px; height: 42px;
     border: none;
     background: transparent;
     cursor: pointer;
@@ -493,7 +492,6 @@
     padding: 0 10px;
     font-size: 12px;
     user-select: none;
-    border-radius: 0 0 8px 8px;
   }
   .status-left, .status-right {
     display: flex; align-items: center; gap: 0;

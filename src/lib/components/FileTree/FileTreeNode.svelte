@@ -137,20 +137,20 @@
   .tree-node {
     display: flex;
     align-items: center;
-    height: 22px;
+    height: 24px;
     padding-right: 8px;
     cursor: pointer;
-    color: #cccccc;
+    color: var(--text-primary);
     font-size: 13px;
     gap: 0;
     transition: background 0.06s;
     user-select: none;
   }
-  .tree-node:hover { background: #2a2d2e; }
-  .tree-node.selected { background: #37373d; }
+  .tree-node:hover { background: var(--bg-hover); }
+  .tree-node.selected { background: var(--bg-active); }
   .tree-node:focus { outline: none; }
   .tree-node:focus-visible {
-    outline: 1px solid #0078d4;
+    outline: 1px solid var(--accent);
     outline-offset: -1px;
   }
 
@@ -159,13 +159,13 @@
     border: none; background: transparent;
     cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    color: #6e6e6e;
+    color: var(--text-muted);
     flex-shrink: 0;
     padding: 0;
     transition: transform 0.08s;
   }
   .toggle-btn :global(svg.rotated) { transform: rotate(90deg); }
-  .toggle-btn:hover { color: #969696; }
+  .toggle-btn:hover { color: var(--text-secondary); }
 
   .toggle-spacer { width: 16px; flex-shrink: 0; }
 
@@ -196,8 +196,8 @@
 
   .loading-dots, .loading-dots-inline {
     width: 10px; height: 10px;
-    border: 2px solid #3c3c3c;
-    border-top-color: #0078d4;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }

@@ -248,7 +248,6 @@
     font-size: 12px;
     user-select: none;
     flex-shrink: 0;
-    border-radius: 8px 8px 0 0;
   }
 
   .title-left {

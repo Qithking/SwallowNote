@@ -1,20 +1,75 @@
 <script lang="ts">
-  import MarkdownIt from 'markdown-it';
-  import { FileText } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import { FileText, FileCode } from 'lucide-svelte';
+  import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } from '@milkdown/core';
+  import { commonmark } from '@milkdown/preset-commonmark';
+  import { gfm } from '@milkdown/preset-gfm';
 
-  let { content = '', scrollSync = false } = $props();
+  let { content = '', scrollSync = false, isMarkdown = false } = $props();
 
-  const md = new MarkdownIt({
-    html: true, linkify: true, typographer: true, breaks: true,
+  let milkdownContainer: HTMLDivElement;
+  let editorInstance: Editor | null = null;
+
+  async function initMilkdown(markdownContent: string) {
+    if (!milkdownContainer || !isMarkdown) return;
+
+    // Destroy existing instance first
+    if (editorInstance) {
+      editorInstance.destroy();
+      editorInstance = null;
+    }
+
+    // Clear container
+    if (milkdownContainer) {
+      milkdownContainer.innerHTML = '';
+    }
+
+    editorInstance = await Editor.make()
+      .config((ctx) => {
+        ctx.set(rootCtx, milkdownContainer);
+        ctx.set(defaultValueCtx, markdownContent);
+        ctx.set(editorViewOptionsCtx, {
+          editable: () => false,
+        });
+      })
+      .use(commonmark)
+      .use(gfm)
+      .create();
+  }
+
+  onMount(() => {
+    if (content && isMarkdown) {
+      initMilkdown(content);
+    }
+
+    return () => {
+      if (editorInstance) {
+        editorInstance.destroy();
+        editorInstance = null;
+      }
+    };
   });
 
-  let previewHtml = $derived(md.render(content));
+  // 响应式处理内容变化
+  $effect(() => {
+    const currentContent = content;
+    const isMd = isMarkdown;
+    if (currentContent && isMd && milkdownContainer) {
+      initMilkdown(currentContent);
+    }
+  });
 </script>
 
 <div class="preview-renderer" class:scroll-sync={scrollSync}>
   <div class="preview-content">
-    {#if content}
-      <div class="markdown-body">{@html previewHtml}</div>
+    {#if !isMarkdown}
+      <div class="non-markdown-preview">
+        <FileCode size={28} strokeWidth={1} opacity={0.4} />
+        <p>该文件不支持预览</p>
+        <span class="hint">仅 Markdown 文件支持预览</span>
+      </div>
+    {:else if content}
+      <div class="milkdown-wrapper" bind:this={milkdownContainer}></div>
     {:else}
       <div class="empty-preview">
         <FileText size={28} strokeWidth={1} opacity={0.4} />
@@ -47,6 +102,41 @@
     font-size: 13px;
     gap: 10px;
     opacity: 0.6;
+  }
+
+  .non-markdown-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 13px;
+    gap: 10px;
+    opacity: 0.6;
+  }
+
+  .non-markdown-preview .hint {
+    font-size: 11px;
+    opacity: 0.6;
+  }
+
+  .milkdown-wrapper {
+    height: 100%;
+    overflow: auto;
+  }
+
+  .milkdown-wrapper :global(.milkdown) {
+    height: 100%;
+    padding: 32px 40px;
+    max-width: 780px;
+    margin: 0 auto;
+    box-sizing: border-box;
+  }
+
+  .milkdown-wrapper :global(.milkdown-editor) {
+    height: 100%;
+    outline: none;
   }
 
   .markdown-body {

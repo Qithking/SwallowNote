@@ -139,13 +139,6 @@ export function closeTab(tabId: string) {
   const tab = currentTabs!.find(t => t.id === tabId);
   if (!tab) return;
 
-  // Check for unsaved changes
-  if (tab.dirty) {
-    if (!confirm('File has unsaved changes. Close anyway?')) {
-      return;
-    }
-  }
-
   // Save to history before closing
   closedTabHistory.push(tabId);
 

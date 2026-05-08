@@ -154,7 +154,7 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: #252526;
+    background: var(--bg-secondary);
     user-select: none;
   }
 
@@ -170,7 +170,7 @@
   .section-title {
     font-size: 11px;
     font-weight: 600;
-    color: #969696;
+    color: var(--text-muted);
     letter-spacing: 0.5px;
     flex: 1;
   }
@@ -190,15 +190,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #969696;
+    color: var(--text-muted);
     border-radius: 4px;
     transition: background 0.1s, color 0.1s;
     padding: 0;
     flex-shrink: 0;
   }
   .action-btn:hover {
-    background: rgba(255,255,255,0.08);
-    color: #cccccc;
+    background: var(--bg-hover);
+    color: var(--text-primary);
   }
   .action-btn:disabled {
     opacity: 0.4;
@@ -206,7 +206,7 @@
   }
   .action-btn:disabled:hover {
     background: transparent;
-    color: #969696;
+    color: var(--text-muted);
   }
 
   .tree-content {
@@ -224,8 +224,8 @@
 
   .loading-spinner {
     width: 16px; height: 16px;
-    border: 2px solid #3c3c3c;
-    border-top-color: #0078d4;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
@@ -235,7 +235,7 @@
   .empty-message {
     padding: 20px 16px;
     text-align: center;
-    color: #6e6e6e;
+    color: var(--text-muted);
     font-size: 12px;
   }
 
@@ -249,7 +249,7 @@
   }
 
   .empty-hint {
-    color: #6e6e6e;
+    color: var(--text-muted);
     font-size: 12px;
     margin: 0;
     text-align: center;
@@ -260,7 +260,7 @@
     align-items: center;
     gap: 6px;
     padding: 5px 14px;
-    background: #0078d4;
+    background: var(--accent);
     color: #ffffff;
     border: none;
     border-radius: 4px;
@@ -268,5 +268,5 @@
     cursor: pointer;
     transition: background 0.1s;
   }
-  .open-folder-btn:hover { background: #1a8ae8; }
+  .open-folder-btn:hover { background: var(--accent-hover); }
 </style>

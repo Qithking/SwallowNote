@@ -4,21 +4,28 @@
    Built with Tailwind CSS v4 + shadcn-svelte + Lucide Icons
    ============================================================ */
 
-@import "tailwindcss";
-
 /* ---- Tailwind CSS v4 Theme Configuration ---- */
 @theme {
-  /* Colors mapped to existing CSS variables for consistency */
-  --color-bg-primary: var(--bg-primary);
-  --color-bg-secondary: var(--bg-secondary);
-  --color-bg-tertiary: var(--bg-tertiary);
-  --color-accent: var(--accent);
-  --color-accent-hover: var(--accent-hover);
-  --color-text-primary: var(--text-primary);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-muted: var(--text-muted);
-  --color-border: var(--border);
+  /* Shadcn/UI color palette - must be defined before @import */
+  --color-popover: #252526;
+  --color-popover-foreground: #ffffff;
+  --color-ring: #0078d4;
+  --color-foreground: #ffffff;
+  --color-background: #1e1e1e;
+  --color-border: #454545;
+  --color-accent: #0078d4;
+  --color-accent-foreground: #ffffff;
+
+  /* App-specific colors */
+  --color-bg-primary: #1e1e1e;
+  --color-bg-secondary: #252526;
+  --color-bg-tertiary: #2d2d2d;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #dddddd;
+  --color-text-muted: #888888;
 }
+
+@import "tailwindcss";
 
 /* ---- Default (dark) ---- */
 :root, [data-theme="dark"] {
@@ -30,6 +37,16 @@
   --bg-active:         #37373d;
   --bg-selection:      #264f78;
   --bg-input:          #3c3c3c;
+
+  /* ---- Shadcn/UI Components ---- */
+  --popover:           #252526;
+  --popover-foreground:#ffffff;
+  --ring:              #0078d4;
+  --foreground:        #ffffff;
+  --background:        #1e1e1e;
+  --border:            #454545;
+  --accent:            #0078d4;
+  --accent-foreground: #ffffff;
 
   /* ---- Activity bar (VS Code: #333333) ---- */
   --activity-bg:          #333333;
@@ -45,11 +62,9 @@
   --text-link:       #4fc1ff;
 
   /* ---- Accent ---- */
-  --accent:       #0078d4;
   --accent-hover: #1a8ae8;
 
   /* ---- Borders ---- */
-  --border:       #454545;
   --border-light: #333333;
 
   /* ---- Scrollbar ---- */
@@ -87,6 +102,16 @@
   --bg-selection:      #add6ff;
   --bg-input:          #ffffff;
 
+  /* ---- Shadcn/UI Components ---- */
+  --popover:           #ffffff;
+  --popover-foreground:#1f1f1f;
+  --ring:              #0078d4;
+  --foreground:        #1f1f1f;
+  --background:        #ffffff;
+  --border:            #e5e5e5;
+  --accent:            #0078d4;
+  --accent-foreground: #ffffff;
+
   --activity-bg:          #f0f0f0;
   --activity-hover:       #e0e0e0;
   --activity-foreground:  #1f1f1f;
@@ -98,10 +123,8 @@
   --text-muted:      #999999;
   --text-link:       #0078d4;
 
-  --accent:       #0078d4;
   --accent-hover: #106ebe;
 
-  --border:       #e5e5e5;
   --border-light: #f0f0f0;
 
   --scrollbar-thumb: #c1c1c1;
@@ -115,6 +138,18 @@
   --tab-activeBorder:    #ffffff;
 
   --sidebar-header: #ececec;
+}
+
+/* Light theme @theme overrides - must be after :root */
+[data-theme="light"] @theme {
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1f1f1f;
+  --color-ring: #0078d4;
+  --color-foreground: #1f1f1f;
+  --color-background: #ffffff;
+  --color-border: #e5e5e5;
+  --color-accent: #0078d4;
+  --color-accent-foreground: #ffffff;
 }
 
 /* ---- Reset ---- */
