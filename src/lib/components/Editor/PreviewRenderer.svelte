@@ -1,8 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { FileText, FileCode } from 'lucide-svelte';
-  import { defaultValueCtx, Editor, rootCtx, editorViewCtx, commandsCtx } from '@milkdown/kit/core';
+  import { defaultValueCtx, Editor, rootCtx, editorViewCtx } from '@milkdown/kit/core';
   import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
+  import { history } from '@milkdown/kit/plugin/history';
+  import { indent } from '@milkdown/kit/plugin/indent';
+  import { trailing } from '@milkdown/kit/plugin/trailing';
+  import { clipboard } from '@milkdown/kit/plugin/clipboard';
+  import { upload } from '@milkdown/kit/plugin/upload';
   import { commonmark } from '@milkdown/kit/preset/commonmark';
   import { gfm } from '@milkdown/kit/preset/gfm';
   import { codeBlockComponent, codeBlockConfig } from '@milkdown/kit/component/code-block';
@@ -13,6 +18,7 @@
   import { keymap } from '@codemirror/view';
   import { activeTabId, updateTabContent } from '../../stores/fileStore';
   import { get } from 'svelte/store';
+  // @ts-ignore
   import '@milkdown/kit/prose/view/style/prosemirror.css';
 
   let { content = '', scrollSync = false, isMarkdown = false } = $props();
@@ -27,6 +33,11 @@
   let slashFilter = $state('');
   let slashSelectedIndex = $state(0);
 
+  // Toolbar state
+  let toolbarVisible = $state(false);
+  let toolbarX = $state(0);
+  let toolbarY = $state(0);
+
   const slashCommands = [
     { id: 'paragraph', label: 'Text', icon: 'T', desc: 'Plain text' },
     { id: 'h1', label: 'Heading 1', icon: 'H1', desc: 'Big heading' },
@@ -37,6 +48,13 @@
     { id: 'code-block', label: 'Code Block', icon: '</>', desc: 'Code block' },
     { id: 'blockquote', label: 'Quote', icon: '"', desc: 'Block quote' },
     { id: 'divider', label: 'Divider', icon: '—', desc: 'Horizontal rule' },
+  ];
+
+  const toolbarActions = [
+    { id: 'bold', label: 'B', icon: 'B', command: 'toggleBold' },
+    { id: 'italic', label: 'I', icon: 'I', command: 'toggleItalic' },
+    { id: 'strike', label: 'S', icon: 'S', command: 'toggleStrike' },
+    { id: 'code', label: '`', icon: '`', command: 'toggleCode' },
   ];
 
   let filteredCommands = $derived(
@@ -68,17 +86,55 @@
     slashSelectedIndex = 0;
   }
 
+  function showToolbar() {
+    if (!editorInstance) return;
+    try {
+      const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
+      if (!view) return;
+      const { from, to } = view.state.selection;
+      if (from === to) {
+        hideToolbar();
+        return;
+      }
+      const coords = view.coordsAtPos(from);
+      toolbarX = coords.left;
+      toolbarY = coords.top - 44;
+      toolbarVisible = true;
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function hideToolbar() {
+    toolbarVisible = false;
+  }
+
+  function executeToolbarAction(action: typeof toolbarActions[0]) {
+    if (!editorInstance) return;
+    try {
+      const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
+      if (!view) return;
+      // Apply heading 1 command
+      const command = view.state.schema.commands[action.command];
+      if (command) {
+        view.dispatch(view.state.tr.call(command));
+      }
+    } catch (e) {
+      // ignore
+    }
+    hideToolbar();
+    editorInstance.action((ctx: any) => ctx.get(editorViewCtx))?.focus();
+  }
+
   function executeSlashCommand(cmd: typeof slashCommands[0]) {
     if (!editorInstance) return;
     try {
       const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
       if (!view) return;
 
-      // Delete the slash character and filter text
       const deleteFrom = view.state.selection.from - (slashFilter.length + 1);
       view.dispatch(view.state.tr.delete(deleteFrom, view.state.selection.from));
 
-      // Execute command
       switch (cmd.id) {
         case 'paragraph':
           view.dispatch(view.state.tr.setBlockType(view.state.selection.from, view.state.selection.to, view.state.schema.nodes.paragraph));
@@ -117,29 +173,32 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (!slashMenuVisible) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      slashSelectedIndex = (slashSelectedIndex + 1) % filteredCommands.length;
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      slashSelectedIndex = (slashSelectedIndex - 1 + filteredCommands.length) % filteredCommands.length;
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (filteredCommands[slashSelectedIndex]) {
-        executeSlashCommand(filteredCommands[slashSelectedIndex]);
+    if (slashMenuVisible) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        slashSelectedIndex = (slashSelectedIndex + 1) % filteredCommands.length;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        slashSelectedIndex = (slashSelectedIndex - 1 + filteredCommands.length) % filteredCommands.length;
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (filteredCommands[slashSelectedIndex]) {
+          executeSlashCommand(filteredCommands[slashSelectedIndex]);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        hideSlashMenu();
       }
-    } else if (e.key === 'Escape') {
+    }
+    if (toolbarVisible && e.key === 'Escape') {
       e.preventDefault();
-      hideSlashMenu();
+      hideToolbar();
     }
   }
 
   async function initMilkdown(markdownContent: string) {
     if (!isMarkdown) return;
 
-    // Destroy existing instance first
     if (editorInstance) {
       editorInstance.destroy();
       editorInstance = null;
@@ -158,7 +217,7 @@
           renderLanguage: (language: string, selected: boolean) =>
             selected ? `✔ ${language}` : language,
         }));
-        ctx.get(listenerCtx).markdownUpdated((_ctx: any, markdown: string, _prev: string) => {
+        ctx.get(listenerCtx).markdownUpdated((_ctx: any, markdown: string) => {
           if (markdown !== lastSyncedContent) {
             lastSyncedContent = markdown;
             const tabId = get(activeTabId);
@@ -170,16 +229,19 @@
       })
       .use(commonmark)
       .use(gfm)
+      .use(history)
+      .use(indent)
+      .use(trailing)
+      .use(clipboard)
+      .use(upload)
       .use(codeBlockComponent)
       .use(listener)
       .create();
 
-    // After editor is created, add keydown listener for slash detection
     const editorDom = document.querySelector('#milkdown-editor .ProseMirror');
     if (editorDom) {
-      editorDom.addEventListener('keydown', handleKeydown);
+      editorDom.addEventListener('keydown', handleKeydown as EventListener);
 
-      // Listen for slash input
       editorDom.addEventListener('input', () => {
         if (!editorInstance) return;
         try {
@@ -202,6 +264,11 @@
           // ignore
         }
       });
+
+      // Selection change for toolbar
+      editorDom.addEventListener('mouseup', (_e: Event) => {
+        setTimeout(() => showToolbar(), 0);
+      });
     }
   }
 
@@ -210,7 +277,6 @@
     const currentContent = content;
     const isMd = isMarkdown;
     if (currentContent && isMd) {
-      // 跳过编辑器自身触发的更新，避免重复初始化
       if (currentContent === lastSyncedContent && editorInstance) return;
       initMilkdown(currentContent);
     }
@@ -252,14 +318,19 @@
   <div
     class="slash-menu"
     style="left: {slashMenuX}px; top: {slashMenuY}px;"
+    role="listbox"
   >
     <div class="slash-menu-list">
       {#each filteredCommands as cmd, idx}
         <div
           class="slash-menu-item"
           class:active={idx === slashSelectedIndex}
-          on:click={() => executeSlashCommand(cmd)}
-          on:mouseenter={() => (slashSelectedIndex = idx)}
+          role="option"
+          aria-selected={idx === slashSelectedIndex}
+          tabindex="0"
+          onclick={() => executeSlashCommand(cmd)}
+          onmouseenter={() => (slashSelectedIndex = idx)}
+          onkeydown={(e) => e.key === 'Enter' && executeSlashCommand(cmd)}
         >
           <span class="slash-icon">{cmd.icon}</span>
           <span class="slash-label">{cmd.label}</span>
@@ -267,6 +338,19 @@
         </div>
       {/each}
     </div>
+  </div>
+{/if}
+
+{#if toolbarVisible}
+  <div
+    class="toolbar"
+    style="left: {toolbarX}px; top: {toolbarY}px;"
+  >
+    {#each toolbarActions as action}
+      <button class="toolbar-btn" onclick={() => executeToolbarAction(action)}>
+        <span class="toolbar-icon" style:font-weight={action.id === 'bold' ? '700' : '400'} style:font-style={action.id === 'italic' ? 'italic' : 'normal'} style:text-decoration={action.id === 'strike' ? 'line-through' : 'none'} style:font-family={action.id === 'code' ? 'monospace' : 'inherit'}>{action.icon}</span>
+      </button>
+    {/each}
   </div>
 {/if}
 
@@ -415,5 +499,41 @@
   .slash-desc {
     font-size: 12px;
     color: var(--text-muted, #888);
+  }
+
+  /* Toolbar */
+  .toolbar {
+    position: fixed;
+    z-index: 10000;
+    display: flex;
+    gap: 2px;
+    background: var(--bg-secondary, #2d2d2d);
+    border: 1px solid var(--border, #404040);
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .toolbar-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-primary, #fff);
+    transition: background 0.1s;
+  }
+
+  .toolbar-btn:hover {
+    background: var(--bg-hover, rgba(255,255,255,0.1));
+  }
+
+  .toolbar-icon {
+    font-size: 14px;
+    line-height: 1;
   }
 </style>

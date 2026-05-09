@@ -85,6 +85,86 @@ export function selectNode(node: FileNode) {
   }
 }
 
+// Helper function to find node by path in a list
+function findNodeInList(nodes: FileNode[], path: string): FileNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    if (node.children) {
+      const found = findNodeInList(node.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// Helper function to expand all directories in a path
+async function expandPathToFile(filePath: string) {
+  let root = get(rootPath);
+  if (!root) return;
+
+  // Build list of parent directories to expand
+  const relativePath = filePath.substring(root.length + 1);
+  const parts = relativePath.split('/');
+  let currentPath = root;
+
+  // Expand each parent directory in sequence
+  for (let i = 0; i < parts.length - 1; i++) {
+    currentPath = currentPath + '/' + parts[i];
+
+    // Load directory if not cached
+    let cache: Map<string, FileNode[]>;
+    treeCache.subscribe(value => cache = value)();
+
+    if (!cache!.has(currentPath)) {
+      await loadDirectory(currentPath);
+      // Re-subscribe to get updated cache
+      treeCache.subscribe(value => cache = value)();
+    }
+
+    // Get the directory node to find its id
+    const nodes = cache!.get(currentPath) || [];
+    const dirNode = nodes.find(n => n.path === currentPath);
+    if (dirNode) {
+      // Expand this directory
+      expandedNodes.update(set => {
+        set.add(dirNode.id);
+        return set;
+      });
+    }
+  }
+}
+
+/**
+ * Select a node by its file path (expanding parent directories as needed)
+ */
+export async function selectNodeByPath(filePath: string) {
+  // First expand all parent directories so the file becomes visible
+  await expandPathToFile(filePath);
+
+  // Re-get cache after expanding directories
+  let cache: Map<string, FileNode[]>;
+  treeCache.subscribe(value => cache = value)();
+
+  // Search through all cached directories
+  for (const [, nodes] of cache!) {
+    const found = findNodeInList(nodes, filePath);
+    if (found) {
+      selectedNode.set(found);
+      return;
+    }
+  }
+
+  // If still not found, try to load the parent directory
+  const parentPath = filePath.substring(0, filePath.lastIndexOf('/'));
+  if (parentPath) {
+    const nodes = await loadDirectory(parentPath);
+    const found = findNodeInList(nodes, filePath);
+    if (found) {
+      selectedNode.set(found);
+    }
+  }
+}
+
 /**
  * Open a file in a new tab
  */
@@ -95,7 +175,12 @@ export async function openFile(node: FileNode) {
   // Check if already open
   const existingTab = currentTabs!.find(t => t.fileId === node.path);
   if (existingTab) {
+    // Update both activeTabId and tabs array to keep them in sync
+    const updatedTabs = currentTabs!.map(t => ({ ...t, active: t.id === existingTab.id }));
+    tabs.set(updatedTabs);
     activeTabId.set(existingTab.id);
+    // Also select the node in file tree
+    selectNode(node);
     return;
   }
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { tabs, activeTabId, closeTab, saveTab } from '../../stores/fileStore';
+  import { tabs, activeTabId, closeTab, saveTab, selectNodeByPath } from '../../stores/fileStore';
   import { get } from 'svelte/store';
   import { X, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-svelte';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -9,9 +9,14 @@
 
   function handleTabClick(tabId: string) {
     const currentTabs = get(tabs);
+    const clickedTab = currentTabs.find(t => t.id === tabId);
     const updatedTabs = currentTabs.map(t => ({ ...t, active: t.id === tabId }));
     tabs.set(updatedTabs);
     activeTabId.set(tabId);
+    // Select the corresponding file in the file tree
+    if (clickedTab?.fileId) {
+      selectNodeByPath(clickedTab.fileId);
+    }
   }
 
   async function handleTabClose(tabId: string, event: Event) {
