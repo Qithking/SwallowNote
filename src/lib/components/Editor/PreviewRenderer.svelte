@@ -10,6 +10,7 @@
   import { upload } from '@milkdown/kit/plugin/upload';
   import { commonmark } from '@milkdown/kit/preset/commonmark';
   import { gfm } from '@milkdown/kit/preset/gfm';
+  import { slashFactory, SlashProvider } from '@milkdown/kit/plugin/slash';
   import { codeBlockComponent, codeBlockConfig } from '@milkdown/kit/component/code-block';
   import { languages } from '@codemirror/language-data';
   import { basicSetup } from 'codemirror';
@@ -25,6 +26,9 @@
 
   let editorInstance: any = null;
   let lastSyncedContent = '';
+
+  // Milkdown Slash Provider for enhanced positioning
+  let slashProvider: any = null;
 
   // Slash menu state
   let slashMenuVisible = $state(false);
@@ -70,8 +74,11 @@
       if (!view) return;
       const { from } = view.state.selection;
       const coords = view.coordsAtPos(from);
-      slashMenuX = coords.left;
-      slashMenuY = coords.bottom + 8;
+      // Get editor container position to convert Shadow DOM coordinates to viewport coordinates
+      const editorDom = document.querySelector('#milkdown-editor');
+      const editorRect = editorDom ? editorDom.getBoundingClientRect() : { left: 0, top: 0 };
+      slashMenuX = coords.left + editorRect.left;
+      slashMenuY = coords.bottom + editorRect.top;
       slashMenuVisible = true;
       slashFilter = '';
       slashSelectedIndex = 0;
@@ -97,8 +104,11 @@
         return;
       }
       const coords = view.coordsAtPos(from);
-      toolbarX = coords.left;
-      toolbarY = coords.top - 44;
+      // Get editor container position to convert Shadow DOM coordinates to viewport coordinates
+      const editorDom = document.querySelector('#milkdown-editor');
+      const editorRect = editorDom ? editorDom.getBoundingClientRect() : { left: 0, top: 0 };
+      toolbarX = coords.left + editorRect.left;
+      toolbarY = coords.top + editorRect.top - 44;
       toolbarVisible = true;
     } catch (e) {
       // ignore
@@ -109,18 +119,83 @@
     toolbarVisible = false;
   }
 
+  // Helper function to check if a mark is active in the selection
+  function isMarkActive(markName: string): boolean {
+    if (!editorInstance) return false;
+    try {
+      const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
+      if (!view) return false;
+      const { state } = view;
+      const { from, to } = state.selection;
+      if (from === to) return false;
+
+      let mark;
+      switch (markName) {
+        case 'bold': mark = state.schema.marks.strong; break;
+        case 'italic': mark = state.schema.marks.em; break;
+        case 'strike': mark = state.schema.marks.strike_through; break;
+        case 'code': mark = state.schema.marks.inline_code; break;
+        default: return false;
+      }
+      if (!mark) return false;
+
+      for (let i = from; i <= to; i++) {
+        const resolved = state.doc.resolve(i);
+        const marks = resolved.marks();
+        if (marks.some((m: any) => m.type === mark)) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   function executeToolbarAction(action: typeof toolbarActions[0]) {
     if (!editorInstance) return;
     try {
       const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
       if (!view) return;
-      // Apply heading 1 command
-      const command = view.state.schema.commands[action.command];
-      if (command) {
-        view.dispatch(view.state.tr.call(command));
+
+      const { state, dispatch } = view;
+      const { from, to } = state.selection;
+      if (from === to) return;
+
+      let tr = state.tr;
+      const isActive = isMarkActive(action.command);
+
+      switch (action.command) {
+        case 'toggleBold':
+          if (isActive) {
+            tr = tr.removeMark(from, to, state.schema.marks.strong);
+          } else {
+            tr = tr.addMark(from, to, state.schema.marks.strong.create());
+          }
+          break;
+        case 'toggleItalic':
+          if (isActive) {
+            tr = tr.removeMark(from, to, state.schema.marks.em);
+          } else {
+            tr = tr.addMark(from, to, state.schema.marks.em.create());
+          }
+          break;
+        case 'toggleStrike':
+          if (isActive) {
+            tr = tr.removeMark(from, to, state.schema.marks.strike_through);
+          } else {
+            tr = tr.addMark(from, to, state.schema.marks.strike_through.create());
+          }
+          break;
+        case 'toggleCode':
+          if (isActive) {
+            tr = tr.removeMark(from, to, state.schema.marks.inline_code);
+          } else {
+            tr = tr.addMark(from, to, state.schema.marks.inline_code.create());
+          }
+          break;
       }
+      dispatch(tr);
     } catch (e) {
-      // ignore
+      console.warn('Toolbar action failed:', e);
     }
     hideToolbar();
     editorInstance.action((ctx: any) => ctx.get(editorViewCtx))?.focus();
@@ -236,11 +311,41 @@
       .use(upload)
       .use(codeBlockComponent)
       .use(listener)
+      .use(slashFactory('slash'))
       .create();
 
     const editorDom = document.querySelector('#milkdown-editor .ProseMirror');
     if (editorDom) {
       editorDom.addEventListener('keydown', handleKeydown as EventListener);
+
+      // Create hidden content element for Milkdown SlashProvider
+      const slashContent = document.createElement('div');
+      slashContent.style.cssText = 'position: fixed; visibility: hidden; pointer-events: none;';
+      document.body.appendChild(slashContent);
+
+      // Initialize Milkdown SlashProvider for enhanced positioning
+      const view = editorInstance.action((ctx: any) => ctx.get(editorViewCtx));
+      if (view) {
+        slashProvider = new SlashProvider({
+          content: slashContent,
+          debounce: 100,
+          trigger: '/',
+        });
+        slashProvider.onShow = () => {
+          // Sync with custom slash menu visibility
+          if (!slashMenuVisible) {
+            slashFilter = '';
+            slashSelectedIndex = 0;
+          }
+        };
+        slashProvider.onHide = () => {
+          if (slashMenuVisible) {
+            hideSlashMenu();
+          }
+        };
+        // Connect provider to editor view for position updates
+        slashProvider.update(view);
+      }
 
       editorDom.addEventListener('input', () => {
         if (!editorInstance) return;
@@ -256,6 +361,10 @@
           const slashMatch = textBefore.match(/\/([^\s]*)$/);
           if (slashMatch) {
             slashFilter = slashMatch[1];
+            // Update slashProvider with current view for position tracking
+            if (slashProvider) {
+              slashProvider.update(view);
+            }
             showSlashMenu();
           } else {
             if (slashMenuVisible) hideSlashMenu();
@@ -347,7 +456,12 @@
     style="left: {toolbarX}px; top: {toolbarY}px;"
   >
     {#each toolbarActions as action}
-      <button class="toolbar-btn" onclick={() => executeToolbarAction(action)}>
+      <button
+        class="toolbar-btn"
+        class:active={isMarkActive(action.command)}
+        onclick={() => executeToolbarAction(action)}
+        title={action.label}
+      >
         <span class="toolbar-icon" style:font-weight={action.id === 'bold' ? '700' : '400'} style:font-style={action.id === 'italic' ? 'italic' : 'normal'} style:text-decoration={action.id === 'strike' ? 'line-through' : 'none'} style:font-family={action.id === 'code' ? 'monospace' : 'inherit'}>{action.icon}</span>
       </button>
     {/each}
@@ -530,6 +644,15 @@
 
   .toolbar-btn:hover {
     background: var(--bg-hover, rgba(255,255,255,0.1));
+  }
+
+  .toolbar-btn.active {
+    background: var(--accent, #0078d4);
+    color: #fff;
+  }
+
+  .toolbar-btn.active:hover {
+    background: var(--accent-hover, #106ebe);
   }
 
   .toolbar-icon {
