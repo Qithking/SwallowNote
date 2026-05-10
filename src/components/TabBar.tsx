@@ -4,7 +4,7 @@
  */
 import { useRef, useState, useEffect } from 'react'
 import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react'
-import { useEditorStore } from '@/stores'
+import { useEditorStore, useFileTreeStore, useWorkspaceStore } from '@/stores'
 import { cn } from '@/lib/utils'
 
 function TabBar() {
@@ -126,6 +126,12 @@ function TabBar() {
   const handleTabClick = (tabId: string) => {
     setActiveTab(tabId)
     scrollToTab(tabId)
+    // Sync file tree: expand to and select the file
+    const tab = tabs.find(t => t.id === tabId)
+    if (tab) {
+      const rootPath = useWorkspaceStore.getState().rootPath
+      useFileTreeStore.getState().revealPath(tab.path, rootPath!)
+    }
   }
 
   if (tabs.length === 0) {

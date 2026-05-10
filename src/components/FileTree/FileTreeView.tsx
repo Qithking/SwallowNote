@@ -1,16 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect } from 'react'
 import { FileText, FilePlus, FolderPlus, Image, Folder, FolderOpen, RefreshCw, ChevronRight, File } from 'lucide-react'
-import { useWorkspaceStore, useEditorStore } from '@/stores'
-import { loadDirectory, loadFileContent } from '@/lib/api'
+import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
+import { loadFileContent } from '@/lib/api'
 import { openFolderDialog } from '@/lib/tauri'
-
-interface FileNode {
-  id: string
-  name: string
-  path: string
-  isDirectory: boolean
-  children?: FileNode[]
-}
+import type { FileNode } from '@/stores/filetree'
 
 interface TreeItemProps {
   node: FileNode
@@ -18,11 +11,13 @@ interface TreeItemProps {
   onToggle: (path: string) => void
   expanded: Set<string>
   onSelect: (node: FileNode) => void
+  selectedPath: string | null
 }
 
-function TreeItem({ node, depth, onToggle, expanded, onSelect }: TreeItemProps) {
+function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath }: TreeItemProps) {
   const isExpanded = expanded.has(node.path)
   const hasChildren = node.children && node.children.length > 0
+  const isSelected = !node.isDirectory && node.path === selectedPath
 
   const handleClick = () => {
     if (node.isDirectory) {
@@ -45,7 +40,8 @@ function TreeItem({ node, depth, onToggle, expanded, onSelect }: TreeItemProps) 
   return (
     <div>
       <div
-        className="flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+        data-path={node.path}
+        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={handleClick}
       >
@@ -74,6 +70,7 @@ function TreeItem({ node, depth, onToggle, expanded, onSelect }: TreeItemProps) 
               onToggle={onToggle}
               expanded={expanded}
               onSelect={onSelect}
+              selectedPath={selectedPath}
             />
           ))}
         </div>
@@ -85,81 +82,15 @@ function TreeItem({ node, depth, onToggle, expanded, onSelect }: TreeItemProps) 
 export function FileTreeView() {
   const { rootPath } = useWorkspaceStore()
   const { addTab } = useEditorStore()
-  const [nodes, setNodes] = useState<FileNode[]>([])
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [isLoading, setIsLoading] = useState(false)
-
-  const loadRoot = useCallback(async () => {
-    if (!rootPath) {
-      setNodes([])
-      return
-    }
-    setIsLoading(true)
-    try {
-      const data = await loadDirectory(rootPath)
-      // Create root node with the selected folder as the root
-      const rootNode: FileNode = {
-        id: 'root',
-        name: rootPath.split('/').pop() || rootPath,
-        path: rootPath,
-        isDirectory: true,
-        children: data,
-      }
-      setNodes([rootNode])
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [rootPath])
+  const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, loadRoot } = useFileTreeStore()
 
   useEffect(() => {
-    loadRoot()
-  }, [loadRoot])
-
-  const handleToggle = async (path: string) => {
-    const newExpanded = new Set(expanded)
-    if (newExpanded.has(path)) {
-      newExpanded.delete(path)
-    } else {
-      newExpanded.add(path)
-      // Load children if not loaded
-      const findNode = (list: FileNode[]): FileNode | null => {
-        for (const n of list) {
-          if (n.path === path) return n
-          if (n.children) {
-            const found = findNode(n.children)
-            if (found) return found
-          }
-        }
-        return null
-      }
-      const node = findNode(nodes)
-      if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
-        try {
-          const children = await loadDirectory(path)
-          // Update nodes with children
-          const updateNodes = (list: FileNode[]): FileNode[] => {
-            return list.map((n) => {
-              if (n.path === path) {
-                return { ...n, children }
-              }
-              if (n.children) {
-                return { ...n, children: updateNodes(n.children) }
-              }
-              return n
-            })
-          }
-          setNodes(updateNodes(nodes))
-        } catch (e) {
-          console.error(e)
-        }
-      }
-    }
-    setExpanded(newExpanded)
-  }
+    if (rootPath) loadRoot(rootPath)
+    else useFileTreeStore.getState().clearAll()
+  }, [rootPath, loadRoot])
 
   const handleSelect = (node: FileNode) => {
+    setSelectedPath(node.path)
     loadFileContent(node.path)
       .then((content) => {
         addTab({
@@ -195,7 +126,7 @@ export function FileTreeView() {
           <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]" style={{ color: 'var(--text-muted)' }}>
             <FolderPlus size={14} />
           </button>
-          <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]" style={{ color: 'var(--text-muted)' }} onClick={loadRoot}>
+          <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]" style={{ color: 'var(--text-muted)' }} onClick={() => loadRoot(rootPath!)}>
             <RefreshCw size={14} />
           </button>
         </div>
@@ -207,7 +138,7 @@ export function FileTreeView() {
           </div>
         ) : nodes.length > 0 ? (
           nodes.map((node) => (
-            <TreeItem key={node.path} node={node} depth={0} onToggle={handleToggle} expanded={expanded} onSelect={handleSelect} />
+            <TreeItem key={node.path} node={node} depth={0} onToggle={toggleNode} expanded={expanded} onSelect={handleSelect} selectedPath={selectedPath} />
           ))
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
