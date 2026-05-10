@@ -13,13 +13,16 @@ function TabBar() {
   const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+  const [isOverflowing, setIsOverflowing] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
 
   const checkScroll = () => {
     if (!scrollRef.current) return
     const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current
     setCanScrollLeft(scrollLeft > 0)
     setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 1)
+    setIsOverflowing(scrollWidth > clientWidth)
   }
 
   useEffect(() => {
@@ -36,6 +39,19 @@ function TabBar() {
       window.removeEventListener('resize', checkScroll)
     }
   }, [tabs])
+
+  // Click outside to close more menu
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setShowMoreMenu(false)
+      }
+    }
+    if (showMoreMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showMoreMenu])
 
   // 当 activeTabId 变化时，自动滚动到活动 tab
   useEffect(() => {
@@ -122,19 +138,21 @@ function TabBar() {
 
   return (
     <div className="h-10 flex items-center border-b border-border bg-[var(--tab-bg)]">
-      {/* Left scroll button */}
-      <button
-        onClick={() => scroll('left')}
-        className={cn(
-          "h-full px-2 flex items-center justify-center shrink-0",
-          "border-r border-[var(--border-color)]",
-          canScrollLeft
-            ? "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] cursor-pointer"
-            : "text-[var(--border-color)] cursor-not-allowed"
-        )}
-      >
-        <ChevronLeft size={16} />
-      </button>
+      {/* Left scroll button - only show when overflowing */}
+      {isOverflowing && (
+        <button
+          onClick={() => scroll('left')}
+          className={cn(
+            "h-full px-2 flex items-center justify-center shrink-0",
+            "border-r border-[var(--border-color)]",
+            canScrollLeft
+              ? "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] cursor-pointer"
+              : "text-[var(--border-color)] cursor-not-allowed"
+          )}
+        >
+          <ChevronLeft size={16} />
+        </button>
+      )}
 
       {/* Tabs container */}
       <div
@@ -195,26 +213,94 @@ function TabBar() {
         })}
       </div>
 
-      {/* Right scroll button */}
-      <button
-        onClick={() => scroll('right')}
-        className={cn(
-          "h-full px-2 flex items-center justify-center shrink-0",
-          "border-l border-[var(--border-color)]",
-          canScrollRight
-            ? "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] cursor-pointer"
-            : "text-[var(--border-color)] cursor-not-allowed"
-        )}
-      >
-        <ChevronRight size={16} />
-      </button>
+      {/* Right scroll button - only show when overflowing */}
+      {isOverflowing && (
+        <button
+          onClick={() => scroll('right')}
+          className={cn(
+            "h-full px-2 flex items-center justify-center shrink-0",
+            "border-l border-[var(--border-color)]",
+            canScrollRight
+              ? "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] cursor-pointer"
+              : "text-[var(--border-color)] cursor-not-allowed"
+          )}
+        >
+          <ChevronRight size={16} />
+        </button>
+      )}
 
-      {/* More button */}
-      <button
-        className="h-full px-2 flex items-center justify-center shrink-0 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] border-l border-[var(--border-color)]"
-      >
-        <MoreHorizontal size={16} />
-      </button>
+      {/* More button with dropdown */}
+      <div className="relative h-full shrink-0" ref={moreMenuRef}>
+        <button
+          onClick={() => setShowMoreMenu(!showMoreMenu)}
+          className={cn(
+            "h-full px-2 flex items-center justify-center",
+            "text-[var(--text-muted)] hover:bg-[var(--bg-hover)]",
+            isOverflowing ? "border-l border-[var(--border-color)]" : ""
+          )}
+        >
+          <MoreHorizontal size={16} />
+        </button>
+
+        {/* Dropdown menu */}
+        {showMoreMenu && (
+          <div
+            className={cn(
+              "absolute top-full right-0 z-50 mt-1",
+              "min-w-[180px] max-h-[300px] overflow-y-auto",
+              "bg-[var(--bg-secondary)] border border-[var(--border-color)]",
+              "shadow-lg rounded-md py-1"
+            )}
+          >
+            {tabs.map((tab) => {
+              const isActive = tab.id === activeTabId
+              return (
+                <div
+                  key={tab.id}
+                  onClick={() => {
+                    handleTabClick(tab.id)
+                    setShowMoreMenu(false)
+                  }}
+                  className={cn(
+                    "group flex items-center h-8 px-3 cursor-pointer select-none",
+                    "text-sm",
+                    isActive
+                      ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  )}
+                >
+                  {/* Status dot */}
+                  {tab.isEdited && (
+                    tab.isDirty ? (
+                      <span className="w-2 h-2 rounded-full bg-red-500 mr-2 shrink-0" />
+                    ) : (
+                      <span className="w-2 h-2 rounded-full bg-green-500 mr-2 shrink-0" />
+                    )
+                  )}
+
+                  <FileText size={14} className="shrink-0 mr-2" />
+                  <span className="truncate max-w-[200px]">{tab.name}</span>
+
+                  {/* Close button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleTabClose(e, tab.id)
+                    }}
+                    className={cn(
+                      "ml-2 h-4 w-4 flex items-center justify-center rounded-sm shrink-0",
+                      "opacity-0 group-hover:opacity-100",
+                      "hover:bg-[rgba(255,255,255,0.1)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    )}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
