@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BlockNoteEditor, PartialBlock } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote } from '@blocknote/react'
+import { useUIStore } from '@/stores'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -27,6 +28,7 @@ function BlockNoteInner({
   blocks: PartialBlock[]
   onChange?: (content: string) => void
 }) {
+  const theme = useUIStore((state) => state.theme)
   const editor = useCreateBlockNote({
     initialContent: blocks,
   })
@@ -37,11 +39,15 @@ function BlockNoteInner({
     onChange(md)
   }
 
+  // Determine BlockNote theme: use 'dark' or 'light' based on app theme
+  // For 'system', default to 'light' (BlockNote will use system preference)
+  const blocknoteTheme = theme === 'dark' ? 'dark' : 'light'
+
   return (
     <div className="blocknote-editor-container">
       <BlockNoteView
         editor={editor}
-        theme="dark"
+        theme={blocknoteTheme}
         onChange={handleChange}
       />
     </div>
