@@ -229,18 +229,15 @@ function TabBar() {
         </button>
       )}
 
-      {/* More button with dropdown */}
-      <div className="relative h-full shrink-0" ref={moreMenuRef}>
-        <button
-          onClick={() => setShowMoreMenu(!showMoreMenu)}
-          className={cn(
-            "h-full px-2 flex items-center justify-center",
-            "text-[var(--text-muted)] hover:bg-[var(--bg-hover)]",
-            isOverflowing ? "border-l border-[var(--border-color)]" : ""
-          )}
-        >
-          <MoreHorizontal size={16} />
-        </button>
+      {/* More button with dropdown - only show when tabs overflow */}
+      {isOverflowing && (
+        <div className="relative h-full shrink-0" ref={moreMenuRef}>
+          <button
+            onClick={() => setShowMoreMenu(!showMoreMenu)}
+            className="h-full px-2 flex items-center justify-center border-l border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"
+          >
+            <MoreHorizontal size={16} />
+          </button>
 
         {/* Dropdown menu */}
         {showMoreMenu && (
@@ -301,6 +298,7 @@ function TabBar() {
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }
