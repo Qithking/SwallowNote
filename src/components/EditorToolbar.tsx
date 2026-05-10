@@ -31,11 +31,11 @@ function EditorToolbar() {
         </button>
         <button
           onClick={toggleViewMode}
-          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
-          style={{ color: viewMode === 'source' ? 'var(--theme-color)' : undefined }}
+          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)]"
+          style={{ color: viewMode === 'source' ? 'var(--theme-color)' : 'var(--text-muted)' }}
           title="源码"
         >
-          <Code size={14} />
+          <Code size={14} style={{ color: 'inherit' }} />
         </button>
         <button
           className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
