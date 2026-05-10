@@ -9,6 +9,16 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none !important;
+  }
+}
+
 @layer base {
   /* Default (light) theme - VS Code Light+ exact colors */
   :root {

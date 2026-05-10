@@ -9,6 +9,7 @@ export interface EditorTab {
   name: string
   content: string
   isDirty: boolean
+  isEdited: boolean // 文件是否被编辑过
   fileSize?: string
   modifiedTime?: string
   wordCount?: number
@@ -26,6 +27,7 @@ export interface EditorState {
   setActiveTab: (id: string) => void
   updateTabContent: (id: string, content: string) => void
   updateTabDirty: (id: string, isDirty: boolean) => void
+  updateTabEdited: (id: string, isEdited: boolean) => void
   updateCursorPosition: (id: string, line: number, column: number) => void
   getActiveTab: () => EditorTab | undefined
 }
@@ -39,8 +41,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (existing) {
         return { activeTabId: existing.id }
       }
+      // 新打开的文件 isEdited 默认为 false
       return {
-        tabs: [...state.tabs, tab],
+        tabs: [...state.tabs, { ...tab, isEdited: false }],
         activeTabId: tab.id,
       }
     }),
@@ -61,11 +64,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setActiveTab: (id) => set({ activeTabId: id }),
   updateTabContent: (id, content) =>
     set((state) => ({
-      tabs: state.tabs.map((t) => (t.id === id ? { ...t, content } : t)),
+      tabs: state.tabs.map((t) =>
+        t.id === id ? { ...t, content, isDirty: true, isEdited: true } : t
+      ),
     })),
   updateTabDirty: (id, isDirty) =>
     set((state) => ({
       tabs: state.tabs.map((t) => (t.id === id ? { ...t, isDirty } : t)),
+    })),
+  updateTabEdited: (id, isEdited) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === id ? { ...t, isEdited } : t)),
     })),
   updateCursorPosition: (id, line, column) =>
     set((state) => ({
