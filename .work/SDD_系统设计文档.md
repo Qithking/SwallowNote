@@ -45,35 +45,33 @@
 | Electron | 生态成熟、VSCode验证 | 内存占用高、包体积大 | ❌ 不选 |
 | Flutter Desktop | 性能好、UI一致 | Markdown生态弱 | ❌ 不选 |
 
-#### 2.1.2 前端框架:**Svelte 5**
+#### 2.1.2 前端框架:**React 18**
 
 **选型理由**:
-- **无虚拟 DOM**:编译时响应式,直接操作真实 DOM,避免 React Fiber 调和带来的微卡顿
-- **输入延迟低**:高频输入时无虚拟 DOM diff 开销,实现真正的"零延迟"编辑体验
-- **包体积极小**:编译后代码量远小于 React/Vue
-- **适合编辑器场景**:VS Code 自身也未使用框架,Svelte 5 是最接近原生性能的现代框架
+- **成熟的生态系统**:React 拥有最完善的 Markdown 编辑器生态(Milkdown、Monaco 等)
+- **优秀的开发体验**:Hooks + 函数式组件,状态逻辑清晰可复用
+- **性能优化手段**:useMemo、useCallback、Suspense 等内置优化 API
+- **社区支持**:遇到问题容易找到解决方案
 
-**为什么不选 React**:
-- React 的虚拟 DOM 和频繁调和会在高频输入时产生微小卡顿(输入延迟)
-- 对于追求极致性能的编辑器,React 的开销不可接受
+**为什么不选 Svelte**:
+- Svelte 5 生态较新,编辑器相关库(如 CodeMirror 适配)支持有限
+- 对于复杂编辑器场景,React 社区方案更成熟
 
-#### 2.1.3 状态管理:**Svelte 5 Runes (内置)**
-
-**选型理由**:
-- **无需额外库**:Svelte 5 内置 `$state`、`$derived`、`$effect` 等 Runes,提供细粒度响应式
-- **编译时优化**:编译器自动追踪依赖,无需手动优化
-- **零运行时开销**:相比 Zustand/Redux,无额外的 store 管理成本
-
-#### 2.1.4 Markdown 引擎:**CodeMirror 6 + markdown-it**
+#### 2.1.3 状态管理:**Zustand**
 
 **选型理由**:
-- **CodeMirror 6**:采用六边形架构,可按需拆解,增量文档模型处理超大文件(10万+行)性能远超 Monaco
-- **markdown-it**:高性能解析器,作为预览渲染引擎
-- **Tree-sitter**:用于语法高亮和代码折叠,C 编写的增量解析库(WASM 版本),性能极低损耗
+- **轻量级**:仅 1KB 左右,无 boilerplate 代码
+- **TypeScript 友好**:完整的类型推断支持
+- **简单直观**:create 方法创建 store,直接读写状态
+- **中间件支持**:支持 persist、devtools 等常用中间件
 
-**为什么不选 Monaco**:
-- Monaco(VS Code 核心)虽然强大但极其庞大沉重
-- CodeMirror 6 更适合追求极致性能的场景
+#### 2.1.4 Markdown 引擎:**Milkdown**
+
+**选型理由**:
+- **开箱即用**:完整的 Markdown 编辑器方案,支持实时预览
+- **插件化架构**:按需加载语法高亮、表格、数学公式等插件
+- **ProseMirror 基于**:继承 ProseMirror 的优秀架构,性能可靠
+- **React 集成优秀**:与 React 18 配合良好
 
 #### 2.1.5 Git 操作:**git2-rs (libgit2 Rust 绑定)**
 
@@ -126,7 +124,7 @@
 │   Rust 后端 (Main)   │     WebView 前端 (Renderer)       │
 │                      │                                  │
 │ ┌──────────────────┐ │ ┌──────────────────────────────┐│
-│ │ 文件系统服务      │ │ │  UI 层 (Svelte 5 Components) ││
+│ │ 文件系统服务      │ │ │  UI 层 (React 18 Components) ││
 │ │ - 文件读写        │ │ │  - 编辑器组件                ││
 │ │ - 目录扫描        │ │ │  - 文件树组件                ││
 │ │ - 文件监听(notify)│ │ │  - 标签页组件                ││
@@ -134,16 +132,16 @@
 │                      │ │ └──────────────────────────────┘│
 │ ┌──────────────────┐ │ │                                  │
 │ │ Git 服务(git2-rs)│ │ │ ┌──────────────────────────────┐│
-│ │ - Git 操作        │◄─┼─┤  状态管理层 (Svelte Runes)    ││
-│ │ - 差异计算        │ │ │  - $state: editorState         ││
-│ │ - 提交管理        │ │ │  - $state: fileTreeState       ││
-│ └──────────────────┘ │ │  - $state: gitState            ││
-│                      │ │  - $state: syncState           ││
-│ ┌──────────────────┐ │ │  - $state: aiState             ││
+│ │ - Git 操作        │◄─┼─┤  状态管理层 (Zustand Stores)    ││
+│ │ - 差异计算        │ │ │  - editorStore         ││
+│ │ - 提交管理        │ │ │  - fileTreeStore       ││
+│ └──────────────────┘ │ │  - gitStore            ││
+│                      │ │  - syncStore           ││
+│ ┌──────────────────┐ │ │  - aiStore             ││
 │ │ 同步服务          │ │ └──────────────────────────────┘│
 │ │ - WebDAV(reqwest)│ │                                  │
 │ │ - S3(reqwest)     │ │ │ ┌──────────────────────────────┐│
-│ │ - FTP(reqwest)    │ │ │  业务逻辑层 (Svelte Services)  ││
+│ │ - FTP(reqwest)    │ │ │  业务逻辑层 (React Services)  ││
 │ └──────────────────┘ │ │  - MarkdownService             ││
 │                      │ │  - FileService                 ││
 │ ┌──────────────────┐ │ │  - GitService                  ││
@@ -153,12 +151,12 @@
 │ └──────────────────┘ │ └──────────────────────────────┘│
 │                      │ │                                  │
 │ ┌──────────────────┐ │ │ ┌──────────────────────────────┐│
-│ │ Tauri IPC 通信    │◄─┼─┤  Markdown 引擎层             ││
-│ │ - Commands        │ │ │  - CodeMirror 6 Editor         ││
-│ │ - Events          │ │ │  - markdown-it Parser          ││
-│ └──────────────────┘ │ │  - Tree-sitter Highlighter     ││
-│                      │ │  - KaTeX Renderer              ││
-│ ┌──────────────────┐ │ │  - Mermaid Renderer            ││
+│ │ Tauri IPC 通信    │◄─┼─┤  Markdown 引擎层 (Milkdown)    ││
+│ │ - Commands        │ │ │  - Editor Core                ││
+│ │ - Events          │ │ │  - Syntax Highlighter         ││
+│ └──────────────────┘ │ │  - KaTeX Renderer             ││
+│                      │ │  - Mermaid Renderer           ││
+│ ┌──────────────────┐ │ │  - Table Plugin               ││
 │ │ 配置管理          │ │ └──────────────────────────────┘│
 │ │ - serde_json      │ │                                  │
 │ │ - tauri::conf     │ │ ┌──────────────────────────────┐│
@@ -173,7 +171,230 @@
 
 ---
 
-### 2.3 进程模型
+### 2.3 UI/UX 设计规范（shadcn/ui）
+
+#### 2.3.1 设计理念
+
+shadcn/ui 不是传统意义上的组件库，而是一组**可复制、可定制**的组件源码。其设计理念：
+
+| 理念 | 说明 |
+|------|------|
+| **设计系统基石** | 提供基础组件层，作为设计系统的起点 |
+| **代码所有权** | 组件代码直接复制到项目中，完全可控 |
+| **可定制性** | 基于 Tailwind CSS，可自由调整样式 |
+| **无障碍优先** | 基于 Radix UI 原语，默认支持键盘导航和屏幕阅读器 |
+
+#### 2.3.2 核心组件映射
+
+根据 SwallowNote 功能需求，核心组件对应关系：
+
+| 功能模块 | shadcn/ui 组件 | 用途 |
+|----------|----------------|------|
+| 编辑器 | Dialog, Sheet, Command | 快捷命令、设置面板 |
+| 文件树 | Context Menu, Dropdown Menu | 右键菜单、文件操作 |
+| 标签页 | Tabs | 多文档切换 |
+| 搜索 | Command, Dialog, Input | 快速搜索、文件搜索 |
+| 设置 | Select, Switch, Slider, Checkbox | 配置选项 |
+| AI 对话 | Dialog, Scroll Area, Avatar | 对话窗口 |
+| 同步状态 | Progress, Badge, Toast | 状态展示 |
+
+#### 2.3.3 组件代码示例
+
+**Command 组件（快捷命令）**
+```tsx
+import { Command } from "@/components/ui/command";
+import { Dialog } from "@/components/ui/dialog";
+
+interface QuickCommandProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function QuickCommand({ open, onOpenChange }: QuickCommandProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="overflow-hidden p-0 shadow-lg">
+        <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium">
+          <Command.Input placeholder="Type a command or search..." />
+          <Command.List>
+            <Command.Empty>No results found.</Command.Empty>
+            <Command.Group heading="Navigation">
+              <Command.Item>New File</Command.Item>
+              <Command.Item>Open Folder</Command.Item>
+              <Command.Item>Recent Files</Command.Item>
+            </Command.Group>
+            <Command.Group heading="Edit">
+              <Command.Item>Find in File</Command.Item>
+              <Command.Item>Replace</Command.Item>
+            </Command.Group>
+          </Command.List>
+        </Command>
+      </Dialog.Content>
+    </Dialog>
+  );
+}
+```
+
+**Tabs 组件（标签页）**
+```tsx
+import { Tabs } from "@/components/ui/tabs";
+import { TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+
+interface EditorTabsProps {
+  files: File[];
+  activeFileId: string;
+  onSelect: (fileId: string) => void;
+}
+
+export function EditorTabs({ files, activeFileId, onSelect }: EditorTabsProps) {
+  return (
+    <Tabs value={activeFileId} onValueChange={onSelect}>
+      <TabsList className="grid w-full grid-cols-4">
+        {files.map(file => (
+          <TabsTrigger key={file.id} value={file.id}>
+            {file.dirty && <span className="mr-1">●</span>}
+            {file.name}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
+  );
+}
+```
+
+**Context Menu 组件（右键菜单）**
+```tsx
+import { ContextMenu } from "@/components/ui/context-menu";
+import { ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu";
+
+interface FileTreeNodeProps {
+  file: FileNode;
+  children: React.ReactNode;
+}
+
+export function FileTreeNode({ file, children }: FileTreeNodeProps) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem>New File</ContextMenuItem>
+        <ContextMenuItem>New Folder</ContextMenuItem>
+        <ContextMenuItem>Rename</ContextMenuItem>
+        <ContextMenuItem className="text-red-600">Delete</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+```
+
+**Sheet 组件（侧边面板）**
+```tsx
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+
+interface SettingsPanelProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+export function SettingsPanel({ open, onOpenChange }: SettingsPanelProps) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-[400px]">
+        <SheetHeader>
+          <SheetTitle>Settings</SheetTitle>
+        </SheetHeader>
+        <div className="grid gap-4 py-4">
+          <div className="flex items-center justify-between">
+            <label>Auto Save</label>
+            <Switch checked={autoSave} onCheckedChange={setAutoSave} />
+          </div>
+          <div className="space-y-2">
+            <label>Font Size</label>
+            <Select value={fontSize} onValueChange={setFontSize}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="12">12px</SelectItem>
+                <SelectItem value="14">14px</SelectItem>
+                <SelectItem value="16">16px</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+```
+
+#### 2.3.4 主题定制
+
+**CSS 变量配置**
+```css
+/* globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+  }
+}
+```
+
+**暗色模式支持**
+```tsx
+// components/theme-provider.tsx
+import { createContext, useContext, useEffect, useState } from "react";
+
+type Theme = "dark" | "light";
+
+const ThemeContext = createContext<{ theme: Theme; setTheme: (theme: Theme) => void }>({
+  theme: "light",
+  setTheme: () => {},
+});
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<Theme>("light");
+
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.remove("light", "dark");
+    root.classList.add(theme);
+  }, [theme]);
+
+  return (
+    <ThemeContext.Provider value={{ theme, setTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+```
+
+---
+
+### 2.4 进程模型
 
 #### 2.3.1 Rust 后端职责
 - 文件系统操作(读写、监听,通过 notify crate)
@@ -184,10 +405,10 @@
 - 自动更新(Tauri Updater)
 
 #### 2.3.2 WebView 前端职责
-- UI 渲染(Svelte 5 组件)
+- UI 渲染(React 18 组件)
 - 用户交互(键盘、鼠标事件)
-- Markdown 解析和预览(CodeMirror 6 + markdown-it)
-- 本地状态管理(Svelte Runes)
+- Markdown 解析和预览(Milkdown 编辑器)
+- 本地状态管理(Zustand stores)
 
 #### 2.3.3 Tauri IPC 通信设计
 
@@ -205,7 +426,7 @@ async fn read_file(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-// Svelte 前端
+// React 前端
 import { invoke } from '@tauri-apps/api/core';
 const content = await invoke('read_file', { path: filePath });
 ```
@@ -224,92 +445,64 @@ const content = await invoke('read_file', { path: filePath });
 
 #### 3.1.2 核心组件
 
-**EditorContainer.svelte**
-```svelte
-<script lang="ts">
-  import SourceEditor from './SourceEditor.svelte';
-  import PreviewRenderer from './PreviewRenderer.svelte';
-  
-  let { fileId, mode, onContentChange } = $props();
-  let content = $state('');
-  
-  // 根据 mode 渲染不同视图
-</script>
+**EditorContainer.tsx**
+```tsx
+import { useState, useCallback } from 'react';
+import SourceEditor from './SourceEditor';
+import PreviewRenderer from './PreviewRenderer';
 
-{#if mode === 'source'}
-  <SourceEditor {content} onChange={handleContentChange} />
-{:else if mode === 'preview'}
-  <PreviewRenderer {content} />
-{:else}
-  <div class="split-view">
-    <SourceEditor {content} onChange={handleContentChange} />
-    <PreviewRenderer {content} />
-  </div>
-{/if}
+interface EditorContainerProps {
+  fileId: string;
+  mode: 'source' | 'preview' | 'split';
+  onContentChange: (content: string) => void;
+}
+
+export function EditorContainer({ fileId, mode, onContentChange }: EditorContainerProps) {
+  const [content, setContent] = useState('');
+
+  const handleContentChange = useCallback((newContent: string) => {
+    setContent(newContent);
+    onContentChange(newContent);
+  }, [onContentChange]);
+
+  if (mode === 'source') {
+    return <SourceEditor content={content} onChange={handleContentChange} />;
+  } else if (mode === 'preview') {
+    return <PreviewRenderer content={content} />;
+  }
+
+  return (
+    <div className="split-view">
+      <SourceEditor content={content} onChange={handleContentChange} />
+      <PreviewRenderer content={content} />
+    </div>
+  );
+}
 ```
 
-**SourceEditor.svelte** - 基于 CodeMirror 6 封装
-```svelte
-<script lang="ts">
-  import { EditorView, basicSetup } from 'codemirror';
-  import { markdown } from '@codemirror/lang-markdown';
-  
-  let { value, onChange, theme } = $props();
-  let editorContainer: HTMLDivElement;
-  let view: EditorView;
-  
-  $effect(() => {
-    if (!editorContainer) return;
-    
-    view = new EditorView({
-      doc: value,
-      extensions: [
-        basicSetup,
-        markdown(),
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            onChange(update.state.doc.toString());
-          }
-        })
-      ],
-      parent: editorContainer
-    });
-    
-    return () => view.destroy();
-  });
-</script>
+**PreviewRenderer.tsx** - 基于 Milkdown 封装
+```tsx
+import { Editor, rootRenderer } from '@milkdown/core';
+import { commonmark } from '@milkdown/preset-commonmark';
+import { MilkdownProvider } from '@milkdown/react';
+import '@milkdown/theme-common/style.css';
 
-<div bind:this={editorContainer}></div>
-```
+interface PreviewRendererProps {
+  content: string;
+  scrollSync?: boolean;
+}
 
-**PreviewRenderer.svelte**
-```svelte
-<script lang="ts">
-  import MarkdownIt from 'markdown-it';
-  import katex from 'katex';
-  import mermaid from 'mermaid';
-  
-  let { content, scrollSync = false } = $props();
-  let previewHtml = $derived(markdownParser.render(content));
-  
-  const markdownParser = new MarkdownIt({
-    html: true,
-    linkify: true,
-    typographer: true
-  });
-  
-  // 防抖更新(200ms)
-  let timeout: NodeJS.Timeout;
-  $effect(() => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => {
-      // 渲染 KaTeX 和 Mermaid
-      renderMathAndDiagrams();
-    }, 200);
-  });
-</script>
-
-<div class="preview" innerHTML={previewHtml}></div>
+export function PreviewRenderer({ content, scrollSync = false }: PreviewRendererProps) {
+  return (
+    <MilkdownProvider>
+      <Editor
+        value={content}
+        onChange={handleChange}
+        plugins={[commonmark]}
+      />
+    </MilkdownProvider>
+  );
+}
 ```
 
 #### 3.1.3 大文件优化策略
@@ -369,48 +562,64 @@ class PaginatedPreview {
 
 #### 3.2.2 核心组件
 
-**FileTree.svelte**
-```svelte
-<script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
-  
-  let { rootPath, onSelect, onContextMenu } = $props();
-  let treeData = $state<FileNode[]>([]);
-  let expandedNodes = $state(new Set<string>());
-  
+**FileTree.tsx**
+```tsx
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+
+interface FileNode {
+  id: string;
+  name: string;
+  path: string;
+  is_directory: boolean;
+}
+
+interface FileTreeProps {
+  rootPath: string;
+  onSelect: (node: FileNode) => void;
+  onContextMenu: (node: FileNode, e: MouseEvent) => void;
+}
+
+export function FileTree({ rootPath, onSelect, onContextMenu }: FileTreeProps) {
+  const [treeData, setTreeData] = useState<FileNode[]>([]);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+
   // 异步加载子目录
   async function loadDirectory(path: string): Promise<FileNode[]> {
     return await invoke('list_directory', { path });
   }
-  
+
   // 监听文件系统变化
-  $effect(() => {
-    const unlisten = listen('file-changed', (event) => {
+  useEffect(() => {
+    const unlisten = listen('file-changed', () => {
       refreshTree();
     });
-    return () => unlisten.then(f => f());
-  });
-</script>
+    return () => { unlisten.then(f => f()); };
+  }, []);
 
-<!-- 虚拟列表实现 -->
-<div class="file-tree">
-  {#each treeData as node (node.id)}
-    <FileTreeNode 
-      {node}
-      expanded={expandedNodes.has(node.id)}
-      on:toggle={() => toggleNode(node.id)}
-      on:select={() => onSelect(node)}
-      on:contextmenu={(e) => onContextMenu(node, e)}
-    />
-  {/each}
-</div>
+  return (
+    <div className="file-tree">
+      {treeData.map(node => (
+        <FileTreeNode
+          key={node.id}
+          node={node}
+          expanded={expandedNodes.has(node.id)}
+          onToggle={() => toggleNode(node.id)}
+          onSelect={() => onSelect(node)}
+          onContextMenu={(e) => onContextMenu(node, e)}
+        />
+      ))}
+    </div>
+  );
+}
 ```
 
-**TabManager.svelte** - Svelte 5 Store
+**TabManager.tsx** - Zustand Store
 ```typescript
 // stores/tabStore.ts
-import { writable } from 'svelte/store';
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 interface Tab {
   id: string;
@@ -420,39 +629,47 @@ interface Tab {
   active: boolean;
 }
 
-export const tabs = writable<Tab[]>([]);
-export const activeTabId = writable<string | null>(null);
-
-export function openFile(fileId: string) {
-  tabs.update(currentTabs => {
-    // 检查是否已打开
-    const existing = currentTabs.find(t => t.fileId === fileId);
-    if (existing) {
-      activeTabId.set(existing.id);
-      return currentTabs;
-    }
-    
-    // 检查最大标签数
-    if (currentTabs.length >= 50) {
-      alert('达到最大标签数限制');
-      return currentTabs;
-    }
-    
-    const newTab = createTab(fileId);
-    activeTabId.set(newTab.id);
-    return [...currentTabs, newTab];
-  });
+interface TabStore {
+  tabs: Tab[];
+  activeTabId: string | null;
+  openFile: (fileId: string) => void;
+  closeTab: (tabId: string) => void;
+  setActiveTab: (tabId: string) => void;
 }
 
-export function closeTab(tabId: string) {
-  tabs.update(currentTabs => {
-    const tab = currentTabs.find(t => t.id === tabId);
-    if (tab?.dirty && !confirm('文件未保存,是否关闭?')) {
-      return currentTabs;
-    }
-    return currentTabs.filter(t => t.id !== tabId);
-  });
-}
+export const useTabStore = create<TabStore>()(
+  persist(
+    (set, get) => ({
+      tabs: [],
+      activeTabId: null,
+
+      openFile: (fileId: string) => {
+        const { tabs } = get();
+        const existing = tabs.find(t => t.fileId === fileId);
+        if (existing) {
+          set({ activeTabId: existing.id });
+          return;
+        }
+        if (tabs.length >= 50) {
+          alert('达到最大标签数限制');
+          return;
+        }
+        const newTab = createTab(fileId);
+        set({ tabs: [...tabs, newTab], activeTabId: newTab.id });
+      },
+
+      closeTab: (tabId: string) => {
+        const { tabs, activeTabId } = get();
+        const tab = tabs.find(t => t.id === tabId);
+        if (tab?.dirty && !confirm('文件未保存,是否关闭?')) {
+          return;
+        }
+        set({ tabs: tabs.filter(t => t.id !== tabId) });
+      },
+    }),
+    { name: 'tab-storage' }
+  )
+);
 ```
 
 #### 3.2.3 文件监听实现 (Rust 后端)
@@ -782,7 +999,7 @@ class DiffViewer extends React.Component<DiffViewerProps> {
 
 ### 7.1 文件树优化
 
-- **虚拟列表**:Svelte {#each} 配合固定高度容器,仅渲染可视区域节点
+- **虚拟列表**:React 虚拟化列表库(如 @tanstack/react-virtual),仅渲染可视区域节点
 - **懒加载**:子目录展开时异步调用 Tauri Command 加载
 - **缓存**:Rust 后端缓存目录结构,减少重复扫描
 
@@ -791,7 +1008,7 @@ class DiffViewer extends React.Component<DiffViewerProps> {
 - **Web Worker**:Markdown 解析在前端 Web Worker 进行(避免阻塞 UI)
 - **防抖更新**:预览更新延迟 200ms
 - **分页渲染**:大文件分 1000 行一页渲染
-- **标签卸载**:非活动标签销毁 CodeMirror 实例释放内存
+- **标签卸载**:非活动标签卸载 Milkdown Editor 实例释放内存
 
 ### 7.3 Rust 后端优势
 
@@ -806,7 +1023,7 @@ class DiffViewer extends React.Component<DiffViewerProps> {
 ### 8.1 单元测试
 
 - **Rust**:使用 cargo test 测试后端逻辑
-- **Svelte**:使用 Vitest + @testing-library/svelte 测试组件渲染、用户交互、业务逻辑
+- **React/TypeScript**:使用 Vitest + @testing-library/react 测试组件渲染、用户交互、业务逻辑
 
 ### 8.2 E2E 测试
 
@@ -842,9 +1059,9 @@ class DiffViewer extends React.Component<DiffViewerProps> {
 - clippy 静态检查
 - 遵循 Rust API Guidelines
 
-**Svelte/TypeScript**:
+**React/TypeScript**:
 - ESLint + Prettier 统一代码风格
-- Svelte 5 Runes 最佳实践
+- React Hooks + Zustand 最佳实践
 - 80 字符行宽、单引号、分号
 
 ### 10.2 提交规范
@@ -877,31 +1094,34 @@ swallownote/
 │   │   └── utils/
 │   ├── Cargo.toml            # Rust 依赖
 │   └── tauri.conf.json       # Tauri 配置
-├── src/                      # Svelte 5 前端
+├── src/                      # React 18 前端
 │   ├── lib/
-│   │   ├── components/       # Svelte 组件
+│   │   ├── components/       # React 组件
 │   │   │   ├── Editor/
-│   │   │   │   ├── EditorContainer.svelte
-│   │   │   │   ├── SourceEditor.svelte
-│   │   │   │   └── PreviewRenderer.svelte
+│   │   │   │   ├── EditorContainer.tsx
+│   │   │   │   ├── SourceEditor.tsx
+│   │   │   │   └── PreviewRenderer.tsx
 │   │   │   ├── FileTree/
-│   │   │   │   ├── FileTree.svelte
-│   │   │   │   └── FileTreeNode.svelte
+│   │   │   │   ├── FileTree.tsx
+│   │   │   │   └── FileTreeNode.tsx
 │   │   │   ├── Tabs/
 │   │   │   └── Sidebar/
-│   │   ├── stores/           # Svelte Stores
+│   │   ├── stores/           # Zustand Stores
 │   │   │   ├── editorStore.ts
-│   │   │   ├── fileStore.ts
-│   │   │   └── gitStore.ts
+│   │   │   ├── fileTreeStore.ts
+│   │   │   ├── gitStore.ts
+│   │   │   └── aiStore.ts
 │   │   ├── services/         # 前端服务
 │   │   └── types/            # TypeScript 类型
 │   ├── routes/               # 页面路由
-│   ├── app.html              # HTML 模板
-│   └── app.css               # 全局样式
+│   ├── App.tsx               # React 应用入口
+│   ├── main.tsx              # React 渲染入口
+│   └── index.css             # 全局样式
 ├── package.json              # Node.js 依赖
-├── svelte.config.js          # Svelte 配置
 ├── vite.config.ts            # Vite 配置
-└── tsconfig.json             # TypeScript 配置
+├── tailwind.config.js        # Tailwind CSS v3 配置
+├── tsconfig.json             # TypeScript 配置
+└── index.html                # HTML 入口
 ```
 
 ---
@@ -931,21 +1151,28 @@ base64 = "0.21"
 {
   "dependencies": {
     "@tauri-apps/api": "^2.0",
-    "codemirror": "^6.0",
-    "@codemirror/lang-markdown": "^6.0",
-    "markdown-it": "^14.0",
+    "@milkdown/core": "^7.0",
+    "@milkdown/preset-commonmark": "^7.0",
+    "@milkdown/react": "^7.0",
+    "@milkdown/plugin-history": "^7.0",
+    "@milkdown/plugin-listener": "^7.0",
     "katex": "^0.16",
     "mermaid": "^10.0",
     "fuse.js": "^7.0",
-    "@types/markdown-it": "^13.0"
+    "zustand": "^4.0",
+    "lucide-react": "^0.300",
+    "clsx": "^2.0"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^3.0",
-    "@tsconfig/svelte": "^5.0",
-    "svelte": "^5.0",
-    "svelte-check": "^3.0",
+    "@vitejs/plugin-react": "^4.0",
+    "@types/node": "^20.0",
+    "react": "^18.0",
+    "react-dom": "^18.0",
     "typescript": "^5.0",
-    "vite": "^5.0"
+    "vite": "^5.0",
+    "tailwindcss": "^3.4",
+    "autoprefixer": "^10.4",
+    "postcss": "^8.4"
   }
 }
 ```
