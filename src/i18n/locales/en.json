@@ -1,0 +1,89 @@
+{
+  "app": {
+    "name": "SwallowNote"
+  },
+  "menu": {
+    "file": "File",
+    "edit": "Edit",
+    "view": "View",
+    "help": "Help"
+  },
+  "sidebar": {
+    "explorer": "Explorer",
+    "search": "Search",
+    "git": "Git",
+    "ai": "AI",
+    "settings": "Settings"
+  },
+  "editor": {
+    "untitled": "Untitled",
+    "preview": "Preview",
+    "split": "Split View"
+  },
+  "fileTree": {
+    "newFile": "New File",
+    "newFolder": "New Folder",
+    "rename": "Rename",
+    "delete": "Delete",
+    "refresh": "Refresh"
+  },
+  "tabs": {
+    "close": "Close",
+    "closeOthers": "Close Others",
+    "closeAll": "Close All"
+  },
+  "search": {
+    "placeholder": "Search...",
+    "noResults": "No results found",
+    "files": "Files",
+    "content": "Content"
+  },
+  "commandPalette": {
+    "placeholder": "Type a command or search...",
+    "noResults": "No commands found"
+  },
+  "statusBar": {
+    "Ln": "Ln",
+    "Col": "Col",
+    "spaces": "Spaces",
+    "encoding": "Encoding",
+    "language": "Language",
+    "branch": "Branch"
+  },
+  "settings": {
+    "title": "Settings",
+    "general": "General",
+    "editor": "Editor",
+    "appearance": "Appearance",
+    "git": "Git",
+    "sync": "Sync",
+    "ai": "AI",
+    "shortcuts": "Shortcuts",
+    "about": "About"
+  },
+  "git": {
+    "commit": "Commit",
+    "push": "Push",
+    "pull": "Pull",
+    "branch": "Branch",
+    "merge": "Merge",
+    "diff": "Diff"
+  },
+  "ai": {
+    "chat": "Chat",
+    "complete": "Complete",
+    "rewrite": "Rewrite",
+    "explain": "Explain"
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "close": "Close",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success"
+  }
+}

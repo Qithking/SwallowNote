@@ -1,202 +1,180 @@
 /* ============================================================
    SwallowNote — VS Code Exact Dark Theme Design System
-   Theme controlled via data-theme attribute on <html>
-   Built with Tailwind CSS v4 + shadcn-svelte + Lucide Icons
+   Theme controlled via .dark class on <html>
+   Built with Tailwind CSS v3 + shadcn/ui + Lucide Icons
    ============================================================ */
 
-/* ---- Tailwind CSS v4 Theme Configuration ---- */
-@theme {
-  /* Shadcn/UI color palette - must be defined before @import */
-  --color-background: #1e1e1e;
-  --color-foreground: #ffffff;
-  --color-card: #252526;
-  --color-card-foreground: #ffffff;
-  --color-popover: #252526;
-  --color-popover-foreground: #ffffff;
-  --color-primary: #ffffff;
-  --color-primary-foreground: #1e1e1e;
-  --color-secondary: #252526;
-  --color-secondary-foreground: #ffffff;
-  --color-muted: #2d2d2d;
-  --color-muted-foreground: #888888;
-  --color-accent: #0078d4;
-  --color-accent-foreground: #ffffff;
-  --color-destructive: #e81123;
-  --color-destructive-foreground: #ffffff;
-  --color-border: #454545;
-  --color-input: #3c3c3c;
-  --color-ring: #0078d4;
+/* ---- Tailwind CSS v3 + shadcn/ui CSS Variables ---- */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  /* App-specific colors */
-  --color-bg-primary: #1e1e1e;
-  --color-bg-secondary: #252526;
-  --color-bg-tertiary: #2d2d2d;
-  --color-text-primary: #ffffff;
-  --color-text-secondary: #dddddd;
-  --color-text-muted: #888888;
+@layer base {
+  /* Default (light) theme - VS Code Light+ exact colors */
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    
+    --radius: 0.5rem;
+    
+    /* VS Code Dark+ specific colors */
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --bg-tertiary: #2d2d2d;
+    --bg-hover: #2a2d2e;
+    --bg-active: #37373d;
+    --bg-selection: #264f78;
+    --bg-input: #3c3c3c;
+    
+    --text-primary: #ffffff;
+    --text-secondary: #dddddd;
+    --text-muted: #888888;
+    --text-link: #4fc1ff;
+    
+    --border-color: #454545;
+    --border-light: #333333;
+    
+    --scrollbar-bg: transparent;
+    --scrollbar-thumb: #505050;
+    --scrollbar-hover: #606060;
+    
+    --status-bg: #0078d4;
+    --status-fg: #ffffff;
+    
+    --tab-bg: #2d2d2d;
+    --tab-active-bg: #1e1e1e;
+    --tab-hover-bg: #2a2d2e;
+    --tab-border: #252526;
+    --tab-activeBorderTop: #0078d4;
+    --tab-activeBorder: #1e1e1e;
+    
+    --sidebar-header: #2d2d2d;
+    --activity-bg: #333333;
+    --activity-hover: #3c3c3c;
+    --activity-foreground: #ffffff;
+    --activity-inactive: #aaaaaa;
+    --activity-activeBorder: #ffffff;
+    
+    --accent-hover: #1a8ae8;
+    
+    /* Fonts */
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  }
+
+  /* Dark theme - VS Code Dark+ exact colors */
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+    
+    --radius: 0.5rem;
+    
+    /* VS Code Dark+ specific colors */
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --bg-tertiary: #2d2d2d;
+    --bg-hover: #2a2d2e;
+    --bg-active: #37373d;
+    --bg-selection: #264f78;
+    --bg-input: #3c3c3c;
+    
+    --text-primary: #ffffff;
+    --text-secondary: #dddddd;
+    --text-muted: #888888;
+    --text-link: #4fc1ff;
+    
+    --border-color: #454545;
+    --border-light: #333333;
+    
+    --scrollbar-bg: transparent;
+    --scrollbar-thumb: #505050;
+    --scrollbar-hover: #606060;
+    
+    --status-bg: #0078d4;
+    --status-fg: #ffffff;
+    
+    --tab-bg: #2d2d2d;
+    --tab-active-bg: #1e1e1e;
+    --tab-hover-bg: #2a2d2e;
+    --tab-border: #252526;
+    --tab-activeBorderTop: #0078d4;
+    --tab-activeBorder: #1e1e1e;
+    
+    --sidebar-header: #2d2d2d;
+    --activity-bg: #333333;
+    --activity-hover: #3c3c3c;
+    --activity-foreground: #ffffff;
+    --activity-inactive: #aaaaaa;
+    --activity-activeBorder: #ffffff;
+    
+    --accent-hover: #1a8ae8;
+    
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  }
+
+  /* Apply shadcn/ui base styles */
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-ui);
+  }
 }
 
-@import "tailwindcss";
-
-/* ---- Default (dark) ---- */
-:root, [data-theme="dark"] {
-  /* ---- Background hierarchy ---- */
-  --bg-primary:        #1e1e1e;
-  --bg-secondary:      #252526;
-  --bg-tertiary:       #2d2d2d;
-  --bg-hover:          #2a2d2e;
-  --bg-active:         #37373d;
-  --bg-selection:      #264f78;
-  --bg-input:          #3c3c3c;
-
-  /* ---- Shadcn/UI Components ---- */
-  --background:        #1e1e1e;
-  --foreground:        #ffffff;
-  --card:              #252526;
-  --card-foreground:   #ffffff;
-  --popover:           #252526;
-  --popover-foreground:#ffffff;
-  --primary:           #ffffff;
-  --primary-foreground:#1e1e1e;
-  --secondary:         #252526;
-  --secondary-foreground:#ffffff;
-  --muted:             #2d2d2d;
-  --muted-foreground:  #888888;
-  --accent:            #0078d4;
-  --accent-foreground: #ffffff;
-  --destructive:       #e81123;
-  --destructive-foreground:#ffffff;
-  --border:            #454545;
-  --input:             #3c3c3c;
-  --ring:              #0078d4;
-
-  /* ---- Activity bar (VS Code: #333333) ---- */
-  --activity-bg:          #333333;
-  --activity-hover:       #3c3c3c;
-  --activity-foreground:  #ffffff;
-  --activity-inactive:    #aaaaaa;
-  --activity-activeBorder:#ffffff;
-
-  /* ---- Text ---- */
-  --text-primary:    #ffffff;
-  --text-secondary:  #dddddd;
-  --text-muted:      #888888;
-  --text-link:       #4fc1ff;
-
-  /* ---- Accent ---- */
-  --accent-hover: #1a8ae8;
-
-  /* ---- Borders ---- */
-  --border-light: #333333;
-
-  /* ---- Scrollbar ---- */
-  --scrollbar-bg:   transparent;
-  --scrollbar-thumb:#505050;
-  --scrollbar-hover:#606060;
-
-  /* ---- Status bar ---- */
-  --status-bg: #0078d4;
-  --status-fg: #ffffff;
-
-  /* ---- Tabs ---- */
-  --tab-bg:              #2d2d2d;
-  --tab-active-bg:       #1e1e1e;
-  --tab-hover-bg:        #2a2d2e;
-  --tab-border:          #252526;
-  --tab-activeBorderTop: #0078d4;
-  --tab-activeBorder:    #1e1e1e;
-
-  /* ---- Sidebar header ---- */
-  --sidebar-header: #2d2d2d;
-
-  /* ---- Fonts ---- */
-  --font-ui:  -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-mono:'JetBrains Mono','SF Mono','Fira Code','Cascadia Code','Consolas',monospace;
-}
-
-/* ---- Light theme ---- */
-[data-theme="light"] {
-  --bg-primary:        #ffffff;
-  --bg-secondary:      #f3f3f3;
-  --bg-tertiary:       #ececec;
-  --bg-hover:          #e8e8e8;
-  --bg-active:         #d6ebff;
-  --bg-selection:      #add6ff;
-  --bg-input:          #ffffff;
-
-  /* ---- Shadcn/UI Components ---- */
-  --background:        #ffffff;
-  --foreground:        #1f1f1f;
-  --card:              #ffffff;
-  --card-foreground:   #1f1f1f;
-  --popover:           #ffffff;
-  --popover-foreground:#1f1f1f;
-  --primary:           #1f1f1f;
-  --primary-foreground:#ffffff;
-  --secondary:         #f3f3f3;
-  --secondary-foreground:#1f1f1f;
-  --muted:             #f5f5f5;
-  --muted-foreground:  #999999;
-  --accent:            #0078d4;
-  --accent-foreground: #ffffff;
-  --destructive:       #e81123;
-  --destructive-foreground:#ffffff;
-  --border:            #e5e5e5;
-  --input:             #ffffff;
-  --ring:              #0078d4;
-
-  --activity-bg:          #f0f0f0;
-  --activity-hover:       #e0e0e0;
-  --activity-foreground:  #1f1f1f;
-  --activity-inactive:    #858585;
-  --activity-activeBorder:#1f1f1f;
-
-  --text-primary:    #1f1f1f;
-  --text-secondary:  #616161;
-  --text-muted:      #999999;
-  --text-link:       #0078d4;
-
-  --accent-hover: #106ebe;
-
-  --border-light: #f0f0f0;
-
-  --scrollbar-thumb: #c1c1c1;
-  --scrollbar-hover: #a1a1a1;
-
-  --tab-bg:              #ececec;
-  --tab-active-bg:       #ffffff;
-  --tab-hover-bg:        #e8e8e8;
-  --tab-border:          #f3f3f3;
-  --tab-activeBorderTop: #0078d4;
-  --tab-activeBorder:    #ffffff;
-
-  --sidebar-header: #ececec;
-}
-
-/* Light theme @theme overrides - must be after :root */
-[data-theme="light"] @theme {
-  --color-background: #ffffff;
-  --color-foreground: #1f1f1f;
-  --color-card: #ffffff;
-  --color-card-foreground: #1f1f1f;
-  --color-popover: #ffffff;
-  --color-popover-foreground: #1f1f1f;
-  --color-primary: #1f1f1f;
-  --color-primary-foreground: #ffffff;
-  --color-secondary: #f3f3f3;
-  --color-secondary-foreground: #1f1f1f;
-  --color-muted: #f5f5f5;
-  --color-muted-foreground: #999999;
-  --color-accent: #0078d4;
-  --color-accent-foreground: #ffffff;
-  --color-destructive: #e81123;
-  --color-destructive-foreground: #ffffff;
-  --color-border: #e5e5e5;
-  --color-input: #ffffff;
-  --color-ring: #0078d4;
-}
-
-/* ---- Menubar (shadcn-svelte) ---- */
+/* ---- shadcn/ui Component Styles ---- */
 /* Using data-slot attributes for reliable styling without Tailwind variant scanning */
 [data-slot="menubar"] {
   display: flex;
@@ -545,71 +523,72 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .cm-editor .cm-selectionMatch  { background:rgba(255,255,255,0.08); }
 
 /* ============================================================
-   Dark theme CodeMirror overrides (data-theme="dark")
+   Dark theme CodeMirror overrides (.dark)
    ============================================================ */
-[data-theme="dark"] .cm-editor {
+.dark .cm-editor {
   background: var(--bg-primary) !important;
   color: var(--text-primary);
 }
-[data-theme="dark"] .cm-editor .cm-gutters { background: var(--bg-primary); border-right-color: var(--border); }
-[data-theme="dark"] .cm-editor .cm-activeLineGutter { color: var(--text-secondary); }
-[data-theme="dark"] .cm-editor .cm-activeLine { background: rgba(255,255,255,0.04) !important; }
-[data-theme="dark"] .cm-editor .cm-selectionBackground,
-[data-theme="dark"] .cm-editor.cm-focused .cm-selectionBackground { background: var(--bg-selection) !important; }
+.dark .cm-editor .cm-gutters { background: var(--bg-primary); border-right-color: var(--border); }
+.dark .cm-editor .cm-activeLineGutter { color: var(--text-secondary); }
+.dark .cm-editor .cm-activeLine { background: rgba(255,255,255,0.04) !important; }
+.dark .cm-editor .cm-selectionBackground,
+.dark .cm-editor.cm-focused .cm-selectionBackground { background: var(--bg-selection) !important; }
 
-[data-theme="dark"] .cm-editor .cm-header { color:#569cd6; }
-[data-theme="dark"] .cm-editor .cm-strong { color:#ce9178; }
-[data-theme="dark"] .cm-editor .cm-em { color:#c586c0; }
-[data-theme="dark"] .cm-editor .cm-link { color:#4fc1ff; }
-[data-theme="dark"] .cm-editor .cm-comment,
-[data-theme="dark"] .cm-editor .cm-quote { color:#6a9955; }
-[data-theme="dark"] .cm-editor .cm-atom,
-[data-theme="dark"] .cm-editor .cm-number { color:#b5cea8; }
-[data-theme="dark"] .cm-editor .cm-keyword { color:#569cd6; }
-[data-theme="dark"] .cm-editor .cm-string { color:#ce9178; }
-[data-theme="dark"] .cm-editor .cm-def { color:#dcdcaa; }
-[data-theme="dark"] .cm-editor .cm-variable,
-[data-theme="dark"] .cm-editor .cm-property { color:#9cdcfe; }
-[data-theme="dark"] .cm-editor .cm-tag { color:#569cd6; }
-[data-theme="dark"] .cm-editor .cm-attribute { color:#9cdcfe; }
+.dark .cm-editor .cm-header { color:#569cd6; }
+.dark .cm-editor .cm-strong { color:#ce9178; }
+.dark .cm-editor .cm-em { color:#c586c0; }
+.dark .cm-editor .cm-link { color:#4fc1ff; }
+.dark .cm-editor .cm-comment,
+.dark .cm-editor .cm-quote { color:#6a9955; }
+.dark .cm-editor .cm-atom,
+.dark .cm-editor .cm-number { color:#b5cea8; }
+.dark .cm-editor .cm-keyword { color:#569cd6; }
+.dark .cm-editor .cm-string { color:#ce9178; }
+.dark .cm-editor .cm-def { color:#dcdcaa; }
+.dark .cm-editor .cm-variable,
+.dark .cm-editor .cm-property { color:#9cdcfe; }
+.dark .cm-editor .cm-tag { color:#569cd6; }
+.dark .cm-editor .cm-attribute { color:#9cdcfe; }
 
-[data-theme="dark"] .cm-editor .cm-panels { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
-[data-theme="dark"] .cm-editor .cm-panels input { background: var(--bg-input); color: var(--text-primary); border-color: var(--border); }
-[data-theme="dark"] .cm-editor .cm-panels .cm-button { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
-[data-theme="dark"] .cm-editor .cm-panels .cm-button:hover { background: var(--bg-hover); }
-[data-theme="dark"] .cm-editor .cm-selectionMatch { background: rgba(255,255,255,0.08); }
+.dark .cm-editor .cm-panels { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
+.dark .cm-editor .cm-panels input { background: var(--bg-input); color: var(--text-primary); border-color: var(--border); }
+.dark .cm-editor .cm-panels .cm-button { background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border); }
+.dark .cm-editor .cm-panels .cm-button:hover { background: var(--bg-hover); }
+.dark .cm-editor .cm-selectionMatch { background: rgba(255,255,255,0.08); }
 
 /* ============================================================
-   Light theme CodeMirror overrides (data-theme="light")
+   Light theme CodeMirror overrides
+   Note: Light theme uses base .cm-editor styles
    ============================================================ */
-[data-theme="light"] .cm-editor {
+.cm-editor {
   background: #ffffff !important;
   color: #1f1f1f;
 }
-[data-theme="light"] .cm-editor .cm-activeLine { background: rgba(0,0,0,0.04) !important; }
-[data-theme="light"] .cm-editor .cm-gutters { background: #ffffff; color: #999999; border-right-color: #e5e5e5; }
-[data-theme="light"] .cm-editor .cm-activeLineGutter { color: #666666; }
-[data-theme="light"] .cm-editor .cm-selectionBackground,
-[data-theme="light"] .cm-editor.cm-focused .cm-selectionBackground { background: #add6ff !important; }
+.cm-editor .cm-activeLine { background: rgba(0,0,0,0.04) !important; }
+.cm-editor .cm-gutters { background: #ffffff; color: #999999; border-right-color: #e5e5e5; }
+.cm-editor .cm-activeLineGutter { color: #666666; }
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground { background: #add6ff !important; }
 
-[data-theme="light"] .cm-editor .cm-header { color: #800000; }
-[data-theme="light"] .cm-editor .cm-strong { color: #a31515; }
-[data-theme="light"] .cm-editor .cm-em { color: #795e26; }
-[data-theme="light"] .cm-editor .cm-link { color: #0000ff; }
-[data-theme="light"] .cm-editor .cm-comment,
-[data-theme="light"] .cm-editor .cm-quote { color: #008000; }
-[data-theme="light"] .cm-editor .cm-atom,
-[data-theme="light"] .cm-editor .cm-number { color: #098658; }
-[data-theme="light"] .cm-editor .cm-keyword { color: #0000ff; }
-[data-theme="light"] .cm-editor .cm-string { color: #a31515; }
-[data-theme="light"] .cm-editor .cm-def { color: #001080; }
-[data-theme="light"] .cm-editor .cm-variable,
-[data-theme="light"] .cm-editor .cm-property { color: #001080; }
-[data-theme="light"] .cm-editor .cm-tag { color: #800000; }
-[data-theme="light"] .cm-editor .cm-attribute { color: #ff0000; }
+.cm-editor .cm-header { color: #800000; }
+.cm-editor .cm-strong { color: #a31515; }
+.cm-editor .cm-em { color: #795e26; }
+.cm-editor .cm-link { color: #0000ff; }
+.cm-editor .cm-comment,
+.cm-editor .cm-quote { color: #008000; }
+.cm-editor .cm-atom,
+.cm-editor .cm-number { color: #098658; }
+.cm-editor .cm-keyword { color: #0000ff; }
+.cm-editor .cm-string { color: #a31515; }
+.cm-editor .cm-def { color: #001080; }
+.cm-editor .cm-variable,
+.cm-editor .cm-property { color: #001080; }
+.cm-editor .cm-tag { color: #800000; }
+.cm-editor .cm-attribute { color: #ff0000; }
 
-[data-theme="light"] .cm-editor .cm-panels { background: #f3f3f3; color: #1f1f1f; }
-[data-theme="light"] .cm-editor .cm-panels input { background: #ffffff; color: #1f1f1f; border-color: #e5e5e5; }
-[data-theme="light"] .cm-editor .cm-panels .cm-button { background: #ececec; color: #1f1f1f; border-color: #e5e5e5; }
-[data-theme="light"] .cm-editor .cm-panels .cm-button:hover { background: #e8e8e8; }
-[data-theme="light"] .cm-editor .cm-selectionMatch { background: rgba(0,0,0,0.06); }
+.cm-editor .cm-panels { background: #f3f3f3; color: #1f1f1f; }
+.cm-editor .cm-panels input { background: #ffffff; color: #1f1f1f; border-color: #e5e5e5; }
+.cm-editor .cm-panels .cm-button { background: #ececec; color: #1f1f1f; border-color: #e5e5e5; }
+.cm-editor .cm-panels .cm-button:hover { background: #e8e8e8; }
+.cm-editor .cm-selectionMatch { background: rgba(0,0,0,0.06); }

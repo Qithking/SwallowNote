@@ -1,0 +1,244 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+
+    /* UI Component Colors - Light */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f3f3f3;
+    --bg-tertiary: #ececec;
+    --bg-hover: #e8e8e8;
+    --bg-active: #d6d6d6;
+    --bg-selection: #add6ff;
+    --bg-input: #ffffff;
+    --text-primary: #1f1f1f;
+    --text-secondary: #666666;
+    --text-muted: #999999;
+    --text-link: #006ab1;
+    --border-color: #e5e5e5;
+    --border-light: #f0f0f0;
+    --tab-bg: #ececec;
+    --tab-active-bg: #ffffff;
+    --tab-hover-bg: #e8e8e8;
+    --tab-border: #e5e5e5;
+    --tab-activeBorderTop: #005fb8;
+    --tab-activeBorder: #ffffff;
+    --status-bg: #005fb8;
+    --status-fg: #ffffff;
+    --sidebar-header: #ececec;
+    --activity-bg: #333333;
+    --activity-hover: #3c3c3c;
+    --activity-foreground: #ffffff;
+    --activity-inactive: #aaaaaa;
+    --activity-activeBorder: #ffffff;
+    --accent-hover: #1a8ae8;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+    --radius: 0.5rem;
+
+    /* UI Component Colors - Dark */
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --bg-tertiary: #2d2d2d;
+    --bg-hover: #2a2d2e;
+    --bg-active: #37373d;
+    --bg-selection: #264f78;
+    --bg-input: #3c3c3c;
+    --text-primary: #ffffff;
+    --text-secondary: #dddddd;
+    --text-muted: #888888;
+    --text-link: #4fc1ff;
+    --border-color: #454545;
+    --border-light: #333333;
+    --tab-bg: #2d2d2d;
+    --tab-active-bg: #1e1e1e;
+    --tab-hover-bg: #2a2d2e;
+    --tab-border: #252526;
+    --tab-activeBorderTop: #0078d4;
+    --tab-activeBorder: #1e1e1e;
+    --status-bg: #0078d4;
+    --status-fg: #ffffff;
+    --sidebar-header: #2d2d2d;
+    --activity-bg: #333333;
+    --activity-hover: #3c3c3c;
+    --activity-foreground: #ffffff;
+    --activity-inactive: #aaaaaa;
+    --activity-activeBorder: #ffffff;
+    --accent-hover: #1a8ae8;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Milkdown editor styles */
+.milkdown {
+  --milkdown-font-family: theme('fontFamily.sans');
+  --milkdown-font-size: 16px;
+  --milkdown-line-height: 1.75;
+  --milkdown-code-font-family: theme('fontFamily.mono');
+  --milkdown-code-font-size: 0.875em;
+  --milkdown-block-margin-bottom: 1.5rem;
+  --milkdown-heading-weight: 700;
+  --milkdown-heading-margin-top: 2rem;
+  --milkdown-heading-margin-bottom: 1rem;
+}
+
+.milkdown .milkdown--expected {
+  outline: none;
+}
+
+.milkdown p {
+  margin-bottom: 1rem;
+}
+
+.milkdown h1,
+.milkdown h2,
+.milkdown h3,
+.milkdown h4,
+.milkdown h5,
+.milkdown h6 {
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.milkdown a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+
+.milkdown code {
+  background-color: hsl(var(--muted));
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-family: theme('fontFamily.mono');
+  font-size: 0.875em;
+}
+
+.milkdown pre {
+  background-color: hsl(var(--muted));
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-bottom: 1rem;
+}
+
+.milkdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.milkdown blockquote {
+  border-left: 4px solid hsl(var(--border));
+  padding-left: 1rem;
+  margin-left: 0;
+  margin-bottom: 1rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.milkdown ul,
+.milkdown ol {
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.milkdown li {
+  margin-bottom: 0.25rem;
+}
+
+.milkdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+.milkdown th,
+.milkdown td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.milkdown th {
+  background-color: hsl(var(--muted));
+  font-weight: 600;
+}
+
+.milkdown hr {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+  margin: 2rem 0;
+}
+
+.milkdown img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Scrollbar styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}

@@ -1,0 +1,89 @@
+{
+  "app": {
+    "name": "燕子笔记"
+  },
+  "menu": {
+    "file": "文件",
+    "edit": "编辑",
+    "view": "视图",
+    "help": "帮助"
+  },
+  "sidebar": {
+    "explorer": "资源管理器",
+    "search": "搜索",
+    "git": "Git",
+    "ai": "AI",
+    "settings": "设置"
+  },
+  "editor": {
+    "untitled": "未命名",
+    "preview": "预览",
+    "split": "分屏视图"
+  },
+  "fileTree": {
+    "newFile": "新建文件",
+    "newFolder": "新建文件夹",
+    "rename": "重命名",
+    "delete": "删除",
+    "refresh": "刷新"
+  },
+  "tabs": {
+    "close": "关闭",
+    "closeOthers": "关闭其他",
+    "closeAll": "关闭所有"
+  },
+  "search": {
+    "placeholder": "搜索...",
+    "noResults": "未找到结果",
+    "files": "文件",
+    "content": "内容"
+  },
+  "commandPalette": {
+    "placeholder": "输入命令或搜索...",
+    "noResults": "未找到命令"
+  },
+  "statusBar": {
+    "Ln": "行",
+    "Col": "列",
+    "spaces": "空格",
+    "encoding": "编码",
+    "language": "语言",
+    "branch": "分支"
+  },
+  "settings": {
+    "title": "设置",
+    "general": "通用",
+    "editor": "编辑器",
+    "appearance": "外观",
+    "git": "Git",
+    "sync": "同步",
+    "ai": "AI",
+    "shortcuts": "快捷键",
+    "about": "关于"
+  },
+  "git": {
+    "commit": "提交",
+    "push": "推送",
+    "pull": "拉取",
+    "branch": "分支",
+    "merge": "合并",
+    "diff": "差异"
+  },
+  "ai": {
+    "chat": "对话",
+    "complete": "补全",
+    "rewrite": "改写",
+    "explain": "解释"
+  },
+  "common": {
+    "ok": "确定",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "close": "关闭",
+    "confirm": "确认",
+    "loading": "加载中...",
+    "error": "错误",
+    "success": "成功"
+  }
+}

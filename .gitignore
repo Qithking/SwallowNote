@@ -30,5 +30,5 @@ npm-debug.log*
 .env.local
 
 
-.work/
+
 .codebuddy/

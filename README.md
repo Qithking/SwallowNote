@@ -1,98 +1,121 @@
 # SwallowNote
 
-A fast, lightweight Markdown note-taking application built with Tauri 2.0 and Svelte 5.
+A cross-platform Markdown editor built with Tauri 2.x, React, and Milkdown.
 
-## Prerequisites
+## Tech Stack
 
-Before you begin, ensure you have the following installed:
+- **Framework**: Tauri 2.x + React 18
+- **Editor**: Milkdown (Markdown editor)
+- **Code Editor**: CodeMirror 6
+- **UI**: shadcn/ui + Tailwind CSS v4
+- **State Management**: Zustand
+- **Styling**: Tailwind CSS v4 + CSS Variables
+- **Icons**: Lucide React
+- **i18n**: react-i18next
+- **Build Tool**: Vite
 
-- **Node.js** (v18 or higher) - [Download](https://nodejs.org/)
-- **Rust** (latest stable) - [Install via rustup](https://www.rust-lang.org/tools/install)
+## Features
 
-### Install on macOS
+- 📝 Markdown editing with Milkdown
+- 💻 Code editing with CodeMirror 6
+- 🌲 File tree browser
+- 📑 Multi-tab editing
+- 🔍 Quick file search (Ctrl+P)
+- 🔎 Global content search (Ctrl+Shift+F)
+- 🌙 Light/Dark/System theme
+- 🌐 Multi-language support (English/Chinese)
+- 📁 Git integration
+- 🤖 AI assistant panel
+- ⌨️ VSCode-style keyboard shortcuts
 
-```bash
-# Install Node.js
-brew install node
+## Keyboard Shortcuts
 
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+P | Command Palette |
+| Ctrl+Shift+F | Global Search |
+| Ctrl+B | Toggle Sidebar |
+| Ctrl+W | Close Tab |
+| Ctrl+1-9 | Switch to Tab 1-9 |
+| Ctrl+, | Settings |
+| Escape | Close Overlays |
 
 ## Getting Started
 
-### 1. Install dependencies
+### Prerequisites
+
+- Node.js 18+
+- Rust 1.70+
+- Tauri CLI 2.x
+
+### Installation
 
 ```bash
+# Install dependencies
 npm install
-```
 
-### 2. Run in development mode
-
-```bash
+# Run in development
 npm run tauri dev
-```
 
-This will start both the Vite dev server and the Tauri application.
-
-### 3. Build for production
-
-```bash
+# Build for production
 npm run tauri build
 ```
 
 ## Project Structure
 
 ```
-swallownote/
-├── src-tauri/                 # Rust backend
-│   ├── src/
-│   │   ├── commands/         # Tauri IPC commands
-│   │   │   └── file.rs       # File operations
-│   │   ├── services/         # Background services
-│   │   │   └── file_watcher.rs
-│   │   ├── lib.rs            # Library entry point
-│   │   └── main.rs           # Application entry point
-│   ├── Cargo.toml            # Rust dependencies
-│   └── tauri.conf.json       # Tauri configuration
-├── src/                      # Svelte 5 frontend
-│   ├── lib/
-│   │   ├── components/       # Svelte components
-│   │   │   ├── Editor/
-│   │   │   ├── FileTree/
-│   │   │   ├── Layout/
-│   │   │   └── Tabs/
-│   │   ├── services/         # Frontend services
-│   │   ├── stores/           # State management
-│   │   └── types/            # TypeScript types
-│   ├── routes/               # SvelteKit routes
-│   ├── app.html              # HTML template
-│   └── app.css               # Global styles
-├── package.json              # Node.js dependencies
-├── svelte.config.js          # Svelte configuration
-├── vite.config.ts            # Vite configuration
-└── tsconfig.json             # TypeScript configuration
+src/
+├── components/          # React components
+│   ├── TitleBar.tsx    # Custom title bar
+│   ├── Sidebar.tsx     # Sidebar container
+│   ├── TabBar.tsx      # Tab management
+│   ├── Editor.tsx      # Main editor
+│   ├── StatusBar.tsx   # Bottom status bar
+│   ├── CommandPalette.tsx
+│   ├── SearchPanel.tsx
+│   ├── FileTree/       # File tree components
+│   ├── Search/        # Search components
+│   ├── Git/           # Git components
+│   ├── AI/            # AI components
+│   └── Settings/      # Settings components
+├── stores/             # Zustand stores
+│   ├── workspace.ts   # Workspace state
+│   ├── filetree.ts    # File tree state
+│   ├── editor.ts      # Editor state
+│   ├── ui.ts          # UI state
+│   └── git.ts         # Git state
+├── hooks/              # Custom React hooks
+│   ├── useKeyboardShortcuts.ts
+│   └── useTheme.ts
+├── lib/                # Utilities
+│   ├── utils.ts       # Helper functions
+│   └── tauri.ts       # Tauri API wrappers
+├── i18n/              # Internationalization
+│   ├── index.ts       # i18n configuration
+│   └── locales/       # Translation files
+│       ├── en.json
+│       └── zh-CN.json
+└── App.tsx            # Root component
 ```
 
-## Features (Phase 1 - MVP)
+## Development Notes
 
-- [x] File tree with lazy loading
-- [x] Multi-tab editor
-- [x] Markdown source editing (CodeMirror 6)
-- [x] File system watching
-- [x] Basic file operations (create, delete, rename)
-- [ ] Git integration (planned)
-- [ ] Preview mode (planned)
-- [ ] Search (planned)
+### Theme System
 
-## Tech Stack
+The app uses CSS variables for theming. Theme colors are defined in `src/index.css` and can be toggled between light, dark, and system preferences.
 
-- **Desktop Framework**: Tauri 2.0
-- **Frontend**: Svelte 5 + SvelteKit
-- **Editor**: CodeMirror 6
-- **State Management**: Svelte 5 Runes ($state, $derived, $effect)
-- **File Watching**: notify (Rust crate)
-- **Build Tool**: Vite
+### State Management
+
+Zustand is used for global state management. Each store handles a specific domain:
+- `workspaceStore`: Root path and workspace loading state
+- `fileTreeStore`: File tree structure and selection
+- `editorStore`: Tabs and editor content
+- `uiStore`: UI preferences (theme, sidebar visibility, etc.)
+- `gitStore`: Git repository state
+
+### Tauri Commands
+
+Tauri backend commands are wrapped in `src/lib/tauri.ts` for type-safe access from the React frontend.
 
 ## License
 
