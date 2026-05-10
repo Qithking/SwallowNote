@@ -46,6 +46,7 @@ export function EditorView() {
   }
 
   const fileType = detectFileType(activeTab.name, activeTab.content)
+  const viewMode = activeTab.viewMode
 
   const handleContentChange = (content: string) => {
     updateTabContent(activeTab.id, content)
@@ -55,11 +56,20 @@ export function EditorView() {
     case 'markdown':
       return (
         <div className="flex-1 overflow-auto bg-[var(--bg-primary)]">
-          <MarkdownEditor
-            key={activeTab.id}
-            content={activeTab.content}
-            onChange={handleContentChange}
-          />
+          {viewMode === 'source' ? (
+            <CodeEditor
+              content={activeTab.content}
+              filename={activeTab.name}
+              onChange={handleContentChange}
+              className="flex-1"
+            />
+          ) : (
+            <MarkdownEditor
+              key={activeTab.id}
+              content={activeTab.content}
+              onChange={handleContentChange}
+            />
+          )}
         </div>
       )
 

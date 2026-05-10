@@ -3,6 +3,7 @@
  */
 import { useEffect, useRef } from 'react'
 import { EditorView, basicSetup } from 'codemirror'
+import { EditorView as CMView, lineNumbers } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
 import { python } from '@codemirror/lang-python'
@@ -14,7 +15,7 @@ import { sql } from '@codemirror/lang-sql'
 import { xml } from '@codemirror/lang-xml'
 import { rust } from '@codemirror/lang-rust'
 import { yaml } from '@codemirror/lang-yaml'
-import { oneDark } from '@codemirror/theme-one-dark'
+
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 
 interface CodeEditorProps {
@@ -55,7 +56,7 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
       extensions: [
         basicSetup,
         langExt(),
-        oneDark,
+        CMView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             onChange?.(update.state.doc.toString())

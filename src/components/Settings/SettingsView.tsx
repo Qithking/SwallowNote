@@ -118,7 +118,7 @@ function SettingsView() {
               <h2 className="text-xl font-bold mb-2">SwallowNote</h2>
               <p className="text-sm text-muted-foreground mb-4">Version 0.1.0</p>
               <p className="text-xs text-muted-foreground">
-                A cross-platform Markdown editor built with Tauri, React, and Milkdown
+                A cross-platform Markdown editor built with Tauri, React, and BlockNote
               </p>
             </div>
           </div>

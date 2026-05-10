@@ -92,6 +92,10 @@
     
     --accent-hover: #1a8ae8;
     
+    /* Theme color for UI accents (default blue) */
+    --theme-color: hsl(221.2, 83.2%, 53.3%);
+    --theme-color-hover: hsl(221.2, 83.2%, 60%);
+    
     /* Fonts */
     --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
@@ -168,6 +172,10 @@
     --activity-activeBorder: #ffffff;
     
     --accent-hover: #1a8ae8;
+    
+    /* Theme color for UI accents (default blue) */
+    --theme-color: hsl(217.2, 91.2%, 59.8%);
+    --theme-color-hover: hsl(217.2, 91.2%, 70%);
     
     --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
@@ -493,7 +501,7 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 }
 .cm-editor.cm-focused { outline: none; }
 .cm-editor .cm-scroller { font-family: var(--font-mono); font-size:14px; line-height:1.7; }
-.cm-editor .cm-content  { padding:16px 0; }
+.cm-editor .cm-content  { padding:16px 0; overflow-wrap: break-word; word-break: break-word; }
 .cm-editor .cm-line     { padding:0 20px; }
 .cm-editor .cm-gutters  { border-right:1px solid var(--border); background:var(--bg-primary); color:var(--text-muted); }
 .cm-editor .cm-activeLineGutter { background:transparent; color:var(--text-secondary); }

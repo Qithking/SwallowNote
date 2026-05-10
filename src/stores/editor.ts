@@ -17,6 +17,8 @@ export interface EditorTab {
     line: number
     column: number
   }
+  // View mode for markdown files: 'preview' (BlockNote) or 'source' (CodeMirror)
+  viewMode: 'preview' | 'source'
 }
 
 export interface EditorState {
@@ -29,6 +31,7 @@ export interface EditorState {
   updateTabDirty: (id: string, isDirty: boolean) => void
   updateTabEdited: (id: string, isEdited: boolean) => void
   updateCursorPosition: (id: string, line: number, column: number) => void
+  toggleViewMode: () => void
   getActiveTab: () => EditorTab | undefined
 }
 
@@ -41,9 +44,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (existing) {
         return { activeTabId: existing.id }
       }
-      // 新打开的文件 isEdited 默认为 false
+      // 新打开的文件 isEdited 默认为 false, viewMode 默认为 'preview'
       return {
-        tabs: [...state.tabs, { ...tab, isEdited: false }],
+        tabs: [...state.tabs, { ...tab, isEdited: false, viewMode: 'preview' }],
         activeTabId: tab.id,
       }
     }),
@@ -86,4 +89,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const state = get()
     return state.tabs.find((t) => t.id === state.activeTabId)
   },
+  toggleViewMode: () =>
+    set((state) => {
+      const activeTab = state.tabs.find((t) => t.id === state.activeTabId)
+      if (!activeTab) return state
+      return {
+        tabs: state.tabs.map((t) =>
+          t.id === state.activeTabId
+            ? { ...t, viewMode: t.viewMode === 'preview' ? 'source' : 'preview' }
+            : t
+        ),
+      }
+    }),
 }))
