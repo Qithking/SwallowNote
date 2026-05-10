@@ -602,3 +602,10 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .cm-editor .cm-panels .cm-button { background: #ececec; color: #1f1f1f; border-color: #e5e5e5; }
 .cm-editor .cm-panels .cm-button:hover { background: #e8e8e8; }
 .cm-editor .cm-selectionMatch { background: rgba(0,0,0,0.06); }
+
+/* ---- BlockNote Editor ---- */
+.blocknote-editor-container {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}

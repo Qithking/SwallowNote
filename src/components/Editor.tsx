@@ -1,29 +1,95 @@
 /**
  * Editor Component - Main editor area
- * Shows the content of the active tab
+ * Shows the content of the active tab with appropriate editor
  */
 import { useEditorStore } from '@/stores'
+import { detectFileType } from '@/lib/utils/fileTypeUtils'
+import { MarkdownEditor } from './editors/MarkdownEditor'
+import { CodeEditor } from './editors/CodeEditor'
+import { FileCode } from 'lucide-react'
 
-export function EditorView() {
-  const { tabs, activeTabId } = useEditorStore()
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+interface UnsupportedEditorProps {
+  filename: string
+  reason: string
+}
 
-  if (!activeTab) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-muted)]">
-        <div className="text-center">
-          <p className="text-lg">Welcome to SwallowNote</p>
-          <p className="text-sm mt-2">Open a file or create a new one to start editing</p>
-        </div>
-      </div>
-    )
-  }
-
+function UnsupportedEditor({ filename, reason }: UnsupportedEditorProps) {
   return (
-    <div className="flex-1 flex overflow-hidden bg-[var(--bg-primary)]">
-      <div className="flex-1 overflow-auto p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap">
-        {activeTab.content}
+    <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)]">
+      <div className="text-center">
+        <FileCode size={48} className="mx-auto mb-4 opacity-40" />
+        <p className="text-lg text-[var(--text-muted)]">无法打开此文件</p>
+        <p className="text-sm text-[var(--text-muted)] mt-2">{filename}</p>
+        <p className="text-xs text-[var(--text-muted)] mt-1 opacity-60">{reason}</p>
       </div>
     </div>
   )
+}
+
+function WelcomeScreen() {
+  return (
+    <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-muted)]">
+      <div className="text-center">
+        <p className="text-lg">Welcome to SwallowNote</p>
+        <p className="text-sm mt-2">Open a file or create a new one to start editing</p>
+      </div>
+    </div>
+  )
+}
+
+export function EditorView() {
+  const { tabs, activeTabId, updateTabContent } = useEditorStore()
+  const activeTab = tabs.find((t) => t.id === activeTabId)
+
+  if (!activeTab) {
+    return <WelcomeScreen />
+  }
+
+  const fileType = detectFileType(activeTab.name, activeTab.content)
+
+  const handleContentChange = (content: string) => {
+    updateTabContent(activeTab.id, content)
+  }
+
+  switch (fileType) {
+    case 'markdown':
+      return (
+        <div className="flex-1 overflow-auto bg-[var(--bg-primary)]">
+          <MarkdownEditor
+            key={activeTab.id}
+            content={activeTab.content}
+            onChange={handleContentChange}
+          />
+        </div>
+      )
+
+    case 'code':
+      return (
+        <div className="flex-1 flex overflow-hidden bg-[var(--bg-primary)]">
+          <CodeEditor
+            content={activeTab.content}
+            filename={activeTab.name}
+            onChange={handleContentChange}
+            className="flex-1"
+          />
+        </div>
+      )
+
+    case 'binary':
+      return (
+        <UnsupportedEditor
+          filename={activeTab.name}
+          reason="二进制文件无法在编辑器中显示"
+        />
+      )
+
+    case 'unknown':
+    default:
+      return (
+        <UnsupportedEditor
+          filename={activeTab.name}
+          reason="不支持的文件类型"
+        />
+      )
+  }
 }
