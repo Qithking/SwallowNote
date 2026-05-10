@@ -2,16 +2,38 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Copy } from 'lucide-react'
+import { useState } from 'react'
 import { useEditorStore } from '@/stores'
+import { open } from '@tauri-apps/plugin-shell'
 
 function EditorToolbar() {
   const { tabs, activeTabId, toggleViewMode } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const [copied, setCopied] = useState(false)
 
   if (!activeTab) return null
 
-  const { path, fileSize, modifiedTime, wordCount, viewMode } = activeTab
+  const { path, viewMode } = activeTab
+
+  const handleOpenFolder = async () => {
+    try {
+      const folderPath = path.substring(0, path.lastIndexOf('/'))
+      await open(folderPath)
+    } catch (err) {
+      console.error('Failed to open folder:', err)
+    }
+  }
+
+  const handleCopyPath = async () => {
+    try {
+      await navigator.clipboard.writeText(path)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 3000)
+    } catch (err) {
+      console.error('Failed to copy path:', err)
+    }
+  }
 
   return (
     <div className="flex items-center justify-between h-[22px] px-3 text-[11px] border-b border-border bg-[var(--bg-tertiary)] text-[var(--text-muted)] select-none">
@@ -20,15 +42,14 @@ function EditorToolbar() {
         <span className="truncate">{path}</span>
       </div>
 
-      {/* Right: Icons + File metadata */}
+      {/* Right: Icons */}
       <div className="flex items-center gap-2 shrink-0 ml-4">
-        {/* View toggle icons */}
         <button
           className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
           title="目录"
         >
           <BookOpen size={14} />
-        </button>
+        </button>       
         <button
           onClick={toggleViewMode}
           className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)]"
@@ -43,7 +64,21 @@ function EditorToolbar() {
         >
           <History size={14} />
         </button>
-       
+         <button
+          onClick={handleOpenFolder}
+          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
+          title="打开所在文件夹"
+        >
+          <FolderOpen size={14} />
+        </button>
+        <button
+          onClick={handleCopyPath}
+          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)]"
+          style={{ color: copied ? 'var(--theme-color)' : 'var(--text-muted)' }}
+          title="复制路径"
+        >
+          <Copy size={14} style={{ color: 'inherit' }} />
+        </button>
       </div>
     </div>
   )
