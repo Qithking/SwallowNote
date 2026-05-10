@@ -113,59 +113,66 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const { nodes, expanded } = get()
     const parentPath = filePath.substring(0, filePath.lastIndexOf('/'))
 
-    // If parent is already expanded, just set selectedPath + scroll
-    if (expanded.has(parentPath)) {
-      set({ selectedPath: filePath })
-      // Scroll after DOM update
-      requestAnimationFrame(() => scrollToFileElement(filePath))
-      return
-    }
+    // Always ensure direct parent is in expanded set
+    const newExpanded = new Set(expanded)
+    newExpanded.add(parentPath)
 
-    // Expand parent directories sequentially
+    // Check if we need to load children for any missing directories
     const relativePath = filePath.substring(rootPath.length + 1)
     const parts = relativePath.split('/')
     let currentPath = rootPath
-    let newExpanded = new Set(expanded)
     let currentNodes = nodes
 
     for (let i = 0; i < parts.length - 1; i++) {
       currentPath = currentPath + '/' + parts[i]
-
       if (!newExpanded.has(currentPath)) {
         newExpanded.add(currentPath)
-
-        // Load children if not loaded yet
-        const node = findNodeInList(currentNodes, currentPath)
-        if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
-          try {
-            const children = await loadDirectory(currentPath)
-            currentNodes = updateNodesWithChildren(currentNodes, currentPath, children)
-          } catch (e) {
-            console.error(e)
-          }
+      }
+      // Load children if directory not yet loaded
+      const node = findNodeInList(currentNodes, currentPath)
+      if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
+        try {
+          const children = await loadDirectory(currentPath)
+          currentNodes = updateNodesWithChildren(currentNodes, currentPath, children)
+        } catch (e) {
+          console.error(e)
         }
       }
     }
 
     set({ nodes: currentNodes, expanded: newExpanded, selectedPath: filePath })
 
-    // Scroll after DOM update
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => scrollToFileElement(filePath))
-    })
+    // queueMicrotask runs after current stack + React render, after which DOM is updated
+    queueMicrotask(() => requestAnimationFrame(() => scrollToFileElement(filePath)))
   },
 
   clearAll: () => set({ nodes: [], expanded: new Set(), selectedPath: null, isLoading: false }),
 }))
 
 function scrollToFileElement(path: string) {
-  const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`) as HTMLElement | null
-  if (!el) return
-  const container = el.closest('.overflow-auto') as HTMLElement | null
+  const container = document.querySelector('.overflow-auto')
   if (!container) return
-  const containerRect = container.getBoundingClientRect()
-  const elRect = el.getBoundingClientRect()
-  if (elRect.top < containerRect.top || elRect.bottom > containerRect.bottom) {
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+
+  const tryScroll = () => {
+    const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`) as HTMLElement | null
+    if (!el) return false
+    const containerRect = container.getBoundingClientRect()
+    const elRect = el.getBoundingClientRect()
+    if (elRect.top < containerRect.top || elRect.bottom > containerRect.bottom) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+    return true
   }
+
+  // If element already exists, scroll immediately
+  if (tryScroll()) return
+
+  // Otherwise observe until it appears in DOM
+  const observer = new MutationObserver(() => {
+    if (tryScroll()) observer.disconnect()
+  })
+  observer.observe(container, { childList: true, subtree: true })
+
+  // Safety disconnect after 3s
+  setTimeout(() => observer.disconnect(), 3000)
 }
