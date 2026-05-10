@@ -5,7 +5,7 @@
 import { BookOpen, Code, History, FolderOpen, Copy } from 'lucide-react'
 import { useState } from 'react'
 import { useEditorStore } from '@/stores'
-import { open } from '@tauri-apps/plugin-shell'
+import { invoke } from '@tauri-apps/api/core'
 
 function EditorToolbar() {
   const { tabs, activeTabId, toggleViewMode } = useEditorStore()
@@ -18,8 +18,7 @@ function EditorToolbar() {
 
   const handleOpenFolder = async () => {
     try {
-      const folderPath = path.substring(0, path.lastIndexOf('/'))
-      await open(folderPath)
+      await invoke('open_in_finder', { path })
     } catch (err) {
       console.error('Failed to open folder:', err)
     }

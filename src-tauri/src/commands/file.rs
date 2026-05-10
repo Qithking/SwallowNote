@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+#[cfg(target_os = "macos")]
+use std::process::Command as StdCommand;
+
+#[cfg(target_os = "windows")]
+use std::process::Command as StdCommand;
+
+#[cfg(target_os = "linux")]
+use std::process::Command as StdCommand;
+
 #[derive(Serialize, Clone)]
 pub struct FileNode {
     pub id: String,
@@ -188,6 +197,65 @@ pub async fn rename_file(req: RenameFileRequest) -> Result<(), String> {
     tokio::fs::rename(&old_path, &new_path)
         .await
         .map_err(|e| format!("Failed to rename: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_in_finder(path: String) -> Result<(), String> {
+    let path = PathBuf::from(&path);
+
+    if !path.exists() {
+        return Err(format!("Path does not exist: {}", path.display()));
+    }
+
+    // Determine the folder to open
+    let target = if path.is_dir() {
+        path.clone()
+    } else {
+        path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| path.clone())
+    };
+
+    #[cfg(target_os = "macos")]
+    {
+        if path.is_file() {
+            // open -R opens Finder and selects the file
+            StdCommand::new("open")
+                .arg("-R")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("Failed to open folder: {}", e))?;
+        } else {
+            StdCommand::new("open")
+                .arg(&target)
+                .spawn()
+                .map_err(|e| format!("Failed to open folder: {}", e))?;
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // explorer /select,<file> opens Explorer and selects the file
+        if path.is_file() {
+            StdCommand::new("explorer")
+                .arg(format!("/select,{}", path.display()))
+                .spawn()
+                .map_err(|e| format!("Failed to open folder: {}", e))?;
+        } else {
+            StdCommand::new("explorer")
+                .arg(&target)
+                .spawn()
+                .map_err(|e| format!("Failed to open folder: {}", e))?;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    StdCommand::new("xdg-open")
+        .arg(&target)
+        .spawn()
+        .map_err(|e| format!("Failed to open folder: {}", e))?;
 
     Ok(())
 }
