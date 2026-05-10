@@ -240,6 +240,15 @@ function FileTreeView() {
               style={{ color: 'var(--text-muted)' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+              title="打开文件夹"
+            >
+              <FolderOpen size={14} />
+            </button>
+            <button
+              className="h-6 w-6 flex items-center justify-center rounded"
+              style={{ color: 'var(--text-muted)' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
               title="新建文件"
             >
               <FilePlus size={14} />
@@ -262,16 +271,7 @@ function FileTreeView() {
               onClick={handleRefresh}
             >
               <RefreshCw size={14} />
-            </button>
-            <button
-              className="h-6 w-6 flex items-center justify-center rounded"
-              style={{ color: 'var(--text-muted)' }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
-              title="折叠全部"
-            >
-              <ChevronRight size={14} className="rotate-90" />
-            </button>
+            </button>            
           </div>
         </div>
         <div className="flex-1 overflow-auto">
