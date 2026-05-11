@@ -5,10 +5,13 @@ import { Sidebar } from '@/components/Sidebar'
 import { TabBar } from '@/components/TabBar'
 import { EditorToolbar } from '@/components/EditorToolbar'
 import { EditorView } from '@/components/Editor'
+import { SettingsView } from '@/components/Settings/SettingsView'
+import { useUIStore } from '@/stores'
 import { useTheme } from '@/hooks'
 
 function App() {
   useTheme()
+  const { settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
 
   return (
     <div
@@ -23,14 +26,20 @@ function App() {
         {/* Activity Bar */}
         <ActivityBar />
 
-        {/* Sidebar */}
-        <Sidebar />
+        {/* Sidebar - hidden when settings panel is open */}
+        {!settingsPanelVisible && <Sidebar />}
 
         {/* Editor Area */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <TabBar />
-          <EditorToolbar />
-          <EditorView />
+          {settingsPanelVisible ? (
+            <SettingsView />
+          ) : (
+            <>
+              <TabBar />
+              <EditorToolbar />
+              <EditorView />
+            </>
+          )}
         </div>
       </div>
     </div>

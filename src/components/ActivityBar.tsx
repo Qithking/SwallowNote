@@ -9,11 +9,12 @@ const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'search', icon: Search },
   { id: 'git', icon: GitBranch },
   { id: 'ai', icon: Bot },
-  { id: 'settings', icon: Settings },
 ]
 
+const settingsItem = { id: 'settings' as SidebarView, icon: Settings }
+
 function ActivityBar() {
-  const { sidebarView, setSidebarView } = useUIStore()
+  const { sidebarView, setSidebarView, settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
 
   return (
     <div
@@ -49,6 +50,29 @@ function ActivityBar() {
           </button>
         )
       })}
+      {/* Settings button - opens settings panel in main content area */}
+      <button
+        onClick={() => setSettingsPanelVisible(true)}
+        className="w-[48px] h-[48px] flex items-center justify-center relative"
+        style={{
+          color: settingsPanelVisible ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
+        }}
+        onMouseEnter={(e) => {
+          if (!settingsPanelVisible) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--activity-hover)'
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'
+        }}
+        title="settings"
+      >
+        {settingsPanelVisible && (
+          <div
+            className="absolute left-0 top-0 bottom-0 w-[2px]"
+            style={{ backgroundColor: 'var(--activity-activeBorder)' }}
+          />
+        )}
+        <Settings size={22} />
+      </button>
     </div>
   )
 }

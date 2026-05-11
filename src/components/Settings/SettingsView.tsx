@@ -13,16 +13,29 @@ import {
   Bot,
   Keyboard,
   Info,
+  ArrowLeft,
 } from 'lucide-react'
 import { useUIStore, Theme } from '@/stores'
 import { cn } from '@/lib/utils'
 
 type SettingsSection = 'general' | 'appearance' | 'editor' | 'git' | 'sync' | 'ai' | 'shortcuts' | 'about'
 
-function SettingsView() {
+interface SettingsViewProps {
+  onClose?: () => void
+}
+
+function SettingsView({ onClose }: SettingsViewProps) {
   const { t, i18n } = useTranslation()
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
-  const { theme, setTheme } = useUIStore()
+  const { theme, setTheme, setSettingsPanelVisible } = useUIStore()
+
+  const handleClose = () => {
+    if (onClose) {
+      onClose()
+    } else {
+      setSettingsPanelVisible(false)
+    }
+  }
 
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; labelKey: string }[] = [
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },
@@ -134,7 +147,20 @@ function SettingsView() {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col h-full w-full">
+      {/* Header with back button */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+        <button
+          onClick={handleClose}
+          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-accent transition-colors text-sm"
+        >
+          <ArrowLeft size={16} />
+          <span>Back</span>
+        </button>
+        <span className="text-sm font-medium">Settings</span>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
       {/* Section List */}
       <div className="w-48 border-r border-border p-2">
         {sections.map((section) => {
@@ -159,6 +185,7 @@ function SettingsView() {
 
       {/* Section Content */}
       <div className="flex-1 p-4 overflow-auto">{renderSectionContent()}</div>
+      </div>
     </div>
   )
 }

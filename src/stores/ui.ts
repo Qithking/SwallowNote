@@ -15,6 +15,7 @@ export interface UIState {
   editorViewMode: EditorViewMode
   commandPaletteVisible: boolean
   searchPanelVisible: boolean
+  settingsPanelVisible: boolean
   setTheme: (theme: Theme) => void
   setSidebarView: (view: SidebarView) => void
   toggleSidebar: () => void
@@ -22,6 +23,8 @@ export interface UIState {
   setEditorViewMode: (mode: EditorViewMode) => void
   toggleCommandPalette: () => void
   toggleSearchPanel: () => void
+  setSettingsPanelVisible: (visible: boolean) => void
+  toggleSettingsPanel: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -32,6 +35,7 @@ export const useUIStore = create<UIState>((set) => ({
   editorViewMode: 'split',
   commandPaletteVisible: false,
   searchPanelVisible: false,
+  settingsPanelVisible: false,
   setTheme: (theme) => set({ theme }),
   setSidebarView: (view) => set({ sidebarView: view }),
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
@@ -41,4 +45,7 @@ export const useUIStore = create<UIState>((set) => ({
     set((state) => ({ commandPaletteVisible: !state.commandPaletteVisible })),
   toggleSearchPanel: () =>
     set((state) => ({ searchPanelVisible: !state.searchPanelVisible })),
+  setSettingsPanelVisible: (visible) => set({ settingsPanelVisible: visible }),
+  toggleSettingsPanel: () =>
+    set((state) => ({ settingsPanelVisible: !state.settingsPanelVisible })),
 }))

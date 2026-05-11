@@ -28,7 +28,7 @@ function Sidebar() {
       className="w-60 flex flex-col border-r shrink-0"
       style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}
     >
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto w-full">
         {renderContent()}
       </div>
     </div>
