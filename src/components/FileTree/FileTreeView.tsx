@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { FileText, FilePlus, FolderPlus, Image, Folder, FolderOpen, RefreshCw, ChevronRight, File } from 'lucide-react'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { openFolderDialog, createFile } from '@/lib/tauri'
+import { renameFile } from '@/lib/tauri'
 import type { FileNode } from '@/stores/filetree'
-import { FileTreeContextMenu } from './FileTreeContextMenu'
+import { TreeNodeContextMenu } from './FileTreeContextMenu'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -14,6 +15,33 @@ function updateNodesWithChildren(list: FileNode[], path: string, children: FileN
   })
 }
 
+function findNodeByPath(path: string, list: FileNode[]): FileNode | null {
+  for (const n of list) {
+    if (n.path === path) return n
+    if (n.children) {
+      const found = findNodeByPath(path, n.children)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+function findParentNode(node: FileNode, list: FileNode[]): FileNode | null {
+  for (const n of list) {
+    if (n.children) {
+      if (n.children.some(c => c.path === node.path)) return n
+      const found = findParentNode(node, n.children)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+function getNodeDepth(nodePath: string, rootPath: string): number {
+  const relative = nodePath.substring(rootPath.length + 1)
+  return relative.split('/').length - 1
+}
+
 interface TreeItemProps {
   node: FileNode
   depth: number
@@ -21,15 +49,29 @@ interface TreeItemProps {
   expanded: Set<string>
   onSelect: (node: FileNode) => void
   selectedPath: string | null
-  onContextMenu: (node: FileNode, e: React.MouseEvent) => void
+  editingPath: string | null
+  editingName: string
+  onStartEdit: (path: string, name: string, isDirectory: boolean) => void
 }
 
-function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath, onContextMenu }: TreeItemProps) {
+function TreeItem({
+  node,
+  depth,
+  onToggle,
+  expanded,
+  onSelect,
+  selectedPath,
+  editingPath,
+  editingName,
+  onStartEdit,
+}: TreeItemProps) {
   const isExpanded = expanded.has(node.path)
   const hasChildren = node.children && node.children.length > 0
   const isSelected = node.path === selectedPath
+  const isEditing = editingPath === node.path
 
   const handleClick = () => {
+    if (isEditing) return
     onSelect(node)
     if (node.isDirectory) {
       onToggle(node.path)
@@ -46,34 +88,38 @@ function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath, onC
     return <File size={14} style={{ color: 'var(--text-muted)' }} />
   }
 
+  const nodeContent = (
+    <div
+      data-path={node.path}
+      className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+      style={{ paddingLeft: `${depth * 12 + 8}px` }}
+      onClick={handleClick}
+    >
+      {node.isDirectory ? (
+        <ChevronRight
+          size={14}
+          className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggle(node.path)
+          }}
+        />
+      ) : (
+        <span className="w-[14px]" />
+      )}
+      {getIcon()}
+      <span className="truncate">{node.name}</span>
+    </div>
+  )
+
   return (
     <div>
-      <div
-        data-path={node.path}
-        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-        style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={handleClick}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          onContextMenu(node, e)
-        }}
+      <TreeNodeContextMenu
+        node={node}
+        onRename={() => onStartEdit(node.path, node.name, node.isDirectory)}
       >
-        {node.isDirectory ? (
-          <ChevronRight
-            size={14}
-            className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggle(node.path)
-            }}
-          />
-        ) : (
-          <span className="w-[14px]" />
-        )}
-        {getIcon()}
-        <span className="truncate">{node.name}</span>
-      </div>
+        {nodeContent}
+      </TreeNodeContextMenu>
       {isExpanded && hasChildren && (
         <div>
           {node.children!.map((child) => (
@@ -85,7 +131,9 @@ function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath, onC
               expanded={expanded}
               onSelect={onSelect}
               selectedPath={selectedPath}
-              onContextMenu={onContextMenu}
+              editingPath={editingPath}
+              editingName={editingName}
+              onStartEdit={onStartEdit}
             />
           ))}
         </div>
@@ -106,51 +154,69 @@ function generateUniqueName(baseName: string, siblings: FileNode[]): string {
   return newName
 }
 
+// 新建文件/文件夹模式的状态
+interface NewItemState {
+  parentPath: string
+  name: string
+  type: 'file' | 'folder'
+}
+
 export function FileTreeView() {
   const { rootPath } = useWorkspaceStore()
-  const { addTab } = useEditorStore()
-  const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, loadRoot } = useFileTreeStore()
+  const { addTab, updateTabPath } = useEditorStore()
+  const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, loadRoot, setNodes } = useFileTreeStore()
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // 重命名状态
+  const [editingPath, setEditingPath] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [editingType, setEditingType] = useState<'file' | 'folder' | null>(null)
-  const [editingParentPath, setEditingParentPath] = useState<string | null>(null)
-  const [editingAfterPath, setEditingAfterPath] = useState<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number; node: FileNode | null }>({ visible: false, x: 0, y: 0, node: null })
+  const [isFirstEdit, setIsFirstEdit] = useState(true)
+
+  // 新建文件/文件夹状态
+  const [newItem, setNewItem] = useState<NewItemState | null>(null)
+
+  const handleStartEdit = (path: string, name: string, isDirectory: boolean) => {
+    // 保存完整文件名，useEffect 中会设置选中范围
+    setEditingPath(path)
+    setEditingName(name)
+    setEditingType(isDirectory ? 'folder' : 'file')
+    setIsFirstEdit(true) // 初次编辑，选中文件名
+  }
 
   useEffect(() => {
-    if ((editingParentPath !== null || editingAfterPath !== null) && inputRef.current) {
-      inputRef.current.focus()
-      inputRef.current.select()
+    if (editingPath !== null && inputRef.current) {
+      // 延迟到下一帧确保 DOM 已更新
+      requestAnimationFrame(() => {
+        if (inputRef.current) {
+          inputRef.current.focus()
+          // 只在初次编辑时选中文件名（去除扩展名）
+          if (isFirstEdit) {
+            const editingNode = findNodeByPath(editingPath, nodes)
+            if (editingNode && !editingNode.isDirectory && editingName.includes('.')) {
+              const lastDot = editingName.lastIndexOf('.')
+              inputRef.current.setSelectionRange(0, lastDot)
+            } else {
+              inputRef.current.select()
+            }
+            setIsFirstEdit(false)
+          }
+        }
+      })
     }
-  }, [editingParentPath, editingAfterPath])
+  }, [editingPath, newItem, editingName, nodes, isFirstEdit])
 
   useEffect(() => {
     if (rootPath) loadRoot(rootPath)
     else useFileTreeStore.getState().clearAll()
   }, [rootPath, loadRoot])
 
-  const findNodeByPath = (path: string, list: FileNode[] = nodes): FileNode | null => {
-    for (const n of list) {
-      if (n.path === path) return n
-      if (n.children) {
-        const found = findNodeByPath(path, n.children)
-        if (found) return found
-      }
-    }
-    return null
-  }
-
-  const getLastChildDepth = (node: FileNode, depth: number): number => {
-    if (!node.children || node.children.length === 0 || !expanded.has(node.path)) {
-      return depth
-    }
-    const lastChild = node.children[node.children.length - 1]
-    return getLastChildDepth(lastChild, depth + 1)
-  }
-
   const handleSelect = (node: FileNode) => {
     setSelectedPath(node.path)
-    if (node.isDirectory) return
+    if (node.isDirectory) {
+      toggleNode(node.path)
+      return
+    }
     loadFileContent(node.path)
       .then((content) => {
         addTab({
@@ -174,20 +240,82 @@ export function FileTreeView() {
     if (path) useWorkspaceStore.getState().setRootPath(path)
   }
 
+  const handleFinishEdit = async () => {
+    if (!editingPath || !editingName.trim()) {
+      setEditingPath(null)
+      setEditingName('')
+      setEditingType(null)
+      return
+    }
+
+    const node = findNodeByPath(editingPath, nodes)
+    if (!node) {
+      setEditingPath(null)
+      setEditingName('')
+      setEditingType(null)
+      return
+    }
+
+    // 检查文件名是否改变
+    if (editingName.trim() === node.name) {
+      setEditingPath(null)
+      setEditingName('')
+      setEditingType(null)
+      return
+    }
+
+    try {
+      const parent = findParentNode(node, nodes)
+      const parentPath = parent?.path || rootPath || ''
+      const newName = editingName.trim()
+      const newPath = parentPath + '/' + newName
+      const oldName = node.name
+      await renameFile(editingPath, newPath)
+
+      // 更新已打开的 tab
+      updateTabPath(editingPath, newPath, newName)
+
+      // 刷新父节点
+      if (parent) {
+        const children = await loadDirectory(parent.path)
+        const updatedNodes = updateNodesWithChildren(nodes, parent.path, children)
+        setNodes(updatedNodes)
+      } else {
+        // 根节点重命名，刷新根
+        const children = await loadDirectory(rootPath || editingPath)
+        const rootNode: FileNode = {
+          id: 'root',
+          name: rootPath?.split('/').pop() || rootPath || '',
+          path: rootPath || '',
+          isDirectory: true,
+          children,
+        }
+        setNodes([rootNode])
+      }
+    } catch (e) {
+      console.error('Failed to rename:', e)
+    }
+
+    setEditingPath(null)
+    setEditingName('')
+    setEditingType(null)
+  }
+
+  const handleCancelEdit = () => {
+    setEditingPath(null)
+    setEditingName('')
+    setEditingType(null)
+  }
+
   const handleNewFile = () => {
     if (!selectedPath || !rootPath) return
-    const selected = findNodeByPath(selectedPath)
+    const selected = findNodeByPath(selectedPath, nodes)
     if (!selected || !selected.isDirectory) return
+
     const siblings = selected.children || []
     const name = generateUniqueName('新文件.md', siblings)
-    let afterPath: string | null = null
-    if (siblings.length > 0) {
-      afterPath = siblings[siblings.length - 1].path
-    }
-    setEditingName(name)
-    setEditingType('file')
-    setEditingParentPath(selected.path)
-    setEditingAfterPath(afterPath)
+    setNewItem({ parentPath: selected.path, name, type: 'file' })
+
     if (!expanded.has(selected.path)) {
       toggleNode(selected.path)
     }
@@ -195,186 +323,138 @@ export function FileTreeView() {
 
   const handleNewFolder = () => {
     if (!selectedPath || !rootPath) return
-    const selected = findNodeByPath(selectedPath)
+    const selected = findNodeByPath(selectedPath, nodes)
     if (!selected || !selected.isDirectory) return
+
     const siblings = selected.children || []
     const name = generateUniqueName('新文件夹', siblings)
-    let afterPath: string | null = null
-    if (siblings.length > 0) {
-      afterPath = siblings[siblings.length - 1].path
-    }
-    setEditingName(name)
-    setEditingType('folder')
-    setEditingParentPath(selected.path)
-    setEditingAfterPath(afterPath)
+    setNewItem({ parentPath: selected.path, name, type: 'folder' })
+
     if (!expanded.has(selected.path)) {
       toggleNode(selected.path)
     }
   }
 
-  const handleFinishEdit = async () => {
-    if (!editingParentPath || !editingName.trim()) {
-      setEditingParentPath(null)
-      setEditingAfterPath(null)
-      setEditingName('')
-      setEditingType(null)
+  const handleFinishNewItem = async () => {
+    if (!newItem || !newItem.name.trim()) {
+      setNewItem(null)
       return
     }
+
     try {
-      const fullPath = editingParentPath + '/' + editingName.trim()
-      await createFile(fullPath, editingType === 'folder')
-      // 只刷新父节点的 children
-      const children = await loadDirectory(editingParentPath)
-      const currentNodes = useFileTreeStore.getState().nodes
-      const updatedNodes = updateNodesWithChildren(currentNodes, editingParentPath, children)
-      useFileTreeStore.getState().setNodes(updatedNodes)
-      setEditingParentPath(null)
-      setEditingAfterPath(null)
-      setEditingName('')
-      setEditingType(null)
+      const fullPath = newItem.parentPath + '/' + newItem.name.trim()
+      await createFile(fullPath, newItem.type === 'folder')
+      const children = await loadDirectory(newItem.parentPath)
+      const updatedNodes = updateNodesWithChildren(nodes, newItem.parentPath, children)
+      setNodes(updatedNodes)
     } catch (e) {
       console.error('Failed to create:', e)
     }
+
+    setNewItem(null)
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleCancelNewItem = () => {
+    setNewItem(null)
+  }
+
+  const handleNewItemKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      handleFinishEdit()
+      handleFinishNewItem()
     } else if (e.key === 'Escape') {
-      setEditingParentPath(null)
-      setEditingAfterPath(null)
-      setEditingName('')
-      setEditingType(null)
+      handleCancelNewItem()
     }
   }
 
-  const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath)?.isDirectory ?? false) : false
+  const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath, nodes)?.isDirectory ?? false) : false
 
-  const handleContextMenu = useCallback((node: FileNode, e: React.MouseEvent) => {
-    e.preventDefault()
-    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, node })
-    setSelectedPath(node.path)
-  }, [setSelectedPath])
+  const renderNode = (node: FileNode, depth: number): React.ReactNode => {
+    const isNewItemNode = newItem?.parentPath === node.path && node.children?.length === 0
+    const isEditing = editingPath === node.path
+    const isSelected = node.path === selectedPath
 
-  const handleCloseContextMenu = useCallback(() => {
-    setContextMenu({ visible: false, x: 0, y: 0, node: null })
-  }, [])
+    const nodeContent = (
+      <div
+        data-path={node.path}
+        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+        onClick={() => !isEditing && handleSelect(node)}
+      >
+        {node.isDirectory ? (
+          <ChevronRight
+            size={14}
+            className={`transition-transform ${expanded.has(node.path) ? 'rotate-90' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleNode(node.path)
+            }}
+          />
+        ) : (
+          <span className="w-[14px]" />
+        )}
+        {node.isDirectory ? (
+          <Folder size={14} className="text-[#d4a05a]" />
+        ) : (
+          <FileText size={14} style={{ color: '#569cd6' }} />
+        )}
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            type="text"
+            className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
+            value={editingName}
+            onChange={(e) => setEditingName(e.target.value)}
+            onBlur={handleFinishEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleFinishEdit()
+              else if (e.key === 'Escape') handleCancelEdit()
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="truncate">{node.name}</span>
+        )}
+      </div>
+    )
 
-  const handleRenameFromContext = useCallback((node: FileNode) => {
-    setEditingName(node.name)
-    setEditingType(node.isDirectory ? 'folder' : 'file')
-    // Find parent
-    const findParent = (n: FileNode, list: FileNode[]): FileNode | null => {
-      for (const item of list) {
-        if (item.children) {
-          if (item.children.some(c => c.path === n.path)) return item
-          const found = findParent(n, item.children)
-          if (found) return found
-        }
-      }
-      return null
-    }
-    const parent = findParent(node, nodes)
-    setEditingParentPath(parent?.path ?? null)
-    setEditingAfterPath(parent?.path ? node.path : null)
-  }, [nodes])
-
-  const renderTree = () => {
-    if (editingParentPath !== null) {
-      const renderNode = (list: FileNode[], depth: number): React.ReactNode => {
-        return list.map((node) => {
-          const isEditing = editingAfterPath === node.path
-          const isParentEmpty = editingParentPath === node.path && editingAfterPath === null
-          const editDepth = isEditing ? depth : (isParentEmpty ? depth + 1 : 0)
-          return (
-            <div key={node.path}>
+    return (
+      <div key={node.path}>
+        <TreeNodeContextMenu
+          node={node}
+          onRename={() => handleStartEdit(node.path, node.name, node.isDirectory)}
+        >
+          {nodeContent}
+        </TreeNodeContextMenu>
+        {node.children && expanded.has(node.path) && (
+          <>
+            {node.children.map((child) => renderNode(child, depth + 1))}
+            {/* 在父节点下直接新增（当父节点没有直属子节点时） */}
+            {isNewItemNode && (
               <div
-                data-path={node.path}
-                className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isEditing ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-                style={{ paddingLeft: `${depth * 12 + 8}px` }}
-                onClick={() => !isEditing && handleSelect(node)}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  handleContextMenu(node, e)
-                }}
+                className="flex items-center h-[24px] gap-1 text-sm text-[var(--text-secondary)]"
+                style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
               >
-                {node.isDirectory ? (
-                  <ChevronRight
-                    size={14}
-                    className={`transition-transform ${expanded.has(node.path) ? 'rotate-90' : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      toggleNode(node.path)
-                    }}
-                  />
-                ) : (
-                  <span className="w-[14px]" />
-                )}
-                {node.isDirectory ? (
+                <span className="w-[14px]" />
+                {newItem.type === 'folder' ? (
                   <Folder size={14} className="text-[#d4a05a]" />
                 ) : (
                   <FileText size={14} style={{ color: '#569cd6' }} />
                 )}
-                <span className="truncate">{node.name}</span>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
+                  value={newItem.name}
+                  onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+                  onBlur={handleFinishNewItem}
+                  onKeyDown={handleNewItemKeyDown}
+                />
               </div>
-              {node.children && expanded.has(node.path) && renderNode(node.children, depth + 1)}
-              {/* 在直属最后一个子节点后插入新节点，与子节点同层级 */}
-              {isEditing && (
-                <div
-                  className="flex items-center h-[24px] gap-1 text-sm text-[var(--text-secondary)]"
-                  style={{ paddingLeft: `${editDepth * 12 + 8}px` }}
-                >
-                  <span className="w-[14px]" />
-                  {editingType === 'folder' ? (
-                    <Folder size={14} className="text-[#d4a05a]" />
-                  ) : (
-                    <FileText size={14} style={{ color: '#569cd6' }} />
-                  )}
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
-                    value={editingName}
-                    onChange={(e) => setEditingName(e.target.value)}
-                    onBlur={handleFinishEdit}
-                    onKeyDown={handleKeyDown}
-                  />
-                </div>
-              )}
-              {/* 没有直属子节点时，在父节点下直接新增 */}
-              {isParentEmpty && (
-                <div
-                  className="flex items-center h-[24px] gap-1 text-sm text-[var(--text-secondary)]"
-                  style={{ paddingLeft: `${editDepth * 12 + 8}px` }}
-                >
-                  <span className="w-[14px]" />
-                  {editingType === 'folder' ? (
-                    <Folder size={14} className="text-[#d4a05a]" />
-                  ) : (
-                    <FileText size={14} style={{ color: '#569cd6' }} />
-                  )}
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
-                    value={editingName}
-                    onChange={(e) => setEditingName(e.target.value)}
-                    onBlur={handleFinishEdit}
-                    onKeyDown={handleKeyDown}
-                  />
-                </div>
-              )}
-            </div>
-          )
-        })
-      }
-      return renderNode(nodes, 0)
-    }
-
-    return nodes.map((node) => (
-      <TreeItem key={node.path} node={node} depth={0} onToggle={toggleNode} expanded={expanded} onSelect={handleSelect} selectedPath={selectedPath} onContextMenu={handleContextMenu} />
-    ))
+            )}
+          </>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -414,7 +494,32 @@ export function FileTreeView() {
             <RefreshCw size={16} className="animate-spin" />
           </div>
         ) : nodes.length > 0 ? (
-          renderTree()
+          <>
+            {nodes.map((node) => renderNode(node, 0))}
+            {/* 根目录下新建（当根目录没有直属子节点时） */}
+            {newItem && nodes.length === 1 && nodes[0].children?.length === 0 && (
+              <div
+                className="flex items-center h-[24px] gap-1 text-sm text-[var(--text-secondary)]"
+                style={{ paddingLeft: `${12 + 8}px` }}
+              >
+                <span className="w-[14px]" />
+                {newItem.type === 'folder' ? (
+                  <Folder size={14} className="text-[#d4a05a]" />
+                ) : (
+                  <FileText size={14} style={{ color: '#569cd6' }} />
+                )}
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
+                  value={newItem.name}
+                  onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+                  onBlur={handleFinishNewItem}
+                  onKeyDown={handleNewItemKeyDown}
+                />
+              </div>
+            )}
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
             <FolderOpen size={32} className="mb-2 opacity-50" />
@@ -422,7 +527,6 @@ export function FileTreeView() {
           </div>
         )}
       </div>
-      <FileTreeContextMenu contextMenu={contextMenu} onClose={handleCloseContextMenu} onRename={handleRenameFromContext} />
     </div>
   )
 }

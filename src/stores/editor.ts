@@ -30,6 +30,7 @@ export interface EditorState {
   updateTabContent: (id: string, content: string) => void
   updateTabDirty: (id: string, isDirty: boolean) => void
   updateTabEdited: (id: string, isEdited: boolean) => void
+  updateTabPath: (oldPath: string, newPath: string, newName: string) => void
   updateCursorPosition: (id: string, line: number, column: number) => void
   toggleViewMode: () => void
   getActiveTab: () => EditorTab | undefined
@@ -78,6 +79,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateTabEdited: (id, isEdited) =>
     set((state) => ({
       tabs: state.tabs.map((t) => (t.id === id ? { ...t, isEdited } : t)),
+    })),
+  updateTabPath: (oldPath, newPath, newName) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.path === oldPath ? { ...t, path: newPath, name: newName } : t
+      ),
     })),
   updateCursorPosition: (id, line, column) =>
     set((state) => ({

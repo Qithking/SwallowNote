@@ -17,6 +17,8 @@ export interface UIState {
   searchPanelVisible: boolean
   settingsPanelVisible: boolean
   toastMessage: string | null
+  clipboardFiles: string[]
+  clipboardIsCut: boolean
   setTheme: (theme: Theme) => void
   setSidebarView: (view: SidebarView) => void
   toggleSidebar: () => void
@@ -27,6 +29,8 @@ export interface UIState {
   setSettingsPanelVisible: (visible: boolean) => void
   toggleSettingsPanel: () => void
   showToast: (message: string) => void
+  setClipboardFiles: (files: string[], isCut: boolean) => void
+  clearClipboard: () => void
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -41,6 +45,8 @@ export const useUIStore = create<UIState>((set) => ({
   searchPanelVisible: false,
   settingsPanelVisible: false,
   toastMessage: null,
+  clipboardFiles: [],
+  clipboardIsCut: false,
   setTheme: (theme) => set({ theme }),
   setSidebarView: (view) => set({ sidebarView: view }),
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
@@ -61,4 +67,6 @@ export const useUIStore = create<UIState>((set) => ({
       toastTimer = null
     }, 2000)
   },
+  setClipboardFiles: (files, isCut) => set({ clipboardFiles: files, clipboardIsCut: isCut }),
+  clearClipboard: () => set({ clipboardFiles: [], clipboardIsCut: false }),
 }))
