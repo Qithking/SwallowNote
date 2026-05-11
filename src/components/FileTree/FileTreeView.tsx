@@ -17,13 +17,12 @@ interface TreeItemProps {
 function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath }: TreeItemProps) {
   const isExpanded = expanded.has(node.path)
   const hasChildren = node.children && node.children.length > 0
-  const isSelected = !node.isDirectory && node.path === selectedPath
+  const isSelected = node.path === selectedPath
 
   const handleClick = () => {
+    onSelect(node)
     if (node.isDirectory) {
       onToggle(node.path)
-    } else {
-      onSelect(node)
     }
   }
 
@@ -41,7 +40,7 @@ function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath }: T
     <div>
       <div
         data-path={node.path}
-        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={handleClick}
       >
