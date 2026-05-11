@@ -247,7 +247,7 @@ export function FileTreeView() {
         return list.map((node) => {
           const isEditing = editingAfterPath === node.path
           const isParentEmpty = editingParentPath === node.path && editingAfterPath === null
-          const editDepth = isEditing ? depth + 1 : (isParentEmpty ? depth + 1 : 0)
+          const editDepth = isEditing ? depth : (isParentEmpty ? depth + 1 : 0)
           return (
             <div key={node.path}>
               <div
@@ -291,7 +291,7 @@ export function FileTreeView() {
                   <input
                     ref={inputRef}
                     type="text"
-                    className="shrink-0 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
+                    className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
                     value={editingName}
                     onChange={(e) => setEditingName(e.target.value)}
                     onBlur={handleFinishEdit}
@@ -314,7 +314,7 @@ export function FileTreeView() {
                   <input
                     ref={inputRef}
                     type="text"
-                    className="shrink-0 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
+                    className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
                     value={editingName}
                     onChange={(e) => setEditingName(e.target.value)}
                     onBlur={handleFinishEdit}
