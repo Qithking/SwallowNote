@@ -18,6 +18,8 @@ pub fn run() {
             commands::file::create_file,
             commands::file::delete_file,
             commands::file::rename_file,
+            commands::file::copy_file,
+            commands::file::copy_file_to_clipboard,
             commands::file::open_in_finder,
             commands::git::git_is_repo,
             commands::git::git_init,

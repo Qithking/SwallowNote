@@ -11,7 +11,7 @@ import { useTheme } from '@/hooks'
 
 function App() {
   useTheme()
-  const { settingsPanelVisible } = useUIStore()
+  const { settingsPanelVisible, toastMessage } = useUIStore()
 
   return (
     <div
@@ -42,6 +42,20 @@ function App() {
           )}
         </div>
       </div>
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div
+          className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[99999] px-4 py-2 rounded-md text-sm shadow-lg animate-in fade-in slide-in-from-bottom-2"
+          style={{
+            backgroundColor: 'var(--bg-secondary)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          {toastMessage}
+        </div>
+      )}
     </div>
   )
 }

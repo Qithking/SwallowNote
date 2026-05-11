@@ -16,6 +16,7 @@ export interface UIState {
   commandPaletteVisible: boolean
   searchPanelVisible: boolean
   settingsPanelVisible: boolean
+  toastMessage: string | null
   setTheme: (theme: Theme) => void
   setSidebarView: (view: SidebarView) => void
   toggleSidebar: () => void
@@ -25,7 +26,10 @@ export interface UIState {
   toggleSearchPanel: () => void
   setSettingsPanelVisible: (visible: boolean) => void
   toggleSettingsPanel: () => void
+  showToast: (message: string) => void
 }
+
+let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 export const useUIStore = create<UIState>((set) => ({
   theme: 'dark',
@@ -36,6 +40,7 @@ export const useUIStore = create<UIState>((set) => ({
   commandPaletteVisible: false,
   searchPanelVisible: false,
   settingsPanelVisible: false,
+  toastMessage: null,
   setTheme: (theme) => set({ theme }),
   setSidebarView: (view) => set({ sidebarView: view }),
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
@@ -48,4 +53,12 @@ export const useUIStore = create<UIState>((set) => ({
   setSettingsPanelVisible: (visible) => set({ settingsPanelVisible: visible }),
   toggleSettingsPanel: () =>
     set((state) => ({ settingsPanelVisible: !state.settingsPanelVisible })),
+  showToast: (message) => {
+    if (toastTimer) clearTimeout(toastTimer)
+    set({ toastMessage: message })
+    toastTimer = setTimeout(() => {
+      set({ toastMessage: null })
+      toastTimer = null
+    }, 2000)
+  },
 }))

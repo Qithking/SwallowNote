@@ -1,9 +1,10 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { FileText, FilePlus, FolderPlus, Image, Folder, FolderOpen, RefreshCw, ChevronRight, File } from 'lucide-react'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { openFolderDialog, createFile } from '@/lib/tauri'
 import type { FileNode } from '@/stores/filetree'
+import { FileTreeContextMenu } from './FileTreeContextMenu'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -20,9 +21,10 @@ interface TreeItemProps {
   expanded: Set<string>
   onSelect: (node: FileNode) => void
   selectedPath: string | null
+  onContextMenu: (node: FileNode, e: React.MouseEvent) => void
 }
 
-function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath }: TreeItemProps) {
+function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath, onContextMenu }: TreeItemProps) {
   const isExpanded = expanded.has(node.path)
   const hasChildren = node.children && node.children.length > 0
   const isSelected = node.path === selectedPath
@@ -51,6 +53,11 @@ function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath }: T
         className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={handleClick}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onContextMenu(node, e)
+        }}
       >
         {node.isDirectory ? (
           <ChevronRight
@@ -78,6 +85,7 @@ function TreeItem({ node, depth, onToggle, expanded, onSelect, selectedPath }: T
               expanded={expanded}
               onSelect={onSelect}
               selectedPath={selectedPath}
+              onContextMenu={onContextMenu}
             />
           ))}
         </div>
@@ -107,6 +115,7 @@ export function FileTreeView() {
   const [editingParentPath, setEditingParentPath] = useState<string | null>(null)
   const [editingAfterPath, setEditingAfterPath] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number; node: FileNode | null }>({ visible: false, x: 0, y: 0, node: null })
 
   useEffect(() => {
     if ((editingParentPath !== null || editingAfterPath !== null) && inputRef.current) {
@@ -241,6 +250,35 @@ export function FileTreeView() {
 
   const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath)?.isDirectory ?? false) : false
 
+  const handleContextMenu = useCallback((node: FileNode, e: React.MouseEvent) => {
+    e.preventDefault()
+    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, node })
+    setSelectedPath(node.path)
+  }, [setSelectedPath])
+
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu({ visible: false, x: 0, y: 0, node: null })
+  }, [])
+
+  const handleRenameFromContext = useCallback((node: FileNode) => {
+    setEditingName(node.name)
+    setEditingType(node.isDirectory ? 'folder' : 'file')
+    // Find parent
+    const findParent = (n: FileNode, list: FileNode[]): FileNode | null => {
+      for (const item of list) {
+        if (item.children) {
+          if (item.children.some(c => c.path === n.path)) return item
+          const found = findParent(n, item.children)
+          if (found) return found
+        }
+      }
+      return null
+    }
+    const parent = findParent(node, nodes)
+    setEditingParentPath(parent?.path ?? null)
+    setEditingAfterPath(parent?.path ? node.path : null)
+  }, [nodes])
+
   const renderTree = () => {
     if (editingParentPath !== null) {
       const renderNode = (list: FileNode[], depth: number): React.ReactNode => {
@@ -255,6 +293,11 @@ export function FileTreeView() {
                 className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isEditing ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
                 style={{ paddingLeft: `${depth * 12 + 8}px` }}
                 onClick={() => !isEditing && handleSelect(node)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleContextMenu(node, e)
+                }}
               >
                 {node.isDirectory ? (
                   <ChevronRight
@@ -330,7 +373,7 @@ export function FileTreeView() {
     }
 
     return nodes.map((node) => (
-      <TreeItem key={node.path} node={node} depth={0} onToggle={toggleNode} expanded={expanded} onSelect={handleSelect} selectedPath={selectedPath} />
+      <TreeItem key={node.path} node={node} depth={0} onToggle={toggleNode} expanded={expanded} onSelect={handleSelect} selectedPath={selectedPath} onContextMenu={handleContextMenu} />
     ))
   }
 
@@ -379,6 +422,7 @@ export function FileTreeView() {
           </div>
         )}
       </div>
+      <FileTreeContextMenu contextMenu={contextMenu} onClose={handleCloseContextMenu} onRename={handleRenameFromContext} />
     </div>
   )
 }

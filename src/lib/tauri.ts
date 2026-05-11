@@ -91,6 +91,11 @@ export async function renameFile(oldPath: string, newPath: string): Promise<void
   await invoke('rename_file', { req })
 }
 
+export async function copyFile(srcPath: string, dstPath: string): Promise<void> {
+  const req: RenameFileRequest = { old_path: srcPath, new_path: dstPath }
+  await invoke('copy_file', { req })
+}
+
 // Git APIs
 export async function gitInit(path: string): Promise<void> {
   await invoke('git_init', { path })
