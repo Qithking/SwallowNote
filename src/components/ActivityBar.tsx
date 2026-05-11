@@ -27,7 +27,10 @@ function ActivityBar() {
         return (
           <button
             key={item.id}
-            onClick={() => setSidebarView(item.id)}
+            onClick={() => {
+              if (settingsPanelVisible) setSettingsPanelVisible(false)
+              setSidebarView(item.id)
+            }}
             className="w-[48px] h-[48px] flex items-center justify-center relative"
             style={{
               color: isActive ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
