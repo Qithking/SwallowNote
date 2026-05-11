@@ -24,6 +24,11 @@ function SearchView() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center h-[40px] px-3 shrink-0 select-none" style={{ borderBottom: '1px solid var(--border-color)' }}>
+        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>搜索</span>
+      </div>
+
       {/* Search Input */}
       <div className="p-2">
         <div className="relative">

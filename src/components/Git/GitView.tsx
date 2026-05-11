@@ -25,12 +25,18 @@ function GitView() {
 
   if (!isRepository) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-4">
-        <GitBranch size={32} className="mb-3 opacity-50" />
-        <p className="text-sm text-center mb-2">Not a Git repository</p>
-        <button className="text-xs text-primary hover:underline">
-          Initialize Git
-        </button>
+      <div className="flex flex-col h-full">
+        {/* Header */}
+        <div className="flex items-center h-[40px] px-3 shrink-0 select-none" style={{ borderBottom: '1px solid var(--border-color)' }}>
+          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>源代码管理</span>
+        </div>
+        <div className="flex flex-col items-center justify-center flex-1 text-muted-foreground px-4">
+          <GitBranch size={32} className="mb-3 opacity-50" />
+          <p className="text-sm text-center mb-2">Not a Git repository</p>
+          <button className="text-xs text-primary hover:underline">
+            Initialize Git
+          </button>
+        </div>
       </div>
     )
   }
@@ -38,10 +44,10 @@ function GitView() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+      <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none" style={{ borderBottom: '1px solid var(--border-color)' }}>
         <div className="flex items-center gap-2">
           <GitBranch size={14} />
-          <span className="text-sm font-medium">{currentBranch}</span>
+          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>源代码管理</span>
         </div>
         <div className="flex items-center gap-1">
           <button className="p-1 rounded hover:bg-accent" title="Refresh">
