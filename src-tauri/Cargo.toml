@@ -21,3 +21,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 notify = "6.1"
 uuid = { version = "1.0", features = ["v4"] }
+grep-searcher = "0.1"
+grep = "0.1"
+ignore = "0.4"
+regex = "1"

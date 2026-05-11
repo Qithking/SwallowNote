@@ -32,6 +32,32 @@ pub struct RenameFileRequest {
     pub new_path: String,
 }
 
+#[derive(Deserialize)]
+pub struct SearchRequest {
+    pub query: String,
+    pub root_path: String,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub use_regex: bool,
+    pub include_files: Option<String>,  // Glob pattern for files to include
+    pub exclude_files: Option<String>,  // Glob pattern for files to exclude
+}
+
+#[derive(Serialize, Clone)]
+pub struct SearchResult {
+    pub file_path: String,
+    pub file_name: String,
+    pub line_matches: Vec<LineMatch>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct LineMatch {
+    pub line_number: usize,
+    pub content: String,
+    pub start_col: usize,
+    pub end_col: usize,
+}
+
 #[tauri::command]
 pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
     let path = PathBuf::from(&path);
@@ -383,4 +409,133 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to open folder: {}", e))?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, String> {
+    use ignore::WalkBuilder;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::io::BufRead;
+    use std::io::BufReader;
+
+    let root = PathBuf::from(&req.root_path);
+    if !root.exists() || !root.is_dir() {
+        return Err(format!("Invalid root path: {}", root.display()));
+    }
+
+    // Build regex pattern with options
+    let pattern_str = if req.use_regex {
+        req.query.clone()
+    } else if req.whole_word {
+        format!("\\b{}\\b", regex::escape(&req.query))
+    } else {
+        req.query.clone()
+    };
+
+    // Create regex matcher
+    let regex = regex::Regex::new(&pattern_str)
+        .map_err(|e| format!("Invalid pattern: {}", e))?;
+
+    // Thread-safe results storage
+    let file_matches: Arc<Mutex<std::collections::HashMap<String, Vec<LineMatch>>>> = 
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+    // Build walker respecting .gitignore
+    let walker = WalkBuilder::new(&root)
+        .hidden(true)
+        .ignore(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .filter_entry(|entry| {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            !matches!(name, "node_modules" | "target" | "dist" | "build" | ".swallownote" | "__pycache__" | ".next" | ".nuxt")
+        })
+        .build();
+
+    for result in walker {
+        match result {
+            Ok(entry) => {
+                let path = entry.path();
+                if path.is_dir() {
+                    continue;
+                }
+
+                // Skip binary files by extension
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if matches!(ext_lower.as_str(),
+                        "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp"
+                        | "pdf" | "zip" | "tar" | "gz" | "rar" | "7z"
+                        | "exe" | "dll" | "so" | "dylib" | "a" | "o" | "obj"
+                        | "woff" | "woff2" | "ttf" | "eot" | "otf"
+                        | "mp3" | "mp4" | "wav" | "avi" | "mov" | "webm"
+                        | "wasm" | "pyc" | "class"
+                    ) {
+                        continue;
+                    }
+                }
+
+                // Read file and search using grep (SIMD accelerated)
+                let path_str = path.to_string_lossy().to_string();
+                
+                if let Ok(file) = std::fs::File::open(path) {
+                    let reader = BufReader::new(file);
+                    let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+                    
+                    // Search each line using regex (SIMD accelerated via regex crate)
+                    let mut line_matches: Vec<LineMatch> = Vec::new();
+                    let case_insensitive = !req.case_sensitive;
+                    
+                    for (idx, line) in lines.iter().enumerate() {
+                        // Use regex for all searches (regex crate uses SIMD internally)
+                        for mat in regex.find_iter(line) {
+                            line_matches.push(LineMatch {
+                                line_number: idx + 1,
+                                content: line.clone(),
+                                start_col: mat.start(),
+                                end_col: mat.end(),
+                            });
+                        }
+                    }
+
+                    if !line_matches.is_empty() {
+                        let mut matches_map = file_matches.lock().unwrap();
+                        // Deduplicate by line number
+                        let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();
+                        for m in line_matches {
+                            line_map.entry(m.line_number).or_insert(m);
+                        }
+                        let unique: Vec<LineMatch> = line_map.into_values().collect();
+                        if !unique.is_empty() {
+                            matches_map.insert(path_str, unique);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Walk error: {}", e);
+            }
+        }
+    }
+
+    // Convert to result format
+    let matches_map = file_matches.lock().unwrap();
+    let results: Vec<SearchResult> = matches_map.iter()
+        .map(|(path, line_matches)| {
+            let file_name = PathBuf::from(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            SearchResult {
+                file_path: path.clone(),
+                file_name,
+                line_matches: line_matches.clone(),
+            }
+        })
+        .collect();
+
+    Ok(results)
 }

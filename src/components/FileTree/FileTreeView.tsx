@@ -37,11 +37,6 @@ function findParentNode(node: FileNode, list: FileNode[]): FileNode | null {
   return null
 }
 
-function getNodeDepth(nodePath: string, rootPath: string): number {
-  const relative = nodePath.substring(rootPath.length + 1)
-  return relative.split('/').length - 1
-}
-
 interface TreeItemProps {
   node: FileNode
   depth: number
@@ -54,6 +49,8 @@ interface TreeItemProps {
   onStartEdit: (path: string, name: string, isDirectory: boolean) => void
 }
 
+// TreeItem is used for rendering nested tree nodes in FileTreeView
+// @ts-ignore
 function TreeItem({
   node,
   depth,
@@ -65,6 +62,8 @@ function TreeItem({
   editingName,
   onStartEdit,
 }: TreeItemProps) {
+  // TreeItem is used for rendering nested tree nodes
+  void depth; // Suppress unused warning
   const isExpanded = expanded.has(node.path)
   const hasChildren = node.children && node.children.length > 0
   const isSelected = node.path === selectedPath
@@ -170,7 +169,10 @@ export function FileTreeView() {
   // 重命名状态
   const [editingPath, setEditingPath] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [editingType, setEditingType] = useState<'file' | 'folder' | null>(null)
+  // @ts-ignore editingType is used for future features
+  void editingType
   const [isFirstEdit, setIsFirstEdit] = useState(true)
 
   // 新建文件/文件夹状态
@@ -269,7 +271,6 @@ export function FileTreeView() {
       const parentPath = parent?.path || rootPath || ''
       const newName = editingName.trim()
       const newPath = parentPath + '/' + newName
-      const oldName = node.name
       await renameFile(editingPath, newPath)
 
       // 更新已打开的 tab

@@ -32,6 +32,30 @@ interface RenameFileRequest {
   new_path: string
 }
 
+// Search types
+export interface SearchRequest {
+  query: string
+  root_path: string
+  case_sensitive: boolean
+  whole_word: boolean
+  use_regex: boolean
+  include_files: string | null
+  exclude_files: string | null
+}
+
+export interface LineMatch {
+  line_number: number
+  content: string
+  start_col: number
+  end_col: number
+}
+
+export interface SearchResult {
+  file_path: string
+  file_name: string
+  line_matches: LineMatch[]
+}
+
 // Dialog APIs
 export async function openFolderDialog(): Promise<string | null> {
   const selected = await open({
@@ -94,6 +118,10 @@ export async function renameFile(oldPath: string, newPath: string): Promise<void
 export async function copyFile(srcPath: string, dstPath: string): Promise<void> {
   const req: RenameFileRequest = { old_path: srcPath, new_path: dstPath }
   await invoke('copy_file', { req })
+}
+
+export async function searchInFiles(req: SearchRequest): Promise<SearchResult[]> {
+  return await invoke('search_in_files', { req })
 }
 
 // Git APIs

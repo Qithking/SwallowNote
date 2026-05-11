@@ -2,14 +2,14 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Copy, Sparkles } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Copy } from 'lucide-react'
 import { useState } from 'react'
 import { useEditorStore, useUIStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 
 function EditorToolbar() {
   const { tabs, activeTabId, toggleViewMode } = useEditorStore()
-  const { rightPanelType, setRightPanelType, aiPanelVisible, toggleAIPanel } = useUIStore()
+  const { rightPanelType, setRightPanelType } = useUIStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
 

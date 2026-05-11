@@ -1,26 +1,114 @@
 /**
- * SearchView Component - Search within workspace
+ * SearchView Component - VSCode-like search with file content search support
  */
-import { useState, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
-import { Search, FileText, FileSearch } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Search, FileText, ChevronDown, ChevronRight, X } from 'lucide-react'
+import { searchInFiles, SearchResult as TSearchResult } from '@/lib/tauri'
+import { useWorkspaceStore, useEditorStore } from '@/stores'
+
+interface SearchResult extends TSearchResult {}
 
 function SearchView() {
-  const { t } = useTranslation()
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<any[]>([])
-  const [isSearching, setIsSearching] = useState(false)
+  const { rootPath } = useWorkspaceStore()
+  const { addTab } = useEditorStore()
   const inputRef = useRef<HTMLInputElement>(null)
 
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<SearchResult[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [caseSensitive, setCaseSensitive] = useState(false)
+  const [wholeWord, setWholeWord] = useState(false)
+  const [useRegex, setUseRegex] = useState(false)
+  const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+
+  // Focus input on mount
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  // Keyboard shortcut to focus search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   const handleSearch = async () => {
-    if (!query.trim()) return
-    setIsSearching(true)
-    // TODO: Implement actual search
-    setTimeout(() => {
+    if (!query.trim() || !rootPath) {
       setResults([])
+      return
+    }
+
+    setIsSearching(true)
+
+    try {
+      const searchResults = await searchInFiles({
+        query: query,
+        root_path: rootPath,
+        case_sensitive: caseSensitive,
+        whole_word: wholeWord,
+        use_regex: useRegex,
+        include_files: null,
+        exclude_files: null,
+      })
+      setResults(searchResults)
+      // Expand all files by default
+      setExpandedFiles(new Set(searchResults.map(r => r.file_path)))
+    } catch (e) {
+      setResults([])
+    } finally {
       setIsSearching(false)
-    }, 500)
+    }
   }
+
+  // Auto-search on query change with debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      handleSearch()
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [query, caseSensitive, wholeWord, useRegex, rootPath])
+
+  const toggleFileExpanded = (filePath: string) => {
+    setExpandedFiles(prev => {
+      const next = new Set(prev)
+      if (next.has(filePath)) {
+        next.delete(filePath)
+      } else {
+        next.add(filePath)
+      }
+      return next
+    })
+  }
+
+  const handleResultClick = async (result: SearchResult) => {
+    try {
+      const { readFile } = await import('@/lib/tauri')
+      const content = await readFile(result.file_path)
+      addTab({
+        id: result.file_path,
+        path: result.file_path,
+        name: result.file_name,
+        content,
+        isDirty: false,
+        isEdited: false,
+        viewMode: 'preview' as const,
+        fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
+        modifiedTime: new Date().toLocaleString(),
+        wordCount: content.split(/\s+/).filter(Boolean).length,
+      })
+    } catch (e) {
+      console.error('Failed to open file:', e)
+    }
+  }
+
+  const totalMatches = results.reduce((sum, r) => sum + r.line_matches.length, 0)
 
   return (
     <div className="flex flex-col h-full">
@@ -29,61 +117,207 @@ function SearchView() {
         <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>搜索</span>
       </div>
 
-      {/* Search Input */}
-      <div className="p-2">
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+      {/* Search Input - VSCode style */}
+      <div className="px-2 pb-2">
+        <div 
+          className="flex items-center h-8 rounded overflow-hidden"
+          style={{ backgroundColor: 'var(--bg-tertiary)' }}
+        >
+          {/* Search Icon */}
+          <div className="flex items-center justify-center w-9 h-full shrink-0">
+            <Search size={14} style={{ color: 'var(--text-muted)' }} />
+          </div>
+          
+          {/* Input */}
           <input
             ref={inputRef}
             type="text"
-            className="w-full h-8 pl-8 pr-3 rounded border border-border bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder={t('search.placeholder')}
+            className="flex-1 h-full bg-transparent text-sm focus:outline-none min-w-0"
+            style={{ color: 'var(--text-primary)' }}
+            placeholder="搜索"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           />
+          
+          {/* Clear Button */}
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              className="flex items-center justify-center w-6 h-full shrink-0 hover:bg-[var(--bg-hover)]"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <X size={12} />
+            </button>
+          )}
+          
+          {/* Search Options */}
+          <div className="flex items-center h-full shrink-0 border-l" style={{ borderColor: 'var(--border-color)' }}>
+            <button
+              onClick={() => setCaseSensitive(!caseSensitive)}
+              className="flex items-center justify-center w-8 h-full cursor-pointer"
+              style={{ 
+                backgroundColor: caseSensitive ? 'var(--bg-hover)' : 'transparent',
+                color: caseSensitive ? 'var(--text-primary)' : 'var(--text-muted)'
+              }}
+              title="大小写匹配"
+            >
+              <span className="text-xs font-bold">Aa</span>
+            </button>
+            <button
+              onClick={() => setWholeWord(!wholeWord)}
+              className="flex items-center justify-center w-8 h-full cursor-pointer border-l"
+              style={{ 
+                backgroundColor: wholeWord ? 'var(--bg-hover)' : 'transparent',
+                color: wholeWord ? 'var(--text-primary)' : 'var(--text-muted)',
+                borderColor: 'var(--border-color)'
+              }}
+              title="全词匹配"
+            >
+              <span className="text-xs font-medium">ab</span>
+            </button>
+            <button
+              onClick={() => setUseRegex(!useRegex)}
+              className="flex items-center justify-center w-8 h-full cursor-pointer border-l"
+              style={{ 
+                backgroundColor: useRegex ? 'var(--bg-hover)' : 'transparent',
+                color: useRegex ? 'var(--text-primary)' : 'var(--text-muted)',
+                borderColor: 'var(--border-color)'
+              }}
+              title="正则表达式"
+            >
+              <span className="text-xs">.*</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Results */}
+      {/* Results Header */}
+      {query && !isSearching && (
+        <div className="px-3 py-1 text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
+          {results.length > 0 ? (
+            `${results.length} 个文件，${totalMatches} 个匹配项`
+          ) : (
+            '无结果'
+          )}
+        </div>
+      )}
+
+      {/* Results List - VSCode style */}
       <div className="flex-1 overflow-auto">
         {!query ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-4">
-            <FileSearch size={24} className="mb-2 opacity-50" />
-            <p className="text-sm text-center">
-              Enter a search term to find files and content
-            </p>
+          <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
+            <Search size={24} className="mb-2 opacity-50" />
+            <p className="text-sm text-center">输入搜索内容</p>
           </div>
         ) : isSearching ? (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
+          <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
             <Search size={16} className="animate-spin mr-2" />
-            <span>{t('common.loading')}</span>
+            <span className="text-sm">搜索中...</span>
           </div>
         ) : results.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-4">
-            <FileSearch size={24} className="mb-2 opacity-50" />
-            <p className="text-sm">{t('search.noResults')}</p>
+          <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
+            <Search size={24} className="mb-2 opacity-50" />
+            <p className="text-sm">未找到匹配项</p>
           </div>
         ) : (
-          <div className="px-1">
-            {results.map((result, index) => (
-              <div
-                key={index}
-                className="p-2 rounded hover:bg-accent cursor-pointer"
-              >
-                <div className="flex items-center gap-2 text-sm">
-                  <FileText size={14} className="text-muted-foreground" />
-                  <span className="font-medium">{result.fileName}</span>
+          <div className="py-1">
+            {results.map((result) => {
+              const isExpanded = expandedFiles.has(result.file_path)
+              const relativePath = result.file_path.replace(rootPath + '/', '')
+              
+              return (
+                <div key={result.file_path}>
+                  {/* File header - VSCode style */}
+                  <div
+                    className="flex items-center h-6 px-2 cursor-pointer hover:bg-[var(--bg-hover)]"
+                    onClick={() => toggleFileExpanded(result.file_path)}
+                  >
+                    {/* Collapse/Expand arrow */}
+                    {isExpanded ? (
+                      <ChevronDown size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                    ) : (
+                      <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                    )}
+                    {/* File icon */}
+                    <FileText size={14} className="mr-1.5 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                    {/* File name */}
+                    <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>
+                      {result.file_name}
+                    </span>
+                    {/* Match count badge */}
+                    <span className="ml-auto text-xs px-1 rounded shrink-0" style={{ 
+                      color: 'var(--text-muted)',
+                      backgroundColor: 'var(--bg-tertiary)'
+                    }}>
+                      {result.line_matches.length}
+                    </span>
+                  </div>
+
+                  {/* Match lines - content aligned with file icon */}
+                  {isExpanded && result.line_matches.map((match, idx) => (
+                    <div
+                      key={`${result.file_path}-${match.line_number}-${idx}`}
+                      className="flex items-center h-5 cursor-pointer hover:bg-[var(--bg-hover)]"
+                      onClick={() => handleResultClick(result)}
+                    >
+                      {/* Spacer = arrow(14) + gap(4) = 18px to align with icon */}
+                      <div className="w-[26px] shrink-0" />
+                      {/* Content aligned with file icon */}
+                      <span className="text-xs truncate flex-1" style={{ color: 'var(--text-secondary)' }}>
+                        {highlightAllMatches(match.content, query)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1 pl-6 line-clamp-2">
-                  {result.preview}
-                </p>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
     </div>
+  )
+}
+
+// Highlight all matches in content (VSCode style)
+function highlightAllMatches(content: string, query: string) {
+  if (!query) return <>{content}</>
+  
+  const lowerContent = content.toLowerCase()
+  const lowerQuery = query.toLowerCase()
+  const matches: { start: number; end: number }[] = []
+  
+  let pos = 0
+  while ((pos = lowerContent.indexOf(lowerQuery, pos)) !== -1) {
+    matches.push({ start: pos, end: pos + query.length })
+    pos += 1
+  }
+  
+  if (matches.length === 0) return <>{content}</>
+  
+  // Build highlighted JSX
+  const parts: { text: string; highlighted: boolean }[] = []
+  let lastEnd = 0
+  
+  for (const m of matches) {
+    if (m.start > lastEnd) {
+      parts.push({ text: content.substring(lastEnd, m.start), highlighted: false })
+    }
+    parts.push({ text: content.substring(m.start, m.end), highlighted: true })
+    lastEnd = m.end
+  }
+  
+  if (lastEnd < content.length) {
+    parts.push({ text: content.substring(lastEnd), highlighted: false })
+  }
+  
+  return (
+    <>
+      {parts.map((part, i) => 
+        part.highlighted 
+          ? <span key={i} style={{ backgroundColor: 'rgba(255, 200, 0, 0.4)' }}>{part.text}</span>
+          : <span key={i}>{part.text}</span>
+      )}
+    </>
   )
 }
 

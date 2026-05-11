@@ -21,6 +21,7 @@ pub fn run() {
             commands::file::copy_file,
             commands::file::copy_file_to_clipboard,
             commands::file::open_in_finder,
+            commands::file::search_in_files,
             commands::git::git_is_repo,
             commands::git::git_init,
             commands::git::git_status,
