@@ -48,11 +48,11 @@
     --status-bg: #005fb8;
     --status-fg: #ffffff;
     --sidebar-header: #ececec;
-    --activity-bg: #333333;
-    --activity-hover: #3c3c3c;
-    --activity-foreground: #ffffff;
-    --activity-inactive: #aaaaaa;
-    --activity-activeBorder: #ffffff;
+    --activity-bg: var(--bg-secondary);
+    --activity-hover: var(--bg-hover);
+    --activity-foreground: var(--text-primary);
+    --activity-inactive: var(--text-muted);
+    --activity-activeBorder: var(--tab-activeBorderTop);
     --accent-hover: #1a8ae8;
 
     /* Theme color for UI accents (default blue) */
@@ -105,11 +105,11 @@
     --status-bg: #0078d4;
     --status-fg: #ffffff;
     --sidebar-header: #2d2d2d;
-    --activity-bg: #333333;
-    --activity-hover: #3c3c3c;
-    --activity-foreground: #ffffff;
-    --activity-inactive: #aaaaaa;
-    --activity-activeBorder: #ffffff;
+    --activity-bg: var(--bg-secondary);
+    --activity-hover: var(--bg-hover);
+    --activity-foreground: var(--text-primary);
+    --activity-inactive: var(--text-muted);
+    --activity-activeBorder: var(--tab-activeBorderTop);
     --accent-hover: #1a8ae8;
 
     /* Theme color for UI accents (default blue) */

@@ -17,8 +17,8 @@ function ActivityBar() {
 
   return (
     <div
-      className="w-[48px] flex flex-col items-center pt-1 shrink-0"
-      style={{ backgroundColor: 'var(--activity-bg)' }}
+      className="w-[48px] flex flex-col items-center pt-1 shrink-0 border-r"
+      style={{ backgroundColor: 'var(--activity-bg)', borderColor: 'var(--border-color)' }}
     >
       {activityItems.map((item) => {
         const Icon = item.icon
