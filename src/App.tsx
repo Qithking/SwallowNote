@@ -11,7 +11,7 @@ import { useTheme } from '@/hooks'
 
 function App() {
   useTheme()
-  const { settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
+  const { settingsPanelVisible } = useUIStore()
 
   return (
     <div

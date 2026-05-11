@@ -17,7 +17,6 @@ import { cn } from '@/lib/utils'
 function GitView() {
   const {
     isRepository,
-    currentBranch,
     branches,
     hasUncommittedChanges,
     uncommittedCount,

@@ -2,13 +2,11 @@
  * TitleBar Component - Custom window title bar
  * Styled with CSS variables for proper dark/light theme
  */
-import { useTranslation } from 'react-i18next'
 import { Minus, Square, X, Sun, Moon, Monitor } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useUIStore } from '@/stores'
 
 function TitleBar() {
-  const { t } = useTranslation()
   const { theme, setTheme } = useUIStore()
 
   const handleMinimize = async () => {

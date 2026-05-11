@@ -3,7 +3,7 @@
  */
 import { useEffect, useRef } from 'react'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorView as CMView, lineNumbers } from '@codemirror/view'
+import { EditorView as CMView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { javascript } from '@codemirror/lang-javascript'
 import { python } from '@codemirror/lang-python'

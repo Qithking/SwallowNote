@@ -5,9 +5,6 @@ node_modules/
 build/
 dist/
 
-# SvelteKit
-.svelte-kit/
-
 # Tauri
 src-tauri/target/
 

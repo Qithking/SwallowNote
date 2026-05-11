@@ -38,7 +38,7 @@ interface CommandItem {
 function CommandPalette() {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const { isCommandPaletteOpen, toggleCommandPalette } = useUIStore()
+  const { commandPaletteVisible, toggleCommandPalette } = useUIStore()
 
   const commands: CommandItem[] = [
     {
@@ -99,8 +99,8 @@ function CommandPalette() {
   ]
 
   useEffect(() => {
-    setOpen(isCommandPaletteOpen)
-  }, [isCommandPaletteOpen])
+    setOpen(commandPaletteVisible)
+  }, [commandPaletteVisible])
 
   const handleOpenChange = (newOpen: boolean) => {
     setOpen(newOpen)

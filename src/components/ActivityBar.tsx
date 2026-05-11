@@ -11,8 +11,6 @@ const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'ai', icon: Bot },
 ]
 
-const settingsItem = { id: 'settings' as SidebarView, icon: Settings }
-
 function ActivityBar() {
   const { sidebarView, setSidebarView, settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
 
