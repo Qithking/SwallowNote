@@ -2,13 +2,14 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Copy } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Copy, Sparkles } from 'lucide-react'
 import { useState } from 'react'
-import { useEditorStore } from '@/stores'
+import { useEditorStore, useUIStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 
 function EditorToolbar() {
   const { tabs, activeTabId, toggleViewMode } = useEditorStore()
+  const { rightPanelType, setRightPanelType, aiPanelVisible, toggleAIPanel } = useUIStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
 
@@ -44,40 +45,44 @@ function EditorToolbar() {
       {/* Right: Icons */}
       <div className="flex items-center gap-2 shrink-0 ml-4">
         <button
-          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
+          onClick={() => setRightPanelType(rightPanelType === 'directory' ? null : 'directory')}
+          className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)]"
+          style={{ color: rightPanelType === 'directory' ? 'var(--theme-color)' : 'var(--text-muted)' }}
           title="目录"
         >
-          <BookOpen size={14} />
+          <BookOpen size={14} style={{ color: 'inherit' }} />
         </button>       
         <button
           onClick={toggleViewMode}
-          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)]"
+          className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)]"
           style={{ color: viewMode === 'source' ? 'var(--theme-color)' : 'var(--text-muted)' }}
           title="源码"
         >
           <Code size={14} style={{ color: 'inherit' }} />
         </button>
         <button
-          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
+          onClick={() => setRightPanelType(rightPanelType === 'history' ? null : 'history')}
+          className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)]"
+          style={{ color: rightPanelType === 'history' ? 'var(--theme-color)' : 'var(--text-muted)' }}
           title="历史"
         >
-          <History size={14} />
+          <History size={14} style={{ color: 'inherit' }} />
         </button>
          <button
           onClick={handleOpenFolder}
-          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
+          className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
           title="打开所在文件夹"
         >
           <FolderOpen size={14} />
         </button>
         <button
           onClick={handleCopyPath}
-          className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)]"
+          className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)]"
           style={{ color: copied ? 'var(--theme-color)' : 'var(--text-muted)' }}
           title="复制路径"
         >
           <Copy size={14} style={{ color: 'inherit' }} />
-        </button>
+        </button>        
       </div>
     </div>
   )

@@ -1,14 +1,13 @@
 /**
  * ActivityBar Component - Narrow left icon bar for view switching
  */
-import { FolderTree, Search, GitBranch, Bot, Settings } from 'lucide-react'
+import { FolderTree, Search, GitBranch, Settings } from 'lucide-react'
 import { useUIStore, SidebarView } from '@/stores'
 
 const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'explorer', icon: FolderTree },
   { id: 'search', icon: Search },
   { id: 'git', icon: GitBranch },
-  { id: 'ai', icon: Bot },
 ]
 
 function ActivityBar() {

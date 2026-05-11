@@ -87,15 +87,15 @@ function AIView() {
   ]
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full w-[300px]">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+      <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
         <div className="flex items-center gap-2">
-          <Bot size={16} />
-          <span className="text-sm font-medium">AI Assistant</span>
+          <Bot size={14} style={{ color: 'var(--text-muted)' }} />
+          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>AI Assistant</span>
         </div>
-        <button className="p-1 rounded hover:bg-accent" title="Settings">
-          <RefreshCw size={14} />
+        <button className="p-1 rounded hover:bg-[var(--bg-hover)] ml-auto" style={{ color: 'var(--text-muted)' }} title="Settings">
+          <RefreshCw size={14} style={{ color: 'inherit' }} />
         </button>
       </div>
 

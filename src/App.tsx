@@ -6,12 +6,24 @@ import { TabBar } from '@/components/TabBar'
 import { EditorToolbar } from '@/components/EditorToolbar'
 import { EditorView } from '@/components/Editor'
 import { SettingsView } from '@/components/Settings/SettingsView'
+import { AIView } from '@/components/AI/AIView'
+import { DirectoryView } from '@/components/Directory/DirectoryView'
+import { HistoryView } from '@/components/History/HistoryView'
 import { useUIStore } from '@/stores'
 import { useTheme } from '@/hooks'
 
 function App() {
   useTheme()
-  const { settingsPanelVisible, toastMessage } = useUIStore()
+  const { settingsPanelVisible, toastMessage, rightPanelType } = useUIStore()
+
+  const renderRightPanel = () => {
+    switch (rightPanelType) {
+      case 'ai': return <AIView />
+      case 'directory': return <DirectoryView />
+      case 'history': return <HistoryView />
+      default: return null
+    }
+  }
 
   return (
     <div
@@ -29,16 +41,23 @@ function App() {
         {/* Sidebar - hidden when settings panel is open */}
         {!settingsPanelVisible && <Sidebar />}
 
-        {/* Editor Area */}
+        {/* Editor Area with optional AI Panel */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {settingsPanelVisible ? (
             <SettingsView />
           ) : (
-            <>
-              <TabBar />
-              <EditorToolbar />
-              <EditorView />
-            </>
+            <div className="flex-1 flex overflow-hidden">
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <TabBar />
+                <EditorToolbar />
+                <EditorView />
+              </div>
+              {rightPanelType && (
+                <div className="shrink-0 border-l" style={{ borderColor: 'var(--border-color)' }}>
+                  {renderRightPanel()}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

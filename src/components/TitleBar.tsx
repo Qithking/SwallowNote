@@ -2,12 +2,12 @@
  * TitleBar Component - Custom window title bar
  * Styled with CSS variables for proper dark/light theme
  */
-import { Minus, Square, X, Sun, Moon, Monitor } from 'lucide-react'
+import { Minus, Square, X, Sun, Moon, Monitor, Bot } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useUIStore } from '@/stores'
 
 function TitleBar() {
-  const { theme, setTheme } = useUIStore()
+  const { theme, setTheme, rightPanelType, setRightPanelType } = useUIStore()
 
   const handleMinimize = async () => {
     await getCurrentWindow().minimize()
@@ -47,8 +47,19 @@ function TitleBar() {
         </span>
       </div>
 
-      {/* Right: Theme toggle + Window controls */}
+      {/* Right: AI button + Theme toggle + Window controls */}
       <div className="flex items-center h-full">
+        <button
+          onClick={() => setRightPanelType(rightPanelType === 'ai' ? null : 'ai')}
+          className="h-full px-2 flex items-center justify-center"
+          style={{ color: rightPanelType === 'ai' ? 'var(--text-primary)' : 'var(--text-muted)' }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+          title="AI Assistant"
+        >
+          <Bot size={14} />
+        </button>
+
         <button
           onClick={cycleTheme}
           className="h-full px-2 flex items-center justify-center"

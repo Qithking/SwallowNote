@@ -5,7 +5,6 @@
 import { FileTreeView } from './FileTree/FileTreeView'
 import { SearchView } from './Search/SearchView'
 import { GitView } from './Git/GitView'
-import { AIView } from './AI/AIView'
 import { SettingsView } from './Settings/SettingsView'
 import { useUIStore } from '@/stores'
 
@@ -17,7 +16,6 @@ function Sidebar() {
       case 'explorer': return <FileTreeView />
       case 'search': return <SearchView />
       case 'git': return <GitView />
-      case 'ai': return <AIView />
       case 'settings': return <SettingsView />
       default: return <FileTreeView />
     }

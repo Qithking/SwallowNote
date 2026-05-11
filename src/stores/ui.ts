@@ -6,6 +6,7 @@ import { create } from 'zustand'
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
 export type EditorViewMode = 'edit' | 'preview' | 'split'
+export type RightPanelType = 'ai' | 'directory' | 'history' | null
 
 export interface UIState {
   theme: Theme
@@ -16,7 +17,9 @@ export interface UIState {
   commandPaletteVisible: boolean
   searchPanelVisible: boolean
   settingsPanelVisible: boolean
-  toastMessage: string | null
+  aiPanelVisible: boolean
+  rightPanelType: RightPanelType
+  toastMessage: string | null,
   clipboardFiles: string[]
   clipboardIsCut: boolean
   setTheme: (theme: Theme) => void
@@ -28,6 +31,8 @@ export interface UIState {
   toggleSearchPanel: () => void
   setSettingsPanelVisible: (visible: boolean) => void
   toggleSettingsPanel: () => void
+  toggleAIPanel: () => void
+  setRightPanelType: (type: RightPanelType) => void
   showToast: (message: string) => void
   setClipboardFiles: (files: string[], isCut: boolean) => void
   clearClipboard: () => void
@@ -44,6 +49,8 @@ export const useUIStore = create<UIState>((set) => ({
   commandPaletteVisible: false,
   searchPanelVisible: false,
   settingsPanelVisible: false,
+  aiPanelVisible: false,
+  rightPanelType: null,
   toastMessage: null,
   clipboardFiles: [],
   clipboardIsCut: false,
@@ -59,6 +66,9 @@ export const useUIStore = create<UIState>((set) => ({
   setSettingsPanelVisible: (visible) => set({ settingsPanelVisible: visible }),
   toggleSettingsPanel: () =>
     set((state) => ({ settingsPanelVisible: !state.settingsPanelVisible })),
+  toggleAIPanel: () =>
+    set((state) => ({ aiPanelVisible: !state.aiPanelVisible })),
+  setRightPanelType: (type) => set({ rightPanelType: type }),
   showToast: (message) => {
     if (toastTimer) clearTimeout(toastTimer)
     set({ toastMessage: message })
