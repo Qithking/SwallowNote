@@ -52,43 +52,43 @@
     
     --radius: 0.5rem;
     
-    /* VS Code Dark+ specific colors */
-    --bg-primary: #1e1e1e;
-    --bg-secondary: #252526;
-    --bg-tertiary: #2d2d2d;
-    --bg-hover: #2a2d2e;
-    --bg-active: #37373d;
-    --bg-selection: #264f78;
-    --bg-input: #3c3c3c;
+    /* VS Code Light+ specific colors */
+    --bg-primary: #ffffff;
+    --bg-secondary: transparent;
+    --bg-tertiary: transparent;
+    --bg-hover: rgba(0, 0, 0, 0.04);
+    --bg-active: rgba(0, 0, 0, 0.08);
+    --bg-selection: #add6ff;
+    --bg-input: #ffffff;
     
-    --text-primary: #ffffff;
-    --text-secondary: #dddddd;
-    --text-muted: #888888;
-    --text-link: #4fc1ff;
+    --text-primary: #1f1f1f;
+    --text-secondary: #666666;
+    --text-muted: #999999;
+    --text-link: #006ab1;
     
-    --border-color: #454545;
-    --border-light: #333333;
+    --border-color: #e5e5e5;
+    --border-light: #f0f0f0;
     
     --scrollbar-bg: transparent;
-    --scrollbar-thumb: #505050;
-    --scrollbar-hover: #606060;
+    --scrollbar-thumb: #c1c1c1;
+    --scrollbar-hover: #a8a8a8;
     
-    --status-bg: #0078d4;
+    --status-bg: #005fb8;
     --status-fg: #ffffff;
     
-    --tab-bg: #2d2d2d;
-    --tab-active-bg: #1e1e1e;
-    --tab-hover-bg: #2a2d2e;
-    --tab-border: #252526;
-    --tab-activeBorderTop: #0078d4;
-    --tab-activeBorder: #1e1e1e;
+    --tab-bg: transparent;
+    --tab-active-bg: #ffffff;
+    --tab-hover-bg: rgba(0, 0, 0, 0.04);
+    --tab-border: #e5e5e5;
+    --tab-activeBorderTop: #005fb8;
+    --tab-activeBorder: #ffffff;
     
-    --sidebar-header: #2d2d2d;
-    --activity-bg: #333333;
-    --activity-hover: #3c3c3c;
-    --activity-foreground: #ffffff;
-    --activity-inactive: #aaaaaa;
-    --activity-activeBorder: #ffffff;
+    --sidebar-header: transparent;
+    --activity-bg: transparent;
+    --activity-hover: rgba(0, 0, 0, 0.04);
+    --activity-foreground: #1f1f1f;
+    --activity-inactive: #999999;
+    --activity-activeBorder: #005fb8;
     
     --accent-hover: #1a8ae8;
     

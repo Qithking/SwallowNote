@@ -27,10 +27,10 @@
 
     /* UI Component Colors - Light */
     --bg-primary: #ffffff;
-    --bg-secondary: #f3f3f3;
-    --bg-tertiary: #ececec;
-    --bg-hover: #e8e8e8;
-    --bg-active: #d6d6d6;
+    --bg-secondary: transparent;
+    --bg-tertiary: transparent;
+    --bg-hover: rgba(0, 0, 0, 0.04);
+    --bg-active: rgba(0, 0, 0, 0.08);
     --bg-selection: #add6ff;
     --bg-input: #ffffff;
     --text-primary: #1f1f1f;
@@ -39,17 +39,17 @@
     --text-link: #006ab1;
     --border-color: #e5e5e5;
     --border-light: #f0f0f0;
-    --tab-bg: #ececec;
+    --tab-bg: transparent;
     --tab-active-bg: #ffffff;
-    --tab-hover-bg: #e8e8e8;
+    --tab-hover-bg: rgba(0, 0, 0, 0.04);
     --tab-border: #e5e5e5;
     --tab-activeBorderTop: #005fb8;
     --tab-activeBorder: #ffffff;
     --status-bg: #005fb8;
     --status-fg: #ffffff;
-    --sidebar-header: #ececec;
-    --activity-bg: var(--bg-secondary);
-    --activity-hover: var(--bg-hover);
+    --sidebar-header: transparent;
+    --activity-bg: transparent;
+    --activity-hover: rgba(0, 0, 0, 0.04);
     --activity-foreground: var(--text-primary);
     --activity-inactive: var(--text-muted);
     --activity-activeBorder: var(--tab-activeBorderTop);
