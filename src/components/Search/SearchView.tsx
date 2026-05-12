@@ -3,11 +3,26 @@
  */
 import { useState, useEffect, useRef } from 'react'
 import { Search, FileText, ChevronDown, ChevronRight, X } from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { searchInFiles, SearchResult as TSearchResult } from '@/lib/tauri'
 import { useWorkspaceStore, useEditorStore } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 interface SearchResult extends TSearchResult {}
+
+const FILE_TYPES = [
+  { value: 'all', label: '全部文件' },
+  { value: 'txt', label: '文本文件' },
+  { value: 'md', label: 'Markdown' },
+  { value: 'code', label: '代码文件' },
+  { value: 'json', label: 'JSON' },
+]
 
 function SearchView() {
   const { rootPath } = useWorkspaceStore()
@@ -15,6 +30,7 @@ function SearchView() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const [query, setQuery] = useState('')
+  const [fileType, setFileType] = useState('all')
   const [results, setResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [caseSensitive, setCaseSensitive] = useState(false)
@@ -119,21 +135,17 @@ function SearchView() {
       </div>
 
       {/* Search Input - VSCode style */}
-      <div className="px-2 pb-2">
+      <div className="p-2 ">
         <div 
           className="flex items-center h-8 rounded overflow-hidden"
-          style={{ backgroundColor: 'var(--bg-tertiary)' }}
+          style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}
         >
-          {/* Search Icon */}
-          <div className="flex items-center justify-center w-9 h-full shrink-0">
-            <Search size={14} style={{ color: 'var(--text-muted)' }} />
-          </div>
-          
+         
           {/* Input */}
           <input
             ref={inputRef}
             type="text"
-            className="flex-1 h-full bg-transparent text-sm focus:outline-none min-w-0"
+            className="flex-1 h-full pl-2 bg-transparent text-sm focus:outline-none min-w-0"
             style={{ color: 'var(--text-primary)' }}
             placeholder="搜索"
             value={query}
@@ -144,7 +156,7 @@ function SearchView() {
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="flex items-center justify-center w-6 h-full shrink-0 hover:bg-[var(--bg-hover)]"
+              className="flex items-center justify-center w-6 h-full shrink-0 cursor-pointer"
               style={{ color: 'var(--text-muted)' }}
             >
               <X size={12} />
@@ -152,12 +164,14 @@ function SearchView() {
           )}
           
           {/* Search Options */}
-          <div className="flex items-center h-full shrink-0 border-l" style={{ borderColor: 'var(--border-color)' }}>
+          <div 
+            className="flex items-center h-6 m-1 rounded"            
+          >
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setCaseSensitive(!caseSensitive)}
-                  className="flex items-center justify-center w-8 h-full cursor-pointer"
+                  className="flex items-center justify-center w-5 h-full cursor-pointer rounded-l-sm"
                   style={{ 
                     backgroundColor: caseSensitive ? 'var(--bg-hover)' : 'transparent',
                     color: caseSensitive ? 'var(--text-primary)' : 'var(--text-muted)'
@@ -166,39 +180,37 @@ function SearchView() {
                   <span className="text-xs font-bold">Aa</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>大小写匹配</TooltipContent>
+              <TooltipContent side="bottom">大小写匹配</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setWholeWord(!wholeWord)}
-                  className="flex items-center justify-center w-8 h-full cursor-pointer border-l"
+                  className="flex items-center justify-center w-5 h-full cursor-pointer"
                   style={{ 
                     backgroundColor: wholeWord ? 'var(--bg-hover)' : 'transparent',
-                    color: wholeWord ? 'var(--text-primary)' : 'var(--text-muted)',
-                    borderColor: 'var(--border-color)'
+                    color: wholeWord ? 'var(--text-primary)' : 'var(--text-muted)'
                   }}
                 >
                   <span className="text-xs font-medium">ab</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>全词匹配</TooltipContent>
+              <TooltipContent side="bottom">全词匹配</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setUseRegex(!useRegex)}
-                  className="flex items-center justify-center w-8 h-full cursor-pointer border-l"
+                  className="flex items-center justify-center w-5 h-full rounded-r-sm"
                   style={{ 
                     backgroundColor: useRegex ? 'var(--bg-hover)' : 'transparent',
-                    color: useRegex ? 'var(--text-primary)' : 'var(--text-muted)',
-                    borderColor: 'var(--border-color)'
+                    color: useRegex ? 'var(--text-primary)' : 'var(--text-muted)'
                   }}
                 >
                   <span className="text-xs">.*</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>正则表达式</TooltipContent>
+              <TooltipContent side="bottom">正则表达式</TooltipContent>
             </Tooltip>
           </div>
         </div>
