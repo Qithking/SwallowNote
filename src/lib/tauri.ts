@@ -137,6 +137,14 @@ export async function gitCommit(path: string, message: string): Promise<void> {
   await invoke('git_commit', { path, message })
 }
 
+export async function gitPush(path: string): Promise<void> {
+  await invoke('git_push', { path })
+}
+
+export async function gitCommitAndPush(path: string, message: string): Promise<void> {
+  await invoke('git_commit_and_push', { path, message })
+}
+
 export async function gitDiff(path: string, filePath: string): Promise<string> {
   return await invoke('git_diff', { path, filePath })
 }
@@ -147,6 +155,19 @@ export async function gitLog(path: string, maxCount: number = 50): Promise<strin
 
 export async function isGitRepository(path: string): Promise<boolean> {
   return await invoke('git_is_repo', { path })
+}
+
+export interface GitRepositoryInfo {
+  name: string
+  path: string
+  remote_url: string | null
+  has_uncommitted_changes: boolean
+  uncommitted_count: number
+  current_branch: string
+}
+
+export async function scanGitRepos(rootPath: string): Promise<GitRepositoryInfo[]> {
+  return await invoke('scan_git_repos', { rootPath })
 }
 
 // File watcher APIs

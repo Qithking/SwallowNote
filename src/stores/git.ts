@@ -8,32 +8,37 @@ export interface GitBranch {
   isCurrent: boolean
 }
 
-export interface GitState {
-  isRepository: boolean
-  currentBranch: string
-  branches: GitBranch[]
+export interface GitRepository {
+  name: string
+  path: string
+  remoteUrl: string | null
   hasUncommittedChanges: boolean
   uncommittedCount: number
+  currentBranch: string
+  branches: GitBranch[]
+}
+
+export interface GitState {
+  repositories: GitRepository[]
+  activeRepository: string | null  // 当前选中的仓库路径
   isGitLoading: boolean
-  setIsRepository: (isRepo: boolean) => void
-  setCurrentBranch: (branch: string) => void
-  setBranches: (branches: GitBranch[]) => void
-  setHasUncommittedChanges: (hasChanges: boolean) => void
-  setUncommittedCount: (count: number) => void
+  // Actions
+  setRepositories: (repos: GitRepository[]) => void
+  setActiveRepository: (path: string | null) => void
+  updateRepository: (path: string, updates: Partial<GitRepository>) => void
   setLoading: (loading: boolean) => void
 }
 
 export const useGitStore = create<GitState>((set) => ({
-  isRepository: false,
-  currentBranch: '',
-  branches: [],
-  hasUncommittedChanges: false,
-  uncommittedCount: 0,
+  repositories: [],
+  activeRepository: null,
   isGitLoading: false,
-  setIsRepository: (isRepo) => set({ isRepository: isRepo }),
-  setCurrentBranch: (branch) => set({ currentBranch: branch }),
-  setBranches: (branches) => set({ branches }),
-  setHasUncommittedChanges: (hasChanges) => set({ hasUncommittedChanges: hasChanges }),
-  setUncommittedCount: (count) => set({ uncommittedCount: count }),
+  setRepositories: (repos) => set({ repositories: repos }),
+  setActiveRepository: (path) => set({ activeRepository: path }),
+  updateRepository: (path, updates) => set((state) => ({
+    repositories: state.repositories.map((repo) =>
+      repo.path === path ? { ...repo, ...updates } : repo
+    )
+  })),
   setLoading: (loading) => set({ isGitLoading: loading }),
 }))

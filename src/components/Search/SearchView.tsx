@@ -223,7 +223,6 @@ function SearchView() {
           <div className="py-1">
             {results.map((result) => {
               const isExpanded = expandedFiles.has(result.file_path)
-              const relativePath = result.file_path.replace(rootPath + '/', '')
               
               return (
                 <div key={result.file_path}>

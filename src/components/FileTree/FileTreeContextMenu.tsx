@@ -18,8 +18,9 @@ import {
   Edit3,
   Trash2,
   History,
+  GitBranch,
 } from 'lucide-react'
-import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore } from '@/stores'
+import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGitStore } from '@/stores'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { deleteFile } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
@@ -69,6 +70,15 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
   const { addTab } = useEditorStore()
   const { nodes, setSelectedPath, toggleNode, setNodes } = useFileTreeStore()
   const { clipboardFiles, clipboardIsCut, setClipboardFiles, showToast } = useUIStore()
+  const { repositories } = useGitStore()
+
+  // 检查节点是否在 git 仓库中
+  const isInGitRepo = repositories.some(repo => {
+    // 节点路径等于仓库路径，或节点路径在仓库路径下
+    return node.path === repo.path || node.path.startsWith(repo.path + '/')
+  })
+  // "同步初始化"只在不在 git 项目中时显示
+  const canShowGitInit = node.isDirectory && !isInGitRepo
 
   const hasClipboard = clipboardFiles.length > 0
   // 只有目标是目录时才显示粘贴菜单
@@ -109,6 +119,21 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
 
   const handleOpenHistory = () => {
     console.log('Open history for:', node.path)
+  }
+
+  const handleGitInit = async () => {
+    if (!node.isDirectory) return
+    try {
+      await invoke('git_init', { path: node.path })
+      showToast('Git 仓库初始化成功')
+      // Refresh the directory to show .git folder
+      const children = await loadDirectory(node.path)
+      const updatedNodes = updateNodesWithChildren(nodes, node.path, children)
+      setNodes(updatedNodes)
+    } catch (e) {
+      console.error('Failed to init git:', e)
+      showToast(`初始化失败: ${e}`)
+    }
   }
 
   const handleCopyPath = async (relative: boolean) => {
@@ -236,12 +261,27 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
 
         <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
 
-        <ContextMenuItem onClick={handleOpenHistory} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
-          <History size={12} />
-          <span>打开历史记录</span>
-        </ContextMenuItem>
+        {/* 打开历史记录 - 只在 git 项目中显示 */}
+        {isInGitRepo && (
+          <ContextMenuItem onClick={handleOpenHistory} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
+            <History size={12} />
+            <span>打开历史记录</span>
+          </ContextMenuItem>
+        )}
 
-        <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
+        {/* 同步初始化 - 只在不在 git 项目中的文件夹显示 */}
+        {canShowGitInit && (
+          <>
+            <ContextMenuItem onClick={handleGitInit} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
+              <GitBranch size={12} />
+              <span>同步初始化</span>
+            </ContextMenuItem>
+          </>
+        )}
+
+        {(isInGitRepo || canShowGitInit) && (
+          <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
+        )}
 
         <ContextMenuItem onClick={() => handleCopyPath(false)} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           <FileText size={12} />

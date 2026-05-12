@@ -1,5 +1,15 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+#[derive(Serialize, Deserialize)]
+pub struct GitRepositoryInfo {
+    pub name: String,
+    pub path: String,
+    pub remote_url: Option<String>,
+    pub has_uncommitted_changes: bool,
+    pub uncommitted_count: usize,
+    pub current_branch: String,
+}
 
 #[derive(Serialize)]
 pub struct GitStatus {
@@ -114,6 +124,31 @@ pub async fn git_commit(path: String, message: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Push commits to remote
+#[tauri::command]
+pub async fn git_push(path: String) -> Result<(), String> {
+    run_git(&path, &["push"]).map_err(|e| format!("Failed to push: {}", e))?;
+    Ok(())
+}
+
+/// Commit and push in one command
+#[tauri::command]
+pub async fn git_commit_and_push(path: String, message: String) -> Result<(), String> {
+    // Stage all changes
+    run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
+
+    // Commit
+    run_git(&path, &["commit", "-m", &message]).map_err(|e| format!("Failed to commit: {}", e))?;
+
+    // Push - only if remote exists
+    let remote_url = get_remote_url(&path);
+    if remote_url.is_ok() {
+        run_git(&path, &["push"]).map_err(|e| format!("Failed to push: {}", e))?;
+    }
+
+    Ok(())
+}
+
 /// Get commit log
 #[tauri::command]
 pub async fn git_log(path: String, max_count: i32) -> Result<Vec<String>, String> {
@@ -133,6 +168,114 @@ pub async fn git_log(path: String, max_count: i32) -> Result<Vec<String>, String
 
 fn get_branch(path: &str) -> Result<String, String> {
     run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
+}
+
+/// Scan directory for all git repositories
+#[tauri::command]
+pub async fn scan_git_repos(root_path: String) -> Result<Vec<GitRepositoryInfo>, String> {
+    let root = Path::new(&root_path);
+    if !root.exists() {
+        return Err(format!("Path does not exist: {}", root_path));
+    }
+
+    let mut repos = Vec::new();
+    scan_dir_recursive(root, &mut repos)?;
+    Ok(repos)
+}
+
+fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>) -> Result<(), String> {
+    // Skip common non-repo directories
+    let dir_name = dir.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    
+    if dir_name.starts_with('.') 
+        || dir_name == "node_modules"
+        || dir_name == "target"
+        || dir_name == "dist"
+        || dir_name == "build"
+    {
+        return Ok(());
+    }
+
+    // Check if this directory is a git repo
+    let git_dir = dir.join(".git");
+    if git_dir.exists() && git_dir.is_dir() {
+        let repo_name = dir.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        
+        let path_str = dir.to_string_lossy().to_string();
+        
+        // Get remote URL
+        let remote_url = get_remote_url(&path_str).ok();
+        
+        // Get current branch
+        let current_branch = get_branch(&path_str).unwrap_or_else(|_| "unknown".to_string());
+        
+        // Check for uncommitted changes
+        let (has_changes, change_count) = get_uncommitted_count(&path_str);
+        
+        repos.push(GitRepositoryInfo {
+            name: repo_name,
+            path: path_str,
+            remote_url,
+            has_uncommitted_changes: has_changes,
+            uncommitted_count: change_count,
+            current_branch,
+        });
+        
+        // Don't recurse into git repos (to avoid submodules being counted separately)
+        return Ok(());
+    }
+
+    // Recursively scan subdirectories
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan_dir_recursive(&path, repos)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn get_remote_url(path: &str) -> Result<String, String> {
+    // Try to get the first remote URL (usually 'origin')
+    let output = run_git(path, &["remote", "get-url", "origin"])?;
+    Ok(output.trim().to_string())
+}
+
+fn check_has_uncommitted_changes(path: &str) -> Result<bool, String> {
+    let modified = run_git(path, &["diff", "--name-only"]).unwrap_or_default();
+    let staged = run_git(path, &["diff", "--cached", "--name-only"]).unwrap_or_default();
+    let untracked = run_git(path, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default();
+    
+    let count = modified.lines()
+        .chain(staged.lines())
+        .chain(untracked.lines())
+        .filter(|line| !line.is_empty())
+        .count();
+    
+    Ok(count > 0)
+}
+
+fn get_uncommitted_count(path: &str) -> (bool, usize) {
+    let modified = run_git(path, &["diff", "--name-only"]).unwrap_or_default();
+    let staged = run_git(path, &["diff", "--cached", "--name-only"]).unwrap_or_default();
+    let untracked = run_git(path, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default();
+    
+    let mut count = 0usize;
+    for line in modified.lines().chain(staged.lines()).chain(untracked.lines()) {
+        if !line.is_empty() {
+            count += 1;
+        }
+    }
+    
+    (count > 0, count)
 }
 
 fn run_git(path: &str, args: &[&str]) -> Result<String, String> {

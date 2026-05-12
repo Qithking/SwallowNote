@@ -27,7 +27,10 @@ pub fn run() {
             commands::git::git_status,
             commands::git::git_diff,
             commands::git::git_commit,
+            commands::git::git_push,
+            commands::git::git_commit_and_push,
             commands::git::git_log,
+            commands::git::scan_git_repos,
             services::file_watcher::watch_directory,
             services::file_watcher::unwatch_directory,
         ])

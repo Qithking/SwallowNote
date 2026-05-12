@@ -6,7 +6,15 @@ import { useEditorStore, useGitStore } from '@/stores'
 
 function StatusBar() {
   const { tabs, activeTabId } = useEditorStore()
-  const { currentBranch, hasUncommittedChanges, uncommittedCount } = useGitStore()
+  const { repositories, activeRepository } = useGitStore()
+  
+  // Get current repo info from the active repository or first one
+  const currentRepo = activeRepository 
+    ? repositories.find(r => r.path === activeRepository)
+    : repositories[0]
+  const currentBranch = currentRepo?.currentBranch || ''
+  const hasUncommittedChanges = currentRepo?.hasUncommittedChanges || false
+  const uncommittedCount = currentRepo?.uncommittedCount || 0
 
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const wordCount = activeTab?.wordCount
