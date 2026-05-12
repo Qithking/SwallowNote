@@ -1,7 +1,7 @@
 /**
  * GitView Component - Git integration panel with multi-repository support
  */
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import {
   GitBranch,
   RefreshCw,
@@ -14,6 +14,7 @@ import { useGitStore, GitRepository } from '@/stores/git'
 import { scanGitRepos, GitRepositoryInfo, gitCommitAndPush } from '@/lib/tauri'
 import { useWorkspaceStore, useUIStore } from '@/stores'
 import { cn } from '@/lib/utils'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 // Commit section with vertical layout
 function CommitSection({ 
@@ -124,7 +125,7 @@ function CommitSection({
   )
 }
 
-// Repository item with checkbox for multi-select
+// Repository item with checkbox for multi-select and tooltip
 function RepositoryItem({ 
   repo, 
   isSelected, 
@@ -134,85 +135,56 @@ function RepositoryItem({
   isSelected: boolean
   onToggle: () => void
 }) {
-  const [showPopover, setShowPopover] = useState(false)
-  const timerRef = useRef<NodeJS.Timeout>()
-
-  const handleMouseEnter = () => {
-    timerRef.current = setTimeout(() => setShowPopover(true), 300)
-  }
-
-  const handleMouseLeave = () => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    setShowPopover(false)
-  }
-
   return (
-    <div className="relative">
-      <div
-        className={cn(
-          'p-2 rounded cursor-pointer text-sm flex flex-col gap-1',
-          'hover:bg-[var(--bg-hover)]',
-          isSelected && 'bg-[var(--bg-hover)]'
-        )}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        onClick={onToggle}
-      >
-        {/* Repo name with status indicator and checkbox */}
-        <div className="flex items-center gap-2">
-          {/* Checkbox */}
-          <div 
-            className={cn(
-              'w-4 h-4 rounded border flex items-center justify-center shrink-0',
-              isSelected 
-                ? 'bg-[var(--accent)] border-[var(--accent)]' 
-                : 'border-[var(--border-color)]'
-            )}
-          >
-            {isSelected && <Check size={10} className="text-[var(--text-primary)]" />}
-          </div>
-          {/* Status dot: red for uncommitted, green for clean */}
-          <div className="relative">
-            {repo.hasUncommittedChanges ? (
-              <Circle size={8} className="fill-red-500 text-red-500" />
-            ) : (
-              <Circle size={8} className="fill-green-500 text-green-500" />
-            )}
-          </div>
-          <span style={{ color: 'var(--text-primary)' }}>{repo.name}</span>
-        </div>
-        
-        {/* Git remote URL */}
-        <div className="text-xs pl-7" style={{ color: 'var(--text-muted)' }}>
-          {repo.remoteUrl || '无远程仓库'}
-        </div>
-      </div>
-
-      {/* Popover on hover */}
-      {showPopover && (
+    <Tooltip>
+      <TooltipTrigger asChild>
         <div
-          className="absolute left-0 top-full mt-1 p-2 rounded shadow-lg z-50 text-xs min-w-[200px]"
-          style={{ 
-            backgroundColor: 'var(--bg-tertiary)', 
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-color)'
-          }}
-          onMouseEnter={() => { if (timerRef.current) clearTimeout(timerRef.current) }}
-          onMouseLeave={handleMouseLeave}
+          className={cn(
+            'p-2 rounded cursor-pointer text-sm flex flex-col gap-1',
+            'hover:bg-[var(--bg-hover)]',
+            isSelected && 'bg-[var(--bg-hover)]'
+          )}
+          onClick={onToggle}
         >
-          <div className="font-medium mb-1">仓库目录</div>
-          <div className="text-[var(--text-muted)] break-all mb-2">{repo.path}</div>
+          {/* Repo name with status indicator and checkbox */}
+          <div className="flex items-center gap-2">
+            {/* Checkbox */}
+            <div 
+              className={cn(
+                'w-4 h-4 rounded border flex items-center justify-center shrink-0',
+                isSelected 
+                  ? 'bg-[var(--accent)] border-[var(--accent)]' 
+                  : 'border-[var(--border-color)]'
+              )}
+            >
+              {isSelected && <Check size={10} className="text-[var(--text-primary)]" />}
+            </div>
+            {/* Status dot: red for uncommitted, green for clean */}
+            <div className="relative">
+              {repo.hasUncommittedChanges ? (
+                <Circle size={8} className="fill-red-500 text-red-500" />
+              ) : (
+                <Circle size={8} className="fill-green-500 text-green-500" />
+              )}
+            </div>
+            <span style={{ color: 'var(--text-primary)' }}>{repo.name}</span>
+          </div>
+          
+          {/* Git remote URL */}
+          <div className="text-xs pl-7" style={{ color: 'var(--text-muted)' }}>
+            {repo.remoteUrl || '无远程仓库'}
+          </div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-[300px]">
+        <div className="space-y-1">
+          <div><span className="font-medium">仓库目录:</span> {repo.path}</div>
           {repo.hasUncommittedChanges && (
-            <>
-              <div className="font-medium mb-1">待提交文件</div>
-              <div style={{ color: 'var(--text-muted)' }}>
-                {repo.uncommittedCount} 个文件
-              </div>
-            </>
+            <div><span className="font-medium">待提交文件:</span> {repo.uncommittedCount} 个文件</div>
           )}
         </div>
-      )}
-    </div>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -286,20 +258,29 @@ function GitView() {
           <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>源代码管理</span>
         </div>
         <div className="flex items-center gap-1">
-          <button 
-            className="p-1 rounded hover:bg-[var(--bg-hover)]" 
-            title="刷新"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <RefreshCw size={14} />
-          </button>
-          <button 
-            className="p-1 rounded hover:bg-[var(--bg-hover)]" 
-            title="分支操作"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <ChevronDown size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button 
+                className="p-1 rounded hover:bg-[var(--bg-hover)] cursor-pointer" 
+                style={{ color: 'var(--text-muted)' }}
+                onClick={handleRefresh}
+              >
+                <RefreshCw size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>刷新</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button 
+                className="p-1 rounded hover:bg-[var(--bg-hover)] cursor-pointer" 
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <ChevronDown size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>分支操作</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

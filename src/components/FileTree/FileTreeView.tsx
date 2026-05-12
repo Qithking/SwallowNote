@@ -6,6 +6,7 @@ import { openFolderDialog, createFile } from '@/lib/tauri'
 import { renameFile } from '@/lib/tauri'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -463,30 +464,48 @@ export function FileTreeView() {
       <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none" style={{ borderBottom: '1px solid var(--border-color)' }}>
         <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>资源管理器</span>
         <div className="flex items-center gap-0.5">
-          <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]" style={{ color: 'var(--text-muted)' }} onClick={handleOpenFolder}>
-            <FolderOpen size={14} />
-          </button>
-          <button
-            className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] disabled:opacity-40"
-            style={{ color: 'var(--text-muted)' }}
-            onClick={handleNewFile}
-            disabled={!isSelectedDirectory}
-            title="新建文件"
-          >
-            <FilePlus size={14} />
-          </button>
-          <button
-            className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] disabled:opacity-40"
-            style={{ color: 'var(--text-muted)' }}
-            onClick={handleNewFolder}
-            disabled={!isSelectedDirectory}
-            title="新建文件夹"
-          >
-            <FolderPlus size={14} />
-          </button>
-          <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)]" style={{ color: 'var(--text-muted)' }} onClick={() => loadRoot(rootPath!)}>
-            <RefreshCw size={14} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] cursor-pointer" style={{ color: 'var(--text-muted)' }} onClick={handleOpenFolder}>
+                <FolderOpen size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>打开文件夹</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
+                style={{ color: 'var(--text-muted)' }}
+                onClick={handleNewFile}
+                disabled={!isSelectedDirectory}
+              >
+                <FilePlus size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>新建文件</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
+                style={{ color: 'var(--text-muted)' }}
+                onClick={handleNewFolder}
+                disabled={!isSelectedDirectory}
+              >
+                <FolderPlus size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>新建文件夹</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] cursor-pointer" style={{ color: 'var(--text-muted)' }} onClick={() => loadRoot(rootPath!)}>
+                <RefreshCw size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>刷新</TooltipContent>
+          </Tooltip>
         </div>
       </div>
       <div className="flex-1 overflow-auto py-1">

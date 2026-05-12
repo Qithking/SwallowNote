@@ -3,12 +3,21 @@
  */
 import { FolderTree, Search, GitBranch, Settings } from 'lucide-react'
 import { useUIStore, SidebarView } from '@/stores'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'explorer', icon: FolderTree },
   { id: 'search', icon: Search },
   { id: 'git', icon: GitBranch },
 ]
+
+const titleMap: Record<string, string> = {
+  explorer: '资源管理器',
+  search: '搜索',
+  git: '源代码管理',
+  ai: 'AI 助手',
+  settings: '设置',
+}
 
 function ActivityBar() {
   const { sidebarView, setSidebarView, settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
@@ -22,57 +31,64 @@ function ActivityBar() {
         const Icon = item.icon
         const isActive = sidebarView === item.id
         return (
+          <Tooltip key={item.id}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  if (settingsPanelVisible) setSettingsPanelVisible(false)
+                  setSidebarView(item.id)
+                }}
+                className="w-[48px] h-[48px] flex items-center justify-center relative cursor-pointer"
+                style={{
+                  color: isActive ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--activity-hover)'
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'
+                }}
+              >
+                {isActive && (
+                  <div
+                    className="absolute left-0 top-0 bottom-0 w-[2px]"
+                    style={{ backgroundColor: 'var(--activity-activeBorder)' }}
+                  />
+                )}
+                <Icon size={22} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{titleMap[item.id]}</TooltipContent>
+          </Tooltip>
+        )
+      })}
+      {/* Settings button - opens settings panel in main content area */}
+      <Tooltip>
+        <TooltipTrigger asChild>
           <button
-            key={item.id}
-            onClick={() => {
-              if (settingsPanelVisible) setSettingsPanelVisible(false)
-              setSidebarView(item.id)
-            }}
+            onClick={() => setSettingsPanelVisible(true)}
             className="w-[48px] h-[48px] flex items-center justify-center relative"
             style={{
-              color: isActive ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
+              color: settingsPanelVisible ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
             }}
             onMouseEnter={(e) => {
-              if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--activity-hover)'
+              if (!settingsPanelVisible) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--activity-hover)'
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'
             }}
-            title={item.id}
           >
-            {isActive && (
+            {settingsPanelVisible && (
               <div
                 className="absolute left-0 top-0 bottom-0 w-[2px]"
                 style={{ backgroundColor: 'var(--activity-activeBorder)' }}
               />
             )}
-            <Icon size={22} />
+            <Settings size={22} />
           </button>
-        )
-      })}
-      {/* Settings button - opens settings panel in main content area */}
-      <button
-        onClick={() => setSettingsPanelVisible(true)}
-        className="w-[48px] h-[48px] flex items-center justify-center relative"
-        style={{
-          color: settingsPanelVisible ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
-        }}
-        onMouseEnter={(e) => {
-          if (!settingsPanelVisible) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--activity-hover)'
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'
-        }}
-        title="settings"
-      >
-        {settingsPanelVisible && (
-          <div
-            className="absolute left-0 top-0 bottom-0 w-[2px]"
-            style={{ backgroundColor: 'var(--activity-activeBorder)' }}
-          />
-        )}
-        <Settings size={22} />
-      </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">设置</TooltipContent>
+      </Tooltip>
     </div>
   )
 }

@@ -12,3 +12,9 @@ export {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from './ui/context-menu'
+export {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from './ui/tooltip'

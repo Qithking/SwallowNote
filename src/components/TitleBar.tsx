@@ -5,6 +5,7 @@
 import { Minus, Square, X, Sun, Moon, Monitor, Bot } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useUIStore } from '@/stores'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 function TitleBar() {
   const { theme, setTheme, rightPanelType, setRightPanelType } = useUIStore()
@@ -49,27 +50,35 @@ function TitleBar() {
 
       {/* Right: AI button + Theme toggle + Window controls */}
       <div className="flex items-center h-full">
-        <button
-          onClick={() => setRightPanelType(rightPanelType === 'ai' ? null : 'ai')}
-          className="h-full px-2 flex items-center justify-center"
-          style={{ color: rightPanelType === 'ai' ? 'var(--text-primary)' : 'var(--text-muted)' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
-          title="AI Assistant"
-        >
-          <Bot size={14} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setRightPanelType(rightPanelType === 'ai' ? null : 'ai')}
+              className="h-full px-2 flex items-center justify-center cursor-pointer"
+              style={{ color: rightPanelType === 'ai' ? 'var(--text-primary)' : 'var(--text-muted)' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+            >
+              <Bot size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>AI Assistant</TooltipContent>
+        </Tooltip>
 
-        <button
-          onClick={cycleTheme}
-          className="h-full px-2 flex items-center justify-center"
-          style={{ color: 'var(--text-muted)' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
-          title={`Theme: ${theme}`}
-        >
-          <ThemeIcon size={14} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={cycleTheme}
+              className="h-full px-2 flex items-center justify-center cursor-pointer"
+              style={{ color: 'var(--text-muted)' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+            >
+              <ThemeIcon size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>主题: {theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '系统'}</TooltipContent>
+        </Tooltip>
 
         <div className="flex items-center h-full">
           <button

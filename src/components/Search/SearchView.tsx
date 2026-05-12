@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Search, FileText, ChevronDown, ChevronRight, X } from 'lucide-react'
 import { searchInFiles, SearchResult as TSearchResult } from '@/lib/tauri'
 import { useWorkspaceStore, useEditorStore } from '@/stores'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 interface SearchResult extends TSearchResult {}
 
@@ -152,41 +153,53 @@ function SearchView() {
           
           {/* Search Options */}
           <div className="flex items-center h-full shrink-0 border-l" style={{ borderColor: 'var(--border-color)' }}>
-            <button
-              onClick={() => setCaseSensitive(!caseSensitive)}
-              className="flex items-center justify-center w-8 h-full cursor-pointer"
-              style={{ 
-                backgroundColor: caseSensitive ? 'var(--bg-hover)' : 'transparent',
-                color: caseSensitive ? 'var(--text-primary)' : 'var(--text-muted)'
-              }}
-              title="大小写匹配"
-            >
-              <span className="text-xs font-bold">Aa</span>
-            </button>
-            <button
-              onClick={() => setWholeWord(!wholeWord)}
-              className="flex items-center justify-center w-8 h-full cursor-pointer border-l"
-              style={{ 
-                backgroundColor: wholeWord ? 'var(--bg-hover)' : 'transparent',
-                color: wholeWord ? 'var(--text-primary)' : 'var(--text-muted)',
-                borderColor: 'var(--border-color)'
-              }}
-              title="全词匹配"
-            >
-              <span className="text-xs font-medium">ab</span>
-            </button>
-            <button
-              onClick={() => setUseRegex(!useRegex)}
-              className="flex items-center justify-center w-8 h-full cursor-pointer border-l"
-              style={{ 
-                backgroundColor: useRegex ? 'var(--bg-hover)' : 'transparent',
-                color: useRegex ? 'var(--text-primary)' : 'var(--text-muted)',
-                borderColor: 'var(--border-color)'
-              }}
-              title="正则表达式"
-            >
-              <span className="text-xs">.*</span>
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setCaseSensitive(!caseSensitive)}
+                  className="flex items-center justify-center w-8 h-full cursor-pointer"
+                  style={{ 
+                    backgroundColor: caseSensitive ? 'var(--bg-hover)' : 'transparent',
+                    color: caseSensitive ? 'var(--text-primary)' : 'var(--text-muted)'
+                  }}
+                >
+                  <span className="text-xs font-bold">Aa</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>大小写匹配</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setWholeWord(!wholeWord)}
+                  className="flex items-center justify-center w-8 h-full cursor-pointer border-l"
+                  style={{ 
+                    backgroundColor: wholeWord ? 'var(--bg-hover)' : 'transparent',
+                    color: wholeWord ? 'var(--text-primary)' : 'var(--text-muted)',
+                    borderColor: 'var(--border-color)'
+                  }}
+                >
+                  <span className="text-xs font-medium">ab</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>全词匹配</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setUseRegex(!useRegex)}
+                  className="flex items-center justify-center w-8 h-full cursor-pointer border-l"
+                  style={{ 
+                    backgroundColor: useRegex ? 'var(--bg-hover)' : 'transparent',
+                    color: useRegex ? 'var(--text-primary)' : 'var(--text-muted)',
+                    borderColor: 'var(--border-color)'
+                  }}
+                >
+                  <span className="text-xs">.*</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>正则表达式</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -227,30 +240,35 @@ function SearchView() {
               return (
                 <div key={result.file_path}>
                   {/* File header - VSCode style */}
-                  <div
-                    className="flex items-center h-6 px-2 cursor-pointer hover:bg-[var(--bg-hover)]"
-                    onClick={() => toggleFileExpanded(result.file_path)}
-                  >
-                    {/* Collapse/Expand arrow */}
-                    {isExpanded ? (
-                      <ChevronDown size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
-                    ) : (
-                      <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
-                    )}
-                    {/* File icon */}
-                    <FileText size={14} className="mr-1.5 shrink-0" style={{ color: 'var(--text-muted)' }} />
-                    {/* File name */}
-                    <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>
-                      {result.file_name}
-                    </span>
-                    {/* Match count badge */}
-                    <span className="ml-auto text-xs px-1 rounded shrink-0" style={{ 
-                      color: 'var(--text-muted)',
-                      backgroundColor: 'var(--bg-tertiary)'
-                    }}>
-                      {result.line_matches.length}
-                    </span>
-                  </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className="flex items-center h-6 px-2 cursor-pointer hover:bg-[var(--bg-hover)]"
+                        onClick={() => toggleFileExpanded(result.file_path)}
+                      >
+                        {/* Collapse/Expand arrow */}
+                        {isExpanded ? (
+                          <ChevronDown size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                        ) : (
+                          <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                        )}
+                        {/* File icon */}
+                        <FileText size={14} className="mr-1.5 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                        {/* File name */}
+                        <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>
+                          {result.file_name}
+                        </span>
+                        {/* Match count badge */}
+                        <span className="ml-auto text-xs px-1 rounded shrink-0" style={{ 
+                          color: 'var(--text-muted)',
+                          backgroundColor: 'var(--bg-tertiary)'
+                        }}>
+                          {result.line_matches.length}
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">{result.file_path}</TooltipContent>
+                  </Tooltip>
 
                   {/* Match lines - content aligned with file icon */}
                   {isExpanded && result.line_matches.map((match, idx) => (

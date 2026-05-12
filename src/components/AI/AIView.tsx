@@ -8,13 +8,14 @@ import {
   Send,
   Loader2,
   Sparkles,
-  RefreshCw,
   Copy,
   Check,
   FileText,
   Globe,
+  Settings,
   Wand2,
 } from 'lucide-react'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { cn } from '@/lib/utils'
 
 interface Message {
@@ -94,9 +95,14 @@ function AIView() {
           <Bot size={14} style={{ color: 'var(--text-muted)' }} />
           <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>AI Assistant</span>
         </div>
-        <button className="p-1 rounded hover:bg-[var(--bg-hover)] ml-auto" style={{ color: 'var(--text-muted)' }} title="Settings">
-          <RefreshCw size={14} style={{ color: 'inherit' }} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button className="p-1 rounded hover:bg-[var(--bg-hover)] ml-auto cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+              <Settings size={14} style={{ color: 'inherit' }} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>设置</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Messages */}

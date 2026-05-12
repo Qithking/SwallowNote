@@ -11,6 +11,7 @@ import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
 import { useUIStore } from '@/stores'
 import { useTheme } from '@/hooks'
+import { TooltipProvider } from '@/components'
 
 function App() {
   useTheme()
@@ -26,6 +27,7 @@ function App() {
   }
 
   return (
+    <TooltipProvider>
     <div
       className="h-screen w-screen flex flex-col overflow-hidden"
       style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 13 }}
@@ -76,6 +78,7 @@ function App() {
         </div>
       )}
     </div>
+    </TooltipProvider>
   )
 }
 
