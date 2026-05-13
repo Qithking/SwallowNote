@@ -29,7 +29,8 @@ function App() {
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isDragging) return
     const newWidth = e.clientX - 48
-    if (newWidth >= 150 && newWidth <= 400) {
+    const maxWidth = window.innerWidth * 0.5
+    if (newWidth >= 200 && newWidth <= maxWidth) {
       setSidebarWidth(newWidth)
     }
   }, [isDragging])
@@ -68,7 +69,7 @@ function App() {
       <TitleBar />
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden gap-x-1">
+      <div className="flex-1 flex overflow-hidden gap-x-0.5">
         {/* Activity Bar */}
         <ActivityBar />
 
@@ -85,12 +86,17 @@ function App() {
         {/* Resize Handle */}
         {!settingsPanelVisible && (
           <div
-            className="flex-shrink-0 w-[2px] h-full flex items-center justify-center cursor-col-resize hover:bg-border-color/50"
+            className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
             onMouseDown={handleMouseDown}
+            onMouseEnter={() => setIsHovering(true)}
+            onMouseLeave={() => setIsHovering(false)}
           >
             <div 
-              className="w-[1px] h-[100%] bg-theme-color rounded-full"
-              style={{ backgroundColor: 'var(--theme-color)' }}
+              className="w-[1px] h-[100%] rounded-full transition-opacity duration-200"
+              style={{ 
+                backgroundColor: 'var(--theme-color)',
+                opacity: isHovering || isDragging ? 1 : 0
+              }}
             />
           </div>
         )}
