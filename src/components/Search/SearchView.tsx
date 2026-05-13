@@ -2,27 +2,12 @@
  * SearchView Component - VSCode-like search with file content search support
  */
 import { useState, useEffect, useRef } from 'react'
-import { Search, FileText, ChevronDown, ChevronRight, X } from 'lucide-react'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Search, FileText, ChevronRight, ChevronDown, X } from 'lucide-react'
 import { searchInFiles, SearchResult as TSearchResult } from '@/lib/tauri'
 import { useWorkspaceStore, useEditorStore } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 interface SearchResult extends TSearchResult {}
-
-const FILE_TYPES = [
-  { value: 'all', label: '全部文件' },
-  { value: 'txt', label: '文本文件' },
-  { value: 'md', label: 'Markdown' },
-  { value: 'code', label: '代码文件' },
-  { value: 'json', label: 'JSON' },
-]
 
 function SearchView() {
   const { rootPath } = useWorkspaceStore()
@@ -30,7 +15,6 @@ function SearchView() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const [query, setQuery] = useState('')
-  const [fileType, setFileType] = useState('all')
   const [results, setResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [caseSensitive, setCaseSensitive] = useState(false)

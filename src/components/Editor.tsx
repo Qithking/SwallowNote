@@ -2,6 +2,7 @@
  * Editor Component - Main editor area
  * Shows the content of the active tab with appropriate editor
  */
+import { useEffect, useRef } from 'react'
 import { useEditorStore } from '@/stores'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { MarkdownEditor } from './editors/MarkdownEditor'
@@ -38,8 +39,19 @@ function WelcomeScreen() {
 }
 
 export function EditorView() {
-  const { tabs, activeTabId, updateTabContent } = useEditorStore()
+  const { tabs, activeTabId, updateTabContent, scrollToLine } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const scrollToLineRef = useRef(scrollToLine)
+
+  // Listen for scroll-to-line events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const line = (e as CustomEvent).detail.line
+      scrollToLineRef.current?.(line)
+    }
+    window.addEventListener('scroll-to-line', handler)
+    return () => window.removeEventListener('scroll-to-line', handler)
+  }, [])
 
   if (!activeTab) {
     return <WelcomeScreen />
@@ -55,7 +67,7 @@ export function EditorView() {
   switch (fileType) {
     case 'markdown':
       return (
-        <div className="flex-1 overflow-auto bg-[var(--bg-primary)]">
+        <div className="flex-1 overflow-hidden bg-[var(--bg-primary)]">
           {viewMode === 'source' ? (
             <CodeEditor
               content={activeTab.content}

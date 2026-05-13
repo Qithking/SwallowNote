@@ -10,6 +10,7 @@ import {
   Check,
   Loader2,
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { useGitStore, GitRepository } from '@/stores/git'
 import { scanGitRepos, GitRepositoryInfo, gitCommitAndPush } from '@/lib/tauri'
 import { useWorkspaceStore, useUIStore } from '@/stores'
@@ -94,7 +95,7 @@ function CommitSection({
   }
   
   return (
-    <div className="p-2 border-t flex flex-col gap-2" style={{ borderColor: 'var(--border-color)' }}>
+    <div className="p-2 border-b flex flex-col gap-2" style={{ borderColor: 'var(--border-color)' }}>
       <input
         type="text"
         placeholder="提交信息"
@@ -112,15 +113,15 @@ function CommitSection({
           }
         }}
       />
-      <button 
-        className="w-full h-8 px-3 text-xs rounded font-medium flex items-center justify-center gap-2"
-        style={{ backgroundColor: 'var(--accent)', color: 'var(--text-primary)' }}
+      <Button
+        className="w-full h-8 text-xs"
+        variant="default"
         onClick={handleCommit}
         disabled={isCommitting}
       >
         {isCommitting && <Loader2 size={12} className="animate-spin" />}
         {isCommitting ? '提交中...' : '提交'}
-      </button>
+      </Button>
     </div>
   )
 }
@@ -255,34 +256,34 @@ function GitView() {
       <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none" style={{ borderBottom: '1px solid var(--border-color)' }}>
         <div className="flex items-center gap-2">
           <GitBranch size={14} style={{ color: 'var(--text-muted)' }} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>源代码管理</span>
+          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>同步管理</span>
         </div>
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <button 
-                className="p-1 rounded hover:bg-[var(--bg-hover)] cursor-pointer" 
-                style={{ color: 'var(--text-muted)' }}
-                onClick={handleRefresh}
-              >
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh}>
                 <RefreshCw size={14} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>刷新</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button 
-                className="p-1 rounded hover:bg-[var(--bg-hover)] cursor-pointer" 
-                style={{ color: 'var(--text-muted)' }}
-              >
+              <Button variant="ghost" size="icon" className="h-7 w-7">
                 <ChevronDown size={14} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>分支操作</TooltipContent>
           </Tooltip>
         </div>
       </div>
+
+      {/* Commit Message Input and Sync Button */}
+      <CommitSection 
+        selectedRepos={selectedRepos}
+        allRepos={repositories}
+        onRefresh={handleRefresh}
+      />
 
       {/* Repositories List */}
       <div className="flex-1 overflow-auto p-2">
@@ -303,14 +304,7 @@ function GitView() {
             ))}
           </div>
         )}
-      </div>
-
-      {/* Commit Message Input and Sync Button */}
-      <CommitSection 
-        selectedRepos={selectedRepos}
-        allRepos={repositories}
-        onRefresh={handleRefresh}
-      />
+      </div>      
     </div>
   )
 }

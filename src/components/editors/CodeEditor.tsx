@@ -23,6 +23,7 @@ interface CodeEditorProps {
   filename: string
   onChange?: (content: string) => void
   className?: string
+  scrollToLine?: (lineNumber: number) => void
 }
 
 const languageExtensions: Record<string, () => any> = {
@@ -44,6 +45,33 @@ const languageExtensions: Record<string, () => any> = {
 export function CodeEditor({ content, filename, onChange, className = '' }: CodeEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
+
+  // 滚动到指定行
+  const scrollToLine = (lineNumber: number) => {
+    if (!viewRef.current) return
+    try {
+      const line = viewRef.current.state.doc.line(Math.min(lineNumber, viewRef.current.state.doc.lines))
+      viewRef.current.dispatch({
+        effects: EditorView.scrollIntoView(line.from, { y: 'center' })
+      })
+      viewRef.current.dispatch({
+        selection: { anchor: line.from },
+        effects: EditorView.scrollIntoView(line.from, { y: 'center' })
+      })
+    } catch (e) {
+      console.error('Failed to scroll to line:', e)
+    }
+  }
+
+  // Listen for scroll-to-line events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const line = (e as CustomEvent).detail.line
+      scrollToLine(line)
+    }
+    window.addEventListener('scroll-to-line', handler)
+    return () => window.removeEventListener('scroll-to-line', handler)
+  }, [])
 
   useEffect(() => {
     if (!editorRef.current) return

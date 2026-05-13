@@ -34,6 +34,7 @@ export interface EditorState {
   updateCursorPosition: (id: string, line: number, column: number) => void
   toggleViewMode: () => void
   getActiveTab: () => EditorTab | undefined
+  scrollToLine: (line: number) => void
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -95,6 +96,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   getActiveTab: () => {
     const state = get()
     return state.tabs.find((t) => t.id === state.activeTabId)
+  },
+  scrollToLine: (line: number) => {
+    // 触发窗口事件让编辑器滚动
+    window.dispatchEvent(new CustomEvent('scroll-to-line', { detail: { line } }))
   },
   toggleViewMode: () =>
     set((state) => {

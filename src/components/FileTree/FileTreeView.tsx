@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { FileText, FilePlus, FolderPlus, Image, Folder, FolderOpen, RefreshCw, ChevronRight, File } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { openFolderDialog, createFile } from '@/lib/tauri'
@@ -466,43 +467,33 @@ export function FileTreeView() {
         <div className="flex items-center gap-0.5">
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] cursor-pointer" style={{ color: 'var(--text-muted)' }} onClick={handleOpenFolder}>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleOpenFolder}>
                 <FolderOpen size={14} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>打开文件夹</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
-                style={{ color: 'var(--text-muted)' }}
-                onClick={handleNewFile}
-                disabled={!isSelectedDirectory}
-              >
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFile} disabled={!isSelectedDirectory}>
                 <FilePlus size={14} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>新建文件</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer"
-                style={{ color: 'var(--text-muted)' }}
-                onClick={handleNewFolder}
-                disabled={!isSelectedDirectory}
-              >
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFolder} disabled={!isSelectedDirectory}>
                 <FolderPlus size={14} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>新建文件夹</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="h-6 w-6 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] cursor-pointer" style={{ color: 'var(--text-muted)' }} onClick={() => loadRoot(rootPath!)}>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => loadRoot(rootPath!)}>
                 <RefreshCw size={14} />
-              </button>
+              </Button>
             </TooltipTrigger>
             <TooltipContent>刷新</TooltipContent>
           </Tooltip>

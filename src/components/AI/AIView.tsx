@@ -16,6 +16,7 @@ import {
   Wand2,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface Message {
@@ -97,9 +98,9 @@ function AIView() {
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="p-1 rounded hover:bg-[var(--bg-hover)] ml-auto cursor-pointer" style={{ color: 'var(--text-muted)' }}>
-              <Settings size={14} style={{ color: 'inherit' }} />
-            </button>
+            <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto">
+              <Settings size={14} />
+            </Button>
           </TooltipTrigger>
           <TooltipContent>设置</TooltipContent>
         </Tooltip>
