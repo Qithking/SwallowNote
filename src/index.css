@@ -186,6 +186,7 @@
   background: hsl(var(--muted-foreground) / 0.5);
 }
 
+
 /* Firefox support */
 .scrollable-area {
   scrollbar-width: none;

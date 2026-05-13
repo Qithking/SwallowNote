@@ -94,7 +94,7 @@ function App() {
       <TitleBar />
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden gap-x-0.5">
+      <div className="flex-1 flex overflow-hidden gap-x-0.5 pr-1">
         {/* Activity Bar */}
         <ActivityBar />
 
@@ -159,7 +159,7 @@ function App() {
 
         {/* Right Panel - moved outside editor, same level as sidebar */}
         {rightPanelType && (
-          <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] border-l" style={{ width: rightPanelWidth, background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+          <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] " style={{ width: rightPanelWidth, background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
             {renderRightPanel()}
           </div>
         )}
