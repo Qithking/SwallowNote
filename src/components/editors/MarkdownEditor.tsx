@@ -114,31 +114,34 @@ function BlockNoteInner({
     }
   }, [editor])
 
-  // 编辑器就绪后通知目录面板
+  // 编辑器就绪后发送目录数据
   useEffect(() => {
-    if (editor && editor.document) {
-      // 提取所有标题及其 block ID 和文本内容
-      const headings = editor.document
-        .filter(block => block.type.startsWith('heading'))
-        .map(block => {
-          // 从 block 内容中提取文本
-          let text = ''
-          const content = block.content as any[]
-          if (content && Array.isArray(content)) {
-            text = content
-              .map(c => typeof c === 'string' ? c : (c as any)?.text || '')
-              .join('')
-          }
-          return {
-            id: block.id,
-            text: text || '未命名标题',
-          }
-        })
-      
-      window.dispatchEvent(new CustomEvent('block-editor-ready', {
-        detail: { headings, isBlockNote: true }
-      }))
-    }
+    if (!editor || !editor.document) return
+    
+    const headings = editor.document
+      .filter(block => block.type.startsWith('heading'))
+      .map((block, index) => {
+        let text = ''
+        const content = block.content as any[]
+        if (content && Array.isArray(content)) {
+          text = content
+            .map(c => typeof c === 'string' ? c : (c as any)?.text || '')
+            .join('')
+        }
+        const levelMatch = block.type.match(/^heading(\d)$/)
+        const level = levelMatch ? parseInt(levelMatch[1]) : 1
+        
+        return {
+          id: block.id,
+          text: text || '未命名标题',
+          level,
+          index,
+        }
+      })
+    
+    window.dispatchEvent(new CustomEvent('block-editor-ready', {
+      detail: { headings, isBlockNote: true }
+    }))
   }, [editor, editor?.document?.length])
 
   const handleChange = async () => {

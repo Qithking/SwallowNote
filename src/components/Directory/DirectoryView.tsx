@@ -15,6 +15,12 @@ interface TocItem {
   blockId?: string
 }
 
+interface HeadingData {
+  id: string
+  text: string
+  level?: number
+}
+
 interface TreeNode {
   key: string
   title: string
@@ -78,41 +84,60 @@ function DirectoryView() {
   const [selectedId, setSelectedId] = useState<string>('')
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
 
-  // 监听 block IDs 更新事件
+  // 监听 BlockNote 编辑器就绪事件 - 直接使用 BlockNote 返回的目录数据
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail
-      if (detail.headings && Array.isArray(detail.headings)) {
-        // 通过文本内容匹配来设置 blockId
-        setToc(prev => prev.map(item => {
-          const matchingHeading = detail.headings.find((h: any) => 
-            h.text === item.text || h.text.trim() === item.text.trim()
-          )
-          return {
-            ...item,
-            blockId: matchingHeading?.id || item.id
-          }
+      if (detail.headings && Array.isArray(detail.headings) && detail.isBlockNote) {
+        // 使用 BlockNote 返回的目录数据
+        const newToc: TocItem[] = detail.headings.map((heading: HeadingData, index: number) => ({
+          id: `heading-${index}`,
+          text: heading.text,
+          level: heading.level || 1,
+          line: index + 1,
+          blockId: heading.id
         }))
+        // 只有当数据有效时才更新
+        if (newToc.length > 0) {
+          setToc(newToc)
+          setTreeData(buildTree(newToc))
+          setExpandedKeys(newToc.map(item => item.id))
+        }
       }
     }
     window.addEventListener('block-editor-ready', handler)
     return () => window.removeEventListener('block-editor-ready', handler)
   }, [])
 
+  // Tab 切换或内容变化时更新目录
   useEffect(() => {
-    if (activeTab?.content) {
-      const newToc = extractToc(activeTab.content)
-      setToc(newToc)
-      setTreeData(buildTree(newToc))
-      setExpandedKeys(newToc.map(item => item.id))
-      setSelectedId('')
-    } else {
+    if (!activeTab) {
       setToc([])
       setTreeData([])
       setExpandedKeys([])
       setSelectedId('')
+      return
     }
-  }, [activeTab?.content])
+
+    setSelectedId('')
+
+    // 检查是否是 markdown 文件
+    const isMarkdown = activeTab.name.toLowerCase().endsWith('.md')
+    if (!isMarkdown) {
+      setToc([])
+      setTreeData([])
+      setExpandedKeys([])
+      return
+    }
+
+    // 始终从文本提取目录
+    if (activeTab.content) {
+      const newToc = extractToc(activeTab.content)
+      setToc(newToc)
+      setTreeData(buildTree(newToc))
+      setExpandedKeys(newToc.map(item => item.id))
+    }
+  }, [activeTab])
 
   // 滚动定位
   const scrollToPosition = useCallback((item: TocItem) => {
@@ -157,7 +182,7 @@ function DirectoryView() {
     
     return (
       <span
-        className={`flex items-center gap-1.5 text-sm cursor-pointer truncate ${isSelected ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'} hover:text-[var(--text-primary)]`}
+        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'text-[var(--theme-color)]' : 'text-[var(--text-secondary)]'}`}
         title={node.title}
       >
         <IconComponent size={12} className="shrink-0 opacity-70" />

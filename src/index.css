@@ -157,6 +157,31 @@
   background: hsl(var(--muted-foreground) / 0.3);
 }
 
+/* Directory tree custom styles - remove default selected background and border */
+.my-tree .rc-tree-node-content-wrapper {
+  background: transparent !important;
+  border: none !important;
+}
+
+.my-tree .rc-tree-node-content-wrapper:hover {
+  background: transparent !important;
+}
+
+.my-tree .rc-tree-node-content-wrapper.rc-tree-node-selected {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.my-tree li.rc-tree-node-selected > .rc-tree-node-content-wrapper {
+  background: transparent !important;
+  border: none !important;
+}
+.my-tree .rc-tree-treenode.rc-tree-treenode-selected{
+  background-color: hsl(var(--primary) / 0.1);
+  border: 0 !important;
+}
+
 .scrollable-area:hover::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
 }
