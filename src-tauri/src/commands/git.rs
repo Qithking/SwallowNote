@@ -9,6 +9,8 @@ pub struct GitRepositoryInfo {
     pub has_uncommitted_changes: bool,
     pub uncommitted_count: usize,
     pub current_branch: String,
+    pub is_submodule: bool,
+    pub parent_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -134,11 +136,41 @@ pub async fn git_push(path: String) -> Result<(), String> {
 /// Commit and push in one command
 #[tauri::command]
 pub async fn git_commit_and_push(path: String, message: String) -> Result<(), String> {
-    // Stage all changes
+    // Stage all changes including submodules
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
 
-    // Commit
-    run_git(&path, &["commit", "-m", &message]).map_err(|e| format!("Failed to commit: {}", e))?;
+    // Check if there are submodule changes that need special handling
+    let status_output = run_git(&path, &["status", "--porcelain"])?;
+    
+    // Check for submodule with modified content (submodule internal changes)
+    let has_submodule_modified = status_output.contains("modified content");
+    let has_submodule_untracked = status_output.contains("untracked content");
+    
+    if has_submodule_modified || has_submodule_untracked {
+        // First try to commit changes in submodules
+        match commit_submodules(&path, &message) {
+            Ok(_) => {
+                // Submodules committed successfully, now stage and commit parent
+                run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
+                run_git(&path, &["commit", "-m", &message]).map_err(|e| format!("Failed to commit: {}", e))?;
+            }
+            Err(e) => {
+                // Submodule commit failed - this means submodule has uncommitted changes
+                // Return specific error for frontend to handle
+                return Err(format!("子模块内部有未提交的变更，请先在子模块内提交"));
+            }
+        }
+    } else {
+        // Regular commit
+        let commit_result = run_git(&path, &["commit", "-m", &message]);
+        if let Err(e) = commit_result {
+            // Check if this is a submodule reference update issue
+            if e.contains("submodule") && (e.contains("modified") || e.contains("new commits")) {
+                return Err(format!("子模块引用需要更新，请先提交子模块变更"));
+            }
+            return Err(format!("Failed to commit: {}", e));
+        }
+    }
 
     // Push - only if remote exists
     let remote_url = get_remote_url(&path);
@@ -146,6 +178,42 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
         run_git(&path, &["push"]).map_err(|e| format!("Failed to push: {}", e))?;
     }
 
+    Ok(())
+}
+
+fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
+    // Get list of submodules
+    let submodule_output = run_git(path, &["submodule", "status"])?;
+    
+    for line in submodule_output.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // Parse submodule line: e.g., " 1a2b3c4... (heads/main)" or "1a2b3c4... (heads/main)"
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+        
+        let submodule_path = parts.last().unwrap().trim_matches(&['(', ')'][..]);
+        let submodule_full_path = format!("{}/{}", path, submodule_path);
+        
+        // Check if submodule has uncommitted changes
+        let submodule_status = run_git(&submodule_full_path, &["status", "--porcelain"])?;
+        if !submodule_status.trim().is_empty() {
+            // Stage and commit in submodule
+            run_git(&submodule_full_path, &["add", "-A"])?;
+            if let Err(e) = run_git(&submodule_full_path, &["commit", "-m", message]) {
+                // If submodule commit fails (no changes), that's okay
+                if !e.contains("nothing to commit") && !e.contains("working tree clean") {
+                    return Err(e);
+                }
+            }
+        }
+    }
+    
+    // Now stage the submodule reference changes in parent
+    run_git(path, &["add", "-A"])?;
     Ok(())
 }
 
@@ -179,11 +247,11 @@ pub async fn scan_git_repos(root_path: String) -> Result<Vec<GitRepositoryInfo>,
     }
 
     let mut repos = Vec::new();
-    scan_dir_recursive(root, &mut repos)?;
+    scan_dir_recursive(root, &mut repos, None)?;
     Ok(repos)
 }
 
-fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>) -> Result<(), String> {
+fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_path: Option<String>) -> Result<(), String> {
     // Skip common non-repo directories
     let dir_name = dir.file_name()
         .and_then(|n| n.to_str())
@@ -200,7 +268,7 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>) -> Result<
 
     // Check if this directory is a git repo
     let git_dir = dir.join(".git");
-    if git_dir.exists() && git_dir.is_dir() {
+    if git_dir.exists() {
         let repo_name = dir.file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
@@ -208,8 +276,15 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>) -> Result<
         
         let path_str = dir.to_string_lossy().to_string();
         
+        // Check if .git is a file (indicating a submodule)
+        let is_submodule = git_dir.is_file();
+        
         // Get remote URL
-        let remote_url = get_remote_url(&path_str).ok();
+        let remote_url = if is_submodule {
+            get_remote_url(&path_str).ok()
+        } else {
+            get_remote_url(&path_str).ok()
+        };
         
         // Get current branch
         let current_branch = get_branch(&path_str).unwrap_or_else(|_| "unknown".to_string());
@@ -224,6 +299,8 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>) -> Result<
             has_uncommitted_changes: has_changes,
             uncommitted_count: change_count,
             current_branch,
+            is_submodule,
+            parent_path,
         });
         
         // Don't recurse into git repos (to avoid submodules being counted separately)
@@ -235,7 +312,7 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>) -> Result<
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                scan_dir_recursive(&path, repos)?;
+                scan_dir_recursive(&path, repos, parent_path.clone())?;
             }
         }
     }
@@ -289,6 +366,16 @@ fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(stderr)
+        if stderr.is_empty() {
+            // 如果 stderr 为空，尝试从 stdout 获取错误信息
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !stdout.is_empty() {
+                Err(stdout)
+            } else {
+                Err("Git command failed with no output".to_string())
+            }
+        } else {
+            Err(stderr)
+        }
     }
 }

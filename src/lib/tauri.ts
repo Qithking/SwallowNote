@@ -164,6 +164,8 @@ export interface GitRepositoryInfo {
   has_uncommitted_changes: boolean
   uncommitted_count: number
   current_branch: string
+  is_submodule: boolean
+  parent_path: string | null
 }
 
 export async function scanGitRepos(rootPath: string): Promise<GitRepositoryInfo[]> {

@@ -33,7 +33,7 @@ function CommitSection({
 
   const handleCommit = async () => {
     if (!commitMessage.trim()) {
-      showToast('请输入提交信息')
+      showToast('请输入提交信息', 'error')
       return
     }
 
@@ -45,14 +45,14 @@ function CommitSection({
       : allRepos.filter(r => r.hasUncommittedChanges)
 
     if (reposToCommit.length === 0) {
-      showToast('没有需要提交的仓库或没有变更')
+      showToast('没有需要提交的仓库或没有变更', 'info')
       return
     }
 
     // 进一步过滤：移除没有实际变更的仓库
     const reposWithChanges = reposToCommit.filter(r => r.hasUncommittedChanges)
     if (reposWithChanges.length === 0 && selectedRepos.length === 0) {
-      showToast('没有需要提交的变更')
+      showToast('没有需要提交的变更', 'info')
       return
     }
     
@@ -68,13 +68,24 @@ function CommitSection({
         await gitCommitAndPush(repo.path, commitMessage)
         successCount++
       } catch (e) {
-        console.error('Failed to commit and push:', repo.path, e)
-        // 忽略"没有需要提交的变更"错误
-        if (String(e).includes('没有需要提交的变更')) {
+        const errorMessage = String(e).trim()
+        console.error('Failed to commit and push:', repo.path, errorMessage)
+        // 忽略"没有需要提交的变更"错误，包括子模块场景
+        if (errorMessage.includes('没有需要提交的变更') || 
+            errorMessage.includes('nothing to commit') ||
+            errorMessage.includes('working tree clean') ||
+            errorMessage.includes('no changes added to commit') ||
+            (errorMessage.includes('modified content') && errorMessage.includes('submodule'))) {
           successCount++
+        } else if (errorMessage.includes('子模块内部有未提交的变更')) {
+          successCount++
+          showToast(`${repo.name}: 子模块内部有未提交的变更，请先在子模块内提交`, 'error')
+        } else if (errorMessage.includes('子模块引用需要更新')) {
+          successCount++
+          showToast(`${repo.name}: 子模块引用需要更新，请先提交子模块变更`, 'error')
         } else {
           failCount++
-          showToast(`${repo.name}: ${e}`)
+          showToast(`${repo.name}: ${errorMessage || '未知错误'}`, 'error')
         }
       }
     }
@@ -87,10 +98,10 @@ function CommitSection({
     
     if (failCount === 0) {
       if (successCount > 0) {
-        showToast(`已提交 ${successCount} 个仓库`)
+        showToast(`已提交 ${successCount} 个仓库`, 'success')
       }
     } else {
-      showToast(`成功 ${successCount} 个，失败 ${failCount} 个`)
+      showToast(`成功 ${successCount} 个，失败 ${failCount} 个`, 'error')
     }
   }
   
@@ -143,7 +154,8 @@ function RepositoryItem({
           className={cn(
             'p-2 rounded cursor-pointer text-sm flex flex-col gap-1',
             'hover:bg-[var(--bg-hover)]',
-            isSelected && 'bg-[var(--bg-hover)]'
+            isSelected && 'bg-[var(--bg-hover)]',
+            repo.isSubmodule && 'pl-4'
           )}
           onClick={onToggle}
         >
@@ -168,6 +180,10 @@ function RepositoryItem({
                 <Circle size={8} className="fill-green-500 text-green-500" />
               )}
             </div>
+            {/* Submodule indicator */}
+            {repo.isSubmodule && (
+              <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>子模块</span>
+            )}
             <span style={{ color: 'var(--text-primary)' }}>{repo.name}</span>
           </div>
           
@@ -180,6 +196,9 @@ function RepositoryItem({
       <TooltipContent side="right" className="max-w-[300px]">
         <div className="space-y-1">
           <div><span className="font-medium">仓库目录:</span> {repo.path}</div>
+          {repo.isSubmodule && repo.parentPath && (
+            <div><span className="font-medium">父仓库:</span> {repo.parentPath}</div>
+          )}
           {repo.hasUncommittedChanges && (
             <div><span className="font-medium">待提交文件:</span> {repo.uncommittedCount} 个文件</div>
           )}
@@ -210,6 +229,8 @@ function GitView() {
           uncommittedCount: repo.uncommitted_count,
           currentBranch: repo.current_branch,
           branches: [],
+          isSubmodule: repo.is_submodule,
+          parentPath: repo.parent_path,
         }))
         setRepositories(storeRepos)
         // Clear selection when repos change
@@ -243,6 +264,8 @@ function GitView() {
         uncommittedCount: repo.uncommitted_count,
         currentBranch: repo.current_branch,
         branches: [],
+        isSubmodule: repo.is_submodule,
+        parentPath: repo.parent_path,
       }))
       setRepositories(storeRepos)
     } catch (e) {

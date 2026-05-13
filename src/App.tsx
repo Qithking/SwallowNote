@@ -12,10 +12,12 @@ import { HistoryView } from '@/components/History/HistoryView'
 import { useUIStore } from '@/stores'
 import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
+import { ToastProvider, ToastViewport, Toast, ToastClose, ToastDescription, toastVariants, toastViewportVariants, toastCloseVariants, toastDescriptionVariants } from '@/components/ui/toast'
+import { AlertCircle, CheckCircle, Info } from 'lucide-react'
 
 function App() {
   useTheme()
-  const { settingsPanelVisible, toastMessage, rightPanelType } = useUIStore()
+  const { settingsPanelVisible, toasts, dismissToast, rightPanelType } = useUIStore()
 
   const renderRightPanel = () => {
     switch (rightPanelType) {
@@ -65,18 +67,25 @@ function App() {
       </div>
 
       {/* Toast Notification */}
-      {toastMessage && (
-        <div
-          className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[99999] px-4 py-2 rounded-md text-sm shadow-lg animate-in fade-in slide-in-from-bottom-2"
-          style={{
-            backgroundColor: 'var(--bg-secondary)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-color)',
-          }}
-        >
-          {toastMessage}
-        </div>
-      )}
+      <ToastProvider>
+        <ToastViewport className={toastViewportVariants}>
+          {toasts.map((toast) => (
+            <Toast key={toast.id} className={toastVariants}>
+              {toast.type === 'error' && (
+                <AlertCircle className="w-4 h-4 mr-2 text-red-500 shrink-0" />
+              )}
+              {toast.type === 'success' && (
+                <CheckCircle className="w-4 h-4 mr-2 text-green-500 shrink-0" />
+              )}
+              {toast.type === 'info' && (
+                <Info className="w-4 h-4 mr-2 text-blue-500 shrink-0" />
+              )}
+              <ToastDescription className={toastDescriptionVariants}>{toast.message}</ToastDescription>
+              <ToastClose className={toastCloseVariants} onClick={() => dismissToast(toast.id)} />
+            </Toast>
+          ))}
+        </ToastViewport>
+      </ToastProvider>
     </div>
     </TooltipProvider>
   )

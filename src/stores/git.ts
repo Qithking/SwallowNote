@@ -16,6 +16,8 @@ export interface GitRepository {
   uncommittedCount: number
   currentBranch: string
   branches: GitBranch[]
+  isSubmodule: boolean
+  parentPath: string | null
 }
 
 export interface GitState {
