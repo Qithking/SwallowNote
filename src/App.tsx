@@ -31,14 +31,14 @@ function App() {
   return (
     <TooltipProvider>
     <div
-      className="h-screen w-screen flex flex-col overflow-hidden"
-      style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 13 }}
+      className="h-screen w-screen flex flex-col overflow-hidden p-1"
+      style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
     >
       {/* Title Bar */}
       <TitleBar />
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden gap-x-1">
         {/* Activity Bar */}
         <ActivityBar />
 
@@ -46,7 +46,7 @@ function App() {
         {!settingsPanelVisible && <Sidebar />}
 
         {/* Editor Area with optional AI Panel */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary)'}}>
           {settingsPanelVisible ? (
             <SettingsView />
           ) : (
@@ -64,6 +64,11 @@ function App() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className='flex overflow-hidden h-8'>
+          <div className='w-1/2'></div>
+          <div className='flex-auto'></div>
       </div>
 
       {/* Toast Notification */}

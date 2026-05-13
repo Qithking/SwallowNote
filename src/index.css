@@ -26,8 +26,8 @@
     --radius: 0.5rem;
 
     /* UI Component Colors - Light */
-    --bg-primary: #ffffff;
-    --bg-secondary: transparent;
+    --bg-primary: #EDEFF2;
+    --bg-secondary: #ffffff;
     --bg-tertiary: transparent;
     --bg-hover: rgba(0, 0, 0, 0.04);
     --bg-active: rgba(0, 0, 0, 0.08);
@@ -58,6 +58,11 @@
     /* Theme color for UI accents (default blue) */
     --theme-color: hsl(221.2, 83.2%, 53.3%);
     --theme-color-hover: hsl(221.2, 83.2%, 60%);
+
+    --font-size: 12px;
+    --font-size-sm: 10px;
+    --font-size-md: 14px;
+    --font-size-lg: 16px;
   }
 
   .dark {
@@ -144,4 +149,14 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
+}
+.activity-bar:hover{
+  background-color: hsl(var(--primary) / 0.1);
+}
+.activebg {
+  border: 1px solid var(--theme-color);
+  background-color: hsl(var(--primary) / 0.1);
+}
+.activebg-no-border {
+  background-color: hsl(var(--primary) / 0.1);
 }

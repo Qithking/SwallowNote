@@ -24,7 +24,7 @@ function ActivityBar() {
 
   return (
     <div
-      className="w-[48px] flex flex-col items-center pt-1 shrink-0 border-r"
+      className="w-[40px] flex flex-col items-center pt-1 shrink-0 activity-bar"
       style={{ backgroundColor: 'var(--activity-bg)', borderColor: 'var(--border-color)' }}
     >
       {activityItems.map((item) => {
@@ -38,24 +38,12 @@ function ActivityBar() {
                   if (settingsPanelVisible) setSettingsPanelVisible(false)
                   setSidebarView(item.id)
                 }}
-                className="w-[48px] h-[48px] flex items-center justify-center relative cursor-pointer"
+                className={`w-[36px] h-[36px] flex items-center justify-center relative cursor-pointer rounded-lg ${isActive ? 'bg-primary/10' : ''}`}
                 style={{
                   color: isActive ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--activity-hover)'
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'
-                }}
-              >
-                {isActive && (
-                  <div
-                    className="absolute left-0 top-0 bottom-0 w-[2px]"
-                    style={{ backgroundColor: 'var(--activity-activeBorder)' }}
-                  />
-                )}
-                <Icon size={22} />
+                }}                
+              >               
+                <Icon size={18} />
               </button>
             </TooltipTrigger>
             <TooltipContent side="right">{titleMap[item.id]}</TooltipContent>
@@ -66,25 +54,13 @@ function ActivityBar() {
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            onClick={() => setSettingsPanelVisible(true)}
-            className="w-[48px] h-[48px] flex items-center justify-center relative"
+            onClick={() => {setSettingsPanelVisible(true);setSidebarView('settings')}}
+            className={`w-[36px] h-[36px] flex items-center justify-center relative cursor-pointer rounded-lg ${settingsPanelVisible ? 'bg-primary/10' : ''}`}
             style={{
               color: settingsPanelVisible ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
-            }}
-            onMouseEnter={(e) => {
-              if (!settingsPanelVisible) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--activity-hover)'
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'
-            }}
-          >
-            {settingsPanelVisible && (
-              <div
-                className="absolute left-0 top-0 bottom-0 w-[2px]"
-                style={{ backgroundColor: 'var(--activity-activeBorder)' }}
-              />
-            )}
-            <Settings size={22} />
+            }}            
+          >            
+            <Settings size={18} />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">设置</TooltipContent>

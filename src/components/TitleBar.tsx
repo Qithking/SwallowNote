@@ -38,8 +38,7 @@ function TitleBar() {
   return (
     <div
       data-tauri-drag-region
-      className="h-[30px] flex items-center justify-between select-none"
-      style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)' }}
+      className="h-[30px] flex items-center justify-between select-none"     
     >
       {/* Left: App name */}
       <div className="flex items-center gap-1 px-3" data-tauri-drag-region>
@@ -83,7 +82,7 @@ function TitleBar() {
         <div className="flex items-center h-full">
           <button
             onClick={handleMinimize}
-            className="h-full w-[46px] flex items-center justify-center"
+            className="h-full w-[40px] flex items-center justify-center"
             style={{ color: 'var(--text-muted)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
@@ -92,7 +91,7 @@ function TitleBar() {
           </button>
           <button
             onClick={handleMaximize}
-            className="h-full w-[46px] flex items-center justify-center"
+            className="h-full w-[40px] flex items-center justify-center"
             style={{ color: 'var(--text-muted)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
@@ -101,7 +100,7 @@ function TitleBar() {
           </button>
           <button
             onClick={handleClose}
-            className="h-full w-[46px] flex items-center justify-center"
+            className="h-full w-[40px] flex items-center justify-center"
             style={{ color: 'var(--text-muted)' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = '#c42b1c'; (e.currentTarget as HTMLElement).style.color = '#ffffff' }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLElement).style.color = '' }}

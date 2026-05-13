@@ -29,7 +29,7 @@ function UnsupportedEditor({ filename, reason }: UnsupportedEditorProps) {
 
 function WelcomeScreen() {
   return (
-    <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-muted)]">
+    <div className="flex-1 flex items-center justify-center  text-[var(--text-muted)]">
       <div className="text-center">
         <p className="text-lg">Welcome to SwallowNote</p>
         <p className="text-sm mt-2">Open a file or create a new one to start editing</p>
@@ -67,7 +67,7 @@ export function EditorView() {
   switch (fileType) {
     case 'markdown':
       return (
-        <div className="flex-1 overflow-hidden bg-[var(--bg-primary)]">
+        <div className="flex-1 overflow-hidden">
           {viewMode === 'source' ? (
             <CodeEditor
               content={activeTab.content}
@@ -87,7 +87,7 @@ export function EditorView() {
 
     case 'code':
       return (
-        <div className="flex-1 flex overflow-hidden bg-[var(--bg-primary)]">
+        <div className="flex-1 flex overflow-hidden ">
           <CodeEditor
             content={activeTab.content}
             filename={activeTab.name}

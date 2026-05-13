@@ -463,8 +463,8 @@ export function FileTreeView() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none" style={{ borderBottom: '1px solid var(--border-color)' }}>
-        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>资源管理器</span>
-        <div className="flex items-center gap-0.5">
+        <span className="text-xs font-medium uppercase tracking-wider" style={{ fontSize: 'var(--font-size-md)' }}>资源管理器</span>
+        <div className="flex items-center">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleOpenFolder}>

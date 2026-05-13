@@ -37,7 +37,7 @@ function EditorToolbar() {
   }
 
   return (
-    <div className="flex items-center justify-between h-[22px] px-3 text-[11px] border-b border-border bg-[var(--bg-tertiary)] text-[var(--text-muted)] select-none">
+    <div className="flex items-center justify-between h-[22px] p-3 text-[11px]  bg-[var(--bg-tertiary)] text-[var(--text-muted)] select-none">
       {/* Left: File path */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
         <span className="truncate">{path}</span>
