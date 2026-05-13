@@ -13,11 +13,41 @@ import { useUIStore } from '@/stores'
 import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
-import { Group, Panel, Separator } from 'react-resizable-panels'
+import { useState, useCallback, useEffect } from 'react'
 
 function App() {
   useTheme()
   const { settingsPanelVisible, rightPanelType } = useUIStore()
+  const [sidebarWidth, setSidebarWidth] = useState(240)
+  const [isDragging, setIsDragging] = useState(false)
+  const [isHovering, setIsHovering] = useState(false)
+
+  const handleMouseDown = useCallback((_e: React.MouseEvent) => {
+    setIsDragging(true)
+  }, [])
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging) return
+    const newWidth = e.clientX - 48
+    if (newWidth >= 150 && newWidth <= 400) {
+      setSidebarWidth(newWidth)
+    }
+  }, [isDragging])
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, handleMouseMove, handleMouseUp])
 
   const renderRightPanel = () => {
     switch (rightPanelType) {
@@ -43,7 +73,27 @@ function App() {
         <ActivityBar />
 
         {/* Sidebar - hidden when settings panel is open */}
-        {!settingsPanelVisible && <Sidebar />}
+        {!settingsPanelVisible && (
+          <div 
+            className="flex-shrink-0 overflow-hidden rounded-[var(--radius)]" 
+            style={{ width: sidebarWidth, background: 'var(--bg-secondary)' }}
+          >
+            <Sidebar />
+          </div>
+        )}
+
+        {/* Resize Handle */}
+        {!settingsPanelVisible && (
+          <div
+            className="flex-shrink-0 w-[2px] h-full flex items-center justify-center cursor-col-resize hover:bg-border-color/50"
+            onMouseDown={handleMouseDown}
+          >
+            <div 
+              className="w-[1px] h-[100%] bg-theme-color rounded-full"
+              style={{ backgroundColor: 'var(--theme-color)' }}
+            />
+          </div>
+        )}
 
         {/* Editor Area with optional AI Panel */}
               <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary)'}}>
@@ -66,7 +116,8 @@ function App() {
           </div>
       </div>
 
-      <div className='flex overflow-hidden h-8'>
+      {/* statusbar */}
+      <div className='flex overflow-hidden h-6'>
           <div className='w-1/2'></div>
           <div className='flex-auto'></div>
       </div>
