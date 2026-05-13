@@ -626,3 +626,22 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
   overflow-y: auto;
   overflow-x: hidden;
 }
+
+.blocknote-editor-container::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+}
+
+.blocknote-editor-container:hover::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.blocknote-editor-container:hover::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+.blocknote-editor-container:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}

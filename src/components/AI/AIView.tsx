@@ -107,7 +107,7 @@ function AIView() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-auto p-3 space-y-4">
+      <div className="flex-1 overflow-auto p-3 space-y-4 scrollable-area">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Sparkles size={32} className="mb-3 opacity-50" />

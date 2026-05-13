@@ -132,10 +132,10 @@
   }
 }
 
-/* Scrollbar styles */
+/* Scrollbar styles - hidden by default, visible on hover */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 0px;
+  height: 0px;
 }
 
 ::-webkit-scrollbar-track {
@@ -143,12 +143,31 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.3);
+  background: transparent;
   border-radius: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+/* When hovering over scrollable areas, show scrollbar */
+.scrollable-area:hover::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollable-area:hover::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+}
+
+.scrollable-area:hover::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Firefox support */
+.scrollable-area {
+  scrollbar-width: none;
+}
+
+.scrollable-area:hover {
+  scrollbar-width: thin;
 }
 .activity-bar:hover{
   background-color: hsl(var(--primary) / 0.1);

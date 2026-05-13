@@ -23,7 +23,7 @@ function Sidebar() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-auto w-full">
+      <div className="flex-1 overflow-auto w-full scrollable-area">
         {renderContent()}
       </div>
     </div>

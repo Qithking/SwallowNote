@@ -184,7 +184,7 @@ function SettingsView({ onClose }: SettingsViewProps) {
       </div>
 
       {/* Section Content */}
-      <div className="flex-1 p-4 overflow-auto">{renderSectionContent()}</div>
+      <div className="flex-1 p-4 overflow-auto scrollable-area">{renderSectionContent()}</div>
       </div>
     </div>
   )

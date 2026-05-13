@@ -190,7 +190,7 @@ function DirectoryView() {
           <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>目录</span>
         </div>
       </div>
-      <div className="flex-1 overflow-auto p-2">
+      <div className="flex-1 overflow-auto p-2 scrollable-area">
         {treeData.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
             <p className="text-sm">无目录</p>

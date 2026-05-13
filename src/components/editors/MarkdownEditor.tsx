@@ -151,7 +151,7 @@ function BlockNoteInner({
 
   return (
     <div className="blocknote-editor-container flex flex-col h-full">
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto scrollable-area">
         <BlockNoteView
           editor={editor}
           theme={blocknoteTheme}

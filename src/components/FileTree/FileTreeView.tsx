@@ -499,7 +499,7 @@ export function FileTreeView() {
           </Tooltip>
         </div>
       </div>
-      <div className="flex-1 overflow-auto py-1">
+      <div className="flex-1 overflow-auto py-1 scrollable-area">
         {isLoading ? (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
             <RefreshCw size={16} className="animate-spin" />

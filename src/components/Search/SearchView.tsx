@@ -212,7 +212,7 @@ function SearchView() {
       )}
 
       {/* Results List - VSCode style */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto scrollable-area">
         {!query ? (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
             <Search size={24} className="mb-2 opacity-50" />

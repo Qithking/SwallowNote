@@ -45,7 +45,7 @@ function HistoryView() {
           <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>历史</span>
         </div>
       </div>
-      <div className="flex-1 overflow-auto p-2">
+      <div className="flex-1 overflow-auto p-2 scrollable-area">
         <ul className="space-y-1">
           {mockHistory.map((item) => (
             <li

@@ -68,7 +68,7 @@ function SearchPanel() {
       </div>
 
       {/* Search Results */}
-      <div className="max-h-80 overflow-y-auto">
+      <div className="max-h-80 overflow-y-auto scrollable-area">
         {isSearching ? (
           <div className="p-4 text-center text-muted-foreground">
             {t('common.loading')}

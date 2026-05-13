@@ -309,7 +309,7 @@ function GitView() {
       />
 
       {/* Repositories List */}
-      <div className="flex-1 overflow-auto p-2">
+      <div className="flex-1 overflow-auto p-2 scrollable-area">
         {repositories.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <GitBranch size={32} className="mb-3 opacity-50" style={{ color: 'var(--text-muted)' }} />
