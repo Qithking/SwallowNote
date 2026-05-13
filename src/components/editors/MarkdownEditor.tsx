@@ -150,12 +150,14 @@ function BlockNoteInner({
   const blocknoteTheme = theme === 'dark' ? 'dark' : 'light'
 
   return (
-    <div className="blocknote-editor-container">
-      <BlockNoteView
-        editor={editor}
-        theme={blocknoteTheme}
-        onChange={handleChange}
-      />
+    <div className="blocknote-editor-container flex flex-col h-full">
+      <div className="flex-1 overflow-auto">
+        <BlockNoteView
+          editor={editor}
+          theme={blocknoteTheme}
+          onChange={handleChange}
+        />
+      </div>
     </div>
   )
 }
