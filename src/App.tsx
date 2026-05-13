@@ -19,36 +19,61 @@ function App() {
   useTheme()
   const { settingsPanelVisible, rightPanelType } = useUIStore()
   const [sidebarWidth, setSidebarWidth] = useState(240)
-  const [isDragging, setIsDragging] = useState(false)
-  const [isHovering, setIsHovering] = useState(false)
+  const [rightPanelWidth, setRightPanelWidth] = useState(288)
+  const [isDraggingLeft, setIsDraggingLeft] = useState(false)
+  const [isDraggingRight, setIsDraggingRight] = useState(false)
+  const [isHoveringLeft, setIsHoveringLeft] = useState(false)
+  const [isHoveringRight, setIsHoveringRight] = useState(false)
 
-  const handleMouseDown = useCallback((_e: React.MouseEvent) => {
-    setIsDragging(true)
+  const handleMouseDownLeft = useCallback(() => {
+    setIsDraggingLeft(true)
   }, [])
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!isDragging) return
+  const handleMouseMoveLeft = useCallback((e: MouseEvent) => {
+    if (!isDraggingLeft) return
     const newWidth = e.clientX - 48
     const maxWidth = window.innerWidth * 0.5
     if (newWidth >= 200 && newWidth <= maxWidth) {
       setSidebarWidth(newWidth)
     }
-  }, [isDragging])
+  }, [isDraggingLeft])
+
+  const handleMouseDownRight = useCallback(() => {
+    setIsDraggingRight(true)
+  }, [])
+
+  const handleMouseMoveRight = useCallback((e: MouseEvent) => {
+    if (!isDraggingRight) return
+    const newWidth = window.innerWidth - e.clientX
+    const maxWidth = window.innerWidth * 0.5
+    if (newWidth >= 250 && newWidth <= maxWidth) {
+      setRightPanelWidth(newWidth)
+    }
+  }, [isDraggingRight])
 
   const handleMouseUp = useCallback(() => {
-    setIsDragging(false)
+    setIsDraggingLeft(false)
+    setIsDraggingRight(false)
   }, [])
 
   useEffect(() => {
-    if (isDragging) {
-      document.addEventListener('mousemove', handleMouseMove)
+    if (isDraggingLeft) {
+      document.addEventListener('mousemove', handleMouseMoveLeft)
       document.addEventListener('mouseup', handleMouseUp)
       return () => {
-        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mousemove', handleMouseMoveLeft)
         document.removeEventListener('mouseup', handleMouseUp)
       }
     }
-  }, [isDragging, handleMouseMove, handleMouseUp])
+    if (isDraggingRight) {
+      document.addEventListener('mousemove', handleMouseMoveRight)
+      document.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMoveRight)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDraggingLeft, isDraggingRight, handleMouseMoveLeft, handleMouseMoveRight, handleMouseUp])
 
   const renderRightPanel = () => {
     switch (rightPanelType) {
@@ -76,50 +101,68 @@ function App() {
         {/* Sidebar - hidden when settings panel is open */}
         {!settingsPanelVisible && (
           <div 
-            className="flex-shrink-0 overflow-hidden rounded-[var(--radius)]" 
+            className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 
             style={{ width: sidebarWidth, background: 'var(--bg-secondary)' }}
           >
             <Sidebar />
           </div>
         )}
 
-        {/* Resize Handle */}
+        {/* Left Resize Handle */}
         {!settingsPanelVisible && (
           <div
             className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
-            onMouseDown={handleMouseDown}
-            onMouseEnter={() => setIsHovering(true)}
-            onMouseLeave={() => setIsHovering(false)}
+            onMouseDown={handleMouseDownLeft}
+            onMouseEnter={() => setIsHoveringLeft(true)}
+            onMouseLeave={() => setIsHoveringLeft(false)}
           >
             <div 
               className="w-[1px] h-[100%] rounded-full transition-opacity duration-200"
               style={{ 
                 backgroundColor: 'var(--theme-color)',
-                opacity: isHovering || isDragging ? 1 : 0
+                opacity: isHoveringLeft || isDraggingLeft ? 1 : 0
               }}
             />
           </div>
         )}
 
-        {/* Editor Area with optional AI Panel */}
-              <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary)'}}>
+        {/* Editor Area */}
+        <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary)'}}>
           {settingsPanelVisible ? (
             <SettingsView />
           ) : (
-                <div className="flex-1 flex overflow-hidden">
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                    <TabBar />
-                    <EditorToolbar />
-                    <EditorView />
-                  </div>
-                  {rightPanelType && (
-                    <div className="shrink-0 border-l" style={{ borderColor: 'var(--border-color)' }}>
-                      {renderRightPanel()}
-                    </div>
-                  )}
-                </div>
-        )}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <TabBar />
+              <EditorToolbar />
+              <EditorView />
+            </div>
+          )}
+        </div>
+
+        {/* Right Resize Handle */}
+        {rightPanelType && (
+          <div
+            className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
+            onMouseDown={handleMouseDownRight}
+            onMouseEnter={() => setIsHoveringRight(true)}
+            onMouseLeave={() => setIsHoveringRight(false)}
+          >
+            <div 
+              className="w-[1px] h-[100%] rounded-full transition-opacity duration-200"
+              style={{ 
+                backgroundColor: 'var(--theme-color)',
+                opacity: isHoveringRight || isDraggingRight ? 1 : 0
+              }}
+            />
           </div>
+        )}
+
+        {/* Right Panel - moved outside editor, same level as sidebar */}
+        {rightPanelType && (
+          <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] border-l" style={{ width: rightPanelWidth, background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+            {renderRightPanel()}
+          </div>
+        )}
       </div>
 
       {/* statusbar */}

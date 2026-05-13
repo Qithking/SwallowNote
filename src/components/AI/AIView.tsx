@@ -89,7 +89,7 @@ function AIView() {
   ]
 
   return (
-    <div className="flex flex-col h-full w-[300px]">
+    <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
         <div className="flex items-center gap-2">

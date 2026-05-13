@@ -22,11 +22,8 @@ function Sidebar() {
   }
 
   return (
-    <div
-      className="w-60 flex flex-col shrink-0 rounded-[var(--radius)]"
-      style={{ background: 'var(--bg-secondary)'}}
-    >
-      <div className="flex-1 overflow-auto w-full ">
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-auto w-full">
         {renderContent()}
       </div>
     </div>
