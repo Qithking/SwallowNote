@@ -13,6 +13,8 @@ src-tauri/target/
 .idea/
 *.swp
 *.swo
+.lingma/
+.qoder/
 
 # OS
 .DS_Store
