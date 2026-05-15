@@ -4,12 +4,12 @@
  * Note: This component is keyed by activeTab.id in Editor.tsx,
  * so it remounts on tab switch — no need to watch content changes.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { BlockNoteEditor, PartialBlock } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote } from '@blocknote/react'
 import { codeBlock } from '@blocknote/code-block'
-import { useUIStore } from '@/stores'
+import { useUIStore, useEditorSettingsStore } from '@/stores'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -30,6 +30,20 @@ function BlockNoteInner({
   onChange?: (content: string) => void
 }) {
   const theme = useUIStore((state) => state.theme)
+  const {
+    h1Size,
+    h2Size,
+    h3Size,
+    h4Size,
+    h5Size,
+    bodySize,
+    lineHeight,
+    letterSpacing,
+    normalPaddingVertical,
+    normalPaddingHorizontal,
+  } = useEditorSettingsStore()
+
+  const editorContainerRef = useRef<HTMLDivElement>(null)
 
   // codeBlock from @blocknote/code-block provides syntax highlighting via Shiki
   // It's passed as the `codeBlock` editor option, NOT as a blockSpec
@@ -117,7 +131,7 @@ function BlockNoteInner({
   // 编辑器就绪后发送目录数据
   useEffect(() => {
     if (!editor || !editor.document) return
-    
+
     const headings = editor.document
       .filter(block => block.type.startsWith('heading'))
       .map((block, index) => {
@@ -130,7 +144,7 @@ function BlockNoteInner({
         }
         const levelMatch = block.type.match(/^heading(\d)$/)
         const level = levelMatch ? parseInt(levelMatch[1]) : 1
-        
+
         return {
           id: block.id,
           text: text || '未命名标题',
@@ -138,7 +152,7 @@ function BlockNoteInner({
           index,
         }
       })
-    
+
     window.dispatchEvent(new CustomEvent('block-editor-ready', {
       detail: { headings, isBlockNote: true }
     }))
@@ -152,8 +166,65 @@ function BlockNoteInner({
 
   const blocknoteTheme = theme === 'dark' ? 'dark' : 'light'
 
+  // Apply typography settings by injecting a style element into the container
+  useEffect(() => {
+    if (!editorContainerRef.current) return
+
+    const container = editorContainerRef.current
+
+    // Remove existing style element if present
+    const existingStyle = container.querySelector('[data-typography-style]')
+    if (existingStyle) {
+      existingStyle.remove()
+    }
+
+    // Create new style element with typography settings
+    const styleElement = document.createElement('style')
+    styleElement.setAttribute('data-typography-style', 'true')
+    styleElement.textContent = `
+      .bn-heading-1 {
+        font-size: ${h1Size}px !important;
+        line-height: ${h1Size * 1.4}px !important;
+        letter-spacing: ${letterSpacing}px !important;
+      }
+      .bn-heading-2 {
+        font-size: ${h2Size}px !important;
+        line-height: ${h2Size * 1.4}px !important;
+        letter-spacing: ${letterSpacing}px !important;
+      }
+      .bn-heading-3 {
+        font-size: ${h3Size}px !important;
+        line-height: ${h3Size * 1.4}px !important;
+        letter-spacing: ${letterSpacing}px !important;
+      }
+      .bn-heading-4 {
+        font-size: ${h4Size}px !important;
+        line-height: ${h4Size * 1.4}px !important;
+        letter-spacing: ${letterSpacing}px !important;
+      }
+      .bn-heading-5 {
+        font-size: ${h5Size}px !important;
+        line-height: ${h5Size * 1.4}px !important;
+        letter-spacing: ${letterSpacing}px !important;
+      }
+      .bn-paragraph {
+        font-size: ${bodySize}px !important;
+        line-height: ${lineHeight} !important;
+        letter-spacing: ${letterSpacing}px !important;
+      }
+    `
+
+    container.appendChild(styleElement)
+
+    // Cleanup
+    return () => {
+      styleElement.remove()
+    }
+  }, [h1Size, h2Size, h3Size, h4Size, h5Size, bodySize, lineHeight, letterSpacing,
+    normalPaddingVertical, normalPaddingHorizontal])
+
   return (
-    <div className="blocknote-editor-container flex flex-col h-full">
+    <div ref={editorContainerRef} className="blocknote-editor-container flex flex-col h-full">
       <div className="flex-1 overflow-auto scrollable-area">
         <BlockNoteView
           editor={editor}

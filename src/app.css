@@ -625,6 +625,7 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  padding:30px 40px;
 }
 
 .blocknote-editor-container::-webkit-scrollbar {

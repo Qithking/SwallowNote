@@ -2,9 +2,9 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Copy } from 'lucide-react'
-import { useState } from 'react'
-import { useEditorStore, useUIStore, useWorkspaceStore } from '@/stores'
+import { BookOpen, Code, History, FolderOpen, Copy, Settings, Maximize2, Minimize2 } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
@@ -12,13 +12,21 @@ function EditorToolbar() {
   const { tabs, activeTabId, toggleViewMode } = useEditorStore()
   const { rightPanelType, setRightPanelType } = useUIStore()
   const { rootPath } = useWorkspaceStore()
+  const { normalPaddingVertical, normalPaddingHorizontal, widePaddingVertical, widePaddingHorizontal } = useEditorSettingsStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
+  const [isWide, setIsWide] = useState(false)
+  const savedPaddingRef = useRef({ vertical: normalPaddingVertical, horizontal: normalPaddingHorizontal })
+
+  // Listen for padding changes from settings panel
+  useEffect(() => {
+    savedPaddingRef.current = { vertical: normalPaddingVertical, horizontal: normalPaddingHorizontal }
+  }, [normalPaddingVertical, normalPaddingHorizontal])
 
   if (!activeTab) return null
 
   const { path, viewMode } = activeTab
-  
+
   // Get path relative to workspace root directory, starting with /rootDir/
   const getRelativePath = (absolutePath: string): string => {
     if (!rootPath) return absolutePath
@@ -46,6 +54,33 @@ function EditorToolbar() {
     } catch (err) {
       console.error('Failed to copy path:', err)
     }
+  }
+
+  const handleToggleWidth = () => {
+    const container = document.querySelector('.blocknote-editor-container')
+    if (!container) return
+
+    const scrollArea = container.querySelector('.scrollable-area') as HTMLElement
+    if (!scrollArea) return
+
+    if (isWide) {
+      // 恢复到普通模式的内边距
+      scrollArea.style.paddingTop = `${savedPaddingRef.current.vertical}px`
+      scrollArea.style.paddingBottom = `${savedPaddingRef.current.vertical}px`
+      scrollArea.style.paddingLeft = `${savedPaddingRef.current.horizontal}px`
+      scrollArea.style.paddingRight = `${savedPaddingRef.current.horizontal}px`
+    } else {
+      // 保存当前值并切换到宽模式
+      savedPaddingRef.current = {
+        vertical: parseInt(scrollArea.style.paddingTop) || normalPaddingVertical,
+        horizontal: parseInt(scrollArea.style.paddingLeft) || normalPaddingHorizontal
+      }
+      scrollArea.style.paddingTop = `${widePaddingVertical}px`
+      scrollArea.style.paddingBottom = `${widePaddingVertical}px`
+      scrollArea.style.paddingLeft = `${widePaddingHorizontal}px`
+      scrollArea.style.paddingRight = `${widePaddingHorizontal}px`
+    }
+    setIsWide(!isWide)
   }
 
   return (
@@ -116,6 +151,30 @@ function EditorToolbar() {
             </button>
           </TooltipTrigger>
           <TooltipContent>复制路径</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={handleToggleWidth}
+              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+              style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
+            >
+              {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>切换宽度</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
+              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+              style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+            >
+              <Settings size={14} style={{ color: 'inherit' }} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>编辑器设置</TooltipContent>
         </Tooltip>
       </div>
     </div>

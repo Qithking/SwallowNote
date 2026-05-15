@@ -3,6 +3,7 @@ export { ActivityBar } from './ActivityBar'
 export { Sidebar } from './Sidebar'
 export { TabBar } from './TabBar'
 export { EditorToolbar } from './EditorToolbar'
+export { EditorSettings } from './EditorSettings/EditorSettings'
 export { EditorView } from './Editor'
 export { StatusBar } from './StatusBar'
 export {

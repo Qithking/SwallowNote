@@ -12,3 +12,6 @@ export type { Theme, SidebarView, EditorViewMode, UIState } from './ui'
 
 export { useGitStore } from './git'
 export type { GitBranch, GitState } from './git'
+
+export { useEditorSettingsStore } from './editorSettings'
+export type { EditorSettingsState } from './editorSettings'

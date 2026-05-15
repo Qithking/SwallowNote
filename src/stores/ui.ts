@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
 export type EditorViewMode = 'edit' | 'preview' | 'split'
-export type RightPanelType = 'ai' | 'directory' | 'history' | null
+export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | null
 
 export interface UIState {
   theme: Theme

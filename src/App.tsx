@@ -9,6 +9,7 @@ import { SettingsView } from '@/components/Settings/SettingsView'
 import { AIView } from '@/components/AI/AIView'
 import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
+import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
 import { useUIStore } from '@/stores'
 import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
@@ -80,6 +81,7 @@ function App() {
       case 'ai': return <AIView />
       case 'directory': return <DirectoryView />
       case 'history': return <HistoryView />
+      case 'editorSettings': return <EditorSettings />
       default: return null
     }
   }
