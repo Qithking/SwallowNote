@@ -94,7 +94,7 @@ function App() {
       <TitleBar />
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden gap-x-0.5 pr-1">
+      <div className="flex-1 flex overflow-hidden gap-x-0.5 pr-0.5">
         {/* Activity Bar */}
         <ActivityBar />
 

@@ -23,7 +23,7 @@ function ActivityBar() {
   const { sidebarView, setSidebarView, settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
 
   return (
-    <div className="w-[40px] flex flex-col items-center pt-1 shrink-0" >
+    <div className="w-[40px] flex flex-col items-center pt-1 shrink-0 mr-0.5" >
       {activityItems.map((item) => {
         const Icon = item.icon
         const isActive = sidebarView === item.id
