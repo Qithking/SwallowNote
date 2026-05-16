@@ -91,13 +91,14 @@ pub fn enable_modern_window_style<R: Runtime>(
     offset_x: Option<f64>,
     offset_y: Option<f64>,
 ) -> Result<(), String> {
+    let radius = corner_radius.unwrap_or(12.0);
+    
     #[cfg(target_os = "macos")]
     {
         let config = TrafficLightsConfig {
             offset_x: offset_x.unwrap_or(0.0),
             offset_y: offset_y.unwrap_or(0.0),
         };
-        let radius = corner_radius.unwrap_or(12.0);
 
         window
             .with_webview(move |webview| {
@@ -107,7 +108,6 @@ pub fn enable_modern_window_style<R: Runtime>(
                     
                     let mut style_mask = ns_window.styleMask();
                     
-                    // 只添加必要的样式，不添加 Traffic Lights
                     style_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
                     style_mask |= NSWindowStyleMask::NSResizableWindowMask;
                     
@@ -128,14 +128,41 @@ pub fn enable_modern_window_style<R: Runtime>(
                 }
             })
             .map_err(|e| e.to_string())?;
-        
-        Ok(())
     }
     
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        Ok(())
+        use tauri::Manager;
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE};
+        use windows::Win32::Foundation::HWND;
+        
+        window
+            .with_webview(move |webview| {
+                #[cfg(target_os = "windows")]
+                unsafe {
+                    let hwnd = HWND(webview.hwnd() as _);
+                    
+                    // DWMWA_WINDOW_CORNER_PREFERENCE: 2 = Round, 3 = RoundSmall
+                    let corner_preference: u32 = if radius > 12.0 { 2 } else { 3 };
+                    
+                    let _ = DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &corner_preference as *const _ as *const _,
+                        std::mem::size_of::<u32>() as u32,
+                    );
+                }
+            })
+            .map_err(|e| e.to_string())?;
     }
+    
+    #[cfg(target_os = "linux")]
+    {
+        // Linux 圆角通过 CSS 实现，在 Tauri 配置中已经设置了 transparent: true
+        // CSS 会在前端处理圆角
+    }
+    
+    Ok(())
 }
 
 /// Repositions Traffic Lights only (useful after fullscreen toggle)

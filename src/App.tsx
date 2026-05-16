@@ -28,7 +28,22 @@ function App() {
   const [isHoveringRight, setIsHoveringRight] = useState(false)
 
   useEffect(() => {
-    enableModernWindowStyle({ cornerRadius: 12 })
+    const initRoundedCorners = async () => {
+      try {
+        const platform = await import('@tauri-apps/plugin-os').then(m => m.platform())
+        if (platform === 'linux') {
+          document.documentElement.style.borderRadius = '12px'
+          document.documentElement.style.overflow = 'hidden'
+          document.body.style.borderRadius = '12px'
+          document.body.style.overflow = 'hidden'
+        } else {
+          await enableModernWindowStyle({ cornerRadius: 12 })
+        }
+      } catch {
+        await enableModernWindowStyle({ cornerRadius: 12 })
+      }
+    }
+    initRoundedCorners()
   }, [])
 
   const handleMouseDownLeft = useCallback(() => {
