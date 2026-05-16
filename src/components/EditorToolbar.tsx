@@ -60,7 +60,7 @@ function EditorToolbar() {
     const container = document.querySelector('.blocknote-editor-container')
     if (!container) return
 
-    const scrollArea = container.querySelector('.scrollable-area') as HTMLElement
+    const scrollArea = container.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
     if (!scrollArea) return
 
     if (isWide) {

@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useGitStore, GitRepository } from '@/stores/git'
 import { scanGitRepos, GitRepositoryInfo, gitCommitAndPush } from '@/lib/tauri'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWorkspaceStore, useUIStore } from '@/stores'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -106,7 +107,7 @@ function CommitSection({
   }
   
   return (
-    <div className="p-2 border-b flex flex-col gap-2" style={{ borderColor: 'var(--border-color)' }}>
+    <div className="p-2 flex flex-col gap-2" style={{ borderColor: 'var(--border-color)' }}>
       <input
         type="text"
         placeholder="提交信息"
@@ -276,16 +277,15 @@ function GitView() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none" style={{ borderBottom: '1px solid var(--border-color)' }}>
+      <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none" >
         <div className="flex items-center gap-2">
-          <GitBranch size={14} style={{ color: 'var(--text-muted)' }} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>同步管理</span>
+          <span className="text-sm font-medium uppercase tracking-wider">同步管理</span>
         </div>
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh}>
-                <RefreshCw size={14} />
+                <RefreshCw size={12} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>刷新</TooltipContent>
@@ -293,7 +293,7 @@ function GitView() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7">
-                <ChevronDown size={14} />
+                <ChevronDown size={12} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>分支操作</TooltipContent>
@@ -309,7 +309,7 @@ function GitView() {
       />
 
       {/* Repositories List */}
-      <div className="flex-1 overflow-auto p-2 scrollable-area">
+      <ScrollArea className="flex-1 p-2">
         {repositories.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <GitBranch size={32} className="mb-3 opacity-50" style={{ color: 'var(--text-muted)' }} />
@@ -327,7 +327,7 @@ function GitView() {
             ))}
           </div>
         )}
-      </div>      
+      </ScrollArea>
     </div>
   )
 }

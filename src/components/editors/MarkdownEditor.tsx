@@ -10,6 +10,7 @@ import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote } from '@blocknote/react'
 import { codeBlock } from '@blocknote/code-block'
 import { useUIStore, useEditorSettingsStore } from '@/stores'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -225,13 +226,13 @@ function BlockNoteInner({
 
   return (
     <div ref={editorContainerRef} className="blocknote-editor-container flex flex-col h-full">
-      <div className="flex-1 overflow-auto scrollable-area">
+      <ScrollArea className="flex-1">
         <BlockNoteView
           editor={editor}
           theme={blocknoteTheme}
           onChange={handleChange}
         />
-      </div>
+      </ScrollArea>
     </div>
   )
 }

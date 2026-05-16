@@ -6,6 +6,7 @@ import Tree from 'rc-tree'
 import 'rc-tree/assets/index.css'
 import { FileText, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6 } from 'lucide-react'
 import { useEditorStore } from '@/stores'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 interface TocItem {
   id: string
@@ -215,7 +216,7 @@ function DirectoryView() {
           <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>目录</span>
         </div>
       </div>
-      <div className="flex-1 overflow-auto p-2 scrollable-area">
+      <ScrollArea className="flex-1 p-2">
         {treeData.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
             <p className="text-sm">无目录</p>
@@ -233,7 +234,7 @@ function DirectoryView() {
             className="text-[var(--text-secondary)] my-tree"
           />
         )}
-      </div>
+      </ScrollArea>
     </div>
   )
 }

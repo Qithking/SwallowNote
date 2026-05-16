@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useUIStore, Theme } from '@/stores'
 import { cn } from '@/lib/utils'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 type SettingsSection = 'general' | 'appearance' | 'editor' | 'git' | 'sync' | 'ai' | 'shortcuts' | 'about'
 
@@ -184,7 +185,7 @@ function SettingsView({ onClose }: SettingsViewProps) {
       </div>
 
       {/* Section Content */}
-      <div className="flex-1 p-4 overflow-auto scrollable-area">{renderSectionContent()}</div>
+      <ScrollArea className="flex-1 p-4">{renderSectionContent()}</ScrollArea>
       </div>
     </div>
   )

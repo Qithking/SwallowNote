@@ -5,6 +5,7 @@
 import { RotateCcw } from 'lucide-react'
 import { useEditorSettingsStore } from '@/stores'
 import { NumberInput } from '@/components/ui/number-input'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 function EditorSettings() {
   const {
@@ -90,7 +91,7 @@ function EditorSettings() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-3 scrollable-area">
+      <ScrollArea className="flex-1 p-3">
         {/* Font Sizes */}
         <Section title="字体大小">
           <SettingRow label="标题 H1">
@@ -219,7 +220,7 @@ function EditorSettings() {
             />
           </SettingRow>
         </Section>
-      </div>
+      </ScrollArea>
     </div>
   )
 }

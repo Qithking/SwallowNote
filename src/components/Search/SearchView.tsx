@@ -6,6 +6,7 @@ import { Search, FileText, ChevronRight, ChevronDown, X } from 'lucide-react'
 import { searchInFiles, SearchResult as TSearchResult } from '@/lib/tauri'
 import { useWorkspaceStore, useEditorStore } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 interface SearchResult extends TSearchResult {}
 
@@ -114,8 +115,8 @@ function SearchView() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center h-[40px] px-3 shrink-0 select-none" style={{ borderBottom: '1px solid var(--border-color)' }}>
-        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>搜索</span>
+      <div className="flex items-center h-[40px] px-3 shrink-0 select-none" >
+        <span className="text-sm font-medium ">搜索</span>
       </div>
 
       {/* Search Input - VSCode style */}
@@ -212,7 +213,7 @@ function SearchView() {
       )}
 
       {/* Results List - VSCode style */}
-      <div className="flex-1 overflow-auto scrollable-area">
+      <ScrollArea className="flex-1">
         {!query ? (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
             <Search size={24} className="mb-2 opacity-50" />
@@ -286,7 +287,7 @@ function SearchView() {
             })}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   )
 }

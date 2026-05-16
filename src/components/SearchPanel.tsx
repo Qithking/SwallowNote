@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, X, FileText } from 'lucide-react'
 import { useUIStore } from '@/stores'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 interface SearchResult {
   path: string
@@ -68,7 +69,7 @@ function SearchPanel() {
       </div>
 
       {/* Search Results */}
-      <div className="max-h-80 overflow-y-auto scrollable-area">
+      <ScrollArea className="max-h-80">
         {isSearching ? (
           <div className="p-4 text-center text-muted-foreground">
             {t('common.loading')}
@@ -96,7 +97,7 @@ function SearchPanel() {
             </div>
           ))
         )}
-      </div>
+      </ScrollArea>
 
       {/* Search Footer */}
       <div className="flex items-center justify-between px-3 py-2 border-t border-border text-xs text-muted-foreground">

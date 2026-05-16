@@ -8,6 +8,7 @@ import { renameFile } from '@/lib/tauri'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -463,12 +464,12 @@ export function FileTreeView() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none">
-        <span className="text-xs uppercase tracking-wider" style={{ fontSize: 'var(--font-size-md)' }}>资源管理器</span>
+        <span className="text-sm font-medium">资源管理器</span>
         <div className="flex items-center">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleOpenFolder}>
-                <FolderOpen size={14} />
+                <FolderOpen size={12} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>打开文件夹</TooltipContent>
@@ -476,7 +477,7 @@ export function FileTreeView() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFile} disabled={!isSelectedDirectory}>
-                <FilePlus size={14} />
+                <FilePlus size={12} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>新建文件</TooltipContent>
@@ -484,7 +485,7 @@ export function FileTreeView() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFolder} disabled={!isSelectedDirectory}>
-                <FolderPlus size={14} />
+                <FolderPlus size={12} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>新建文件夹</TooltipContent>
@@ -492,14 +493,14 @@ export function FileTreeView() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => loadRoot(rootPath!)}>
-                <RefreshCw size={14} />
+                <RefreshCw size={12} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>刷新</TooltipContent>
           </Tooltip>
         </div>
       </div>
-      <div className="flex-1 overflow-auto py-1 scrollable-area">
+      <ScrollArea className="flex-1 py-1">
         {isLoading ? (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
             <RefreshCw size={16} className="animate-spin" />
@@ -537,7 +538,7 @@ export function FileTreeView() {
             <p className="text-sm">未打开文件夹</p>
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   )
 }

@@ -3,6 +3,7 @@
  */
 import { History, FileText } from 'lucide-react'
 import { useEditorStore } from '@/stores'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 interface HistoryItem {
   id: string
@@ -45,7 +46,7 @@ function HistoryView() {
           <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>历史</span>
         </div>
       </div>
-      <div className="flex-1 overflow-auto p-2 scrollable-area">
+      <ScrollArea className="flex-1 p-2">
         <ul className="space-y-1">
           {mockHistory.map((item) => (
             <li
@@ -64,7 +65,7 @@ function HistoryView() {
             </li>
           ))}
         </ul>
-      </div>
+      </ScrollArea>
     </div>
   )
 }

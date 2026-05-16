@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 
 interface Message {
@@ -107,7 +108,7 @@ function AIView() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-auto p-3 space-y-4 scrollable-area">
+      <ScrollArea className="flex-1 p-3 space-y-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Sparkles size={32} className="mb-3 opacity-50" />
@@ -190,7 +191,7 @@ function AIView() {
           </div>
         )}
         <div ref={messagesEndRef} />
-      </div>
+      </ScrollArea>
 
       {/* Input */}
       <div className="p-3 border-t border-border">
