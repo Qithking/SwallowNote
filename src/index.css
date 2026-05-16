@@ -177,6 +177,26 @@
   border: 0 !important;
 }
 
+.my-tree .rc-tree-node-selected {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.my-tree .rc-tree-node-content-wrapper.rc-tree-node-selected:focus,
+.my-tree .rc-tree-node-content-wrapper.rc-tree-node-selected:active {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.my-tree .rc-tree-node-selected {
+  background-color: hsl(var(--primary) / 0.1) !important;
+  box-shadow: none !important;
+  border: none !important;
+  opacity: 1 !important;
+}
+
 .activity-bar:hover{
   background-color: hsl(var(--primary) / 0.1);
 }
