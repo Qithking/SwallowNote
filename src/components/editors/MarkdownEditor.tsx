@@ -45,6 +45,7 @@ function BlockNoteInner({
   } = useEditorSettingsStore()
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState<number>(0)
 
   // codeBlock from @blocknote/code-block provides syntax highlighting via Shiki
   // It's passed as the `codeBlock` editor option, NOT as a blockSpec
@@ -52,6 +53,26 @@ function BlockNoteInner({
     initialContent: blocks,
     codeBlock,
   })
+
+  // 监听容器宽度变化，触发重新渲染以适应宽度变化
+  useEffect(() => {
+    const container = editorContainerRef.current
+    if (!container) return
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width
+        if (width !== containerWidth) {
+          setContainerWidth(width)
+        }
+      }
+    })
+
+    resizeObserver.observe(container)
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [containerWidth])
 
   // 滚动到指定行
   const doScrollToLine = (lineNumber: number) => {
@@ -230,6 +251,7 @@ function BlockNoteInner({
     <div ref={editorContainerRef} className="blocknote-editor-container flex flex-col h-full">
       <ScrollArea className="flex-1">
         <BlockNoteView
+          key={containerWidth}
           editor={editor}
           theme={blocknoteTheme}
           onChange={handleChange}
