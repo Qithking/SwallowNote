@@ -185,3 +185,16 @@ export async function unwatchDirectory(path: string): Promise<void> {
 export async function getPlatform(): Promise<string> {
   return await platform()
 }
+
+// Folder History APIs
+export async function saveFolderHistory(path: string): Promise<void> {
+  await invoke('save_folder_history', { path })
+}
+
+export async function getLatestFolder(): Promise<string | null> {
+  return await invoke('get_latest_folder')
+}
+
+export async function getFolderHistory(): Promise<string[]> {
+  return await invoke('get_folder_history')
+}

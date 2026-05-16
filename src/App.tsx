@@ -10,7 +10,7 @@ import { AIView } from '@/components/AI/AIView'
 import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
 import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
-import { useUIStore } from '@/stores'
+import { useUIStore, useWorkspaceStore } from '@/stores'
 import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
@@ -20,12 +20,17 @@ import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-co
 function App() {
   useTheme()
   const { settingsPanelVisible, rightPanelType } = useUIStore()
+  const { loadLastFolder } = useWorkspaceStore()
   const [sidebarWidth, setSidebarWidth] = useState(240)
   const [rightPanelWidth, setRightPanelWidth] = useState(288)
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
   const [isDraggingRight, setIsDraggingRight] = useState(false)
   const [isHoveringLeft, setIsHoveringLeft] = useState(false)
   const [isHoveringRight, setIsHoveringRight] = useState(false)
+
+  useEffect(() => {
+    loadLastFolder()
+  }, [])
 
   useEffect(() => {
     const initRoundedCorners = async () => {

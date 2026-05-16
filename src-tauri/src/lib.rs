@@ -1,8 +1,11 @@
 mod commands;
+mod db;
 mod plugins;
 mod services;
 
 use plugins::mac_rounded_corners;
+use db::Database;
+use tauri::Manager;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -34,6 +37,9 @@ pub fn run() {
             commands::git::git_commit_and_push,
             commands::git::git_log,
             commands::git::scan_git_repos,
+            commands::folder_history::save_folder_history,
+            commands::folder_history::get_latest_folder,
+            commands::folder_history::get_folder_history,
             services::file_watcher::watch_directory,
             services::file_watcher::unwatch_directory,
             mac_rounded_corners::enable_rounded_corners,
@@ -41,7 +47,18 @@ pub fn run() {
             mac_rounded_corners::reposition_traffic_lights,
         ])
         .setup(|app| {
-            // Initialize file watcher service
+            let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+            std::fs::create_dir_all(&app_data_dir).ok();
+            
+            match db::init_db(app_data_dir) {
+                Ok(db) => {
+                    app.handle().manage(db);
+                }
+                Err(e) => {
+                    eprintln!("Failed to initialize database: {}", e);
+                }
+            }
+            
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle);
             Ok(())

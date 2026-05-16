@@ -242,7 +242,7 @@ export function FileTreeView() {
 
   const handleOpenFolder = async () => {
     const path = await openFolderDialog()
-    if (path) useWorkspaceStore.getState().setRootPath(path)
+    if (path) useWorkspaceStore.getState().openFolder(path)
   }
 
   const handleFinishEdit = async () => {
