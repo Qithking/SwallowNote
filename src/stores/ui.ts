@@ -3,11 +3,13 @@
  */
 import { create } from 'zustand'
 import { toast } from 'sonner'
+import { getLatestFolder } from '@/lib/tauri'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
 export type EditorViewMode = 'edit' | 'preview' | 'split'
 export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | null
+export type WorkspaceMode = 'folder' | 'workspace'
 
 export interface UIState {
   theme: Theme
@@ -23,6 +25,7 @@ export interface UIState {
   rightPanelType: RightPanelType
   clipboardFiles: string[]
   clipboardIsCut: boolean
+  workspaceMode: WorkspaceMode
   setTheme: (theme: Theme) => void
   setSidebarView: (view: SidebarView) => void
   setSidebarWidth: (width: number) => void
@@ -38,6 +41,8 @@ export interface UIState {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void
   setClipboardFiles: (files: string[], isCut: boolean) => void
   clearClipboard: () => void
+  setWorkspaceMode: (mode: WorkspaceMode) => void
+  initWorkspaceMode: () => Promise<void>
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -54,6 +59,7 @@ export const useUIStore = create<UIState>((set) => ({
   rightPanelType: null,
   clipboardFiles: [],
   clipboardIsCut: false,
+  workspaceMode: 'folder',
   setTheme: (theme) => set({ theme }),
   setSidebarView: (view) => set({ sidebarView: view }),
   setSidebarWidth: (width) => set({ sidebarWidth: Math.max(150, Math.min(500, width)) }),
@@ -85,4 +91,17 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setClipboardFiles: (files, isCut) => set({ clipboardFiles: files, clipboardIsCut: isCut }),
   clearClipboard: () => set({ clipboardFiles: [], clipboardIsCut: false }),
+  setWorkspaceMode: (mode) => set({ workspaceMode: mode }),
+  initWorkspaceMode: async () => {
+    try {
+      const latestPath = await getLatestFolder()
+      if (latestPath && latestPath.endsWith('.swallow-workspace')) {
+        set({ workspaceMode: 'workspace' })
+      } else {
+        set({ workspaceMode: 'folder' })
+      }
+    } catch {
+      set({ workspaceMode: 'folder' })
+    }
+  },
 }))

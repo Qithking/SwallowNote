@@ -18,3 +18,9 @@ pub fn get_folder_history(db: State<Database>) -> Result<Vec<String>, String> {
     crate::db::folder_history::get_folder_history(&db)
         .map_err(|e| format!("Failed to get folder history: {}", e))
 }
+
+#[tauri::command]
+pub fn remove_folder_history(db: State<Database>, path: String) -> Result<(), String> {
+    crate::db::folder_history::remove_folder(&db, &path)
+        .map_err(|e| format!("Failed to remove folder history: {}", e))
+}

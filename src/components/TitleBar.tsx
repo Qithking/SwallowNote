@@ -5,10 +5,14 @@
 import { Minus, Square, X, Sun, Moon, Monitor, Bot } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useUIStore } from '@/stores'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 
 function TitleBar() {
-  const { theme, setTheme, rightPanelType, setRightPanelType } = useUIStore()
+  const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode } = useUIStore()
+  const { switchMode } = useWorkspaceStore()
 
   const handleMinimize = async () => {
     await getCurrentWindow().minimize()
@@ -36,15 +40,20 @@ function TitleBar() {
   const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor
 
   return (
-    <div
-      data-tauri-drag-region
-      className="h-[30px] flex items-center justify-between select-none"     
-    >
-      {/* Left: App name */}
-      <div className="flex items-center gap-1 px-3" data-tauri-drag-region>
-        <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-          SwallowNote
-        </span>
+    <div data-tauri-drag-region className={cn(
+      'titlebar',
+      'h-[35px] flex items-center justify-between select-none',
+      'bg-[var(--bg-primary)]',
+      'text-[var(--text-secondary)]'
+    )}>
+      <div className="flex items-center gap-2 pl-3">
+        <span className="text-xs font-medium text-[var(--text-primary)]">SwallowNote</span>
+        <Tabs value={workspaceMode} onValueChange={(v) => switchMode(v as 'folder' | 'workspace')}>
+          <TabsList className="h-6 p-0 bg-transparent border border-[var(--border)] rounded">
+            <TabsTrigger value="folder" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] text-[var(--text-secondary)] shadow-none">文件夹</TabsTrigger>
+            <TabsTrigger value="workspace" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] text-[var(--text-secondary)] shadow-none">工作区</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
       {/* Right: AI button + Theme toggle + Window controls */}

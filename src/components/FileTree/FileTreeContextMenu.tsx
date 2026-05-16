@@ -25,6 +25,7 @@ import { loadFileContent, loadDirectory } from '@/lib/api'
 import { deleteFile } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
+import { removeFolderHistory } from '@/lib/tauri'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -66,11 +67,14 @@ interface TreeNodeContextMenuProps {
 }
 
 export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContextMenuProps) {
-  const { rootPath } = useWorkspaceStore()
+  const { rootPath, workspaceFolders } = useWorkspaceStore()
+  const { workspaceMode } = useUIStore()
   const { addTab } = useEditorStore()
-  const { nodes, setSelectedPath, toggleNode, setNodes } = useFileTreeStore()
+  const { nodes, setSelectedPath, toggleNode, setNodes, removeRoot } = useFileTreeStore()
   const { clipboardFiles, clipboardIsCut, setClipboardFiles, showToast } = useUIStore()
   const { repositories } = useGitStore()
+
+  const isRootFolder = workspaceMode === 'workspace' && workspaceFolders.includes(node.path)
 
   // 检查节点是否在 git 仓库中
   const isInGitRepo = repositories.some(repo => {
@@ -217,6 +221,21 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
     }
   }
 
+  const handleRemoveRecord = async () => {
+    if (!isRootFolder) return
+    try {
+      removeRoot(node.path)
+      await removeFolderHistory(node.path)
+      
+      const { removeWorkspaceFolder } = useWorkspaceStore.getState()
+      removeWorkspaceFolder(node.path)
+      
+      showToast(`已移除: ${node.name}`)
+    } catch (e) {
+      console.error('Failed to remove record:', e)
+    }
+  }
+
   const handleRename = () => {
     if (onRename) {
       onRename()
@@ -316,13 +335,24 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
           <span>重命名</span>
         </ContextMenuItem>
 
+        {isRootFolder && (
+          <ContextMenuItem
+            onClick={handleRemoveRecord}
+            style={{ color: 'var(--danger-color, #f44336)' }}
+            className="cursor-pointer"
+          >
+            <Trash2 size={12} />
+            <span style={{ color: 'var(--danger-color, #f44336)' }}>删除记录</span>
+          </ContextMenuItem>
+        )}
+
         <ContextMenuItem
           onClick={handleDelete}
           style={{ color: 'var(--danger-color, #f44336)' }}
           className="cursor-pointer"
         >
           <Trash2 size={12} />
-          <span style={{ color: 'var(--danger-color, #f44336)' }}>删除</span>
+          <span style={{ color: 'var(--danger-color, #f44336)' }}>物理删除</span>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

@@ -20,7 +20,6 @@ import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-co
 function App() {
   useTheme()
   const { settingsPanelVisible, rightPanelType } = useUIStore()
-  const { loadLastFolder } = useWorkspaceStore()
   const [sidebarWidth, setSidebarWidth] = useState(240)
   const [rightPanelWidth, setRightPanelWidth] = useState(288)
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
@@ -29,7 +28,8 @@ function App() {
   const [isHoveringRight, setIsHoveringRight] = useState(false)
 
   useEffect(() => {
-    loadLastFolder()
+    const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
+    initMode().then(() => loadLatestByMode())
   }, [])
 
   useEffect(() => {

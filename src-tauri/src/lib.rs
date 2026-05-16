@@ -40,6 +40,7 @@ pub fn run() {
             commands::folder_history::save_folder_history,
             commands::folder_history::get_latest_folder,
             commands::folder_history::get_folder_history,
+            commands::folder_history::remove_folder_history,
             services::file_watcher::watch_directory,
             services::file_watcher::unwatch_directory,
             mac_rounded_corners::enable_rounded_corners,

@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
-import { FileText, FilePlus, FolderPlus, Image, Folder, FolderOpen, RefreshCw, ChevronRight, File } from 'lucide-react'
+import { FileText, FilePlus, FolderPlus, Image, Folder, FolderOpen, RefreshCw, ChevronRight, File, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
+import { useUIStore } from '@/stores/ui'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { openFolderDialog, createFile } from '@/lib/tauri'
 import { renameFile } from '@/lib/tauri'
@@ -164,7 +165,8 @@ interface NewItemState {
 }
 
 export function FileTreeView() {
-  const { rootPath } = useWorkspaceStore()
+  const { rootPath, addWorkspaceFolder, saveWorkspaceFile } = useWorkspaceStore()
+  const { workspaceMode } = useUIStore()
   const { addTab, updateTabPath } = useEditorStore()
   const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, loadRoot, setNodes } = useFileTreeStore()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -242,7 +244,13 @@ export function FileTreeView() {
 
   const handleOpenFolder = async () => {
     const path = await openFolderDialog()
-    if (path) useWorkspaceStore.getState().openFolder(path)
+    if (path) {
+      if (workspaceMode === 'workspace') {
+        await addWorkspaceFolder(path)
+      } else {
+        useWorkspaceStore.getState().openFolder(path)
+      }
+    }
   }
 
   const handleFinishEdit = async () => {
@@ -472,32 +480,46 @@ export function FileTreeView() {
                 <FolderOpen size={12} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>打开文件夹</TooltipContent>
+            <TooltipContent>{workspaceMode === 'workspace' ? '添加文件夹到工作区' : '打开文件夹'}</TooltipContent>
           </Tooltip>
+          {workspaceMode === 'folder' && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFile} disabled={!isSelectedDirectory}>
+                    <FilePlus size={12} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>新建文件</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFolder} disabled={!isSelectedDirectory}>
+                    <FolderPlus size={12} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>新建文件夹</TooltipContent>
+              </Tooltip>
+            </>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFile} disabled={!isSelectedDirectory}>
-                <FilePlus size={12} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>新建文件</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFolder} disabled={!isSelectedDirectory}>
-                <FolderPlus size={12} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>新建文件夹</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => loadRoot(rootPath!)}>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => rootPath && loadRoot(rootPath)}>
                 <RefreshCw size={12} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>刷新</TooltipContent>
           </Tooltip>
+          {workspaceMode === 'workspace' && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => saveWorkspaceFile()}>
+                  <Save size={12} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>保存工作区</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
       <ScrollArea className="flex-1 py-1">

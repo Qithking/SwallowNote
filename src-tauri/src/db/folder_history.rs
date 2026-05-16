@@ -51,3 +51,14 @@ pub fn get_folder_history(db: &Database) -> Result<Vec<String>> {
     
     Ok(paths)
 }
+
+pub fn remove_folder(db: &Database, path: &str) -> Result<()> {
+    let conn = db.conn.lock().unwrap();
+    
+    conn.execute(
+        "DELETE FROM folder_history WHERE path = ?1",
+        [path],
+    )?;
+    
+    Ok(())
+}

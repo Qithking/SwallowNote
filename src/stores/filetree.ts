@@ -22,6 +22,8 @@ export interface FileTreeState {
   setSelectedPath: (path: string | null) => void
   toggleNode: (path: string) => Promise<void>
   loadRoot: (rootPath: string) => Promise<void>
+  addRoot: (rootPath: string) => Promise<void>
+  removeRoot: (rootPath: string) => void
   revealPath: (filePath: string, rootPath: string) => Promise<void>
   clearAll: () => void
 }
@@ -105,6 +107,44 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       console.error(e)
       set({ isLoading: false })
     }
+  },
+
+  addRoot: async (rootPath) => {
+    if (!rootPath) return
+    const { nodes, expanded } = get()
+    const existingNode = findNodeInList(nodes, rootPath)
+    if (existingNode) return
+
+    try {
+      const data = await loadDirectory(rootPath)
+      const newNode: FileNode = {
+        id: `root-${rootPath}`,
+        name: rootPath.split('/').pop() || rootPath,
+        path: rootPath,
+        isDirectory: true,
+        children: data,
+      }
+      set({ 
+        nodes: [...nodes, newNode], 
+        expanded: new Set([...expanded, rootPath]) 
+      })
+    } catch (e) {
+      console.error(e)
+    }
+  },
+
+  removeRoot: (rootPath) => {
+    const { nodes, expanded, selectedPath } = get()
+    const newNodes = nodes.filter(n => n.path !== rootPath)
+    const newExpanded = new Set(expanded)
+    newExpanded.delete(rootPath)
+    
+    let newSelectedPath = selectedPath
+    if (selectedPath && selectedPath.startsWith(rootPath)) {
+      newSelectedPath = null
+    }
+    
+    set({ nodes: newNodes, expanded: newExpanded, selectedPath: newSelectedPath })
   },
 
   revealPath: async (filePath, rootPath) => {

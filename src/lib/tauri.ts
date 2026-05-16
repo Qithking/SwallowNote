@@ -88,6 +88,17 @@ export async function saveFileDialog(defaultPath?: string): Promise<string | nul
   return selected
 }
 
+export async function saveWorkspaceFileDialog(defaultPath?: string): Promise<string | null> {
+  const selected = await save({
+    defaultPath,
+    filters: [
+      { name: 'Swallow Workspace', extensions: ['swallow-workspace'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  })
+  return selected
+}
+
 // File System APIs (using Tauri commands)
 export async function listDirectory(path: string): Promise<FileNode[]> {
   return await invoke('list_directory', { path })
@@ -197,4 +208,20 @@ export async function getLatestFolder(): Promise<string | null> {
 
 export async function getFolderHistory(): Promise<string[]> {
   return await invoke('get_folder_history')
+}
+
+export async function removeFolderHistory(path: string): Promise<void> {
+  await invoke('remove_folder_history', { path })
+}
+
+export async function openWorkspaceDialog(): Promise<string | null> {
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    filters: [
+      { name: 'Workspace', extensions: ['swallow-workspace'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  })
+  return selected as string | null
 }
