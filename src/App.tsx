@@ -108,104 +108,104 @@ function App() {
 
   return (
     <TooltipProvider>
-    <div
-      className="h-screen w-screen flex flex-col overflow-hidden p-1"
-      style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
-    >
-      {/* Title Bar */}
-      <TitleBar />
+      <div
+        className="h-screen w-screen flex flex-col overflow-hidden p-1"
+        style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
+      >
+        {/* Title Bar */}
+        <TitleBar />
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden gap-x-0.5 pr-0.5">
-        {/* Activity Bar */}
-        <ActivityBar />
+        {/* Main Content */}
+        <div className="flex-1 flex overflow-hidden gap-x-0.5 pr-0.5">
+          {/* Activity Bar */}
+          <ActivityBar />
 
-        {/* Sidebar - hidden when settings panel is open */}
-        {!settingsPanelVisible && (
-          <div 
-            className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 
-            style={{ width: sidebarWidth, background: 'var(--bg-secondary)' }}
-          >
-            <Sidebar />
-          </div>
-        )}
-
-        {/* Left Resize Handle */}
-        {!settingsPanelVisible && (
-          <div
-            className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
-            onMouseDown={handleMouseDownLeft}
-            onMouseEnter={() => setIsHoveringLeft(true)}
-            onMouseLeave={() => setIsHoveringLeft(false)}
-          >
+          {/* Sidebar - hidden when settings panel is open */}
+          {!settingsPanelVisible && (
             <div 
-              className="w-[1px] h-[100%] rounded-full transition-opacity duration-200"
-              style={{ 
-                backgroundColor: 'var(--theme-color)',
-                opacity: isHoveringLeft || isDraggingLeft ? 1 : 0
-              }}
-            />
-          </div>
-        )}
+              className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 
+              style={{ width: sidebarWidth, background: 'var(--bg-secondary)' }}
+            >
+              <Sidebar />
+            </div>
+          )}
 
-        {/* Editor Area */}
-        <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary)'}}>
-          {settingsPanelVisible ? (
-            <SettingsView />
-          ) : (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <TabBar />
-              <EditorToolbar />
-              <EditorView />
+          {/* Left Resize Handle */}
+          {!settingsPanelVisible && (
+            <div
+              className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
+              onMouseDown={handleMouseDownLeft}
+              onMouseEnter={() => setIsHoveringLeft(true)}
+              onMouseLeave={() => setIsHoveringLeft(false)}
+            >
+              <div 
+                className="w-[1px] h-[100%] rounded-full transition-opacity duration-200"
+                style={{ 
+                  backgroundColor: 'var(--theme-color)',
+                  opacity: isHoveringLeft || isDraggingLeft ? 1 : 0
+                }}
+              />
+            </div>
+          )}
+
+          {/* Editor Area */}
+          <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary)'}}>
+            {settingsPanelVisible ? (
+              <SettingsView />
+            ) : (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <TabBar />
+                <EditorToolbar />
+                <EditorView />
+              </div>
+            )}
+          </div>
+
+          {/* Right Resize Handle */}
+          {rightPanelType && (
+            <div
+              className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
+              onMouseDown={handleMouseDownRight}
+              onMouseEnter={() => setIsHoveringRight(true)}
+              onMouseLeave={() => setIsHoveringRight(false)}
+            >
+              <div 
+                className="w-[1px] h-[100%] rounded-full transition-opacity duration-200"
+                style={{ 
+                  backgroundColor: 'var(--theme-color)',
+                  opacity: isHoveringRight || isDraggingRight ? 1 : 0
+                }}
+              />
+            </div>
+          )}
+
+          {/* Right Panel - moved outside editor, same level as sidebar */}
+          {rightPanelType && (
+            <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] " style={{ width: rightPanelWidth, background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+              {renderRightPanel()}
             </div>
           )}
         </div>
 
-        {/* Right Resize Handle */}
-        {rightPanelType && (
-          <div
-            className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
-            onMouseDown={handleMouseDownRight}
-            onMouseEnter={() => setIsHoveringRight(true)}
-            onMouseLeave={() => setIsHoveringRight(false)}
-          >
-            <div 
-              className="w-[1px] h-[100%] rounded-full transition-opacity duration-200"
-              style={{ 
-                backgroundColor: 'var(--theme-color)',
-                opacity: isHoveringRight || isDraggingRight ? 1 : 0
-              }}
-            />
-          </div>
-        )}
+        {/* statusbar */}
+        <div className='flex overflow-hidden h-6'>
+            <div className='w-1/2'></div>
+            <div className='flex-auto'></div>
+        </div>
 
-        {/* Right Panel - moved outside editor, same level as sidebar */}
-        {rightPanelType && (
-          <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] " style={{ width: rightPanelWidth, background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
-            {renderRightPanel()}
-          </div>
-        )}
+        {/* Toast Notification */}
+        <Toaster 
+          position="bottom-center"
+          duration={3000}
+          toastOptions={{
+            style: {
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-primary)',
+            },
+          }}
+        />
       </div>
-
-      {/* statusbar */}
-      <div className='flex overflow-hidden h-6'>
-          <div className='w-1/2'></div>
-          <div className='flex-auto'></div>
-      </div>
-
-      {/* Toast Notification */}
-      <Toaster 
-        position="bottom-center"
-        duration={3000}
-        toastOptions={{
-          style: {
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
-            color: 'var(--text-primary)',
-          },
-        }}
-      />
-    </div>
     </TooltipProvider>
   )
 }

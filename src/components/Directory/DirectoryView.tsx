@@ -7,20 +7,8 @@ import 'rc-tree/assets/index.css'
 import { FileText, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6 } from 'lucide-react'
 import { useEditorStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
-
-interface TocItem {
-  id: string
-  text: string
-  level: number
-  line: number
-  blockId?: string
-}
-
-interface HeadingData {
-  id: string
-  text: string
-  level?: number
-}
+import type { TocItem } from '@/utils/tableOfContents'
+import { buildTableOfContentsFromMarkdown } from '@/utils/tableOfContents'
 
 interface TreeNode {
   key: string
@@ -28,81 +16,49 @@ interface TreeNode {
   children?: TreeNode[]
 }
 
-function extractToc(content: string): TocItem[] {
-  const lines = content.split('\n')
-  const toc: TocItem[] = []
-  
-  lines.forEach((line, index) => {
-    const match = line.match(/^(#{1,6})\s+(.+)$/)
-    if (match) {
-      toc.push({
-        id: `heading-${index}`,
-        text: match[2],
-        level: match[1].length,
-        line: index + 1,
-      })
-    }
-  })
-  
-  return toc
-}
-
-// 递归构建树形结构
-function buildTree(items: TocItem[]): TreeNode[] {
-  const result: TreeNode[] = []
-  const stack: { level: number, children: TreeNode[] }[] = []
-  
-  for (const item of items) {
-    const node: TreeNode = {
-      key: item.id,
-      title: item.text,
-    }
-    
-    // 弹出所有深度 >= 当前深度的栈元素
-    while (stack.length > 0 && stack[stack.length - 1].level >= item.level) {
-      stack.pop()
-    }
-    
-    if (stack.length === 0) {
-      // 顶级节点
-      result.push(node)
-      stack.push({ level: item.level, children: node.children = [] })
-    } else {
-      // 添加到父节点的 children
-      stack[stack.length - 1].children.push(node)
-      stack.push({ level: item.level, children: node.children = [] })
-    }
-  }
-  
-  return result
-}
-
 function DirectoryView() {
   const { tabs, activeTabId } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
-  const [toc, setToc] = useState<TocItem[]>([])
+  const [toc, setToc] = useState<TocItem | null>(null)
   const [treeData, setTreeData] = useState<TreeNode[]>([])
   const [selectedId, setSelectedId] = useState<string>('')
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
 
-  // 监听 BlockNote 编辑器就绪事件 - 直接使用 BlockNote 返回的目录数据
+  function tocToTree(tocItem: TocItem): TreeNode[] {
+    return tocItem.children.map((child) => ({
+      key: child.blockId || child.id,
+      title: child.title,
+      children: child.children.length > 0 ? tocToTree(child) : undefined,
+    }))
+  }
+
+  function flattenTocItems(tocItem: TocItem): TocItem[] {
+    const result: TocItem[] = []
+    function traverse(item: TocItem) {
+      result.push(item)
+      for (const child of item.children) {
+        traverse(child)
+      }
+    }
+    traverse(tocItem)
+    return result
+  }
+
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail
-      if (detail.headings && Array.isArray(detail.headings) && detail.isBlockNote) {
-        // 使用 BlockNote 返回的目录数据
-        const newToc: TocItem[] = detail.headings.map((heading: HeadingData, index: number) => ({
-          id: `heading-${index}`,
-          text: heading.text,
-          level: heading.level || 1,
-          line: index + 1,
-          blockId: heading.id
-        }))
-        // 只有当数据有效时才更新
-        if (newToc.length > 0) {
+      if (detail.toc && detail.isBlockNote) {
+        const newToc = detail.toc as TocItem
+        if (newToc.children.length > 0) {
           setToc(newToc)
-          setTreeData(buildTree(newToc))
-          setExpandedKeys(newToc.map(item => item.id))
+          setTreeData(tocToTree(newToc))
+          setExpandedKeys(
+            flattenTocItems(newToc).map((item) => item.blockId || item.id)
+          )
+        } else {
+          setToc(null)
+          setTreeData([])
+          setExpandedKeys([])
         }
       }
     }
@@ -110,10 +66,9 @@ function DirectoryView() {
     return () => window.removeEventListener('block-editor-ready', handler)
   }, [])
 
-  // Tab 切换或内容变化时更新目录
   useEffect(() => {
     if (!activeTab) {
-      setToc([])
+      setToc(null)
       setTreeData([])
       setExpandedKeys([])
       setSelectedId('')
@@ -122,48 +77,56 @@ function DirectoryView() {
 
     setSelectedId('')
 
-    // 检查是否是 markdown 文件
     const isMarkdown = activeTab.name.toLowerCase().endsWith('.md')
     if (!isMarkdown) {
-      setToc([])
+      setToc(null)
       setTreeData([])
       setExpandedKeys([])
       return
     }
 
-    // 始终从文本提取目录
-    if (activeTab.content) {
-      const newToc = extractToc(activeTab.content)
+    if (!activeTab.content) {
+      setToc(null)
+      setTreeData([])
+      setExpandedKeys([])
+      return
+    }
+
+    const entryTitle = activeTab.name.replace(/\.md$/i, '')
+    const newToc = buildTableOfContentsFromMarkdown(entryTitle, activeTab.content)
+
+    if (newToc.children.length > 0) {
       setToc(newToc)
-      setTreeData(buildTree(newToc))
-      setExpandedKeys(newToc.map(item => item.id))
+      setTreeData(tocToTree(newToc))
+      setExpandedKeys(flattenTocItems(newToc).map((item) => item.blockId || item.id))
+    } else {
+      setToc(null)
+      setTreeData([])
+      setExpandedKeys([])
     }
   }, [activeTab])
 
-  // 滚动定位
   const scrollToPosition = useCallback((item: TocItem) => {
-    if (item.blockId) {
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('scroll-to-block-id', {
-          detail: { blockId: item.blockId, fallbackText: item.text }
-        }))
-      }, 50)
-    } else {
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('scroll-to-block-id', {
-          detail: { blockId: item.id, fallbackText: item.text }
-        }))
-      }, 50)
-    }
+    const blockId = item.blockId || item.id
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent('scroll-to-block-id', {
+          detail: { blockId, fallbackText: item.title },
+        })
+      )
+    }, 50)
   }, [])
 
   const handleSelect = (selectedKeys: React.Key[]) => {
     if (selectedKeys.length > 0) {
       const key = selectedKeys[0] as string
       setSelectedId(key)
-      const item = toc.find(t => t.id === key)
-      if (item) {
-        scrollToPosition(item)
+      if (toc) {
+        const allItems = flattenTocItems(toc)
+        const item = allItems.find((i) => (i.blockId || i.id) === key)
+        if (item) {
+          scrollToPosition(item)
+        }
       }
     }
   }
@@ -174,16 +137,34 @@ function DirectoryView() {
 
   const renderTitle = (node: TreeNode) => {
     const isSelected = selectedId === node.key
-    const tocItem = toc.find(t => t.id === node.key)
-    const level = tocItem?.level || 1
-    
-    // 根据标题级别选择图标
-    const IconComponent = level === 1 ? Heading1 : level === 2 ? Heading2 : level === 3 ? Heading3 : 
-                         level === 4 ? Heading4 : level === 5 ? Heading5 : Heading6
-    
+    let level = 1
+
+    if (toc) {
+      const allItems = flattenTocItems(toc)
+      const item = allItems.find((i) => (i.blockId || i.id) === node.key)
+      if (item) {
+        level = item.level
+      }
+    }
+
+    const IconComponent =
+      level === 1
+        ? Heading1
+        : level === 2
+          ? Heading2
+          : level === 3
+            ? Heading3
+            : level === 4
+              ? Heading4
+              : level === 5
+                ? Heading5
+                : Heading6
+
     return (
       <span
-        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'text-[var(--theme-color)]' : 'text-[var(--text-secondary)]'}`}
+        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${
+          isSelected ? 'text-[var(--theme-color)]' : 'text-[var(--text-secondary)]'
+        }`}
         title={node.title}
       >
         <IconComponent size={12} className="shrink-0 opacity-70" />
@@ -195,10 +176,18 @@ function DirectoryView() {
   if (!activeTab) {
     return (
       <div className="flex flex-col h-full">
-        <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)' }}>
+        <div
+          className="flex items-center h-10 px-3 shrink-0 border-b"
+          style={{ borderColor: 'var(--border-color)' }}
+        >
           <div className="flex items-center gap-2">
             <FileText size={14} style={{ color: 'var(--text-muted)' }} />
-            <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>目录</span>
+            <span
+              className="text-xs font-medium uppercase tracking-wider"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              目录
+            </span>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
@@ -210,10 +199,18 @@ function DirectoryView() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)' }}>
+      <div
+        className="flex items-center h-10 px-3 shrink-0 border-b"
+        style={{ borderColor: 'var(--border-color)' }}
+      >
         <div className="flex items-center gap-2">
           <FileText size={14} style={{ color: 'var(--text-muted)' }} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>目录</span>
+          <span
+            className="text-xs font-medium uppercase tracking-wider"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            目录
+          </span>
         </div>
       </div>
       <ScrollArea className="flex-1 p-2">

@@ -5,13 +5,14 @@
  * so it remounts on tab switch — no need to watch content changes.
  */
 import { useEffect, useState, useRef } from 'react'
-import { BlockNoteEditor, PartialBlock } from '@blocknote/core'
+import { BlockNoteEditor, PartialBlock, createCodeBlockSpec } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote } from '@blocknote/react'
-import { codeBlock } from '@blocknote/code-block'
-import { useUIStore, useEditorSettingsStore } from '@/stores'
+import { codeBlockOptions } from '@blocknote/code-block'
+import { useUIStore, useEditorStore, useEditorSettingsStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
+import { buildTableOfContents } from '@/utils/tableOfContents'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -32,6 +33,8 @@ function BlockNoteInner({
   onChange?: (content: string) => void
 }) {
   const theme = useUIStore((state) => state.theme)
+  const { tabs, activeTabId } = useEditorStore()
+  const activeTab = tabs.find((t) => t.id === activeTabId)
   const {
     h1Size,
     h2Size,
@@ -49,7 +52,10 @@ function BlockNoteInner({
   const [containerWidth, setContainerWidth] = useState<number>(0)
 
   // codeBlock from @blocknote/code-block provides syntax highlighting via Shiki
-  // It's passed as the `codeBlock` editor option, NOT as a blockSpec
+  // In newer versions, we need to create the code block spec using createCodeBlockSpec
+  // Using type assertion to resolve shiki types conflict
+  const codeBlock = createCodeBlockSpec(codeBlockOptions as any)
+  
   const editor = useCreateBlockNote({
     initialContent: blocks,
     codeBlock,
@@ -155,30 +161,16 @@ function BlockNoteInner({
   useEffect(() => {
     if (!editor || !editor.document) return
 
-    const headings = editor.document
-      .filter(block => block.type.startsWith('heading'))
-      .map((block, index) => {
-        let text = ''
-        const content = block.content as any[]
-        if (content && Array.isArray(content)) {
-          text = content
-            .map(c => typeof c === 'string' ? c : (c as any)?.text || '')
-            .join('')
-        }
-        const levelMatch = block.type.match(/^heading(\d)$/)
-        const level = levelMatch ? parseInt(levelMatch[1]) : 1
+    try {
+      const entryTitle = activeTab?.name.replace(/\.md$/i, '') || '未命名'
+      const toc = buildTableOfContents(entryTitle, editor.document)
 
-        return {
-          id: block.id,
-          text: text || '未命名标题',
-          level,
-          index,
-        }
-      })
-
-    window.dispatchEvent(new CustomEvent('block-editor-ready', {
-      detail: { headings, isBlockNote: true }
-    }))
+      window.dispatchEvent(new CustomEvent('block-editor-ready', {
+        detail: { toc, isBlockNote: true }
+      }))
+    } catch (error) {
+      console.error('Error building table of contents:', error)
+    }
   }, [editor, editor?.document?.length])
 
   const handleChange = async () => {
