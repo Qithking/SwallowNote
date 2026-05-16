@@ -25,10 +25,9 @@ function HistoryView() {
   if (!activeTab) {
     return (
       <div className="flex flex-col h-full">
-        <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)' }}>
+        <div className="flex items-center h-10 px-3 shrink-0 " style={{ borderColor: 'var(--border-color)' }}>
           <div className="flex items-center gap-2">
-            <History size={14} style={{ color: 'var(--text-muted)' }} />
-            <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>历史</span>
+            <span className="text-sm font-medium uppercase tracking-wider">历史</span>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
@@ -40,10 +39,9 @@ function HistoryView() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)' }}>
+      <div className="flex items-center h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
         <div className="flex items-center gap-2">
-          <History size={14} style={{ color: 'var(--text-muted)' }} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>历史</span>
+          <span className="text-sm font-medium uppercase tracking-wider">历史</span>
         </div>
       </div>
       <ScrollArea className="flex-1 p-2">

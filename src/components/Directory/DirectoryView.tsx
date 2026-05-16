@@ -177,15 +177,11 @@ function DirectoryView() {
     return (
       <div className="flex flex-col h-full">
         <div
-          className="flex items-center h-10 px-3 shrink-0 border-b"
+          className="flex items-center h-10 px-3 shrink-0"
           style={{ borderColor: 'var(--border-color)' }}
         >
-          <div className="flex items-center gap-2">
-            <FileText size={14} style={{ color: 'var(--text-muted)' }} />
-            <span
-              className="text-xs font-medium uppercase tracking-wider"
-              style={{ color: 'var(--text-muted)' }}
-            >
+          <div className="flex items-center gap-2">           
+            <span className="text-sm font-medium uppercase tracking-wider">
               目录
             </span>
           </div>
@@ -200,14 +196,12 @@ function DirectoryView() {
   return (
     <div className="flex flex-col h-full">
       <div
-        className="flex items-center h-10 px-3 shrink-0 border-b"
+        className="flex items-center h-10 px-3 shrink-0 "
         style={{ borderColor: 'var(--border-color)' }}
       >
         <div className="flex items-center gap-2">
-          <FileText size={14} style={{ color: 'var(--text-muted)' }} />
           <span
-            className="text-xs font-medium uppercase tracking-wider"
-            style={{ color: 'var(--text-muted)' }}
+            className="text-sm font-medium uppercase tracking-wider"
           >
             目录
           </span>
