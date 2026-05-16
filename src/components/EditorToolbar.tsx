@@ -26,6 +26,7 @@ function EditorToolbar() {
   if (!activeTab) return null
 
   const { path, viewMode } = activeTab
+  const isMarkdown = /\.(md|markdown)$/i.test(path)
 
   // Get path relative to workspace root directory, starting with /rootDir/
   const getRelativePath = (absolutePath: string): string => {
@@ -92,30 +93,32 @@ function EditorToolbar() {
 
       {/* Right: Icons */}
       <div className="flex items-center shrink-0 ml-4">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setRightPanelType(rightPanelType === 'directory' ? null : 'directory')}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: rightPanelType === 'directory' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-            >
-              <BookOpen size={14} style={{ color: 'inherit' }} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>目录</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={toggleViewMode}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: viewMode === 'source' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-            >
-              <Code size={14} style={{ color: 'inherit' }} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>源码</TooltipContent>
-        </Tooltip>
+        {isMarkdown && (<>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setRightPanelType(rightPanelType === 'directory' ? null : 'directory')}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: rightPanelType === 'directory' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                <BookOpen size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>打开MarkDown目录</TooltipContent>
+          </Tooltip>        
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={toggleViewMode}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: viewMode === 'source' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                <Code size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>切换源码视图</TooltipContent>
+          </Tooltip>
+        </>)}
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -126,7 +129,7 @@ function EditorToolbar() {
               <History size={14} style={{ color: 'inherit' }} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>历史</TooltipContent>
+          <TooltipContent>打开历史记录</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -150,32 +153,36 @@ function EditorToolbar() {
               <Copy size={14} style={{ color: 'inherit' }} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>复制路径</TooltipContent>
+          <TooltipContent>复制完整路径</TooltipContent>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={handleToggleWidth}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
-            >
-              {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>切换宽度</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-            >
-              <Settings size={14} style={{ color: 'inherit' }} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>编辑器设置</TooltipContent>
-        </Tooltip>
+        {isMarkdown && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleToggleWidth}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>切换编辑器视图宽度</TooltipContent>
+          </Tooltip>
+        )}
+        {isMarkdown && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                <Settings size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>内容排版设置</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   )
