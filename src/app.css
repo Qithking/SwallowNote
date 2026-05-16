@@ -509,7 +509,7 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
   height: 100%; color: var(--text-primary);
 }
 .cm-editor.cm-focused { outline: none; }
-.cm-editor .cm-scroller { font-family: var(--font-mono); font-size:14px; line-height:1.7; }
+.cm-editor .cm-scroller { font-family: var(--font-mono); font-size:14px; line-height:1.7; overflow: visible; }
 .cm-editor .cm-content  { padding:16px 0; overflow-wrap: break-word; word-break: break-word; }
 .cm-editor .cm-line     { padding:0 20px; }
 .cm-editor .cm-gutters  { border-right:1px solid var(--border); background:var(--bg-primary); color:var(--text-muted); }
@@ -519,6 +519,10 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .cm-editor.cm-focused .cm-selectionBackground { background:var(--bg-selection) !important; }
 .cm-editor .cm-cursor  { border-left-color: var(--accent); }
 .cm-editor .cm-activeLine { background:rgba(255,255,255,0.04) !important; }
+
+/* Hide CodeMirror's default scrollbar */
+.cm-editor .cm-scroller::-webkit-scrollbar { display: none; }
+.cm-editor .cm-scroller { scrollbar-width: none; -ms-overflow-style: none; }
 
 /* ---- CM syntax highlights ---- */
 .cm-editor .cm-formatting-header, .cm-editor .cm-header { color:#569cd6; }

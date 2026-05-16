@@ -17,6 +17,7 @@ import { rust } from '@codemirror/lang-rust'
 import { yaml } from '@codemirror/lang-yaml'
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 interface CodeEditorProps {
   content: string
@@ -46,7 +47,6 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
 
-  // 滚动到指定行
   const scrollToLine = (lineNumber: number) => {
     if (!viewRef.current) return
     try {
@@ -63,7 +63,6 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
     }
   }
 
-  // Listen for scroll-to-line events
   useEffect(() => {
     const handler = (e: Event) => {
       const line = (e as CustomEvent).detail.line
@@ -105,7 +104,6 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
     }
   }, [filename])
 
-  // Update content when it changes externally
   useEffect(() => {
     if (viewRef.current) {
       const currentContent = viewRef.current.state.doc.toString()
@@ -122,13 +120,13 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
   }, [content])
 
   return (
-    <div
-      ref={editorRef}
-      className={className}
-      style={{
-        height: '100%',
-        overflow: 'auto',
-      }}
-    />
+    <ScrollArea className={`h-full ${className}`}>
+      <div
+        ref={editorRef}
+        style={{
+          minHeight: '100%',
+        }}
+      />
+    </ScrollArea>
   )
 }
