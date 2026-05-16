@@ -183,36 +183,38 @@ function BlockNoteInner({
     const styleElement = document.createElement('style')
     styleElement.setAttribute('data-typography-style', 'true')
     styleElement.textContent = `
-      .bn-heading-1 {
+      /* 标题样式 - 使用正确的选择器 */
+      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"] {
         font-size: ${h1Size}px !important;
         line-height: ${h1Size * 1.4}px !important;
         letter-spacing: ${letterSpacing}px !important;
       }
-      .bn-heading-2 {
+      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="2"] {
         font-size: ${h2Size}px !important;
         line-height: ${h2Size * 1.4}px !important;
         letter-spacing: ${letterSpacing}px !important;
       }
-      .bn-heading-3 {
+      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="3"] {
         font-size: ${h3Size}px !important;
         line-height: ${h3Size * 1.4}px !important;
         letter-spacing: ${letterSpacing}px !important;
       }
-      .bn-heading-4 {
+      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="4"] {
         font-size: ${h4Size}px !important;
         line-height: ${h4Size * 1.4}px !important;
         letter-spacing: ${letterSpacing}px !important;
       }
-      .bn-heading-5 {
+      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="5"] {
         font-size: ${h5Size}px !important;
         line-height: ${h5Size * 1.4}px !important;
         letter-spacing: ${letterSpacing}px !important;
       }
-      .bn-paragraph {
+      /* 段落样式 */
+      .bn-default-styles {
         font-size: ${bodySize}px !important;
         line-height: ${lineHeight} !important;
         letter-spacing: ${letterSpacing}px !important;
-      }
+      }      
     `
 
     container.appendChild(styleElement)
