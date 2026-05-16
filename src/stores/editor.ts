@@ -36,6 +36,7 @@ export interface EditorState {
   getActiveTab: () => EditorTab | undefined
   scrollToLine: (line: number) => void
   restoreTabs: (tabsData: EditorTab[], activeTabId: string | null) => void
+  filterTabs: (predicate: (tab: EditorTab) => boolean) => void
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -116,4 +117,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   restoreTabs: (tabsData, activeTabId) =>
     set({ tabs: tabsData, activeTabId }),
+  filterTabs: (predicate) =>
+    set((state) => {
+      const keptTabs = state.tabs.filter(predicate)
+      if (keptTabs.length === state.tabs.length) return state
+      
+      const keptIds = new Set(keptTabs.map(t => t.id))
+      let newActiveId = state.activeTabId
+      
+      if (state.activeTabId && !keptIds.has(state.activeTabId)) {
+        newActiveId = keptTabs.length > 0 ? keptTabs[0].id : null
+      }
+      
+      return { tabs: keptTabs, activeTabId: newActiveId }
+    }),
 }))

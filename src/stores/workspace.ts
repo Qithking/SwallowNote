@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { getLatestFolder, saveFolderHistory, getFolderHistory } from '@/lib/tauri'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
+import { useEditorStore, EditorTab } from './editor'
 
 export interface WorkspaceState {
   rootPath: string | null
@@ -151,6 +152,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     useUIStore.getState().setWorkspaceMode(mode)
     await get().loadLatestByMode()
+
+    // 过滤不匹配的 tab
+    const { filterTabs } = useEditorStore.getState()
+    const state = get()
+    if (mode === 'folder') {
+      const rootPath = state.rootPath
+      filterTabs((tab: EditorTab) => {
+        if (!tab.path) return false
+        if (!rootPath) return false
+        return tab.path === rootPath || tab.path.startsWith(rootPath + '/')
+      })
+    } else {
+      const workspaceFolders = state.workspaceFolders
+      filterTabs((tab: EditorTab) => {
+        if (!tab.path) return false
+        if (!workspaceFolders || workspaceFolders.length === 0) return false
+        return workspaceFolders.some(
+          (f: string) => tab.path === f || tab.path.startsWith(f + '/')
+        )
+      })
+    }
   },
   initMode: async () => {
     await useUIStore.getState().initWorkspaceMode()

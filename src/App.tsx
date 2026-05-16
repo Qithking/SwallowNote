@@ -10,7 +10,7 @@ import { AIView } from '@/components/AI/AIView'
 import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
 import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
-import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
+import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEditorSettingsStore } from '@/stores'
 import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
@@ -29,7 +29,11 @@ function App() {
 
   useEffect(() => {
     const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
-    initMode().then(() => loadLatestByMode().then(() => restoreSessionState()))
+    const { loadSettings } = useEditorSettingsStore.getState()
+    initMode().then(() => loadLatestByMode().then(() => {
+      restoreSessionState()
+      loadSettings()
+    }))
   }, [])
 
   useEffect(() => {
@@ -157,6 +161,7 @@ function App() {
       const editorState = useEditorStore.getState()
       const fileTreeState = useFileTreeStore.getState()
       const uiState = useUIStore.getState()
+      const editorSettingsState = useEditorSettingsStore.getState()
 
       const tabsData = editorState.tabs.map(tab => ({
         id: tab.id,
@@ -174,6 +179,18 @@ function App() {
         sidebarWidth: String(uiState.sidebarWidth),
         rightPanelWidth: String(uiState.rightPanelWidth),
         editorViewMode: uiState.editorViewMode,
+        editor_h1Size: String(editorSettingsState.h1Size),
+        editor_h2Size: String(editorSettingsState.h2Size),
+        editor_h3Size: String(editorSettingsState.h3Size),
+        editor_h4Size: String(editorSettingsState.h4Size),
+        editor_h5Size: String(editorSettingsState.h5Size),
+        editor_bodySize: String(editorSettingsState.bodySize),
+        editor_lineHeight: String(editorSettingsState.lineHeight),
+        editor_letterSpacing: String(editorSettingsState.letterSpacing),
+        editor_normalPaddingVertical: String(editorSettingsState.normalPaddingVertical),
+        editor_normalPaddingHorizontal: String(editorSettingsState.normalPaddingHorizontal),
+        editor_widePaddingVertical: String(editorSettingsState.widePaddingVertical),
+        editor_widePaddingHorizontal: String(editorSettingsState.widePaddingHorizontal),
       }
 
       await saveSessionState(states)

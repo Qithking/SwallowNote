@@ -3,6 +3,10 @@
  * Default values reference VSCode markdown preview
  */
 import { create } from 'zustand'
+import { saveSessionState, getSessionState } from '@/lib/tauri'
+
+let saveTimer: NodeJS.Timeout | null = null
+let getStore: (() => EditorSettingsState) | null = null
 
 export interface EditorSettingsState {
   // Font sizes in px (VSCode defaults)
@@ -62,77 +66,124 @@ const DEFAULT_SETTINGS = {
   widePaddingHorizontal: 20,
 }
 
-export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => ({
+function scheduleSave() {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+  }
+  saveTimer = setTimeout(() => {
+    getStore?.().saveSettings()
+    saveTimer = null
+  }, 3000)
+}
+
+function collectSettings(state: EditorSettingsState): Record<string, string> {
+  return {
+    editor_h1Size: String(state.h1Size),
+    editor_h2Size: String(state.h2Size),
+    editor_h3Size: String(state.h3Size),
+    editor_h4Size: String(state.h4Size),
+    editor_h5Size: String(state.h5Size),
+    editor_bodySize: String(state.bodySize),
+    editor_lineHeight: String(state.lineHeight),
+    editor_letterSpacing: String(state.letterSpacing),
+    editor_normalPaddingVertical: String(state.normalPaddingVertical),
+    editor_normalPaddingHorizontal: String(state.normalPaddingHorizontal),
+    editor_widePaddingVertical: String(state.widePaddingVertical),
+    editor_widePaddingHorizontal: String(state.widePaddingHorizontal),
+  }
+}
+
+export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => {
+  getStore = get
+  
+  return {
   ...DEFAULT_SETTINGS,
   
   setH1Size: (size) => {
     set({ h1Size: size })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setH2Size: (size) => {
     set({ h2Size: size })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setH3Size: (size) => {
     set({ h3Size: size })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setH4Size: (size) => {
     set({ h4Size: size })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setH5Size: (size) => {
     set({ h5Size: size })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setBodySize: (size) => {
     set({ bodySize: size })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setLineHeight: (height) => {
     set({ lineHeight: height })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setLetterSpacing: (spacing) => {
     set({ letterSpacing: spacing })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setNormalPaddingVertical: (padding) => {
     set({ normalPaddingVertical: padding })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setNormalPaddingHorizontal: (padding) => {
     set({ normalPaddingHorizontal: padding })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setWidePaddingVertical: (padding) => {
     set({ widePaddingVertical: padding })
-    get().saveSettings()
+    scheduleSave()
   },
   
   setWidePaddingHorizontal: (padding) => {
     set({ widePaddingHorizontal: padding })
-    get().saveSettings()
+    scheduleSave()
   },
   
   resetToDefault: () => {
     set(DEFAULT_SETTINGS)
-    get().saveSettings()
+    scheduleSave()
   },
   
   loadSettings: async () => {
     try {
-      // Will be implemented with SQLite
+      const saved = await getSessionState()
+      if (Object.keys(saved).length === 0) return
+      
+      const partial: Partial<EditorSettingsState> = {}
+      if (saved.editor_h1Size) partial.h1Size = Number(saved.editor_h1Size)
+      if (saved.editor_h2Size) partial.h2Size = Number(saved.editor_h2Size)
+      if (saved.editor_h3Size) partial.h3Size = Number(saved.editor_h3Size)
+      if (saved.editor_h4Size) partial.h4Size = Number(saved.editor_h4Size)
+      if (saved.editor_h5Size) partial.h5Size = Number(saved.editor_h5Size)
+      if (saved.editor_bodySize) partial.bodySize = Number(saved.editor_bodySize)
+      if (saved.editor_lineHeight) partial.lineHeight = Number(saved.editor_lineHeight)
+      if (saved.editor_letterSpacing) partial.letterSpacing = Number(saved.editor_letterSpacing)
+      if (saved.editor_normalPaddingVertical) partial.normalPaddingVertical = Number(saved.editor_normalPaddingVertical)
+      if (saved.editor_normalPaddingHorizontal) partial.normalPaddingHorizontal = Number(saved.editor_normalPaddingHorizontal)
+      if (saved.editor_widePaddingVertical) partial.widePaddingVertical = Number(saved.editor_widePaddingVertical)
+      if (saved.editor_widePaddingHorizontal) partial.widePaddingHorizontal = Number(saved.editor_widePaddingHorizontal)
+      
+      set(partial)
     } catch (err) {
       console.error('Failed to load editor settings:', err)
     }
@@ -140,9 +191,12 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
   
   saveSettings: async () => {
     try {
-      // Will be implemented with SQLite
+      const state = get()
+      const states = collectSettings(state)
+      await saveSessionState(states)
     } catch (err) {
       console.error('Failed to save editor settings:', err)
     }
   },
-}))
+  }
+})

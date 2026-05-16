@@ -52,8 +52,8 @@ function TitleBar() {
         <span className="text-xs font-medium text-[var(--text-primary)]">SwallowNote</span>
         <Tabs value={workspaceMode} onValueChange={(v) => switchMode(v as 'folder' | 'workspace')}>
           <TabsList className="h-6 p-0 bg-transparent border border-[var(--border)] rounded">
-            <TabsTrigger value="folder" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] text-[var(--text-secondary)] shadow-none">文件夹</TabsTrigger>
-            <TabsTrigger value="workspace" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] text-[var(--text-secondary)] shadow-none">工作区</TabsTrigger>
+            <TabsTrigger value="folder" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-black text-[var(--text-secondary)] shadow-none">文件夹</TabsTrigger>
+            <TabsTrigger value="workspace" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-black text-[var(--text-secondary)] shadow-none">工作区</TabsTrigger>
           </TabsList>
         </Tabs>
         <Separator orientation="vertical" className="h-4" />
