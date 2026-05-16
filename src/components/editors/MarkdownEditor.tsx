@@ -11,6 +11,7 @@ import { useCreateBlockNote } from '@blocknote/react'
 import { codeBlock } from '@blocknote/code-block'
 import { useUIStore, useEditorSettingsStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { compactMarkdown } from '@/utils/compact-markdown'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -182,7 +183,8 @@ function BlockNoteInner({
 
   const handleChange = async () => {
     if (!onChange) return
-    const md = await editor.blocksToMarkdownLossy(editor.document)
+    const rawMd = await editor.blocksToMarkdownLossy(editor.document)
+    const md = compactMarkdown(rawMd)
     onChange(md)
   }
 
