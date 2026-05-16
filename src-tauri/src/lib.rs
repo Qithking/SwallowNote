@@ -1,5 +1,8 @@
 mod commands;
+mod plugins;
 mod services;
+
+use plugins::mac_rounded_corners;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -33,6 +36,9 @@ pub fn run() {
             commands::git::scan_git_repos,
             services::file_watcher::watch_directory,
             services::file_watcher::unwatch_directory,
+            mac_rounded_corners::enable_rounded_corners,
+            mac_rounded_corners::enable_modern_window_style,
+            mac_rounded_corners::reposition_traffic_lights,
         ])
         .setup(|app| {
             // Initialize file watcher service

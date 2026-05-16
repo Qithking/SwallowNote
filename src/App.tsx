@@ -15,6 +15,7 @@ import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
 import { useState, useCallback, useEffect } from 'react'
+import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
 
 function App() {
   useTheme()
@@ -25,6 +26,10 @@ function App() {
   const [isDraggingRight, setIsDraggingRight] = useState(false)
   const [isHoveringLeft, setIsHoveringLeft] = useState(false)
   const [isHoveringRight, setIsHoveringRight] = useState(false)
+
+  useEffect(() => {
+    enableModernWindowStyle({ cornerRadius: 12 })
+  }, [])
 
   const handleMouseDownLeft = useCallback(() => {
     setIsDraggingLeft(true)
