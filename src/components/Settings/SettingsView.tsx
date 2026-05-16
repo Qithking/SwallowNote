@@ -148,19 +148,7 @@ function SettingsView({ onClose }: SettingsViewProps) {
   }
 
   return (
-    <div className="flex flex-col h-full w-full">
-      {/* Header with back button */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-        <button
-          onClick={handleClose}
-          className="flex items-center gap-1 px-2 py-1 rounded hover:bg-accent transition-colors text-sm"
-        >
-          <ArrowLeft size={16} />
-          <span>Back</span>
-        </button>
-        <span className="text-sm font-medium">Settings</span>
-      </div>
-
+    <div className="flex flex-col h-full w-full">    
       <div className="flex flex-1 overflow-hidden">
       {/* Section List */}
       <div className="w-48 border-r border-border p-2">
