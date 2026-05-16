@@ -144,16 +144,16 @@ function getFileIcon(name: string): React.ReactNode {
   const special = specialFiles[lowerName]
   if (special) {
     const Icon = special.icon
-    return <Icon size={14} style={{ color: special.color }} />
+    return <Icon size={12} style={{ color: special.color }} />
   }
 
   const mapping = iconMap[ext]
   if (mapping) {
     const Icon = mapping.icon
-    return <Icon size={14} style={{ color: mapping.color }} />
+    return <Icon size={12} style={{ color: mapping.color }} />
   }
 
-  return <File size={14} style={{ color: '#969696' }} />
+  return <File size={12} style={{ color: '#969696' }} />
 }
 
 // TreeItem is used for rendering nested tree nodes in FileTreeView
@@ -186,7 +186,7 @@ function TreeItem({
 
   const getIcon = () => {
     if (node.isDirectory) {
-      return isExpanded ? <FolderOpen size={14} className="text-[#d4a05a]" /> : <Folder size={14} className="text-[#d4a05a]" />
+      return isExpanded ? <FolderOpen size={12} className="text-[#666666]" /> : <Folder size={12} className="text-[#666666]" />
     }
     return getFileIcon(node.name)
   }
@@ -194,13 +194,13 @@ function TreeItem({
   const nodeContent = (
     <div
       data-path={node.path}
-      className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+      className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
       onClick={handleClick}
     >
       {node.isDirectory ? (
         <ChevronRight
-          size={14}
+          size={12}
           className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}
           onClick={(e) => {
             e.stopPropagation()
@@ -488,13 +488,13 @@ export function FileTreeView() {
     const nodeContent = (
       <div
         data-path={node.path}
-        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+        className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => !isEditing && handleSelect(node)}
       >
         {node.isDirectory ? (
           <ChevronRight
-            size={14}
+            size={12}
             className={`transition-transform ${expanded.has(node.path) ? 'rotate-90' : ''}`}
             onClick={(e) => {
               e.stopPropagation()
@@ -505,7 +505,7 @@ export function FileTreeView() {
           <span className="w-[14px]" />
         )}
         {node.isDirectory ? (
-          <Folder size={14} className="text-[#d4a05a]" />
+          <Folder size={12} className="text-[#666666]" />
         ) : (
           getFileIcon(node.name)
         )}
@@ -513,7 +513,7 @@ export function FileTreeView() {
           <input
             ref={inputRef}
             type="text"
-            className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
+            className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-xs text-[var(--text-primary)]"
             value={editingName}
             onChange={(e) => setEditingName(e.target.value)}
             onBlur={handleFinishEdit}
@@ -543,19 +543,19 @@ export function FileTreeView() {
             {/* 在父节点下直接新增（当父节点没有直属子节点时） */}
             {isNewItemNode && (
               <div
-                className="flex items-center h-[24px] gap-1 text-sm text-[var(--text-secondary)]"
+                className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
                 style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
               >
                 <span className="w-[14px]" />
                 {newItem.type === 'folder' ? (
-                  <Folder size={14} className="text-[#d4a05a]" />
+                  <Folder size={12} className="text-[#666666]" />
                 ) : (
                   getFileIcon(newItem.name || 'newfile')
                 )}
                 <input
                   ref={inputRef}
                   type="text"
-                  className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
+                  className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
                   value={newItem.name}
                   onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
                   onBlur={handleFinishNewItem}
@@ -633,19 +633,19 @@ export function FileTreeView() {
             {/* 根目录下新建（当根目录没有直属子节点时） */}
             {newItem && nodes.length === 1 && nodes[0].children?.length === 0 && (
               <div
-                className="flex items-center h-[24px] gap-1 text-sm text-[var(--text-secondary)]"
+                className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
                 style={{ paddingLeft: `${12 + 8}px` }}
               >
                 <span className="w-[14px]" />
                 {newItem.type === 'folder' ? (
-                  <Folder size={14} className="text-[#d4a05a]" />
+                  <Folder size={12} className="text-[#666666]" />
                 ) : (
-                  <FileText size={14} style={{ color: '#569cd6' }} />
+                  <FileText size={12} style={{ color: '#569cd6' }} />
                 )}
                 <input
                   ref={inputRef}
                   type="text"
-                  className="flex-1 h-[20px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
+                  className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-sm text-[var(--text-primary)]"
                   value={newItem.name}
                   onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
                   onBlur={handleFinishNewItem}
