@@ -534,8 +534,8 @@ export function FileTreeView() {
           </>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
-            <FolderOpen size={32} className="mb-2 opacity-50" />
-            <p className="text-sm">未打开文件夹</p>
+            <FolderOpen size={24} className="mb-2 opacity-50" />
+            <p>未打开文件夹</p>
           </div>
         )}
       </ScrollArea>
