@@ -10,18 +10,18 @@ import { AIView } from '@/components/AI/AIView'
 import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
 import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
-import { useUIStore, useWorkspaceStore } from '@/stores'
+import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
 import { useState, useCallback, useEffect } from 'react'
 import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
+import { saveSessionState, getSessionState } from '@/lib/tauri'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 function App() {
   useTheme()
-  const { settingsPanelVisible, rightPanelType } = useUIStore()
-  const [sidebarWidth, setSidebarWidth] = useState(240)
-  const [rightPanelWidth, setRightPanelWidth] = useState(288)
+  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, setSidebarWidth, setRightPanelWidth } = useUIStore()
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
   const [isDraggingRight, setIsDraggingRight] = useState(false)
   const [isHoveringLeft, setIsHoveringLeft] = useState(false)
@@ -29,7 +29,16 @@ function App() {
 
   useEffect(() => {
     const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
-    initMode().then(() => loadLatestByMode())
+    initMode().then(() => loadLatestByMode().then(() => restoreSessionState()))
+  }, [])
+
+  useEffect(() => {
+    const win = getCurrentWindow()
+    const unlisten = win.listen('tauri://close-requested', async () => {
+      await saveSessionStateNow()
+      await win.close()
+    })
+    return () => { unlisten.then(fn => fn()) }
   }, [])
 
   useEffect(() => {
@@ -100,6 +109,78 @@ function App() {
       }
     }
   }, [isDraggingLeft, isDraggingRight, handleMouseMoveLeft, handleMouseMoveRight, handleMouseUp])
+
+  const restoreSessionState = async () => {
+    try {
+      const states = await getSessionState()
+      if (Object.keys(states).length === 0) return
+
+      const { workspaceMode } = useUIStore.getState()
+      const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
+
+      if (states.tabs) {
+        const tabsData = JSON.parse(states.tabs)
+        const validTabs = tabsData.filter((tab: { path: string }) => {
+          if (workspaceMode === 'workspace') {
+            return workspaceFolders.some((f: string) => tab.path.startsWith(f))
+          }
+          return rootPath && tab.path.startsWith(rootPath)
+        })
+        if (validTabs.length > 0) {
+          const activeTabId = states.activeTabId || null
+          useEditorStore.getState().restoreTabs(validTabs, activeTabId)
+        }
+      }
+
+      if (states.expanded) {
+        const expandedPaths = JSON.parse(states.expanded)
+        const selectedPath = states.selectedPath || null
+        useFileTreeStore.getState().restoreTreeState(expandedPaths, selectedPath)
+      }
+
+      if (states.sidebarWidth) {
+        setSidebarWidth(Number(states.sidebarWidth))
+      }
+      if (states.rightPanelWidth) {
+        setRightPanelWidth(Number(states.rightPanelWidth))
+      }
+      if (states.editorViewMode) {
+        useUIStore.getState().setEditorViewMode(states.editorViewMode as any)
+      }
+    } catch (e) {
+      console.error('Failed to restore session state:', e)
+    }
+  }
+
+  const saveSessionStateNow = async () => {
+    try {
+      const editorState = useEditorStore.getState()
+      const fileTreeState = useFileTreeStore.getState()
+      const uiState = useUIStore.getState()
+
+      const tabsData = editorState.tabs.map(tab => ({
+        id: tab.id,
+        path: tab.path,
+        name: tab.name,
+        viewMode: tab.viewMode,
+        cursorPosition: tab.cursorPosition,
+      }))
+
+      const states: Record<string, string> = {
+        tabs: JSON.stringify(tabsData),
+        activeTabId: editorState.activeTabId || '',
+        expanded: JSON.stringify(Array.from(fileTreeState.expanded)),
+        selectedPath: fileTreeState.selectedPath || '',
+        sidebarWidth: String(uiState.sidebarWidth),
+        rightPanelWidth: String(uiState.rightPanelWidth),
+        editorViewMode: uiState.editorViewMode,
+      }
+
+      await saveSessionState(states)
+    } catch (e) {
+      console.error('Failed to save session state:', e)
+    }
+  }
 
   const renderRightPanel = () => {
     switch (rightPanelType) {

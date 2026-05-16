@@ -100,6 +100,10 @@ export async function saveWorkspaceFileDialog(defaultPath?: string): Promise<str
 }
 
 // File System APIs (using Tauri commands)
+export async function pathExists(path: string): Promise<boolean> {
+  return await invoke('path_exists', { path })
+}
+
 export async function listDirectory(path: string): Promise<FileNode[]> {
   return await invoke('list_directory', { path })
 }
@@ -212,6 +216,19 @@ export async function getFolderHistory(): Promise<string[]> {
 
 export async function removeFolderHistory(path: string): Promise<void> {
   await invoke('remove_folder_history', { path })
+}
+
+export async function clearOtherFolderHistory(currentPath: string | null): Promise<void> {
+  await invoke('clear_other_folder_history', { currentPath })
+}
+
+// Session State APIs
+export async function saveSessionState(states: Record<string, string>): Promise<void> {
+  await invoke('save_session_state', { states })
+}
+
+export async function getSessionState(): Promise<Record<string, string>> {
+  return await invoke('get_session_state')
 }
 
 export async function openWorkspaceDialog(): Promise<string | null> {

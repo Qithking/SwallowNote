@@ -62,3 +62,21 @@ pub fn remove_folder(db: &Database, path: &str) -> Result<()> {
     
     Ok(())
 }
+
+pub fn clear_other_history(db: &Database, current_path: Option<&str>) -> Result<()> {
+    let conn = db.conn.lock().unwrap();
+    
+    match current_path {
+        Some(path) => {
+            conn.execute(
+                "DELETE FROM folder_history WHERE path != ?1",
+                [path],
+            )?;
+        }
+        None => {
+            conn.execute("DELETE FROM folder_history", [])?;
+        }
+    }
+    
+    Ok(())
+}

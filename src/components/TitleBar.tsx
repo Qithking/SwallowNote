@@ -8,6 +8,8 @@ import { useUIStore } from '@/stores'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
+import { TitleBarRecentPopover } from './TitleBarRecentPopover'
 import { cn } from '@/lib/utils'
 
 function TitleBar() {
@@ -54,6 +56,8 @@ function TitleBar() {
             <TabsTrigger value="workspace" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] text-[var(--text-secondary)] shadow-none">工作区</TabsTrigger>
           </TabsList>
         </Tabs>
+        <Separator orientation="vertical" className="h-4" />
+        <TitleBarRecentPopover />
       </div>
 
       {/* Right: AI button + Theme toggle + Window controls */}

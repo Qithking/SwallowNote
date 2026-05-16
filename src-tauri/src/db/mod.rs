@@ -1,4 +1,5 @@
 pub mod folder_history;
+pub mod session_state;
 
 use rusqlite::{Connection, Result};
 use std::path::PathBuf;
@@ -23,6 +24,14 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_opened_at ON folder_history(opened_at DESC)",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS session_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
         [],
     )?;
     

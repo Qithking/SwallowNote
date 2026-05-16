@@ -18,6 +18,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
+            commands::file::path_exists,
             commands::file::list_directory,
             commands::file::read_file,
             commands::file::write_file,
@@ -41,6 +42,9 @@ pub fn run() {
             commands::folder_history::get_latest_folder,
             commands::folder_history::get_folder_history,
             commands::folder_history::remove_folder_history,
+            commands::folder_history::clear_other_folder_history,
+            commands::session_state::save_session_state,
+            commands::session_state::get_session_state,
             services::file_watcher::watch_directory,
             services::file_watcher::unwatch_directory,
             mac_rounded_corners::enable_rounded_corners,

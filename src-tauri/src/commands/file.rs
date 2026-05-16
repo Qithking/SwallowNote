@@ -59,6 +59,11 @@ pub struct LineMatch {
 }
 
 #[tauri::command]
+pub async fn path_exists(path: String) -> bool {
+    PathBuf::from(&path).exists()
+}
+
+#[tauri::command]
 pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
     let path = PathBuf::from(&path);
 

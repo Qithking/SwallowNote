@@ -26,6 +26,7 @@ export interface FileTreeState {
   removeRoot: (rootPath: string) => void
   revealPath: (filePath: string, rootPath: string) => Promise<void>
   clearAll: () => void
+  restoreTreeState: (expandedPaths: string[], selectedPath: string | null) => void
 }
 
 function findNodeInList(list: FileNode[], path: string): FileNode | null {
@@ -187,6 +188,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   },
 
   clearAll: () => set({ nodes: [], expanded: new Set(), selectedPath: null, isLoading: false }),
+  restoreTreeState: (expandedPaths, selectedPath) =>
+    set({ expanded: new Set(expandedPaths), selectedPath }),
 }))
 
 function scrollToFileElement(path: string) {

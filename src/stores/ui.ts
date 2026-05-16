@@ -16,6 +16,7 @@ export interface UIState {
   sidebarView: SidebarView
   sidebarVisible: boolean
   sidebarWidth: number
+  rightPanelWidth: number
   statusBarVisible: boolean
   editorViewMode: EditorViewMode
   commandPaletteVisible: boolean
@@ -38,6 +39,7 @@ export interface UIState {
   toggleSettingsPanel: () => void
   toggleAIPanel: () => void
   setRightPanelType: (type: RightPanelType) => void
+  setRightPanelWidth: (width: number) => void
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void
   setClipboardFiles: (files: string[], isCut: boolean) => void
   clearClipboard: () => void
@@ -50,6 +52,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarView: 'explorer',
   sidebarVisible: true,
   sidebarWidth: 240,
+  rightPanelWidth: 288,
   statusBarVisible: true,
   editorViewMode: 'split',
   commandPaletteVisible: false,
@@ -63,6 +66,7 @@ export const useUIStore = create<UIState>((set) => ({
   setTheme: (theme) => set({ theme }),
   setSidebarView: (view) => set({ sidebarView: view }),
   setSidebarWidth: (width) => set({ sidebarWidth: Math.max(150, Math.min(500, width)) }),
+  setRightPanelWidth: (width) => set({ rightPanelWidth: Math.max(150, Math.min(600, width)) }),
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
   toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
   setEditorViewMode: (mode) => set({ editorViewMode: mode }),

@@ -35,6 +35,7 @@ export interface EditorState {
   toggleViewMode: () => void
   getActiveTab: () => EditorTab | undefined
   scrollToLine: (line: number) => void
+  restoreTabs: (tabsData: EditorTab[], activeTabId: string | null) => void
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -113,4 +114,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ),
       }
     }),
+  restoreTabs: (tabsData, activeTabId) =>
+    set({ tabs: tabsData, activeTabId }),
 }))

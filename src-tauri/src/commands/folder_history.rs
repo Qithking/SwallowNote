@@ -24,3 +24,9 @@ pub fn remove_folder_history(db: State<Database>, path: String) -> Result<(), St
     crate::db::folder_history::remove_folder(&db, &path)
         .map_err(|e| format!("Failed to remove folder history: {}", e))
 }
+
+#[tauri::command]
+pub fn clear_other_folder_history(db: State<Database>, current_path: Option<String>) -> Result<(), String> {
+    crate::db::folder_history::clear_other_history(&db, current_path.as_deref())
+        .map_err(|e| format!("Failed to clear other folder history: {}", e))
+}
