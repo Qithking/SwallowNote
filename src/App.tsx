@@ -222,7 +222,15 @@ function App() {
             useEditorStore.getState().loadTabContent(activeTabId)
             const activeTab = restoredTabs.find((t: any) => t.id === activeTabId)
             if (activeTab?.path) {
-              useFileTreeStore.getState().collapseAllExceptPath(activeTab.path)
+              const fileTreeStore = useFileTreeStore.getState()
+              if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
+                const folder = workspaceFolders.find((f: string) => activeTab.path.startsWith(f))
+                if (folder) {
+                  fileTreeStore.collapseAllExceptPath(activeTab.path, folder)
+                }
+              } else if (rootPath) {
+                fileTreeStore.collapseAllExceptPath(activeTab.path, rootPath)
+              }
             }
           }
         }

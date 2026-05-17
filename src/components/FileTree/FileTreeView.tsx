@@ -211,11 +211,6 @@ export function FileTreeView() {
     }
   }, [editingPath, newItem, editingName, nodes, isFirstEdit])
 
-  useEffect(() => {
-    if (rootPath) loadRoot(rootPath)
-    else useFileTreeStore.getState().clearAll()
-  }, [rootPath, loadRoot])
-
   const handleSelect = (node: FileNode) => {
     setSelectedPath(node.path)
     if (node.isDirectory) {

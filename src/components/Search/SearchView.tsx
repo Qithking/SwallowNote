@@ -106,13 +106,11 @@ function SearchView() {
     }
   }
 
-  // Auto-search on query change with debounce
-  useEffect(() => {
-    const timer = setTimeout(() => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
       handleSearch()
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [query, caseSensitive, wholeWord, useRegex, rootPath, workspaceFolders, workspaceMode])
+    }
+  }
 
   const toggleFileExpanded = (filePath: string) => {
     setExpandedFiles(prev => {
@@ -172,6 +170,7 @@ function SearchView() {
             placeholder="搜索"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
           />
           
           {/* Clear Button */}
@@ -274,35 +273,35 @@ function SearchView() {
               return (
                 <div key={result.file_path}>
                   {/* File header - VSCode style */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div
-                        className="flex items-center h-6 px-2 cursor-pointer hover:bg-[var(--bg-hover)]"
-                        onClick={() => toggleFileExpanded(result.file_path)}
-                      >
-                        {/* Collapse/Expand arrow */}
-                        {isExpanded ? (
-                          <ChevronDown size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
-                        ) : (
-                          <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
-                        )}
-                        {/* File icon */}
-                        {getFileIcon(result.file_name, 14)}
-                        {/* File name */}
+                  <div
+                    className="flex items-center h-6 px-2 cursor-pointer hover:bg-[var(--bg-hover)]"
+                    onClick={() => toggleFileExpanded(result.file_path)}
+                  >
+                    {/* Collapse/Expand arrow */}
+                    {isExpanded ? (
+                      <ChevronDown size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                    ) : (
+                      <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                    )}
+                    {/* File icon */}
+                    {getFileIcon(result.file_name, 14)}
+                    {/* File name with tooltip */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
                         <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>
                           {result.file_name}
                         </span>
-                        {/* Match count badge */}
-                        <span className="ml-auto text-xs px-1 rounded shrink-0" style={{ 
-                          color: 'var(--text-muted)',
-                          backgroundColor: 'var(--bg-tertiary)'
-                        }}>
-                          {result.line_matches.length}
-                        </span>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">{result.file_path}</TooltipContent>
-                  </Tooltip>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" align="start">{result.file_path}</TooltipContent>
+                    </Tooltip>
+                    {/* Match count badge */}
+                    <span className="ml-auto text-xs px-1 rounded shrink-0" style={{ 
+                      color: 'var(--text-muted)',
+                      backgroundColor: 'var(--bg-tertiary)'
+                    }}>
+                      {result.line_matches.length}
+                    </span>
+                  </div>
 
                   {/* Match lines - content aligned with file icon */}
                   {isExpanded && result.line_matches.map((match, idx) => (

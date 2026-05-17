@@ -185,7 +185,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const activeTab = tabs.find(t => t.id === activeTabId)
       if (activeTab?.path) {
         const fileTreeStore = useFileTreeStore.getState()
-        fileTreeStore.collapseAllExceptPath(activeTab.path)
+        const folder = state.workspaceFolders.find((f: string) => activeTab.path.startsWith(f))
+        if (folder) {
+          fileTreeStore.collapseAllExceptPath(activeTab.path, folder)
+        }
       }
     }
   },

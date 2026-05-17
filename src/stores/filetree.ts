@@ -28,7 +28,7 @@ export interface FileTreeState {
   clearAll: () => void
   clearExpanded: () => void
   restoreTreeState: (expandedPaths: string[], selectedPath: string | null) => void
-  collapseAllExceptPath: (filePath: string) => void
+  collapseAllExceptPath: (filePath: string, rootPath?: string) => void
 }
 
 function findNodeInList(list: FileNode[], path: string): FileNode | null {
@@ -193,15 +193,18 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   clearExpanded: () => set({ expanded: new Set() }),
   restoreTreeState: (expandedPaths, selectedPath) =>
     set({ expanded: new Set(expandedPaths), selectedPath }),
-  collapseAllExceptPath: (filePath) => {
+  collapseAllExceptPath: (filePath, rootPath) => {
     if (!filePath) {
       set({ expanded: new Set() })
       return
     }
     const parentPath = filePath.substring(0, filePath.lastIndexOf('/'))
-    const parts = parentPath.split('/')
+    const pathToExpand = rootPath && parentPath.startsWith(rootPath)
+      ? parentPath.substring(rootPath.length + 1)
+      : parentPath
+    const parts = pathToExpand.split('/')
     const expandedPaths = new Set<string>()
-    let currentPath = ''
+    let currentPath = rootPath || ''
     for (const part of parts) {
       if (!part) continue
       currentPath = currentPath ? `${currentPath}/${part}` : part
