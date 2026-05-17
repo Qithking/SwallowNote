@@ -2,10 +2,11 @@
  * Workspace Store - Manages workspace state
  */
 import { create } from 'zustand'
-import { getLatestFolder, saveFolderHistory, getFolderHistory } from '@/lib/tauri'
+import { getLatestFolder, saveFolderHistory, getFolderHistory, scanGitRepos, GitRepositoryInfo } from '@/lib/tauri'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
 import { useEditorStore, EditorTab } from './editor'
+import { useGitStore, GitRepository } from './git'
 
 export interface WorkspaceState {
   rootPath: string | null
@@ -84,6 +85,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           fileTreeStore.clearAll()
         }
       }
+      
+      // 异步扫描并缓存 Git 仓库
+      scanAndCacheGitRepos()
     } catch (err) {
       console.warn('Failed to load latest by mode:', err)
     }
@@ -200,4 +204,62 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 async function promptWorkspacePath(): Promise<string | null> {
   const { saveWorkspaceFileDialog } = await import('@/lib/tauri')
   return await saveWorkspaceFileDialog('untitled.swallow-workspace')
+}
+
+async function scanAndCacheGitRepos() {
+  try {
+    const { workspaceMode } = useUIStore.getState()
+    const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
+    const gitStore = useGitStore.getState()
+
+    const scanPaths = workspaceMode === 'workspace'
+      ? (workspaceFolders || [])
+      : (rootPath ? [rootPath] : [])
+
+    if (scanPaths.length === 0) {
+      gitStore.setCachedRepositories([])
+      return
+    }
+
+    gitStore.setScanProgress({ current: 0, total: scanPaths.length, message: '扫描中...' })
+
+    const scanPromises = scanPaths.map(async (path, index) => {
+      try {
+        gitStore.setScanProgress({ current: index, total: scanPaths.length, message: `扫描 ${path}...` })
+        const repos = await scanGitRepos(path)
+        return repos
+      } catch (e) {
+        console.error(`Failed to scan git repos in ${path}:`, e)
+        return []
+      }
+    })
+
+    const results = await Promise.all(scanPromises)
+    const allRepos = results.flat()
+
+    const seenPaths = new Set<string>()
+    const uniqueRepos = allRepos.filter((repo: GitRepositoryInfo) => {
+      if (seenPaths.has(repo.path)) return false
+      seenPaths.add(repo.path)
+      return true
+    })
+
+    const cachedRepos: GitRepository[] = uniqueRepos.map((repo: GitRepositoryInfo) => ({
+      name: repo.name,
+      path: repo.path,
+      remoteUrl: repo.remote_url,
+      hasUncommittedChanges: repo.has_uncommitted_changes,
+      uncommittedCount: repo.uncommitted_count,
+      currentBranch: repo.current_branch,
+      branches: [],
+      isSubmodule: repo.is_submodule,
+      parentPath: repo.parent_path,
+    }))
+
+    gitStore.setCachedRepositories(cachedRepos)
+    gitStore.clearScanProgress()
+  } catch (e) {
+    console.error('Failed to scan and cache git repos:', e)
+    useGitStore.getState().clearScanProgress()
+  }
 }

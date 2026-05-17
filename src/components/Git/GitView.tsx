@@ -11,6 +11,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository } from '@/stores/git'
 import { scanGitRepos, GitRepositoryInfo, gitCommitAndPush } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -210,19 +211,52 @@ function RepositoryItem({
 }
 
 function GitView() {
-  const { repositories, setRepositories } = useGitStore()
-  const { rootPath } = useWorkspaceStore()
+  const { repositories, setRepositories, cachedRepositories, scanProgress } = useGitStore()
+  const { rootPath, workspaceFolders } = useWorkspaceStore()
+  const { workspaceMode } = useUIStore()
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
 
-  // Scan for git repositories in workspace
+  // 优先使用缓存数据，后台异步刷新
   useEffect(() => {
+    // 立即显示缓存数据
+    if (cachedRepositories.length > 0) {
+      setRepositories(cachedRepositories)
+    }
+
+    // 后台异步刷新
     const loadRepos = async () => {
-      if (!rootPath) return
-      
+      const scanPaths = workspaceMode === 'workspace'
+        ? (workspaceFolders || [])
+        : (rootPath ? [rootPath] : [])
+
+      if (scanPaths.length === 0) {
+        setRepositories([])
+        return
+      }
+
       try {
-        const repos = await scanGitRepos(rootPath)
-        // Convert backend format to store format
-        const storeRepos: GitRepository[] = repos.map((repo: GitRepositoryInfo) => ({
+        const scanPromises = scanPaths.map(async (path) => {
+          try {
+            return await scanGitRepos(path)
+          } catch (e) {
+            console.error(`Failed to scan git repos in ${path}:`, e)
+            return []
+          }
+        })
+
+        const results = await Promise.all(scanPromises)
+        const allRepos = results.flat()
+
+        const seenPaths = new Set<string>()
+        const uniqueRepos = allRepos.filter((repo: GitRepositoryInfo) => {
+          if (seenPaths.has(repo.path)) {
+            return false
+          }
+          seenPaths.add(repo.path)
+          return true
+        })
+
+        const storeRepos: GitRepository[] = uniqueRepos.map((repo: GitRepositoryInfo) => ({
           name: repo.name,
           path: repo.path,
           remoteUrl: repo.remote_url,
@@ -234,16 +268,16 @@ function GitView() {
           parentPath: repo.parent_path,
         }))
         setRepositories(storeRepos)
-        // Clear selection when repos change
-        setSelectedRepos([])
       } catch (e) {
         console.error('Failed to scan git repos:', e)
-        setRepositories([])
+        if (cachedRepositories.length === 0) {
+          setRepositories([])
+        }
       }
     }
-    
+
     loadRepos()
-  }, [rootPath, setRepositories])
+  }, [rootPath, workspaceFolders, workspaceMode, cachedRepositories, setRepositories])
 
   const toggleRepo = (path: string) => {
     setSelectedRepos(prev => 
@@ -254,10 +288,38 @@ function GitView() {
   }
 
   const handleRefresh = async () => {
-    if (!rootPath) return
+    const scanPaths = workspaceMode === 'workspace'
+      ? (workspaceFolders || [])
+      : (rootPath ? [rootPath] : [])
+
+    setRepositories([])
+    setSelectedRepos([])
+
+    if (scanPaths.length === 0) return
+
     try {
-      const repos = await scanGitRepos(rootPath)
-      const storeRepos: GitRepository[] = repos.map((repo: GitRepositoryInfo) => ({
+      const scanPromises = scanPaths.map(async (path) => {
+        try {
+          return await scanGitRepos(path)
+        } catch (e) {
+          console.error(`Failed to scan git repos in ${path}:`, e)
+          return []
+        }
+      })
+
+      const results = await Promise.all(scanPromises)
+      const allRepos = results.flat()
+
+      const seenPaths = new Set<string>()
+      const uniqueRepos = allRepos.filter((repo: GitRepositoryInfo) => {
+        if (seenPaths.has(repo.path)) {
+          return false
+        }
+        seenPaths.add(repo.path)
+        return true
+      })
+
+      const storeRepos: GitRepository[] = uniqueRepos.map((repo: GitRepositoryInfo) => ({
         name: repo.name,
         path: repo.path,
         remoteUrl: repo.remote_url,
@@ -288,16 +350,8 @@ function GitView() {
                 <RefreshCw size={12} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>刷新</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-7 w-7">
-                <ChevronDown size={12} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>分支操作</TooltipContent>
-          </Tooltip>
+            <TooltipContent>刷新所有仓库列表</TooltipContent>
+          </Tooltip>          
         </div>
       </div>
 
@@ -307,6 +361,16 @@ function GitView() {
         allRepos={repositories}
         onRefresh={handleRefresh}
       />
+
+      {/* Scan Progress */}
+      {scanProgress && (
+        <div className="px-3 py-2">
+          <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+            {scanProgress.message} ({scanProgress.current}/{scanProgress.total})
+          </div>
+          <Progress value={(scanProgress.current / scanProgress.total) * 100} className="h-1" />
+        </div>
+      )}
 
       {/* Repositories List */}
       <ScrollArea className="flex-1 p-2">

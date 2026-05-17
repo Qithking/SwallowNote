@@ -140,13 +140,12 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
 
     // Check if there are submodule changes that need special handling
-    let status_output = run_git(&path, &["status", "--porcelain"])?;
+    let status_output = run_git(&path, &["status"])?;
     
     // Check for submodule with modified content (submodule internal changes)
-    let has_submodule_modified = status_output.contains("modified content");
-    let has_submodule_untracked = status_output.contains("untracked content");
+    let has_submodule_modified = status_output.contains("modified content") || status_output.contains("submodule");
     
-    if has_submodule_modified || has_submodule_untracked {
+    if has_submodule_modified {
         // First try to commit changes in submodules
         match commit_submodules(&path, &message) {
             Ok(_) => {
@@ -164,10 +163,6 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
         // Regular commit
         let commit_result = run_git(&path, &["commit", "-m", &message]);
         if let Err(e) = commit_result {
-            // Check if this is a submodule reference update issue
-            if e.contains("submodule") && (e.contains("modified") || e.contains("new commits")) {
-                return Err(format!("子模块引用需要更新，请先提交子模块变更"));
-            }
             return Err(format!("Failed to commit: {}", e));
         }
     }
