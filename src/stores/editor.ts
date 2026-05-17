@@ -3,6 +3,7 @@
  */
 import { create } from 'zustand'
 import { loadFileContent } from '@/lib/api'
+import { writeFile } from '@/lib/tauri'
 
 export interface EditorTab {
   id: string
@@ -40,6 +41,9 @@ export interface EditorState {
   scrollToLine: (line: number) => void
   restoreTabs: (tabsData: EditorTab[], activeTabId: string | null) => void
   filterTabs: (predicate: (tab: EditorTab) => boolean) => void
+  saveAllDirtyTabs: () => Promise<void>
+  resetDirtyTabs: () => void
+  getDirtyTabsCount: () => number
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -188,4 +192,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       
       return { tabs: keptTabs, activeTabId: newActiveId }
     }),
+  saveAllDirtyTabs: async () => {
+    const dirtyTabs = get().tabs.filter((t) => t.isDirty)
+    for (const tab of dirtyTabs) {
+      try {
+        await writeFile(tab.path, tab.content)
+        set((state) => ({
+          tabs: state.tabs.map((t) =>
+            t.id === tab.id ? { ...t, isDirty: false, isEdited: false } : t
+          ),
+        }))
+      } catch (e) {
+        console.error('Failed to save tab:', tab.path, e)
+        window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))
+      }
+    }
+  },
+  resetDirtyTabs: () =>
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.isDirty ? { ...t, isDirty: false, isEdited: false } : t
+      ),
+    })),
+  getDirtyTabsCount: () => {
+    return get().tabs.filter((t) => t.isDirty).length
+  },
 }))

@@ -14,10 +14,13 @@ import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEdi
 import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
 import { saveSessionState, getSessionState } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
 
 function App() {
   useTheme()
@@ -26,6 +29,9 @@ function App() {
   const [isDraggingRight, setIsDraggingRight] = useState(false)
   const [isHoveringLeft, setIsHoveringLeft] = useState(false)
   const [isHoveringRight, setIsHoveringRight] = useState(false)
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [dirtyFileNames, setDirtyFileNames] = useState<string[]>([])
+  const pendingCloseRef = useRef(false)
 
   useEffect(() => {
     const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
@@ -39,11 +45,66 @@ function App() {
   useEffect(() => {
     const win = getCurrentWindow()
     const unlisten = win.listen('tauri://close-requested', async () => {
-      await saveSessionStateNow()
-      await win.close()
+      const dirtyCount = useEditorStore.getState().getDirtyTabsCount()
+      if (dirtyCount > 0) {
+        const dirtyTabs = useEditorStore.getState().tabs.filter((t) => t.isDirty)
+        const names = dirtyTabs.slice(0, 5).map((t) => t.name)
+        if (dirtyTabs.length > 5) names.push('...')
+        setDirtyFileNames(names)
+        setShowSaveDialog(true)
+        pendingCloseRef.current = true
+      } else {
+        await saveSessionStateNow()
+        await win.destroy()
+      }
     })
     return () => { unlisten.then(fn => fn()) }
   }, [])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        useEditorStore.getState().saveAllDirtyTabs()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => { document.removeEventListener('keydown', handleKeyDown) }
+  }, [])
+
+  useEffect(() => {
+    const handleSaveError = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      toast.error(`保存失败: ${detail.path}`, { description: String(detail.error) })
+    }
+    window.addEventListener('save-error', handleSaveError)
+    return () => { window.removeEventListener('save-error', handleSaveError) }
+  }, [])
+
+  const handleSaveAndClose = async () => {
+    setShowSaveDialog(false)
+    await useEditorStore.getState().saveAllDirtyTabs()
+    if (pendingCloseRef.current) {
+      const win = getCurrentWindow()
+      await saveSessionStateNow()
+      await win.destroy()
+    }
+  }
+
+  const handleDiscardAndClose = async () => {
+    setShowSaveDialog(false)
+    useEditorStore.getState().resetDirtyTabs()
+    if (pendingCloseRef.current) {
+      const win = getCurrentWindow()
+      await saveSessionStateNow()
+      await win.destroy()
+    }
+  }
+
+  const handleCancelClose = () => {
+    setShowSaveDialog(false)
+    pendingCloseRef.current = false
+  }
 
   useEffect(() => {
     const initRoundedCorners = async () => {
@@ -320,6 +381,29 @@ function App() {
             },
           }}
         />
+
+        {/* Save Confirmation Dialog */}
+        <AlertDialog open={showSaveDialog} onOpenChange={(open: boolean) => { if (!open) handleCancelClose() }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>保存更改</AlertDialogTitle>
+              <AlertDialogDescription className="text-left">
+                <div className="mb-2">你有{dirtyFileNames.length}个文件修改未保存：</div>
+                <div className="max-h-32 overflow-y-auto">
+                  {dirtyFileNames.map((name, i) => (
+                    <p key={i} className="truncate text-xs font-mono" title={name}>
+                      {name.length > 20 ? name.slice(0, 20) + '...' : name}
+                    </p>
+                  ))}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={handleDiscardAndClose}>取消</AlertDialogCancel>
+              <AlertDialogAction onClick={handleSaveAndClose}>保存</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </TooltipProvider>
   )
