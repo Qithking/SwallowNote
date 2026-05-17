@@ -83,15 +83,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (tab && !tab.content && !tab.isLoading) {
       get().loadTabContent(id)
     }
-    
-    // 预加载其他未加载内容的tab（最多预加载2个）
-    const unloadedTabs = get().tabs.filter(
-      (t) => t.id !== id && !t.content && !t.isLoading
-    ).slice(0, 2)
-    
-    unloadedTabs.forEach((t) => {
-      get().loadTabContent(t.id)
-    })
   },
   loadTabContent: async (id) => {
     const tab = get().tabs.find((t) => t.id === id)
@@ -127,6 +118,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         tabs: state.tabs.map((t) =>
           t.id === id ? { ...t, isLoading: false } : t
         ),
+      }))
+      window.dispatchEvent(new CustomEvent('tab-load-error', {
+        detail: { id, path: tab.path, name: tab.name }
       }))
     }
   },

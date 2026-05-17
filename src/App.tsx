@@ -31,6 +31,8 @@ function App() {
   const [isHoveringRight, setIsHoveringRight] = useState(false)
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [dirtyFileNames, setDirtyFileNames] = useState<string[]>([])
+  const [showLoadErrorDialog, setShowLoadErrorDialog] = useState(false)
+  const [failedTabInfo, setFailedTabInfo] = useState<{ id: string; path: string; name: string } | null>(null)
   const pendingCloseRef = useRef(false)
 
   useEffect(() => {
@@ -79,6 +81,16 @@ function App() {
     }
     window.addEventListener('save-error', handleSaveError)
     return () => { window.removeEventListener('save-error', handleSaveError) }
+  }, [])
+
+  useEffect(() => {
+    const handleTabLoadError = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      setFailedTabInfo({ id: detail.id, path: detail.path, name: detail.name })
+      setShowLoadErrorDialog(true)
+    }
+    window.addEventListener('tab-load-error', handleTabLoadError)
+    return () => { window.removeEventListener('tab-load-error', handleTabLoadError) }
   }, [])
 
   const handleSaveAndClose = async () => {
@@ -401,6 +413,35 @@ function App() {
             <AlertDialogFooter>
               <AlertDialogCancel onClick={handleDiscardAndClose}>取消</AlertDialogCancel>
               <AlertDialogAction onClick={handleSaveAndClose}>保存</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Tab Load Error Dialog */}
+        <AlertDialog open={showLoadErrorDialog} onOpenChange={(open: boolean) => {
+          if (!open) {
+            if (failedTabInfo) {
+              useEditorStore.getState().removeTab(failedTabInfo.id)
+            }
+            setShowLoadErrorDialog(false)
+            setFailedTabInfo(null)
+          }
+        }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>文件加载失败</AlertDialogTitle>
+              <AlertDialogDescription className="text-left">
+                <p className="mb-2">无法加载以下文件，文件可能已被删除或移动：</p>
+                <p className="font-mono text-xs truncate" title={failedTabInfo?.path}>
+                  {failedTabInfo?.name}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 truncate" title={failedTabInfo?.path}>
+                  {failedTabInfo?.path}
+                </p>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogAction>关闭</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
