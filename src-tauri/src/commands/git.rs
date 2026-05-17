@@ -13,6 +13,15 @@ pub struct GitRepositoryInfo {
     pub parent_path: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct GitFileLogEntry {
+    pub hash: String,
+    pub message: String,
+    pub date: String,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
 #[derive(Serialize)]
 pub struct GitStatus {
     pub branch: String,
@@ -265,8 +274,89 @@ pub async fn git_log(path: String, max_count: i32) -> Result<Vec<String>, String
             logs.push(line.to_string());
         }
     }
-
     Ok(logs)
+}
+
+/// Get file commit history with pagination
+#[tauri::command]
+pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> Result<Vec<GitFileLogEntry>, String> {
+    // Find the git root by walking up directories
+    let mut current = Path::new(&file_path);
+    loop {
+        if current.join(".git").exists() {
+            break;
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => return Err("NOT_IN_GIT_REPO".to_string()),
+        }
+    }
+
+    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let relative_path = Path::new(&file_path)
+        .strip_prefix(current)
+        .map_err(|e| format!("Invalid relative path: {}", e))?;
+    let relative_path_str = relative_path.to_str().ok_or("Invalid path encoding")?;
+
+    let max_count_str = max_count.to_string();
+    let skip_str = skip.to_string();
+
+    let format_str = "%H%n%s%n%ai";
+    let output = run_git(
+        repo_path,
+        &[
+            "log",
+            "--follow",
+            "--format", format_str,
+            "--numstat",
+            "-n", &max_count_str,
+            "--skip", &skip_str,
+            "--",
+            relative_path_str,
+        ],
+    )?;
+
+    let mut entries = Vec::new();
+    let mut lines = output.lines().peekable();
+
+    while lines.peek().is_some() {
+        let hash = lines.next().unwrap_or("").to_string();
+        if hash.is_empty() {
+            break;
+        }
+        let message = lines.next().unwrap_or("").to_string();
+        let date = lines.next().unwrap_or("").to_string();
+
+        let mut insertions = 0;
+        let mut deletions = 0;
+
+        while let Some(line) = lines.peek() {
+            if line.is_empty() {
+                lines.next();
+                break;
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                if let Ok(ins) = parts[0].parse::<usize>() {
+                    insertions += ins;
+                }
+                if let Ok(del) = parts[1].parse::<usize>() {
+                    deletions += del;
+                }
+            }
+            lines.next();
+        }
+
+        entries.push(GitFileLogEntry {
+            hash,
+            message,
+            date,
+            insertions,
+            deletions,
+        });
+    }
+
+    Ok(entries)
 }
 
 fn get_branch(path: &str) -> Result<String, String> {

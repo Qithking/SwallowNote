@@ -38,6 +38,7 @@ pub fn run() {
             commands::git::git_commit_and_push,
             commands::git::git_auto_commit,
             commands::git::git_log,
+            commands::git::git_file_log,
             commands::git::scan_git_repos,
             commands::folder_history::save_folder_history,
             commands::folder_history::get_latest_folder,

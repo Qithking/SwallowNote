@@ -172,6 +172,18 @@ export async function gitLog(path: string, maxCount: number = 50): Promise<strin
   return await invoke('git_log', { path, maxCount })
 }
 
+export interface GitFileLogEntry {
+  hash: string
+  message: string
+  date: string
+  insertions: number
+  deletions: number
+}
+
+export async function gitFileLog(filePath: string, maxCount: number = 50, skip: number = 0): Promise<GitFileLogEntry[]> {
+  return await invoke('git_file_log', { filePath, maxCount, skip })
+}
+
 export async function isGitRepository(path: string): Promise<boolean> {
   return await invoke('git_is_repo', { path })
 }
