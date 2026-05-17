@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader};
+use tauri::{AppHandle, Emitter};
 
 #[derive(Serialize, Deserialize)]
 pub struct GitRepositoryInfo {
@@ -553,5 +556,65 @@ fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
         } else {
             Err(stderr)
         }
+    }
+}
+
+/// Clone a git repository to a local path
+#[tauri::command]
+pub async fn git_clone(app: AppHandle, url: String, local_path: String) -> Result<String, String> {
+    // Ensure parent directory exists
+    if let Some(parent) = Path::new(&local_path).parent() {
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+    }
+
+    // Check if target path already exists
+    if Path::new(&local_path).exists() {
+        return Err(format!("目标路径已存在: {}", local_path));
+    }
+
+    // Send start event
+    let _ = app.emit("git-clone-progress", serde_json::json!({
+        "status": "started",
+        "message": "开始克隆..."
+    }));
+
+    let mut child = Command::new("git")
+        .args(["clone", "--progress", &url, &local_path])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to execute git clone: {}", e))?;
+
+    // Read stderr for progress (git clone outputs progress to stderr)
+    if let Some(stderr) = child.stderr.take() {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                // Send progress update
+                let _ = app.emit("git-clone-progress", serde_json::json!({
+                    "status": "progress",
+                    "message": line
+                }));
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| format!("Failed to wait for git clone: {}", e))?;
+
+    if status.success() {
+        let _ = app.emit("git-clone-progress", serde_json::json!({
+            "status": "completed",
+            "message": "克隆完成"
+        }));
+        Ok(local_path)
+    } else {
+        let _ = app.emit("git-clone-progress", serde_json::json!({
+            "status": "error",
+            "message": "克隆失败"
+        }));
+        Err("Git clone failed".to_string())
     }
 }

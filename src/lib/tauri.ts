@@ -65,6 +65,14 @@ export async function openFolderDialog(): Promise<string | null> {
   return selected as string | null
 }
 
+export async function openDirectoryDialog(): Promise<string | null> {
+  const selected = await open({
+    directory: true,
+    multiple: false,
+  })
+  return selected as string | null
+}
+
 export async function openFileDialog(): Promise<string | null> {
   const selected = await open({
     directory: false,
@@ -170,6 +178,10 @@ export async function gitDiff(path: string, filePath: string): Promise<string> {
 
 export async function gitLog(path: string, maxCount: number = 50): Promise<string[]> {
   return await invoke('git_log', { path, maxCount })
+}
+
+export async function gitClone(url: string, localPath: string): Promise<string> {
+  return await invoke('git_clone', { url, localPath })
 }
 
 export interface GitFileLogEntry {

@@ -183,6 +183,8 @@
     
     --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+
+    --bn-colors-editor-background:transparent;
   }
 
   /* Apply shadcn/ui base styles */

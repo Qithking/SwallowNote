@@ -83,13 +83,13 @@ export const useUIStore = create<UIState>((set) => ({
   showToast: (message, type = 'info') => {
     switch (type) {
       case 'success':
-        toast.success(message)
+        toast.success(message, { duration: 3000 })
         break
       case 'error':
-        toast.error(message)
+        toast.error(message, { duration: 8000 })
         break
       default:
-        toast(message)
+        toast(message, { duration: 3000 })
         break
     }
   },

@@ -243,13 +243,15 @@ function BlockNoteInner({
 
   return (
     <div ref={editorContainerRef} className="blocknote-editor-container flex flex-col h-full">
-      <ScrollArea className="flex-1">
-        <BlockNoteView
-          key={containerWidth}
-          editor={editor}
-          theme={blocknoteTheme}
-          onChange={handleChange}
-        />
+      <ScrollArea className="flex-1 w-full">
+        <div className="w-full">
+          <BlockNoteView
+            key={containerWidth}
+            editor={editor}
+            theme={blocknoteTheme}
+            onChange={handleChange}
+          />
+        </div>
       </ScrollArea>
     </div>
   )

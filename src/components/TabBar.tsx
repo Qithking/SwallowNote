@@ -206,7 +206,6 @@ function TabBar() {
   if (tabs.length === 0) {
     return (
       <div className="h-10 flex items-center border-b border-[var(--border-color)] bg-[var(--tab-bg)]">
-        <span className="px-4 text-sm text-[var(--text-muted)]">No file open</span>
       </div>
     )
   }

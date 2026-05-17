@@ -1,4 +1,4 @@
-import { FolderOpen, ChevronDown, ChevronUp, Check, MoreHorizontal, Trash2, AlertCircle } from 'lucide-react'
+import { FolderOpen, ChevronDown, ChevronUp, Check, MoreHorizontal, Trash2, AlertCircle, GitBranch, FolderPlus, Loader2 } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
 import {
@@ -8,8 +8,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useUIStore, useWorkspaceStore } from '@/stores'
-import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory, removeFolderHistory } from '@/lib/tauri'
-import { useState, useEffect, useRef } from 'react'
+import { getFolderHistory, openFolderDialog, openDirectoryDialog, pathExists, clearOtherFolderHistory, removeFolderHistory, gitClone } from '@/lib/tauri'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { listen } from '@tauri-apps/api/event'
 
 interface RecentItem {
   path: string
@@ -31,10 +32,16 @@ function getInitialAndColor(path: string): { initial: string; color: string } {
 
 export function TitleBarRecentPopover() {
   const { workspaceMode } = useUIStore()
-  const { rootPath, currentWorkspacePath, openFolder, loadWorkspaceFile, switchMode } = useWorkspaceStore()
+  const { rootPath, currentWorkspacePath, openFolder, loadWorkspaceFile, switchMode, addWorkspaceFolder } = useWorkspaceStore()
   const [recentItems, setRecentItems] = useState<RecentItem[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [showCloneDialog, setShowCloneDialog] = useState(false)
+  const [cloneUrl, setCloneUrl] = useState('')
+  const [cloneLocalPath, setCloneLocalPath] = useState('')
+  const [isCloning, setIsCloning] = useState(false)
+  const [cloneProgress, setCloneProgress] = useState('')
+  const [cloneError, setCloneError] = useState('')
   const popoverRef = useRef<HTMLDivElement>(null)
 
   const displayName = (() => {
@@ -82,6 +89,35 @@ export function TitleBarRecentPopover() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isOpen])
 
+  useEffect(() => {
+    if (!showCloneDialog) return
+
+    let unlisten: (() => void) | undefined
+
+    const setupListener = async () => {
+      unlisten = await listen('git-clone-progress', (event) => {
+        const payload = event.payload as { status: string; message: string }
+        if (payload.status === 'progress') {
+          setCloneProgress(payload.message)
+          setCloneError('')
+        } else if (payload.status === 'completed') {
+          setCloneProgress('克隆完成')
+        } else if (payload.status === 'error') {
+          setCloneError(payload.message)
+        } else if (payload.status === 'started') {
+          setCloneProgress(payload.message)
+          setCloneError('')
+        }
+      })
+    }
+
+    setupListener()
+
+    return () => {
+      if (unlisten) unlisten()
+    }
+  }, [showCloneDialog])
+
   const handleOpenFolder = async () => {
     setIsOpen(false)
     const path = await openFolderDialog()
@@ -119,6 +155,54 @@ export function TitleBarRecentPopover() {
       setShowClearConfirm(false)
     } catch (e) {
       console.error('Failed to clear history:', e)
+    }
+  }
+
+  const handleOpenCloneDialog = () => {
+    setIsOpen(false)
+    setShowCloneDialog(true)
+    setCloneUrl('')
+    setCloneLocalPath('')
+    setCloneProgress('')
+    setCloneError('')
+  }
+
+  const handleSelectClonePath = async () => {
+    const path = await openDirectoryDialog()
+    if (path) {
+      setCloneLocalPath(path)
+    }
+  }
+
+  const handleClone = async () => {
+    if (!cloneUrl.trim()) {
+      const { showToast } = useUIStore.getState()
+      showToast('请输入仓库 URL', 'error')
+      return
+    }
+    if (!cloneLocalPath.trim()) {
+      const { showToast } = useUIStore.getState()
+      showToast('请选择本地地址', 'error')
+      return
+    }
+
+    setIsCloning(true)
+    try {
+      const clonedPath = await gitClone(cloneUrl.trim(), cloneLocalPath.trim())
+      setShowCloneDialog(false)
+      setCloneUrl('')
+      setCloneLocalPath('')
+
+      if (workspaceMode === 'workspace') {
+        await addWorkspaceFolder(clonedPath)
+      } else {
+        await openFolder(clonedPath)
+      }
+    } catch (e: any) {
+      const { showToast } = useUIStore.getState()
+      showToast(`克隆失败: ${e}`, 'error')
+    } finally {
+      setIsCloning(false)
     }
   }
 
@@ -161,6 +245,14 @@ export function TitleBarRecentPopover() {
             >
               <FolderOpen size={14} />
               <span>打开文件夹</span>
+            </button>
+            <button
+              onClick={handleOpenCloneDialog}
+              className="w-full flex items-center gap-2 px-3 py-1 text-sm cursor-pointer hover:bg-[var(--bg-hover)]"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              <GitBranch size={14} />
+              <span>克隆 Git 仓库</span>
             </button>
             <button
               onClick={() => setShowClearConfirm(true)}
@@ -259,6 +351,81 @@ export function TitleBarRecentPopover() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {showCloneDialog && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <div className="w-80 rounded-lg p-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+            <div className="text-sm font-medium mb-3" style={{ color: 'var(--text-primary)' }}>克隆 Git 仓库</div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>仓库 URL</label>
+                <input
+                  type="text"
+                  value={cloneUrl}
+                  onChange={(e) => setCloneUrl(e.target.value)}
+                  placeholder="https://github.com/user/repo.git"
+                  className="w-full px-2 py-1.5 text-xs rounded"
+                  style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                  disabled={isCloning}
+                />
+              </div>
+              <div>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>本地地址</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={cloneLocalPath}
+                    onChange={(e) => setCloneLocalPath(e.target.value)}
+                    placeholder="/path/to/local"
+                    className="flex-1 px-2 py-1.5 text-xs rounded"
+                    style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                    disabled={isCloning}
+                  />
+                  <button
+                    onClick={handleSelectClonePath}
+                    className="px-2 py-1.5 text-xs rounded cursor-pointer hover:bg-[var(--bg-hover)]"
+                    style={{ color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                    disabled={isCloning}
+                  >
+                    <FolderPlus size={12} />
+                  </button>
+                </div>
+              </div>
+              {(cloneProgress || cloneError) && (
+                <div className="mt-2 p-2 rounded text-xs max-h-20 overflow-y-auto" style={{
+                  background: cloneError ? 'rgba(239, 68, 68, 0.1)' : 'var(--bg-tertiary)',
+                  color: cloneError ? 'var(--danger-color, #ef4444)' : 'var(--text-secondary)',
+                  border: `1px solid ${cloneError ? 'rgba(239, 68, 68, 0.3)' : 'var(--border-color)'}`
+                }}>
+                  {cloneError || cloneProgress}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                onClick={() => {
+                  setShowCloneDialog(false)
+                  setCloneProgress('')
+                  setCloneError('')
+                }}
+                className="px-3 py-1.5 text-xs rounded cursor-pointer hover:bg-[var(--bg-hover)]"
+                style={{ color: 'var(--text-primary)' }}
+                disabled={isCloning}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleClone}
+                className="px-3 py-1.5 text-xs rounded cursor-pointer bg-blue-500 text-white hover:bg-blue-600 flex items-center gap-1"
+                disabled={isCloning}
+              >
+                {isCloning && <Loader2 size={12} className="animate-spin" />}
+                {isCloning ? '克隆中...' : '克隆&打开'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

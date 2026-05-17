@@ -130,6 +130,8 @@
     /* Theme color for UI accents (default blue) */
     --theme-color: hsl(217.2, 91.2%, 59.8%);
     --theme-color-hover: hsl(217.2, 91.2%, 70%);
+
+    --bn-colors-editor-background:transparent;
   }
 }
 
