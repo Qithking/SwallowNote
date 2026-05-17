@@ -20,8 +20,8 @@ export interface WorkspaceState {
   loadLastFolder: () => Promise<void>
   loadLatestByMode: () => Promise<void>
   addWorkspaceFolder: (path: string) => Promise<void>
-  removeWorkspaceFolder: (path: string) => void
-  saveWorkspaceFile: () => Promise<void>
+  removeWorkspaceFolder: (path: string) => Promise<void>
+  saveWorkspaceFile: (autoSave?: boolean) => Promise<void>
   loadWorkspaceFile: (workspacePath: string) => Promise<void>
   switchMode: (mode: WorkspaceMode) => Promise<void>
   initMode: () => Promise<void>
@@ -97,17 +97,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     
     const fileTreeStore = useFileTreeStore.getState()
     await fileTreeStore.addRoot(path)
+    
+    await get().saveWorkspaceFile(true)
   },
-  removeWorkspaceFolder: (path: string) => {
+  removeWorkspaceFolder: async (path: string) => {
     const { workspaceFolders } = get()
     const newFolders = workspaceFolders.filter(f => f !== path)
     set({ workspaceFolders: newFolders })
+    
+    await get().saveWorkspaceFile(true)
   },
-  saveWorkspaceFile: async () => {
-    const { workspaceFolders } = get()
+  saveWorkspaceFile: async (autoSave = false) => {
+    const { workspaceFolders, currentWorkspacePath } = get()
     if (workspaceFolders.length === 0) return
 
-    const pathToSave = await promptWorkspacePath()
+    let pathToSave = currentWorkspacePath
+    if (!pathToSave && !autoSave) {
+      pathToSave = await promptWorkspacePath()
+    }
     if (!pathToSave) return
 
     const content = JSON.stringify({ version: 1, folders: workspaceFolders }, null, 2)

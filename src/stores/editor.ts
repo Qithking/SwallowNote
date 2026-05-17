@@ -55,9 +55,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (existing) {
         return { activeTabId: existing.id }
       }
-      // 新打开的文件 isEdited 默认为 false, viewMode 默认为 'preview'
+      // 新打开的文件 isEdited/isDirty 默认为 false, viewMode 默认为 'preview'
       return {
-        tabs: [...state.tabs, { ...tab, isEdited: false, viewMode: 'preview' }],
+        tabs: [...state.tabs, { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' }],
         activeTabId: tab.id,
       }
     }),
@@ -126,9 +126,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   updateTabContent: (id, content) =>
     set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === id ? { ...t, content, isDirty: true, isEdited: true } : t
-      ),
+      tabs: state.tabs.map((t) => {
+        if (t.id !== id) return t
+        // 只有内容真正变化时才标记为 dirty
+        if (t.content === content) return t
+        return { ...t, content, isDirty: true, isEdited: true }
+      }),
     })),
   updateTabDirty: (id, isDirty) =>
     set((state) => ({
