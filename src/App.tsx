@@ -131,8 +131,17 @@ function App() {
           return rootPath && tab.path.startsWith(rootPath)
         })
         if (validTabs.length > 0) {
+          const restoredTabs = validTabs.map((tab: any) => ({
+            ...tab,
+            content: '',
+            isDirty: false,
+            isEdited: false,
+            fileSize: tab.fileSize,
+            modifiedTime: tab.modifiedTime,
+            wordCount: tab.wordCount,
+          }))
           const activeTabId = states.activeTabId || null
-          useEditorStore.getState().restoreTabs(validTabs, activeTabId)
+          useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
         }
       }
 
