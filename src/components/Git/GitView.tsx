@@ -29,36 +29,27 @@ function CommitSection({
   allRepos: GitRepository[]
   onRefresh: () => void
 }) {
-  const [commitMessage, setCommitMessage] = useState('')
   const [isCommitting, setIsCommitting] = useState(false)
   const { showToast } = useUIStore()
 
   const handleCommit = async () => {
-    if (!commitMessage.trim()) {
-      showToast('请输入提交信息', 'error')
-      return
-    }
+    const commitMessage = 'Sync changes'
 
-    // Determine which repos to commit
-    // 如果选中了仓库，只提交选中的（即使显示没有变更也尝试提交）
-    // 如果没选中任何仓库，提交所有有待提交变更的仓库
     const reposToCommit = selectedRepos.length > 0
       ? allRepos.filter(r => selectedRepos.includes(r.path))
       : allRepos.filter(r => r.hasUncommittedChanges)
 
     if (reposToCommit.length === 0) {
-      showToast('没有需要提交的仓库或没有变更', 'info')
+      showToast('没有需要同步的仓库或没有变更', 'info')
       return
     }
 
-    // 进一步过滤：移除没有实际变更的仓库
     const reposWithChanges = reposToCommit.filter(r => r.hasUncommittedChanges)
     if (reposWithChanges.length === 0 && selectedRepos.length === 0) {
-      showToast('没有需要提交的变更', 'info')
+      showToast('没有需要同步的变更', 'info')
       return
     }
     
-    // 如果用户明确选中了仓库，即使没有显示变更也尝试提交
     const finalRepos = reposWithChanges.length > 0 ? reposWithChanges : reposToCommit
 
     setIsCommitting(true)
@@ -72,7 +63,6 @@ function CommitSection({
       } catch (e) {
         const errorMessage = String(e).trim()
         console.error('Failed to commit and push:', repo.path, errorMessage)
-        // 忽略"没有需要提交的变更"错误，包括子模块场景
         if (errorMessage.includes('没有需要提交的变更') || 
             errorMessage.includes('nothing to commit') ||
             errorMessage.includes('working tree clean') ||
@@ -93,14 +83,12 @@ function CommitSection({
     }
 
     setIsCommitting(false)
-    setCommitMessage('')
 
-    // Refresh and show final result
     onRefresh()
     
     if (failCount === 0) {
       if (successCount > 0) {
-        showToast(`已提交 ${successCount} 个仓库`, 'success')
+        showToast(`已同步 ${successCount} 个仓库`, 'success')
       }
     } else {
       showToast(`成功 ${successCount} 个，失败 ${failCount} 个`, 'error')
@@ -108,24 +96,7 @@ function CommitSection({
   }
   
   return (
-    <div className="p-2 flex flex-col gap-2" style={{ borderColor: 'var(--border-color)' }}>
-      <input
-        type="text"
-        placeholder="提交信息"
-        value={commitMessage}
-        onChange={(e) => setCommitMessage(e.target.value)}
-        className="w-full h-8 px-3 text-xs rounded outline-none"
-        style={{ 
-          backgroundColor: 'var(--bg-tertiary)', 
-          color: 'var(--text-primary)',
-          border: '1px solid var(--border-color)'
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !isCommitting) {
-            handleCommit()
-          }
-        }}
-      />
+    <div className="p-2" style={{ borderColor: 'var(--border-color)' }}>
       <Button
         className="w-full h-8 text-xs"
         variant="default"
@@ -133,7 +104,7 @@ function CommitSection({
         disabled={isCommitting}
       >
         {isCommitting && <Loader2 size={12} className="animate-spin" />}
-        {isCommitting ? '提交中...' : '提交'}
+        {isCommitting ? '同步中...' : '同步'}
       </Button>
     </div>
   )
@@ -157,7 +128,7 @@ function RepositoryItem({
             'p-2 rounded cursor-pointer text-sm flex flex-col gap-1',
             'hover:bg-[var(--bg-hover)]',
             isSelected && 'bg-[var(--bg-hover)]',
-            repo.isSubmodule && 'pl-4'
+            repo.isSubmodule && 'pl-8 ml-4 border-l-2 border-[var(--border-color)]'
           )}
           onClick={onToggle}
         >
@@ -195,7 +166,7 @@ function RepositoryItem({
           </div>
         </div>
       </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-[300px]">
+      <TooltipContent side="bottom" align="start" className="max-w-[300px]">
         <div className="space-y-1">
           <div><span className="font-medium">仓库目录:</span> {repo.path}</div>
           {repo.isSubmodule && repo.parentPath && (

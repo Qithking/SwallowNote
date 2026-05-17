@@ -405,11 +405,7 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_pat
         let is_submodule = git_dir.is_file();
         
         // Get remote URL
-        let remote_url = if is_submodule {
-            get_remote_url(&path_str).ok()
-        } else {
-            get_remote_url(&path_str).ok()
-        };
+        let remote_url = get_remote_url(&path_str).ok();
         
         // Get current branch
         let current_branch = get_branch(&path_str).unwrap_or_else(|_| "unknown".to_string());
@@ -418,18 +414,54 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_pat
         let (has_changes, change_count) = get_uncommitted_count(&path_str);
         
         repos.push(GitRepositoryInfo {
-            name: repo_name,
-            path: path_str,
+            name: repo_name.clone(),
+            path: path_str.clone(),
             remote_url,
             has_uncommitted_changes: has_changes,
             uncommitted_count: change_count,
             current_branch,
             is_submodule,
-            parent_path,
+            parent_path: parent_path.clone(),
         });
         
-        // Don't recurse into git repos (to avoid submodules being counted separately)
-        return Ok(());
+        // Check for submodules in this repo
+        let gitmodules_path = dir.join(".gitmodules");
+        if gitmodules_path.exists() && !is_submodule {
+            if let Ok(submodule_paths) = parse_gitmodules(&gitmodules_path) {
+                for submodule_rel_path in submodule_paths {
+                    let submodule_full_path = dir.join(&submodule_rel_path);
+                    if submodule_full_path.exists() && submodule_full_path.join(".git").exists() {
+                        let submodule_name = Path::new(&submodule_rel_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        
+                        let submodule_path_str = submodule_full_path.to_string_lossy().to_string();
+                        let submodule_remote = get_remote_url(&submodule_path_str).ok();
+                        let submodule_branch = get_branch(&submodule_path_str).unwrap_or_else(|_| "unknown".to_string());
+                        let (submodule_has_changes, submodule_change_count) = get_uncommitted_count(&submodule_path_str);
+                        
+                        repos.push(GitRepositoryInfo {
+                            name: submodule_name,
+                            path: submodule_path_str,
+                            remote_url: submodule_remote,
+                            has_uncommitted_changes: submodule_has_changes,
+                            uncommitted_count: submodule_change_count,
+                            current_branch: submodule_branch,
+                            is_submodule: true,
+                            parent_path: Some(path_str.clone()),
+                        });
+                    }
+                }
+            }
+        }
+        
+        // If .git is a file (submodule), don't recurse into it
+        // If .git is a directory (independent repo), continue scanning subdirectories for nested repos
+        if is_submodule {
+            return Ok(());
+        }
     }
 
     // Recursively scan subdirectories
@@ -443,6 +475,25 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_pat
     }
 
     Ok(())
+}
+
+/// Parse .gitmodules file to extract submodule paths
+fn parse_gitmodules(gitmodules_path: &Path) -> Result<Vec<String>, String> {
+    let content = std::fs::read_to_string(gitmodules_path)
+        .map_err(|e| format!("Failed to read .gitmodules: {}", e))?;
+    
+    let mut paths = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with("path = ") {
+            let path = line.trim_start_matches("path = ").trim();
+            if !path.is_empty() {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    
+    Ok(paths)
 }
 
 fn get_remote_url(path: &str) -> Result<String, String> {
