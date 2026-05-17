@@ -36,12 +36,15 @@ function App() {
   const pendingCloseRef = useRef(false)
 
   useEffect(() => {
-    const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
-    const { loadSettings } = useEditorSettingsStore.getState()
-    initMode().then(() => loadLatestByMode().then(() => {
-      restoreSessionState()
-      loadSettings()
-    }))
+    const init = async () => {
+      const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
+      const { loadSettings } = useEditorSettingsStore.getState()
+      await initMode()
+      await loadLatestByMode()
+      await restoreSessionState()
+      await loadSettings()
+    }
+    init()
   }, [])
 
   useEffect(() => {
@@ -217,6 +220,10 @@ function App() {
           useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
           if (activeTabId) {
             useEditorStore.getState().loadTabContent(activeTabId)
+            const activeTab = restoredTabs.find((t: any) => t.id === activeTabId)
+            if (activeTab?.path) {
+              useFileTreeStore.getState().collapseAllExceptPath(activeTab.path)
+            }
           }
         }
       }

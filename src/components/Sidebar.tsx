@@ -1,6 +1,6 @@
 /**
  * Sidebar Component - Left sidebar with view content
- * Switches content based on ActivityBar selection
+ * All panels are always mounted, visibility controlled by CSS display property
  */
 import { FileTreeView } from './FileTree/FileTreeView'
 import { SearchView } from './Search/SearchView'
@@ -11,20 +11,21 @@ import { useUIStore } from '@/stores'
 function Sidebar() {
   const { sidebarView } = useUIStore()
 
-  const renderContent = () => {
-    switch (sidebarView) {
-      case 'explorer': return <FileTreeView />
-      case 'search': return <SearchView />
-      case 'git': return <GitView />
-      case 'settings': return <SettingsView />
-      default: return <FileTreeView />
-    }
-  }
-
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-auto w-full scrollable-area">
-        {renderContent()}
+      <div className="flex-1 overflow-auto w-full scrollable-area relative">
+        <div className={`absolute inset-0 ${sidebarView === 'explorer' ? '' : 'hidden'}`}>
+          <FileTreeView />
+        </div>
+        <div className={`absolute inset-0 ${sidebarView === 'search' ? '' : 'hidden'}`}>
+          <SearchView />
+        </div>
+        <div className={`absolute inset-0 ${sidebarView === 'git' ? '' : 'hidden'}`}>
+          <GitView />
+        </div>
+        <div className={`absolute inset-0 ${sidebarView === 'settings' ? '' : 'hidden'}`}>
+          <SettingsView />
+        </div>
       </div>
     </div>
   )

@@ -18,7 +18,8 @@ import type { EditorTab } from '@/stores/editor'
 
 function TabBar() {
   const { tabs, activeTabId, setActiveTab, removeTab } = useEditorStore()
-  const { rootPath } = useWorkspaceStore()
+  const { rootPath, workspaceFolders } = useWorkspaceStore()
+  const { workspaceMode } = useUIStore()
   const { showToast } = useUIStore()
   const scrollRef = useRef<HTMLDivElement>(null)
   const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -190,8 +191,15 @@ function TabBar() {
     // Sync file tree: expand to and select the file
     const tab = tabs.find(t => t.id === tabId)
     if (tab) {
-      const rootPath = useWorkspaceStore.getState().rootPath
-      useFileTreeStore.getState().revealPath(tab.path, rootPath!)
+      if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
+        // Find which workspace folder contains this file
+        const folder = workspaceFolders.find(f => tab.path.startsWith(f))
+        if (folder) {
+          useFileTreeStore.getState().revealPath(tab.path, folder)
+        }
+      } else if (rootPath) {
+        useFileTreeStore.getState().revealPath(tab.path, rootPath)
+      }
     }
   }
 

@@ -148,6 +148,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         for (const folder of workspace.folders) {
           await fileTreeStore.addRoot(folder)
         }
+        fileTreeStore.clearExpanded()
       }
     } catch (err) {
       set({ error: `Failed to load workspace: ${err}`, isLoading: false })
@@ -161,7 +162,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     await get().loadLatestByMode()
 
     // 过滤不匹配的 tab
-    const { filterTabs } = useEditorStore.getState()
+    const { filterTabs, activeTabId, tabs } = useEditorStore.getState()
     const state = get()
     if (mode === 'folder') {
       const rootPath = state.rootPath
@@ -179,6 +180,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           (f: string) => tab.path === f || tab.path.startsWith(f + '/')
         )
       })
+      
+      // 切换到工作区模式时，只展开当前 active tab 所在路径
+      const activeTab = tabs.find(t => t.id === activeTabId)
+      if (activeTab?.path) {
+        const fileTreeStore = useFileTreeStore.getState()
+        fileTreeStore.collapseAllExceptPath(activeTab.path)
+      }
     }
   },
   initMode: async () => {

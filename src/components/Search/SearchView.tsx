@@ -2,16 +2,18 @@
  * SearchView Component - VSCode-like search with file content search support
  */
 import { useState, useEffect, useRef } from 'react'
-import { Search, FileText, ChevronRight, ChevronDown, X } from 'lucide-react'
+import { Search, ChevronRight, ChevronDown, X } from 'lucide-react'
 import { searchInFiles, SearchResult as TSearchResult } from '@/lib/tauri'
-import { useWorkspaceStore, useEditorStore } from '@/stores'
+import { useWorkspaceStore, useEditorStore, useUIStore } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { getFileIcon } from '@/lib/utils/fileIcon'
 
 interface SearchResult extends TSearchResult {}
 
 function SearchView() {
-  const { rootPath } = useWorkspaceStore()
+  const { rootPath, workspaceFolders } = useWorkspaceStore()
+  const { workspaceMode } = useUIStore()
   const { addTab } = useEditorStore()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -42,7 +44,17 @@ function SearchView() {
   }, [])
 
   const handleSearch = async () => {
-    if (!query.trim() || !rootPath) {
+    if (!query.trim()) {
+      setResults([])
+      return
+    }
+
+    // Determine search paths based on workspace mode
+    const searchPaths = workspaceMode === 'workspace' 
+      ? workspaceFolders 
+      : (rootPath ? [rootPath] : [])
+
+    if (searchPaths.length === 0) {
       setResults([])
       return
     }
@@ -50,18 +62,43 @@ function SearchView() {
     setIsSearching(true)
 
     try {
-      const searchResults = await searchInFiles({
-        query: query,
-        root_path: rootPath,
-        case_sensitive: caseSensitive,
-        whole_word: wholeWord,
-        use_regex: useRegex,
-        include_files: null,
-        exclude_files: null,
-      })
-      setResults(searchResults)
-      // Expand all files by default
-      setExpandedFiles(new Set(searchResults.map(r => r.file_path)))
+      const searchPromises = searchPaths.map(path =>
+        searchInFiles({
+          query: query,
+          root_path: path,
+          case_sensitive: caseSensitive,
+          whole_word: wholeWord,
+          use_regex: useRegex,
+          include_files: null,
+          exclude_files: null,
+        }).catch(() => [])
+      )
+
+      const allResults = await Promise.all(searchPromises)
+      
+      // Merge results and deduplicate by file_path
+      const mergedMap = new Map<string, SearchResult>()
+      for (const results of allResults) {
+        for (const result of results) {
+          if (mergedMap.has(result.file_path)) {
+            // Merge line_matches for existing file
+            const existing = mergedMap.get(result.file_path)!
+            const existingLines = new Set(existing.line_matches.map(m => m.line_number))
+            for (const match of result.line_matches) {
+              if (!existingLines.has(match.line_number)) {
+                existing.line_matches.push(match)
+                existingLines.add(match.line_number)
+              }
+            }
+          } else {
+            mergedMap.set(result.file_path, { ...result })
+          }
+        }
+      }
+
+      const mergedResults = Array.from(mergedMap.values())
+      setResults(mergedResults)
+      setExpandedFiles(new Set(mergedResults.map(r => r.file_path)))
     } catch (e) {
       setResults([])
     } finally {
@@ -75,7 +112,7 @@ function SearchView() {
       handleSearch()
     }, 300)
     return () => clearTimeout(timer)
-  }, [query, caseSensitive, wholeWord, useRegex, rootPath])
+  }, [query, caseSensitive, wholeWord, useRegex, rootPath, workspaceFolders, workspaceMode])
 
   const toggleFileExpanded = (filePath: string) => {
     setExpandedFiles(prev => {
@@ -250,7 +287,7 @@ function SearchView() {
                           <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
                         )}
                         {/* File icon */}
-                        <FileText size={14} className="mr-1.5 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                        {getFileIcon(result.file_name, 14)}
                         {/* File name */}
                         <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>
                           {result.file_name}
@@ -264,7 +301,7 @@ function SearchView() {
                         </span>
                       </div>
                     </TooltipTrigger>
-                    <TooltipContent side="right">{result.file_path}</TooltipContent>
+                    <TooltipContent side="bottom">{result.file_path}</TooltipContent>
                   </Tooltip>
 
                   {/* Match lines - content aligned with file icon */}
