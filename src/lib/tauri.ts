@@ -160,6 +160,10 @@ export async function gitCommitAndPush(path: string, message: string): Promise<v
   await invoke('git_commit_and_push', { path, message })
 }
 
+export async function gitAutoCommit(filePath: string): Promise<void> {
+  await invoke('git_auto_commit', { filePath })
+}
+
 export async function gitDiff(path: string, filePath: string): Promise<string> {
   return await invoke('git_diff', { path, filePath })
 }

@@ -212,6 +212,46 @@ fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Auto commit a single file (local only, no push)
+#[tauri::command]
+pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
+    // Find the git root by walking up directories
+    let mut current = Path::new(&file_path);
+    loop {
+        if current.join(".git").exists() {
+            break;
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => return Ok(()), // Not in a git repo
+        }
+    }
+
+    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let file_name = Path::new(&file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    let commit_message = format!("Auto-save: {}", file_name);
+
+    // Stage only this file
+    run_git(repo_path, &["add", &file_path])?;
+
+    // Commit
+    match run_git(repo_path, &["commit", "-m", &commit_message]) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // Silently ignore "nothing to commit" errors
+            if e.contains("nothing to commit") || e.contains("working tree clean") || e.contains("no changes added to commit") {
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 /// Get commit log
 #[tauri::command]
 pub async fn git_log(path: String, max_count: i32) -> Result<Vec<String>, String> {

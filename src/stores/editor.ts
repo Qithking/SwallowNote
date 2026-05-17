@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand'
 import { loadFileContent } from '@/lib/api'
-import { writeFile } from '@/lib/tauri'
+import { writeFile, gitAutoCommit } from '@/lib/tauri'
 
 export interface EditorTab {
   id: string
@@ -199,6 +199,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             t.id === tab.id ? { ...t, isDirty: false, isEdited: false } : t
           ),
         }))
+        // Auto commit if file is in a git repo (async, non-blocking)
+        gitAutoCommit(tab.path).catch(() => {})
       } catch (e) {
         console.error('Failed to save tab:', tab.path, e)
         window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))
