@@ -2,6 +2,7 @@
  * Editor Store - Manages editor state
  */
 import { create } from 'zustand'
+import { loadFileContent } from '@/lib/api'
 
 export interface EditorTab {
   id: string
@@ -27,6 +28,7 @@ export interface EditorState {
   addTab: (tab: EditorTab) => void
   removeTab: (id: string) => void
   setActiveTab: (id: string) => void
+  loadTabContent: (id: string) => Promise<void>
   updateTabContent: (id: string, content: string) => void
   updateTabDirty: (id: string, isDirty: boolean) => void
   updateTabEdited: (id: string, isEdited: boolean) => void
@@ -68,7 +70,38 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     }),
-  setActiveTab: (id) => set({ activeTabId: id }),
+  setActiveTab: (id) => {
+    set({ activeTabId: id })
+    const tab = get().tabs.find((t) => t.id === id)
+    if (tab && !tab.content) {
+      get().loadTabContent(id)
+    }
+  },
+  loadTabContent: async (id) => {
+    const tab = get().tabs.find((t) => t.id === id)
+    if (!tab || tab.content) return
+
+    try {
+      const content = await loadFileContent(tab.path)
+      const cursorPosition = tab.cursorPosition || { line: 1, column: 1 }
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                content,
+                fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
+                modifiedTime: new Date().toLocaleString(),
+                wordCount: content.split(/\s+/).filter(Boolean).length,
+                cursorPosition,
+              }
+            : t
+        ),
+      }))
+    } catch (e) {
+      console.error('Failed to load tab content:', e)
+    }
+  },
   updateTabContent: (id, content) =>
     set((state) => ({
       tabs: state.tabs.map((t) =>
