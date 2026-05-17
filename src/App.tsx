@@ -142,6 +142,9 @@ function App() {
           }))
           const activeTabId = states.activeTabId || null
           useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
+          if (activeTabId) {
+            useEditorStore.getState().loadTabContent(activeTabId)
+          }
         }
       }
 

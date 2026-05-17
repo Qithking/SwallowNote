@@ -8,6 +8,7 @@ import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
 import { FileCode } from 'lucide-react'
+import { Progress } from '@/components/ui/progress'
 
 interface UnsupportedEditorProps {
   filename: string
@@ -64,9 +65,15 @@ export function EditorView() {
     updateTabContent(activeTab.id, content)
   }
 
-  switch (fileType) {
-    case 'markdown':
-      return (
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden relative">
+      {activeTab.isLoading && (
+        <div className="absolute top-0 left-0 right-0 z-10">
+          <Progress />
+        </div>
+      )}
+
+      {fileType === 'markdown' && (
         <div className="flex-1 overflow-hidden">
           {viewMode === 'source' ? (
             <CodeEditor
@@ -83,11 +90,10 @@ export function EditorView() {
             />
           )}
         </div>
-      )
+      )}
 
-    case 'code':
-      return (
-        <div className="flex-1 flex overflow-hidden ">
+      {fileType === 'code' && (
+        <div className="flex-1 flex overflow-hidden">
           <CodeEditor
             content={activeTab.content}
             filename={activeTab.name}
@@ -95,23 +101,21 @@ export function EditorView() {
             className="flex-1"
           />
         </div>
-      )
+      )}
 
-    case 'binary':
-      return (
+      {fileType === 'binary' && (
         <UnsupportedEditor
           filename={activeTab.name}
           reason="二进制文件无法在编辑器中显示"
         />
-      )
+      )}
 
-    case 'unknown':
-    default:
-      return (
+      {(fileType === 'unknown' || !fileType) && (
         <UnsupportedEditor
           filename={activeTab.name}
           reason="不支持的文件类型"
         />
-      )
-  }
+      )}
+    </div>
+  )
 }

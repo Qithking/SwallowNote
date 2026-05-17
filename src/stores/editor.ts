@@ -11,6 +11,7 @@ export interface EditorTab {
   content: string
   isDirty: boolean
   isEdited: boolean // 文件是否被编辑过
+  isLoading?: boolean // 文件是否正在加载中
   fileSize?: string
   modifiedTime?: string
   wordCount?: number
@@ -71,15 +72,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { tabs: newTabs, activeTabId: newActiveId }
     }),
   setActiveTab: (id) => {
-    set({ activeTabId: id })
     const tab = get().tabs.find((t) => t.id === id)
-    if (tab && !tab.content) {
+    set({ activeTabId: id })
+    
+    // 加载当前切换的tab内容
+    if (tab && !tab.content && !tab.isLoading) {
       get().loadTabContent(id)
     }
+    
+    // 预加载其他未加载内容的tab（最多预加载2个）
+    const unloadedTabs = get().tabs.filter(
+      (t) => t.id !== id && !t.content && !t.isLoading
+    ).slice(0, 2)
+    
+    unloadedTabs.forEach((t) => {
+      get().loadTabContent(t.id)
+    })
   },
   loadTabContent: async (id) => {
     const tab = get().tabs.find((t) => t.id === id)
-    if (!tab || tab.content) return
+    if (!tab || tab.content || tab.isLoading) return
+
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === id ? { ...t, isLoading: true } : t
+      ),
+    }))
 
     try {
       const content = await loadFileContent(tab.path)
@@ -90,6 +108,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             ? {
                 ...t,
                 content,
+                isLoading: false,
                 fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
                 modifiedTime: new Date().toLocaleString(),
                 wordCount: content.split(/\s+/).filter(Boolean).length,
@@ -100,6 +119,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }))
     } catch (e) {
       console.error('Failed to load tab content:', e)
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === id ? { ...t, isLoading: false } : t
+        ),
+      }))
     }
   },
   updateTabContent: (id, content) =>
