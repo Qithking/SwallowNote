@@ -115,7 +115,7 @@ function DiffViewer({ diffContent }: DiffViewerProps) {
 
               return (
                 <div
-                  key={index}
+                  key={`${line.type}-${line.oldLineNum}-${line.newLineNum}-${index}`}
                   className="flex"
                   style={{ backgroundColor: bgColor }}
                 >

@@ -2,11 +2,11 @@
  * Workspace Store - Manages workspace state
  */
 import { create } from 'zustand'
-import { getLatestFolder, saveFolderHistory, getFolderHistory, scanGitRepos, GitRepositoryInfo } from '@/lib/tauri'
+import { getLatestFolder, saveFolderHistory, getFolderHistory, scanGitRepos } from '@/lib/tauri'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
 import { useEditorStore, EditorTab } from './editor'
-import { useGitStore, GitRepository } from './git'
+import { useGitStore, mapRepoInfosToRepositories } from './git'
 
 export interface WorkspaceState {
   rootPath: string | null
@@ -237,24 +237,7 @@ async function scanAndCacheGitRepos() {
     const results = await Promise.all(scanPromises)
     const allRepos = results.flat()
 
-    const seenPaths = new Set<string>()
-    const uniqueRepos = allRepos.filter((repo: GitRepositoryInfo) => {
-      if (seenPaths.has(repo.path)) return false
-      seenPaths.add(repo.path)
-      return true
-    })
-
-    const cachedRepos: GitRepository[] = uniqueRepos.map((repo: GitRepositoryInfo) => ({
-      name: repo.name,
-      path: repo.path,
-      remoteUrl: repo.remote_url,
-      hasUncommittedChanges: repo.has_uncommitted_changes,
-      uncommittedCount: repo.uncommitted_count,
-      currentBranch: repo.current_branch,
-      branches: [],
-      isSubmodule: repo.is_submodule,
-      parentPath: repo.parent_path,
-    }))
+    const cachedRepos = mapRepoInfosToRepositories(allRepos)
 
     gitStore.setCachedRepositories(cachedRepos)
     gitStore.clearScanProgress()

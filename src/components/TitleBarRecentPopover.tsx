@@ -8,8 +8,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useUIStore, useWorkspaceStore } from '@/stores'
-import { getFolderHistory, openFolderDialog, openDirectoryDialog, pathExists, clearOtherFolderHistory, removeFolderHistory, gitClone } from '@/lib/tauri'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory, removeFolderHistory, gitClone } from '@/lib/tauri'
+import { useState, useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 
 interface RecentItem {
@@ -168,7 +168,7 @@ export function TitleBarRecentPopover() {
   }
 
   const handleSelectClonePath = async () => {
-    const path = await openDirectoryDialog()
+    const path = await openFolderDialog()
     if (path) {
       setCloneLocalPath(path)
     }

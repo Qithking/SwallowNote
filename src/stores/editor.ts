@@ -50,7 +50,6 @@ export interface EditorState {
   saveAllDirtyTabs: () => Promise<void>
   resetDirtyTabs: () => void
   getDirtyTabsCount: () => number
-  saveTabsState: () => Promise<void>
   restoreTabsState: () => Promise<void>
 }
 
@@ -69,11 +68,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         activeTabId: tab.id,
       }
     })
-    // 在 set 回调外部调用 saveTabsState，确保获取最新状态
-    setTimeout(() => {
-      get().saveTabsState().catch(console.error)
-      console.log('Tabs state auto-saved after add')
-    }, 100)
   },
   openDiffTab: async (filePath: string, commitHash: string, commitMessage: string) => {
     const { gitShowDiff } = await import('@/lib/tauri')
@@ -108,7 +102,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     })
   },
-  removeTab: (id) =>
+  removeTab: (id) => {
     set((state) => {
       const index = state.tabs.findIndex((t) => t.id === id)
       const newTabs = state.tabs.filter((t) => t.id !== id)
@@ -120,12 +114,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           newActiveId = null
         }
       }
-      setTimeout(() => {
-        get().saveTabsState().catch(console.error)
-        console.log('Tabs state auto-saved after remove')
-      }, 100)
       return { tabs: newTabs, activeTabId: newActiveId }
-    }),
+    })
+  },
   setActiveTab: (id) => {
     const tab = get().tabs.find((t) => t.id === id)
     set({ activeTabId: id })
@@ -267,35 +258,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   getDirtyTabsCount: () => {
     return get().tabs.filter((t) => t.isDirty).length
   },
-  saveTabsState: async () => {
-    const { saveSessionState, getSessionState } = await import('@/lib/tauri')
-    const state = get()
-    // 只保存文件类型的 Tab，不保存 diff Tab
-    const fileTabs = state.tabs.filter((t) => t.type !== 'diff')
-    
-    // 先获取现有的 session state，然后只更新 tabs 和 activeTabId
-    try {
-      const existingState = await getSessionState()
-      const tabsState = {
-        ...existingState,
-        tabs: JSON.stringify(fileTabs),
-        activeTabId: state.activeTabId || '',
-      }
-      await saveSessionState(tabsState)
-      console.log('Tabs state saved:', fileTabs.length, 'tabs')
-    } catch (e) {
-      console.error('Failed to save tabs state:', e)
-    }
-  },
   restoreTabsState: async () => {
-    const { getSessionState } = await import('@/lib/tauri')
+    const { getSessionState, pathExists } = await import('@/lib/tauri')
     try {
       const state = await getSessionState()
       if (state.tabs) {
         const tabs: EditorTab[] = JSON.parse(state.tabs)
-        // 过滤掉不存在的文件
-        const validTabs = tabs.filter((tab) => tab.path && tab.path.trim())
-        const activeTabId = state.activeTabId || (validTabs.length > 0 ? validTabs[0].id : null)
+        const validTabs: EditorTab[] = []
+        for (const tab of tabs) {
+          if (tab.path && tab.path.trim()) {
+            const exists = await pathExists(tab.path)
+            if (exists) {
+              validTabs.push({
+                ...tab,
+                content: tab.content || '',
+                isDirty: tab.isDirty ?? false,
+                isEdited: tab.isEdited ?? false,
+                type: tab.type || 'file',
+                viewMode: tab.viewMode || 'preview',
+              })
+            }
+          }
+        }
+        const activeTabId = (validTabs.find(t => t.id === state.activeTabId)?.id) || (validTabs.length > 0 ? validTabs[0].id : null)
         set({ tabs: validTabs, activeTabId })
       }
     } catch (e) {

@@ -5,8 +5,7 @@
 import { create } from 'zustand'
 import { saveSessionState, getSessionState } from '@/lib/tauri'
 
-let saveTimer: NodeJS.Timeout | null = null
-let getStore: (() => EditorSettingsState) | null = null
+let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 export interface EditorSettingsState {
   // Font sizes in px (VSCode defaults)
@@ -71,7 +70,7 @@ function scheduleSave() {
     clearTimeout(saveTimer)
   }
   saveTimer = setTimeout(() => {
-    getStore?.().saveSettings()
+    useEditorSettingsStore.getState().saveSettings()
     saveTimer = null
   }, 3000)
 }
@@ -94,8 +93,6 @@ function collectSettings(state: EditorSettingsState): Record<string, string> {
 }
 
 export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => {
-  getStore = get
-  
   return {
   ...DEFAULT_SETTINGS,
   
@@ -192,8 +189,8 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
   saveSettings: async () => {
     try {
       const state = get()
-      const states = collectSettings(state)
-      await saveSessionState(states)
+      const settings = collectSettings(state)
+      await saveSessionState(settings)
     } catch (err) {
       console.error('Failed to save editor settings:', err)
     }

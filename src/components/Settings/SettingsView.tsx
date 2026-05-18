@@ -13,7 +13,6 @@ import {
   Bot,
   Keyboard,
   Info,
-  ArrowLeft,
 } from 'lucide-react'
 import { useUIStore, Theme } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -21,22 +20,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 
 type SettingsSection = 'general' | 'appearance' | 'editor' | 'git' | 'sync' | 'ai' | 'shortcuts' | 'about'
 
-interface SettingsViewProps {
-  onClose?: () => void
-}
-
-function SettingsView({ onClose }: SettingsViewProps) {
+function SettingsView() {
   const { t, i18n } = useTranslation()
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
-  const { theme, setTheme, setSettingsPanelVisible } = useUIStore()
-
-  const handleClose = () => {
-    if (onClose) {
-      onClose()
-    } else {
-      setSettingsPanelVisible(false)
-    }
-  }
+  const { theme, setTheme } = useUIStore()
 
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; labelKey: string }[] = [
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },

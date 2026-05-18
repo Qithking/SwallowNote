@@ -2,6 +2,7 @@
  * Git Store - Manages Git state
  */
 import { create } from 'zustand'
+import { GitRepositoryInfo } from '@/lib/tauri'
 
 export interface GitBranch {
   name: string
@@ -18,6 +19,31 @@ export interface GitRepository {
   branches: GitBranch[]
   isSubmodule: boolean
   parentPath: string | null
+}
+
+export function mapRepoInfoToRepository(info: GitRepositoryInfo): GitRepository {
+  return {
+    name: info.name,
+    path: info.path,
+    remoteUrl: info.remote_url,
+    hasUncommittedChanges: info.has_uncommitted_changes,
+    uncommittedCount: info.uncommitted_count,
+    currentBranch: info.current_branch,
+    branches: [],
+    isSubmodule: info.is_submodule,
+    parentPath: info.parent_path,
+  }
+}
+
+export function mapRepoInfosToRepositories(infos: GitRepositoryInfo[]): GitRepository[] {
+  const seenPaths = new Set<string>()
+  return infos
+    .filter((repo) => {
+      if (seenPaths.has(repo.path)) return false
+      seenPaths.add(repo.path)
+      return true
+    })
+    .map(mapRepoInfoToRepository)
 }
 
 export interface GitState {

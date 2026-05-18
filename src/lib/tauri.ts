@@ -65,14 +65,6 @@ export async function openFolderDialog(): Promise<string | null> {
   return selected as string | null
 }
 
-export async function openDirectoryDialog(): Promise<string | null> {
-  const selected = await open({
-    directory: true,
-    multiple: false,
-  })
-  return selected as string | null
-}
-
 export async function openFileDialog(): Promise<string | null> {
   const selected = await open({
     directory: false,

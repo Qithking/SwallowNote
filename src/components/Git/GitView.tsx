@@ -5,15 +5,14 @@ import { useState, useEffect } from 'react'
 import {
   GitBranch,
   RefreshCw,
-  ChevronDown,
   Circle,
   Check,
   Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { useGitStore, GitRepository } from '@/stores/git'
-import { scanGitRepos, GitRepositoryInfo, gitCommitAndPush } from '@/lib/tauri'
+import { useGitStore, GitRepository, mapRepoInfosToRepositories } from '@/stores/git'
+import { scanGitRepos, gitCommitAndPush } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWorkspaceStore, useUIStore } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -182,19 +181,19 @@ function RepositoryItem({
 }
 
 function GitView() {
-  const { repositories, setRepositories, cachedRepositories, scanProgress } = useGitStore()
+  const { repositories, setRepositories, setCachedRepositories, scanProgress } = useGitStore()
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode } = useUIStore()
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
 
-  // 优先使用缓存数据，后台异步刷新
   useEffect(() => {
-    // 立即显示缓存数据
-    if (cachedRepositories.length > 0) {
-      setRepositories(cachedRepositories)
+    setSelectedRepos([])
+
+    const currentCached = useGitStore.getState().cachedRepositories
+    if (currentCached.length > 0) {
+      setRepositories(currentCached)
     }
 
-    // 后台异步刷新
     const loadRepos = async () => {
       const scanPaths = workspaceMode === 'workspace'
         ? (workspaceFolders || [])
@@ -218,37 +217,20 @@ function GitView() {
         const results = await Promise.all(scanPromises)
         const allRepos = results.flat()
 
-        const seenPaths = new Set<string>()
-        const uniqueRepos = allRepos.filter((repo: GitRepositoryInfo) => {
-          if (seenPaths.has(repo.path)) {
-            return false
-          }
-          seenPaths.add(repo.path)
-          return true
-        })
-
-        const storeRepos: GitRepository[] = uniqueRepos.map((repo: GitRepositoryInfo) => ({
-          name: repo.name,
-          path: repo.path,
-          remoteUrl: repo.remote_url,
-          hasUncommittedChanges: repo.has_uncommitted_changes,
-          uncommittedCount: repo.uncommitted_count,
-          currentBranch: repo.current_branch,
-          branches: [],
-          isSubmodule: repo.is_submodule,
-          parentPath: repo.parent_path,
-        }))
+        const storeRepos = mapRepoInfosToRepositories(allRepos)
         setRepositories(storeRepos)
+        setCachedRepositories(storeRepos)
       } catch (e) {
         console.error('Failed to scan git repos:', e)
-        if (cachedRepositories.length === 0) {
+        const latestCached = useGitStore.getState().cachedRepositories
+        if (latestCached.length === 0) {
           setRepositories([])
         }
       }
     }
 
     loadRepos()
-  }, [rootPath, workspaceFolders, workspaceMode, cachedRepositories, setRepositories])
+  }, [rootPath, workspaceFolders, workspaceMode, setRepositories, setCachedRepositories])
 
   const toggleRepo = (path: string) => {
     setSelectedRepos(prev => 
@@ -281,27 +263,9 @@ function GitView() {
       const results = await Promise.all(scanPromises)
       const allRepos = results.flat()
 
-      const seenPaths = new Set<string>()
-      const uniqueRepos = allRepos.filter((repo: GitRepositoryInfo) => {
-        if (seenPaths.has(repo.path)) {
-          return false
-        }
-        seenPaths.add(repo.path)
-        return true
-      })
-
-      const storeRepos: GitRepository[] = uniqueRepos.map((repo: GitRepositoryInfo) => ({
-        name: repo.name,
-        path: repo.path,
-        remoteUrl: repo.remote_url,
-        hasUncommittedChanges: repo.has_uncommitted_changes,
-        uncommittedCount: repo.uncommitted_count,
-        currentBranch: repo.current_branch,
-        branches: [],
-        isSubmodule: repo.is_submodule,
-        parentPath: repo.parent_path,
-      }))
+      const storeRepos = mapRepoInfosToRepositories(allRepos)
       setRepositories(storeRepos)
+      setCachedRepositories(storeRepos)
     } catch (e) {
       console.error('Failed to refresh repos:', e)
     }

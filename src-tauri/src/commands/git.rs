@@ -283,7 +283,6 @@ pub async fn git_log(path: String, max_count: i32) -> Result<Vec<String>, String
 /// Get file commit history with pagination
 #[tauri::command]
 pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> Result<Vec<GitFileLogEntry>, String> {
-    // Find the git root by walking up directories
     let mut current = Path::new(&file_path);
     loop {
         if current.join(".git").exists() {
@@ -304,13 +303,13 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
     let max_count_str = max_count.to_string();
     let skip_str = skip.to_string();
 
-    // First, get commit hashes
-    let hash_output = run_git(
+    let log_output = run_git(
         repo_path,
         &[
             "log",
             "--follow",
-            "--format=%H",
+            "--format=COMMIT_START%n%H%x00%s%x00%ct",
+            "--numstat",
             "-n", &max_count_str,
             "--skip", &skip_str,
             "--",
@@ -318,61 +317,61 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
         ],
     )?;
 
-    let hashes: Vec<&str> = hash_output.lines().filter(|l| !l.is_empty()).collect();
-    if hashes.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // For each hash, get commit info and numstat
     let mut entries = Vec::new();
-    
-    for hash in &hashes {
-        // Get commit message and date
-        let info_output = run_git(
-            repo_path,
-            &["log", "-1", "--format=%s%n%ct", hash],
-        )?;
-        
-        let info_lines: Vec<&str> = info_output.lines().collect();
-        if info_lines.len() < 2 {
+    let mut current_hash = String::new();
+    let mut current_message = String::new();
+    let mut current_date = String::new();
+    let mut current_insertions: usize = 0;
+    let mut current_deletions: usize = 0;
+
+    for line in log_output.lines() {
+        if line.starts_with("COMMIT_START") {
+            if !current_hash.is_empty() {
+                entries.push(GitFileLogEntry {
+                    hash: current_hash.clone(),
+                    message: current_message.clone(),
+                    date: current_date.clone(),
+                    insertions: current_insertions,
+                    deletions: current_deletions,
+                });
+            }
+            current_hash = String::new();
+            current_message = String::new();
+            current_date = String::new();
+            current_insertions = 0;
+            current_deletions = 0;
             continue;
         }
-        
-        let message = info_lines[0].to_string();
-        // %ct gives unix timestamp as string, pass it directly to frontend
-        let timestamp_str = info_lines[1].trim();
-        let date = format!("{}000", timestamp_str); // Convert seconds to milliseconds for JS Date
-        
-        // Get numstat for this commit
-        let numstat_output = run_git(
-            repo_path,
-            &["diff-tree", "--numstat", "-r", hash],
-        );
-        
-        let mut insertions = 0;
-        let mut deletions = 0;
-        
-        if let Ok(output) = numstat_output {
-            for line in output.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    // Check if this numstat is for our file
-                    if parts[2] == relative_path_str || parts[2].ends_with(&format!("/{}", relative_path_str)) {
-                        if let (Ok(ins), Ok(del)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>()) {
-                            insertions += ins;
-                            deletions += del;
-                        }
-                    }
+
+        if current_hash.is_empty() {
+            let parts: Vec<&str> = line.split('\0').collect();
+            if parts.len() >= 3 {
+                current_hash = parts[0].to_string();
+                current_message = parts[1].to_string();
+                let timestamp_str = parts[2].trim();
+                current_date = format!("{}000", timestamp_str);
+            }
+            continue;
+        }
+
+        let numstat_parts: Vec<&str> = line.split_whitespace().collect();
+        if numstat_parts.len() >= 3 {
+            if numstat_parts[2] == relative_path_str || numstat_parts[2].ends_with(&format!("/{}", relative_path_str)) {
+                if let (Ok(ins), Ok(del)) = (numstat_parts[0].parse::<usize>(), numstat_parts[1].parse::<usize>()) {
+                    current_insertions += ins;
+                    current_deletions += del;
                 }
             }
         }
-        
+    }
+
+    if !current_hash.is_empty() {
         entries.push(GitFileLogEntry {
-            hash: hash.to_string(),
-            message,
-            date,
-            insertions,
-            deletions,
+            hash: current_hash,
+            message: current_message,
+            date: current_date,
+            insertions: current_insertions,
+            deletions: current_deletions,
         });
     }
 
@@ -557,20 +556,6 @@ fn get_remote_url(path: &str) -> Result<String, String> {
     // Try to get the first remote URL (usually 'origin')
     let output = run_git(path, &["remote", "get-url", "origin"])?;
     Ok(output.trim().to_string())
-}
-
-fn check_has_uncommitted_changes(path: &str) -> Result<bool, String> {
-    let modified = run_git(path, &["diff", "--name-only"]).unwrap_or_default();
-    let staged = run_git(path, &["diff", "--cached", "--name-only"]).unwrap_or_default();
-    let untracked = run_git(path, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default();
-    
-    let count = modified.lines()
-        .chain(staged.lines())
-        .chain(untracked.lines())
-        .filter(|line| !line.is_empty())
-        .count();
-    
-    Ok(count > 0)
 }
 
 fn get_uncommitted_count(path: &str) -> (bool, usize) {

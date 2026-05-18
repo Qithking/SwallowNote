@@ -4,9 +4,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import Tree from 'rc-tree'
 import 'rc-tree/assets/index.css'
-import { FileText, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6 } from 'lucide-react'
+import { Heading1, Heading2, Heading3, Heading4, Heading5, Heading6 } from 'lucide-react'
 import { useEditorStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { TocItem } from '@/utils/tableOfContents'
 import { buildTableOfContentsFromMarkdown } from '@/utils/tableOfContents'
 
@@ -162,13 +163,17 @@ function DirectoryView() {
 
     return (
       <span
-        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm ${
+        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm min-w-0 ${
           isSelected ? 'text-[var(--theme-color)]' : 'text-[var(--text-secondary)]'
         }`}
-        title={node.title}
       >
         <IconComponent size={12} className="shrink-0 opacity-70" />
-        <span className="truncate">{node.title}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex-1 truncate">{node.title}</span>
+          </TooltipTrigger>
+          <TooltipContent side="right">{node.title}</TooltipContent>
+        </Tooltip>
       </span>
     )
   }

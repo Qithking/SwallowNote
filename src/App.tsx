@@ -19,7 +19,6 @@ import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-co
 import { saveSessionState, getSessionState } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
-import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
 function App() {
@@ -96,16 +95,23 @@ function App() {
     return () => { window.removeEventListener('tab-load-error', handleTabLoadError) }
   }, [])
 
-  // 自动保存 tabs 状态
   useEffect(() => {
+    let saveTimer: ReturnType<typeof setTimeout> | null = null
+    
     const handleTabsChange = () => {
-      console.log('Tab state changed, saving...')
-      saveSessionStateNow().catch(console.error)
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => {
+        saveSessionStateNow().catch(console.error)
+        saveTimer = null
+      }, 500)
     }
     
     const unsubscribe = useEditorStore.subscribe(handleTabsChange)
     
-    return unsubscribe
+    return () => {
+      unsubscribe()
+      if (saveTimer) clearTimeout(saveTimer)
+    }
   }, [])
 
   const handleSaveAndClose = async () => {
@@ -281,7 +287,8 @@ function App() {
       const uiState = useUIStore.getState()
       const editorSettingsState = useEditorSettingsStore.getState()
 
-      const tabsData = editorState.tabs.map(tab => ({
+      const fileTabs = editorState.tabs.filter(tab => tab.type !== 'diff')
+      const tabsData = fileTabs.map(tab => ({
         id: tab.id,
         path: tab.path,
         name: tab.name,
@@ -289,9 +296,11 @@ function App() {
         cursorPosition: tab.cursorPosition,
       }))
 
-      const states: Record<string, string> = {
+      const activeTabId = fileTabs.find(t => t.id === editorState.activeTabId)?.id || (fileTabs.length > 0 ? fileTabs[0].id : '')
+
+      const updates: Record<string, string> = {
         tabs: JSON.stringify(tabsData),
-        activeTabId: editorState.activeTabId || '',
+        activeTabId,
         expanded: JSON.stringify(Array.from(fileTreeState.expanded)),
         selectedPath: fileTreeState.selectedPath || '',
         sidebarWidth: String(uiState.sidebarWidth),
@@ -311,7 +320,7 @@ function App() {
         editor_widePaddingHorizontal: String(editorSettingsState.widePaddingHorizontal),
       }
 
-      await saveSessionState(states)
+      await saveSessionState(updates)
     } catch (e) {
       console.error('Failed to save session state:', e)
     }
