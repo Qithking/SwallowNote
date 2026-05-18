@@ -303,7 +303,7 @@ function App() {
     switch (rightPanelType) {
       case 'ai': return <AIView />
       case 'directory': return <DirectoryView />
-      case 'history': return <HistoryView />
+      case 'history': return <HistoryView visible={true} />
       case 'editorSettings': return <EditorSettings />
       default: return null
     }

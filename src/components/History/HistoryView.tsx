@@ -3,10 +3,11 @@ import { FileText, Loader2 } from 'lucide-react'
 import { useEditorStore } from '@/stores'
 import { gitFileLog, GitFileLogEntry } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const PAGE_SIZE = 50
 
-function HistoryView() {
+function HistoryView({ visible }: { visible: boolean }) {
   const { tabs, activeTabId } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
 
@@ -25,6 +26,7 @@ function HistoryView() {
 
     try {
       const result = await gitFileLog(filePath, PAGE_SIZE, skip)
+      console.log('gitFileLog result:', result)
       if (result.length < PAGE_SIZE) {
         setHasMore(false)
       } else {
@@ -38,6 +40,7 @@ function HistoryView() {
       }
       skipRef.current = skip + result.length
     } catch (e: any) {
+      console.error('gitFileLog error:', e)
       if (e === 'NOT_IN_GIT_REPO' || (e && e.includes && e.includes('NOT_IN_GIT_REPO'))) {
         setNotInRepo(true)
         setEntries([])
@@ -53,14 +56,14 @@ function HistoryView() {
   }, [])
 
   useEffect(() => {
-    if (activeTab?.path) {
+    if (visible && activeTab?.path) {
       setEntries([])
       setHasMore(true)
       setNotInRepo(false)
       skipRef.current = 0
       loadHistory(activeTab.path, 0)
     }
-  }, [activeTab?.path, loadHistory])
+  }, [visible, activeTab?.path, loadHistory])
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
@@ -76,22 +79,28 @@ function HistoryView() {
 
   const formatDate = (dateStr: string) => {
     try {
-      const date = new Date(dateStr)
-      const now = new Date()
-      const diff = now.getTime() - date.getTime()
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-
-      if (days === 0) {
-        return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-      } else if (days === 1) {
-        return '昨天'
-      } else if (days < 7) {
-        return `${days}天前`
+      // Handle unix timestamp (milliseconds) from backend
+      let date: Date
+      if (/^\d+$/.test(dateStr)) {
+        date = new Date(parseInt(dateStr, 10))
       } else {
-        return date.toLocaleDateString('zh-CN')
+        date = new Date(dateStr)
       }
+      
+      if (isNaN(date.getTime())) {
+        return 'Invalid Date'
+      }
+      
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hours = String(date.getHours()).padStart(2, '0')
+      const minutes = String(date.getMinutes()).padStart(2, '0')
+      const seconds = String(date.getSeconds()).padStart(2, '0')
+      
+      return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`
     } catch {
-      return dateStr
+      return 'Invalid Date'
     }
   }
 
@@ -134,20 +143,31 @@ function HistoryView() {
                 {entries.map((entry, index) => (
                   <li
                     key={`${entry.hash}-${index}`}
-                    className="flex items-start gap-2 p-2 rounded cursor-pointer hover:bg-[var(--bg-hover)]"
+                    className="flex items-start gap-2 p-2 rounded cursor-pointer hover:bg-[var(--bg-hover)] overflow-hidden"
                   >
                     <FileText size={12} className="text-[var(--text-muted)] mt-0.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate" style={{ color: 'var(--text-secondary)' }}>
-                        {entry.message}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1">
+                    <div className="flex-1 min-w-0 overflow-hidden">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <p className="text-sm truncate whitespace-nowrap cursor-default" style={{ color: 'var(--text-secondary)' }}>
+                            {entry.message}
+                          </p>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p className="text-xs">{entry.message}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="flex items-center justify-between mt-1">
                         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                           {formatDate(entry.date)}
                         </p>
-                        <div className="flex items-center gap-1 text-xs">
-                          <span style={{ color: 'var(--text-green)' }}>+{entry.insertions}</span>
-                          <span style={{ color: 'var(--text-red)' }}>-{entry.deletions}</span>
+                        <div className="flex items-center gap-2 text-xs shrink-0">
+                          {entry.insertions > 0 && (
+                            <span className="text-green-500">+{entry.insertions}</span>
+                          )}
+                          {entry.deletions > 0 && (
+                            <span className="text-red-500">-{entry.deletions}</span>
+                          )}
                         </div>
                       </div>
                     </div>

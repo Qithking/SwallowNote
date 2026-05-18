@@ -304,14 +304,13 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
     let max_count_str = max_count.to_string();
     let skip_str = skip.to_string();
 
-    let format_str = "%H%n%s%n%ai";
-    let output = run_git(
+    // First, get commit hashes
+    let hash_output = run_git(
         repo_path,
         &[
             "log",
             "--follow",
-            "--format", format_str,
-            "--numstat",
+            "--format=%H",
             "-n", &max_count_str,
             "--skip", &skip_str,
             "--",
@@ -319,39 +318,57 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
         ],
     )?;
 
+    let hashes: Vec<&str> = hash_output.lines().filter(|l| !l.is_empty()).collect();
+    if hashes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // For each hash, get commit info and numstat
     let mut entries = Vec::new();
-    let mut lines = output.lines().peekable();
-
-    while lines.peek().is_some() {
-        let hash = lines.next().unwrap_or("").to_string();
-        if hash.is_empty() {
-            break;
+    
+    for hash in &hashes {
+        // Get commit message and date
+        let info_output = run_git(
+            repo_path,
+            &["log", "-1", "--format=%s%n%ct", hash],
+        )?;
+        
+        let info_lines: Vec<&str> = info_output.lines().collect();
+        if info_lines.len() < 2 {
+            continue;
         }
-        let message = lines.next().unwrap_or("").to_string();
-        let date = lines.next().unwrap_or("").to_string();
-
+        
+        let message = info_lines[0].to_string();
+        // %ct gives unix timestamp as string, pass it directly to frontend
+        let timestamp_str = info_lines[1].trim();
+        let date = format!("{}000", timestamp_str); // Convert seconds to milliseconds for JS Date
+        
+        // Get numstat for this commit
+        let numstat_output = run_git(
+            repo_path,
+            &["diff-tree", "--numstat", "-r", hash],
+        );
+        
         let mut insertions = 0;
         let mut deletions = 0;
-
-        while let Some(line) = lines.peek() {
-            if line.is_empty() {
-                lines.next();
-                break;
-            }
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                if let Ok(ins) = parts[0].parse::<usize>() {
-                    insertions += ins;
+        
+        if let Ok(output) = numstat_output {
+            for line in output.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    // Check if this numstat is for our file
+                    if parts[2] == relative_path_str || parts[2].ends_with(&format!("/{}", relative_path_str)) {
+                        if let (Ok(ins), Ok(del)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>()) {
+                            insertions += ins;
+                            deletions += del;
+                        }
+                    }
                 }
-                if let Ok(del) = parts[1].parse::<usize>() {
-                    deletions += del;
-                }
             }
-            lines.next();
         }
-
+        
         entries.push(GitFileLogEntry {
-            hash,
+            hash: hash.to_string(),
             message,
             date,
             insertions,
