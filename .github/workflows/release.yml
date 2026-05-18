@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-15, windows-latest, ubuntu-24.04]
+        platform: [macos-15, windows-latest, ubuntu-22.04]
 
     runs-on: ${{ matrix.platform }}
 
@@ -50,20 +50,21 @@ jobs:
 
       - name: Set version from tag (Windows)
         if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
         run: |
           $VERSION = $env:GITHUB_REF -replace 'refs/tags/v', ''
           echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Setting version to $VERSION"
           cd src-tauri
           $content = Get-Content tauri.conf.json -Raw
-          $content = $content -replace '"version": "[^"]*"', "\"version\": \"$VERSION\""
-          Set-Content tauri.conf.json $content -NoNewline
+          $content = $content -replace '"version": "[^"]*"', "`"version`": `"$VERSION`""
+          Set-Content tauri.conf.json $content -NoNewline -Encoding utf8
           Get-Content tauri.conf.json | Select-String version
 
       - name: Build (macOS)
         if: matrix.platform == 'macos-15'
         run: |
-          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
           npm run build
           npx tauri build --target universal-apple-darwin
         env:
@@ -72,16 +73,17 @@ jobs:
       - name: Build (Windows)
         if: matrix.platform == 'windows-latest'
         run: |
+          rustup target add x86_64-pc-windows-msvc
           npm run build
           npx tauri build --target x86_64-pc-windows-msvc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build (Linux)
-        if: matrix.platform == 'ubuntu-24.04'
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
           npm run build
           npx tauri build --target x86_64-unknown-linux-gnu
         env:
@@ -100,7 +102,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
