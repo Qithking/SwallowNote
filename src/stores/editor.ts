@@ -22,12 +22,18 @@ export interface EditorTab {
   }
   // View mode for markdown files: 'preview' (BlockNote) or 'source' (CodeMirror)
   viewMode: 'preview' | 'source'
+  // Tab type: 'file' for normal files, 'diff' for git diff view
+  type?: 'file' | 'diff'
+  // For diff tabs: commit hash and diff content
+  commitHash?: string
+  diffContent?: string
 }
 
 export interface EditorState {
   tabs: EditorTab[]
   activeTabId: string | null
   addTab: (tab: EditorTab) => void
+  openDiffTab: (filePath: string, commitHash: string, commitMessage: string) => Promise<void>
   removeTab: (id: string) => void
   setActiveTab: (id: string) => void
   loadTabContent: (id: string) => Promise<void>
@@ -44,23 +50,64 @@ export interface EditorState {
   saveAllDirtyTabs: () => Promise<void>
   resetDirtyTabs: () => void
   getDirtyTabsCount: () => number
+  saveTabsState: () => Promise<void>
+  restoreTabsState: () => Promise<void>
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   tabs: [],
   activeTabId: null,
-  addTab: (tab) =>
+  addTab: (tab) => {
     set((state) => {
       const existing = state.tabs.find((t) => t.path === tab.path)
       if (existing) {
         return { activeTabId: existing.id }
       }
-      // 新打开的文件 isEdited/isDirty 默认为 false, viewMode 默认为 'preview'
+      const newTabs = [...state.tabs, { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }]
       return {
-        tabs: [...state.tabs, { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' }],
+        tabs: newTabs,
         activeTabId: tab.id,
       }
-    }),
+    })
+    // 在 set 回调外部调用 saveTabsState，确保获取最新状态
+    setTimeout(() => {
+      get().saveTabsState().catch(console.error)
+      console.log('Tabs state auto-saved after add')
+    }, 100)
+  },
+  openDiffTab: async (filePath: string, commitHash: string, commitMessage: string) => {
+    const { gitShowDiff } = await import('@/lib/tauri')
+    const diffContent = await gitShowDiff(filePath, commitHash)
+    
+    const diffTabId = `diff-${filePath}-${commitHash}`
+    const shortHash = commitHash.slice(0, 7)
+    const shortMessage = commitMessage.length > 20 ? `${commitMessage.slice(0, 20)}...` : commitMessage
+    
+    set((state) => {
+      const existing = state.tabs.find((t) => t.id === diffTabId)
+      if (existing) {
+        return { activeTabId: existing.id }
+      }
+      
+      const newTab: EditorTab = {
+        id: diffTabId,
+        path: filePath,
+        name: `${shortMessage} (${shortHash})`,
+        content: '',
+        diffContent,
+        isDirty: false,
+        isEdited: false,
+        type: 'diff',
+        commitHash,
+        viewMode: 'source',
+      }
+      
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: diffTabId,
+      }
+    })
+  },
   removeTab: (id) =>
     set((state) => {
       const index = state.tabs.findIndex((t) => t.id === id)
@@ -73,6 +120,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           newActiveId = null
         }
       }
+      setTimeout(() => {
+        get().saveTabsState().catch(console.error)
+        console.log('Tabs state auto-saved after remove')
+      }, 100)
       return { tabs: newTabs, activeTabId: newActiveId }
     }),
   setActiveTab: (id) => {
@@ -215,5 +266,40 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })),
   getDirtyTabsCount: () => {
     return get().tabs.filter((t) => t.isDirty).length
+  },
+  saveTabsState: async () => {
+    const { saveSessionState, getSessionState } = await import('@/lib/tauri')
+    const state = get()
+    // 只保存文件类型的 Tab，不保存 diff Tab
+    const fileTabs = state.tabs.filter((t) => t.type !== 'diff')
+    
+    // 先获取现有的 session state，然后只更新 tabs 和 activeTabId
+    try {
+      const existingState = await getSessionState()
+      const tabsState = {
+        ...existingState,
+        tabs: JSON.stringify(fileTabs),
+        activeTabId: state.activeTabId || '',
+      }
+      await saveSessionState(tabsState)
+      console.log('Tabs state saved:', fileTabs.length, 'tabs')
+    } catch (e) {
+      console.error('Failed to save tabs state:', e)
+    }
+  },
+  restoreTabsState: async () => {
+    const { getSessionState } = await import('@/lib/tauri')
+    try {
+      const state = await getSessionState()
+      if (state.tabs) {
+        const tabs: EditorTab[] = JSON.parse(state.tabs)
+        // 过滤掉不存在的文件
+        const validTabs = tabs.filter((tab) => tab.path && tab.path.trim())
+        const activeTabId = state.activeTabId || (validTabs.length > 0 ? validTabs[0].id : null)
+        set({ tabs: validTabs, activeTabId })
+      }
+    } catch (e) {
+      console.error('Failed to restore tabs state:', e)
+    }
   },
 }))

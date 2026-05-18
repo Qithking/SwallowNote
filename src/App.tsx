@@ -96,6 +96,18 @@ function App() {
     return () => { window.removeEventListener('tab-load-error', handleTabLoadError) }
   }, [])
 
+  // 自动保存 tabs 状态
+  useEffect(() => {
+    const handleTabsChange = () => {
+      console.log('Tab state changed, saving...')
+      saveSessionStateNow().catch(console.error)
+    }
+    
+    const unsubscribe = useEditorStore.subscribe(handleTabsChange)
+    
+    return unsubscribe
+  }, [])
+
   const handleSaveAndClose = async () => {
     setShowSaveDialog(false)
     await useEditorStore.getState().saveAllDirtyTabs()
@@ -193,13 +205,19 @@ function App() {
   const restoreSessionState = async () => {
     try {
       const states = await getSessionState()
-      if (Object.keys(states).length === 0) return
+      console.log('Restoring session state:', states)
+      if (Object.keys(states).length === 0) {
+        console.log('No session state found')
+        return
+      }
 
       const { workspaceMode } = useUIStore.getState()
       const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
+      console.log('Workspace mode:', workspaceMode, 'rootPath:', rootPath, 'workspaceFolders:', workspaceFolders)
 
       if (states.tabs) {
         const tabsData = JSON.parse(states.tabs)
+        console.log('Found tabs in session:', tabsData.length)
         const validTabs = tabsData.filter((tab: { path: string }) => {
           if (workspaceMode === 'workspace') {
             return workspaceFolders.some((f: string) => tab.path.startsWith(f))

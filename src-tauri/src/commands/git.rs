@@ -379,6 +379,43 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
     Ok(entries)
 }
 
+/// Get diff for a specific commit and file
+#[tauri::command]
+pub async fn git_show_diff(file_path: String, commit_hash: String) -> Result<String, String> {
+    // Find the git root by walking up directories
+    let mut current = Path::new(&file_path);
+    loop {
+        if current.join(".git").exists() {
+            break;
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => return Err("NOT_IN_GIT_REPO".to_string()),
+        }
+    }
+
+    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let relative_path = Path::new(&file_path)
+        .strip_prefix(current)
+        .map_err(|e| format!("Invalid relative path: {}", e))?;
+    let relative_path_str = relative_path.to_str().ok_or("Invalid path encoding")?;
+
+    // Get diff for the specific file in this commit
+    let output = run_git(
+        repo_path,
+        &[
+            "show",
+            &commit_hash,
+            "--format=",  // Empty format to skip commit info
+            "--no-color",
+            "--",
+            relative_path_str,
+        ],
+    )?;
+
+    Ok(output)
+}
+
 fn get_branch(path: &str) -> Result<String, String> {
     run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
 }

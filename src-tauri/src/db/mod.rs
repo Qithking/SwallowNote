@@ -1,7 +1,7 @@
 pub mod folder_history;
 pub mod session_state;
 
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, OpenFlags, Result};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -11,7 +11,7 @@ pub struct Database {
 
 pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     let db_path = app_data_dir.join("swallownote.db");
-    let conn = Connection::open(&db_path)?;
+    let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)?;
     
     conn.execute(
         "CREATE TABLE IF NOT EXISTS folder_history (

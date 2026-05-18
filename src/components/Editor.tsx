@@ -7,6 +7,7 @@ import { useEditorStore } from '@/stores'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
+import DiffViewer from './DiffViewer/DiffViewer'
 import { FileCode } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 
@@ -56,6 +57,15 @@ export function EditorView() {
 
   if (!activeTab) {
     return <WelcomeScreen />
+  }
+
+  // Handle diff tab
+  if (activeTab.type === 'diff') {
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        <DiffViewer diffContent={activeTab.diffContent || ''} />
+      </div>
+    )
   }
 
   const fileType = detectFileType(activeTab.name, activeTab.content)

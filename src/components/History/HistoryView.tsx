@@ -8,13 +8,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 const PAGE_SIZE = 50
 
 function HistoryView({ visible }: { visible: boolean }) {
-  const { tabs, activeTabId } = useEditorStore()
+  const { tabs, activeTabId, openDiffTab } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
 
   const [entries, setEntries] = useState<GitFileLogEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [notInRepo, setNotInRepo] = useState(false)
+  const [selectedHash, setSelectedHash] = useState<string | null>(null)
   const skipRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -140,11 +141,19 @@ function HistoryView({ visible }: { visible: boolean }) {
           ) : (
             <>
               <ul className="space-y-1">
-                {entries.map((entry, index) => (
-                  <li
-                    key={`${entry.hash}-${index}`}
-                    className="flex items-start gap-2 p-2 rounded cursor-pointer hover:bg-[var(--bg-hover)] overflow-hidden"
-                  >
+                {entries.map((entry, index) => {
+                  const isSelected = selectedHash === entry.hash
+                  return (
+                    <li
+                      key={`${entry.hash}-${index}`}
+                      className={`flex items-start gap-2 p-2 rounded cursor-pointer overflow-hidden ${isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                      onClick={() => {
+                        setSelectedHash(entry.hash)
+                        if (activeTab?.path) {
+                          openDiffTab(activeTab.path, entry.hash, entry.message)
+                        }
+                      }}
+                    >
                     <FileText size={12} className="text-[var(--text-muted)] mt-0.5 shrink-0" />
                     <div className="flex-1 min-w-0 overflow-hidden">
                       <Tooltip>
@@ -171,8 +180,9 @@ function HistoryView({ visible }: { visible: boolean }) {
                         </div>
                       </div>
                     </div>
-                  </li>
-                ))}
+                    </li>
+                  )
+                })}
               </ul>
               {loading && (
                 <div className="flex items-center justify-center py-2">
