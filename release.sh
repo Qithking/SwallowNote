@@ -105,8 +105,8 @@ push_to_github() {
         git commit -m "$commit_msg"
         
         echo ""
-        echo_info "推送到 $remote_name/main..."
-        git push "$remote_name" main
+        echo_info "推送到 $remote_name/$current_branch..."
+        git push "$remote_name" "$current_branch"
         
         echo_success "代码已成功推送到 GitHub!"
     fi
