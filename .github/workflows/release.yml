@@ -38,6 +38,17 @@ jobs:
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli
 
+      - name: Set version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            echo "Setting version to $VERSION"
+            cd src-tauri
+            cat tauri.conf.json | sed "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" > tauri.conf.json.tmp && mv tauri.conf.json.tmp tauri.conf.json
+            cat tauri.conf.json | grep version
+          fi
+
       - name: Build (macOS)
         if: matrix.platform == 'macos-15'
         run: |
