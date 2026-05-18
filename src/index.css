@@ -210,6 +210,9 @@
   background-color: hsl(var(--primary) / 0.1);
 }
 /* ---- BlockNote Editor ---- */
+.dark>.bn-editor{
+  background-color: transparent;
+}
 .blocknote-editor-container [data-radix-scroll-area-viewport]{  
   padding:30px 30px;
 }
