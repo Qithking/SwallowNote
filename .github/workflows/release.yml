@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-15, windows-latest, ubuntu-24.04]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli
+
+      - name: Build (macOS)
+        if: matrix.platform == 'macos-15'
+        run: |
+          npm run build
+          npx tauri build --target universal-apple-darwin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          npm run build
+          npx tauri build --target x86_64-pc-windows-msvc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (Linux)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+          npm run build
+          npx tauri build --target x86_64-unknown-linux-gnu
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwallowNote-build-${{ matrix.platform }}
+          path: |
+            src-tauri/target/**/*.dmg
+            src-tauri/target/**/*.msi
+            src-tauri/target/**/*.deb
+            src-tauri/target/**/*.AppImage
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List Artifacts
+        run: find artifacts -type f -name "*.dmg" -o -name "*.msi" -o -name "*.deb" -o -name "*.AppImage"
+
+      - name: Generate Release Body
+        id: release_body
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log "$PREV_TAG"..HEAD --oneline --format='  - %s' 2>/dev/null | head -50 || echo "  - 无更新内容")
+          else
+            CHANGELOG=$(git log --oneline --format='  - %s' | head -20 2>/dev/null || echo "  - 无更新内容")
+          fi
+
+          {
+            echo "### 更新内容"
+            echo "$CHANGELOG"
+            echo ""
+            echo "### 下载"
+            echo "  - **macOS**: SwallowNote-*-universal.dmg"
+            echo "  - **Windows**: SwallowNote-*-x64.msi"
+            echo "  - **Linux**: SwallowNote-*-x86_64.AppImage 或 .deb"
+            echo ""
+            echo "### 安装说明"
+            echo "  - **macOS**: 下载 DMG 文件，将 SwallowNote.app 拖入 Applications 文件夹"
+            echo "  - **Windows**: 下载 MSI 文件，双击运行安装程序"
+            echo "  - **Linux**: 下载 AppImage 并运行，或使用 dpkg -i 安装 deb 包"
+            echo ""
+            echo "### 系统要求"
+            echo "  - macOS 13.0 或更高版本"
+            echo "  - Windows 10 或更高版本"
+            echo "  - Linux (Ubuntu 20.04+, Fedora 34+, etc.)"
+          } > release_body.txt
+
+          cat release_body.txt
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_body.txt
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.msi
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
