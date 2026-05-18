@@ -46,6 +46,7 @@ jobs:
           echo "Setting version to $VERSION"
           cd src-tauri
           sed -i.bak "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" tauri.conf.json
+          rm -f tauri.conf.json.bak
           cat tauri.conf.json | grep version
 
       - name: Set version from tag (Windows)
@@ -83,7 +84,7 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev
           npm run build
           npx tauri build --target x86_64-unknown-linux-gnu
         env:
@@ -115,7 +116,8 @@ jobs:
           path: artifacts
 
       - name: List Artifacts
-        run: find artifacts -type f -name "*.dmg" -o -name "*.msi" -o -name "*.deb" -o -name "*.AppImage"
+        run: |
+          find artifacts -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.deb" -o -name "*.AppImage" \)
 
       - name: Generate Release Body
         id: release_body
@@ -125,7 +127,11 @@ jobs:
           if [ -n "$PREV_TAG" ]; then
             CHANGELOG=$(git log "$PREV_TAG"..HEAD --oneline --format='  - %s' 2>/dev/null | head -50 || echo "  - 无更新内容")
           else
-            CHANGELOG=$(git log --oneline --format='  - %s' | head -20 2>/dev/null || echo "  - 无更新内容")
+            CHANGELOG=$(git log --oneline --format='  - %s' 2>/dev/null | head -20 || echo "  - 无更新内容")
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="  - 无更新内容"
           fi
 
           {
