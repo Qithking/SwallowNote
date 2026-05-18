@@ -30,15 +30,15 @@ A cross-platform Markdown editor built with Tauri 2.x, React, and Milkdown.
 
 ## Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+P | Command Palette |
-| Ctrl+Shift+F | Global Search |
-| Ctrl+B | Toggle Sidebar |
-| Ctrl+W | Close Tab |
-| Ctrl+1-9 | Switch to Tab 1-9 |
-| Ctrl+, | Settings |
-| Escape | Close Overlays |
+| Shortcut     | Action            |
+| ------------ | ----------------- |
+| Ctrl+P       | Command Palette   |
+| Ctrl+Shift+F | Global Search     |
+| Ctrl+B       | Toggle Sidebar    |
+| Ctrl+W       | Close Tab         |
+| Ctrl+1-9     | Switch to Tab 1-9 |
+| Ctrl+,       | Settings          |
+| Escape       | Close Overlays    |
 
 ## Getting Started
 
@@ -63,7 +63,7 @@ npm run tauri build
 
 ## Project Structure
 
-```
+```text
 src/
 ├── components/          # React components
 │   ├── TitleBar.tsx    # Custom title bar
@@ -107,6 +107,7 @@ The app uses CSS variables for theming. Theme colors are defined in `src/index.c
 ### State Management
 
 Zustand is used for global state management. Each store handles a specific domain:
+
 - `workspaceStore`: Root path and workspace loading state
 - `fileTreeStore`: File tree structure and selection
 - `editorStore`: Tabs and editor content
@@ -119,4 +120,4 @@ Tauri backend commands are wrapped in `src/lib/tauri.ts` for type-safe access fr
 
 ## License
 
-MIT
+GPV-3
