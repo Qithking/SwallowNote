@@ -38,16 +38,27 @@ jobs:
       - name: Install Tauri CLI
         run: npm install -g @tauri-apps/cli
 
-      - name: Set version from tag
+      - name: Set version from tag (Linux/macOS)
+        if: matrix.platform != 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-            echo "VERSION=$VERSION" >> $GITHUB_ENV
-            echo "Setting version to $VERSION"
-            cd src-tauri
-            cat tauri.conf.json | sed "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" > tauri.conf.json.tmp && mv tauri.conf.json.tmp tauri.conf.json
-            cat tauri.conf.json | grep version
-          fi
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Setting version to $VERSION"
+          cd src-tauri
+          sed -i.bak "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" tauri.conf.json
+          cat tauri.conf.json | grep version
+
+      - name: Set version from tag (Windows)
+        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $VERSION = $env:GITHUB_REF -replace 'refs/tags/v', ''
+          echo "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Setting version to $VERSION"
+          cd src-tauri
+          $content = Get-Content tauri.conf.json -Raw
+          $content = $content -replace '"version": "[^"]*"', "\"version\": \"$VERSION\""
+          Set-Content tauri.conf.json $content -NoNewline
+          Get-Content tauri.conf.json | Select-String version
 
       - name: Build (macOS)
         if: matrix.platform == 'macos-15'
