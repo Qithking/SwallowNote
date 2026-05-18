@@ -41,6 +41,7 @@ jobs:
       - name: Build (macOS)
         if: matrix.platform == 'macos-15'
         run: |
+          rustup target add x86_64-apple-darwin
           npm run build
           npx tauri build --target universal-apple-darwin
         env:
