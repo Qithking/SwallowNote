@@ -1,44 +1,44 @@
 # SwallowNote
 
-A cross-platform Markdown editor built with Tauri 2.x, React, and Milkdown.
+A cross-platform Markdown editor built with Tauri 2.x, React, and BlockNote.
 
 ## Tech Stack
 
 - **Framework**: Tauri 2.x + React 18
-- **Editor**: Milkdown (Markdown editor)
+- **Markdown Editor**: BlockNote
 - **Code Editor**: CodeMirror 6
-- **UI**: shadcn/ui + Tailwind CSS v4
-- **State Management**: Zustand
+- **UI Components**: shadcn/ui + Radix UI
 - **Styling**: Tailwind CSS v4 + CSS Variables
+- **State Management**: Zustand
 - **Icons**: Lucide React
 - **i18n**: react-i18next
 - **Build Tool**: Vite
 
 ## Features
 
-- 📝 Markdown editing with Milkdown
+- 📝 Markdown editing with BlockNote (WYSIWYG)
 - 💻 Code editing with CodeMirror 6
-- 🌲 File tree browser
+- 🌲 File tree browser with workspace support
 - 📑 Multi-tab editing
 - 🔍 Quick file search (Ctrl+P)
 - 🔎 Global content search (Ctrl+Shift+F)
 - 🌙 Light/Dark/System theme
 - 🌐 Multi-language support (English/Chinese)
-- 📁 Git integration
-- 🤖 AI assistant panel
+- 📁 Folder history with SQLite storage
 - ⌨️ VSCode-style keyboard shortcuts
 
 ## Keyboard Shortcuts
 
-| Shortcut     | Action            |
-| ------------ | ----------------- |
-| Ctrl+P       | Command Palette   |
-| Ctrl+Shift+F | Global Search     |
-| Ctrl+B       | Toggle Sidebar    |
-| Ctrl+W       | Close Tab         |
-| Ctrl+1-9     | Switch to Tab 1-9 |
-| Ctrl+,       | Settings          |
-| Escape       | Close Overlays    |
+| Shortcut      | Action            |
+| ------------- | ----------------- |
+| Ctrl+P        | Command Palette   |
+| Ctrl+Shift+F  | Global Search     |
+| Ctrl+B        | Toggle Sidebar    |
+| Ctrl+W        | Close Tab         |
+| Ctrl+Tab      | Next Tab          |
+| Ctrl+1-9      | Switch to Tab 1-9 |
+| Ctrl+,        | Settings          |
+| Escape        | Close Overlays    |
 
 ## Getting Started
 
@@ -66,36 +66,29 @@ npm run tauri build
 ```text
 src/
 ├── components/          # React components
-│   ├── TitleBar.tsx    # Custom title bar
-│   ├── Sidebar.tsx     # Sidebar container
-│   ├── TabBar.tsx      # Tab management
-│   ├── Editor.tsx      # Main editor
-│   ├── StatusBar.tsx   # Bottom status bar
-│   ├── CommandPalette.tsx
-│   ├── SearchPanel.tsx
+│   ├── TitleBar/       # Custom title bar
+│   ├── Sidebar/        # Sidebar container
+│   ├── TabBar/         # Tab management
+│   ├── Editor/         # Main editor (BlockNote + CodeMirror)
+│   ├── StatusBar/     # Bottom status bar
+│   ├── CommandPalette/ # Command palette
 │   ├── FileTree/       # File tree components
-│   ├── Search/        # Search components
-│   ├── Git/           # Git components
-│   ├── AI/            # AI components
+│   ├── Search/         # Search components
+│   ├── Git/            # Git integration
 │   └── Settings/      # Settings components
-├── stores/             # Zustand stores
-│   ├── workspace.ts   # Workspace state
-│   ├── filetree.ts    # File tree state
-│   ├── editor.ts      # Editor state
-│   ├── ui.ts          # UI state
-│   └── git.ts         # Git state
-├── hooks/              # Custom React hooks
-│   ├── useKeyboardShortcuts.ts
-│   └── useTheme.ts
-├── lib/                # Utilities
-│   ├── utils.ts       # Helper functions
-│   └── tauri.ts       # Tauri API wrappers
-├── i18n/              # Internationalization
-│   ├── index.ts       # i18n configuration
-│   └── locales/       # Translation files
-│       ├── en.json
-│       └── zh-CN.json
-└── App.tsx            # Root component
+├── stores/              # Zustand stores
+│   ├── workspace.ts    # Workspace state
+│   ├── filetree.ts     # File tree state
+│   ├── editor.ts       # Editor state
+│   ├── ui.ts           # UI state
+│   └── git.ts          # Git state
+├── hooks/               # Custom React hooks
+├── lib/                 # Utilities
+│   ├── utils.ts        # Helper functions
+│   └── tauri.ts        # Tauri API wrappers
+├── i18n/               # Internationalization
+│   └── locales/        # Translation files
+└── App.tsx             # Root component
 ```
 
 ## Development Notes
@@ -118,6 +111,16 @@ Zustand is used for global state management. Each store handles a specific domai
 
 Tauri backend commands are wrapped in `src/lib/tauri.ts` for type-safe access from the React frontend.
 
+## Downloads
+
+Download the latest release for your platform:
+
+- **macOS**: DMG installer (Apple Silicon + Intel)
+- **Windows**: MSI installer
+- **Linux**: AppImage or DEB package
+
+Visit the [Releases](https://github.com/Qithking/SwallowNote/releases) page to download.
+
 ## License
 
-GPV-3
+GPL-3.0
