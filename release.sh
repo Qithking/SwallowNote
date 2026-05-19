@@ -304,40 +304,66 @@ download_latest() {
     echo_success "下载完成!"
 }
 
+# 清除 GitHub Actions
+clean_actions() {
+    echo ""
+    echo "=== 清除 GitHub Actions ==="
+    echo ""
+    echo "  1. 清除失败的 Actions"
+    echo "  2. 清除所有 Actions"
+    echo "  0. 返回"
+    echo ""
+    read -p "请选择: " sub_choice
+
+    case $sub_choice in
+        1)
+            clean_failed_actions
+            ;;
+        2)
+            clean_all_actions
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo_error "无效选择"
+            ;;
+    esac
+}
+
 # 清除失败的 GitHub Actions
 clean_failed_actions() {
     echo ""
     echo "=== 清除失败的 GitHub Actions ==="
     echo ""
-    
+
     if ! command -v gh &> /dev/null; then
         echo_error "需要安装 GitHub CLI"
         echo "安装命令: brew install gh"
         exit 1
     fi
-    
+
     if ! gh auth status &> /dev/null; then
         echo_error "未登录 GitHub"
         echo "请运行: gh auth login"
         exit 1
     fi
-    
+
     echo_info "获取失败的 Actions 运行..."
-    
-    # 获取失败的运行
+
     failed_runs=$(gh run list --repo Qithking/SwallowNote --status failure --json databaseId,workflowName --jq '.[] | "\(.databaseId) \(.workflowName)"' 2>/dev/null)
-    
+
     if [ -z "$failed_runs" ]; then
         echo_info "没有失败的 Actions 运行"
         return
     fi
-    
+
     echo ""
     echo_info "找到以下失败的运行:"
     echo "$failed_runs" | while read -r id name; do
         echo "  - [$id] $name"
     done
-    
+
     echo ""
     read -p "确认删除所有失败运行? (y/n): " confirm
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
@@ -352,48 +378,175 @@ clean_failed_actions() {
     fi
 }
 
-# 删除指定 tag
+# 清除所有 GitHub Actions
+clean_all_actions() {
+    echo ""
+    echo "=== 清除所有 GitHub Actions ==="
+    echo ""
+
+    if ! command -v gh &> /dev/null; then
+        echo_error "需要安装 GitHub CLI"
+        echo "安装命令: brew install gh"
+        exit 1
+    fi
+
+    if ! gh auth status &> /dev/null; then
+        echo_error "未登录 GitHub"
+        echo "请运行: gh auth login"
+        exit 1
+    fi
+
+    echo_warning "此操作将删除所有 Actions 运行记录！"
+    echo ""
+    read -p "确认删除所有 Actions? (y/n): " confirm
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo_info "已取消"
+        return
+    fi
+
+    echo ""
+    echo_info "获取所有 Actions 运行..."
+
+    all_runs=$(gh run list --repo Qithking/SwallowNote --json databaseId --jq '.[] | .databaseId' 2>/dev/null)
+
+    if [ -z "$all_runs" ]; then
+        echo_info "没有 Actions 运行"
+        return
+    fi
+
+    echo_info "正在删除..."
+    deleted=0
+    failed=0
+    for id in $all_runs; do
+        if gh run delete "$id" --repo Qithking/SwallowNote 2>/dev/null; then
+            ((deleted++)) || true
+        else
+            ((failed++)) || true
+        fi
+    done
+    echo_success "已删除: $deleted 个, 失败: $failed 个"
+}
+
+# 删除 tag
 delete_tag() {
+    echo ""
+    echo "=== 删除 Tag ==="
+    echo ""
+    echo "  1. 删除指定 Tag"
+    echo "  2. 删除所有 Tags"
+    echo "  0. 返回"
+    echo ""
+    read -p "请选择: " sub_choice
+
+    case $sub_choice in
+        1)
+            delete_single_tag
+            ;;
+        2)
+            delete_all_tags
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo_error "无效选择"
+            ;;
+    esac
+}
+
+# 删除指定 tag
+delete_single_tag() {
     echo ""
     echo "=== 删除指定 Tag ==="
     echo ""
-    
-    # 获取远程仓库名称
+
     remote_name=$(git remote 2>/dev/null | head -1)
     if [ -z "$remote_name" ]; then
         echo_error "未找到远程仓库"
         exit 1
     fi
-    
+
     echo_info "本地 Tags:"
     git tag --sort=-version:refname | head -10
-    
+
     echo ""
     read -p "输入要删除的 tag 名称 (如 v1.7.8): " tag_name
-    
+
     if [ -z "$tag_name" ]; then
         echo_error "请输入 tag 名称"
         exit 1
     fi
-    
-    # 检查本地 tag 是否存在
+
     if ! git tag | grep -q "^${tag_name}$"; then
         echo_error "本地未找到 tag: $tag_name"
         exit 1
     fi
-    
+
     echo ""
     read -p "确认删除本地 tag '$tag_name'? (y/n): " confirm
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         git tag -d "$tag_name"
         echo_success "已删除本地 tag: $tag_name"
     fi
-    
+
     echo ""
     read -p "同时删除远程 tag '$tag_name'? (y/n): " confirm
     if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         git push "$remote_name" --delete "$tag_name" 2>/dev/null && echo_success "已删除远程 tag: $tag_name" || echo_warning "远程 tag 可能不存在"
     fi
+}
+
+# 删除所有 tags
+delete_all_tags() {
+    echo ""
+    echo "=== 删除所有 Tags ==="
+    echo ""
+
+    remote_name=$(git remote 2>/dev/null | head -1)
+    if [ -z "$remote_name" ]; then
+        echo_error "未找到远程仓库"
+        exit 1
+    fi
+
+    local_tags=$(git tag --sort=-version:refname 2>/dev/null)
+    if [ -z "$local_tags" ]; then
+        echo_info "没有本地 Tags"
+        return
+    fi
+
+    echo_info "本地 Tags:"
+    echo "$local_tags" | head -10
+    echo ""
+
+    echo_warning "此操作将删除所有本地和远程 Tags！"
+    echo ""
+    read -p "确认删除所有 Tags? (y/n): " confirm
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo_info "已取消"
+        return
+    fi
+
+    echo ""
+    echo_info "正在删除本地 Tags..."
+    deleted_local=0
+    for tag in $local_tags; do
+        if git tag -d "$tag" 2>/dev/null; then
+            ((deleted_local++)) || true
+        fi
+    done
+    echo_success "已删除本地 Tags: $deleted_local 个"
+
+    echo_info "正在删除远程 Tags..."
+    deleted_remote=0
+    failed_remote=0
+    for tag in $local_tags; do
+        if git push "$remote_name" --delete "$tag" 2>/dev/null; then
+            ((deleted_remote++)) || true
+        else
+            ((failed_remote++)) || true
+        fi
+    done
+    echo_success "已删除远程 Tags: $deleted_remote 个, 失败: $failed_remote 个"
 }
 
 # 重新触发最新版本的 GitHub Actions
@@ -463,8 +616,8 @@ show_menu() {
     echo "║  1. 提交代码到 GitHub (main 分支)                ║"
     echo "║  2. 发布新版本 (创建 tag 触发 GitHub Actions)    ║"
     echo "║  3. 下载最新版本                                ║"
-    echo "║  4. 清除失败的 GitHub Actions                   ║"
-    echo "║  5. 删除指定 Tag                                ║"
+    echo "║  4. 清除 Actions                               ║"
+    echo "║  5. 删除 Tag                                   ║"
     echo "║  6. 重新触发最新版本 GitHub Actions            ║"
     echo "║  0. 退出                                         ║"
     echo "╚══════════════════════════════════════════════════╝"
@@ -490,7 +643,7 @@ main() {
                 download_latest
                 ;;
             4)
-                clean_failed_actions
+                clean_actions
                 ;;
             5)
                 delete_tag
