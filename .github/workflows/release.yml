@@ -46,8 +46,14 @@ jobs:
           echo "Setting version to $VERSION"
           cd src-tauri
           sed -i.bak "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" tauri.conf.json
-          rm -f tauri.conf.json.bak
+          sed -i.bak "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" Cargo.toml
+          rm -f tauri.conf.json.bak Cargo.toml.bak
           cat tauri.conf.json | grep version
+          cat Cargo.toml | grep "^version"
+          cd ..
+          sed -i.bak "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" package.json
+          rm -f package.json.bak
+          cat package.json | grep '"version"'
 
       - name: Set version from tag (Windows)
         if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/v')
@@ -61,6 +67,15 @@ jobs:
           $content = $content -replace '"version": "[^"]*"', "`"version`": `"$VERSION`""
           Set-Content tauri.conf.json $content -NoNewline -Encoding utf8
           Get-Content tauri.conf.json | Select-String version
+          $cargoContent = Get-Content Cargo.toml -Raw
+          $cargoContent = $cargoContent -replace '^version = "[^"]*"', "version = `"$VERSION`""
+          Set-Content Cargo.toml $cargoContent -NoNewline -Encoding utf8
+          Get-Content Cargo.toml | Select-String "^version"
+          cd ..
+          $pkgContent = Get-Content package.json -Raw
+          $pkgContent = $pkgContent -replace '"version": "[^"]*"', "`"version`": `"$VERSION`""
+          Set-Content package.json $pkgContent -NoNewline -Encoding utf8
+          Get-Content package.json | Select-String '"version"'
 
       - name: Build (macOS)
         if: matrix.platform == 'macos-15'
