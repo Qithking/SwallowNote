@@ -52,30 +52,41 @@ pub fn enable_rounded_corners<R: Runtime>(
                 #[cfg(target_os = "macos")]
                 unsafe {
                     let ns_window = webview.ns_window() as id;
-                    
+
                     let mut style_mask = ns_window.styleMask();
-                    
+
                     // Add necessary styles for rounded corners
                     style_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
                     style_mask |= NSWindowStyleMask::NSTitledWindowMask;
-                    style_mask |= NSWindowStyleMask::NSClosableWindowMask;
-                    style_mask |= NSWindowStyleMask::NSMiniaturizableWindowMask;
                     style_mask |= NSWindowStyleMask::NSResizableWindowMask;
-                    
+
+                    // Only add traffic light masks if decorations are NOT disabled
+                    // Check if decorations are enabled by examining the style mask
+                    let has_decorations = style_mask.contains(NSWindowStyleMask::NSClosableWindowMask);
+
+                    if has_decorations {
+                        // Only add traffic lights if window has decorations
+                        style_mask |= NSWindowStyleMask::NSClosableWindowMask;
+                        style_mask |= NSWindowStyleMask::NSMiniaturizableWindowMask;
+                    }
+                    // If decorations are disabled (no close/minimize buttons), don't add them
+
                     ns_window.setStyleMask_(style_mask);
                     ns_window.setTitlebarAppearsTransparent_(cocoa::base::YES);
-                    
+
                     let content_view = ns_window.contentView();
                     content_view.setWantsLayer(cocoa::base::YES);
-                    
-                    position_traffic_lights(ns_window, config.offset_x, config.offset_y);
+
+                    if has_decorations {
+                        position_traffic_lights(ns_window, config.offset_x, config.offset_y);
+                    }
                 }
             })
             .map_err(|e| e.to_string())?;
-        
+
         Ok(())
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         Ok(())
@@ -92,7 +103,7 @@ pub fn enable_modern_window_style<R: Runtime>(
     offset_y: Option<f64>,
 ) -> Result<(), String> {
     let radius = corner_radius.unwrap_or(12.0);
-    
+
     #[cfg(target_os = "macos")]
     {
         let config = TrafficLightsConfig {
@@ -105,25 +116,38 @@ pub fn enable_modern_window_style<R: Runtime>(
                 #[cfg(target_os = "macos")]
                 unsafe {
                     let ns_window = webview.ns_window() as id;
-                    
+
                     let mut style_mask = ns_window.styleMask();
-                    
+
+                    // Only add traffic light masks if decorations are enabled
+                    let has_decorations = style_mask.contains(NSWindowStyleMask::NSClosableWindowMask);
+
                     style_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
                     style_mask |= NSWindowStyleMask::NSResizableWindowMask;
-                    
+
+                    // Only add traffic lights if window originally had decorations
+                    if has_decorations {
+                        style_mask |= NSWindowStyleMask::NSClosableWindowMask;
+                        style_mask |= NSWindowStyleMask::NSMiniaturizableWindowMask;
+                    }
+
                     ns_window.setStyleMask_(style_mask);
                     ns_window.setTitlebarAppearsTransparent_(cocoa::base::YES);
                     ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
                     ns_window.setHasShadow_(cocoa::base::YES);
                     ns_window.setOpaque_(cocoa::base::NO);
-                    
+
                     let content_view = ns_window.contentView();
                     content_view.setWantsLayer(cocoa::base::YES);
-                    
+
                     let layer: id = msg_send![content_view, layer];
                     if !layer.is_null() {
                         let _: () = msg_send![layer, setCornerRadius: radius];
                         let _: () = msg_send![layer, setMasksToBounds: cocoa::base::YES];
+                    }
+
+                    if has_decorations {
+                        position_traffic_lights(ns_window, config.offset_x, config.offset_y);
                     }
                 }
             })
@@ -185,14 +209,19 @@ pub fn reposition_traffic_lights<R: Runtime>(
                 #[cfg(target_os = "macos")]
                 unsafe {
                     let ns_window = webview.ns_window() as id;
-                    position_traffic_lights(ns_window, config.offset_x, config.offset_y);
+
+                    // Only reposition traffic lights if decorations are enabled
+                    let style_mask = ns_window.styleMask();
+                    if style_mask.contains(NSWindowStyleMask::NSClosableWindowMask) {
+                        position_traffic_lights(ns_window, config.offset_x, config.offset_y);
+                    }
                 }
             })
             .map_err(|e| e.to_string())?;
-        
+
         Ok(())
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         Ok(())
