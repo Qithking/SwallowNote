@@ -23,7 +23,9 @@ export interface FileTreeState {
   toggleNode: (path: string) => Promise<void>
   loadRoot: (rootPath: string) => Promise<void>
   addRoot: (rootPath: string) => Promise<void>
+  addRoots: (rootPaths: string[]) => Promise<void>
   removeRoot: (rootPath: string) => void
+  refreshNode: (path: string) => Promise<void>
   revealPath: (filePath: string, rootPath: string) => Promise<void>
   clearAll: () => void
   clearExpanded: () => void
@@ -136,6 +138,36 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
   },
 
+  addRoots: async (rootPaths) => {
+    if (!rootPaths || rootPaths.length === 0) return
+    const { nodes, expanded } = get()
+    
+    const newNodes = [...nodes]
+    const newExpanded = new Set(expanded)
+    
+    for (const rootPath of rootPaths) {
+      const existingNode = findNodeInList(newNodes, rootPath)
+      if (existingNode) continue
+
+      try {
+        const data = await loadDirectory(rootPath)
+        const newNode: FileNode = {
+          id: `root-${rootPath}`,
+          name: rootPath.split('/').pop() || rootPath,
+          path: rootPath,
+          isDirectory: true,
+          children: data,
+        }
+        newNodes.push(newNode)
+        newExpanded.add(rootPath)
+      } catch (e) {
+        console.error(e)
+      }
+    }
+    
+    set({ nodes: newNodes, expanded: newExpanded })
+  },
+
   removeRoot: (rootPath) => {
     const { nodes, expanded, selectedPath } = get()
     const newNodes = nodes.filter(n => n.path !== rootPath)
@@ -148,6 +180,21 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
     
     set({ nodes: newNodes, expanded: newExpanded, selectedPath: newSelectedPath })
+  },
+
+  refreshNode: async (path) => {
+    const { nodes, expanded } = get()
+    if (!expanded.has(path)) return
+
+    const node = findNodeInList(nodes, path)
+    if (!node || !node.isDirectory) return
+
+    try {
+      const children = await loadDirectory(path)
+      set({ nodes: updateNodesWithChildren(nodes, path, children) })
+    } catch (e) {
+      console.error(e)
+    }
   },
 
   revealPath: async (filePath, rootPath) => {

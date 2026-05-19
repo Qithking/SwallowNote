@@ -1,50 +1,74 @@
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher, Event};
+use notify::event::{EventKind, ModifyKind};
+use notify::RecursiveMode;
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, RecommendedCache};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 struct FileWatcherState {
-    watcher: Option<RecommendedWatcher>,
+    debouncer: Option<notify_debouncer_full::Debouncer<notify::RecommendedWatcher, RecommendedCache>>,
     watched_paths: Vec<PathBuf>,
 }
 
 impl FileWatcherState {
     fn new() -> Self {
         Self {
-            watcher: None,
+            debouncer: None,
             watched_paths: Vec::new(),
         }
     }
 }
 
-// Global file watcher state
 static FILE_WATCHER: Mutex<Option<FileWatcherState>> = Mutex::new(None);
 
 pub fn init_watcher(app_handle: AppHandle) {
     let mut guard = FILE_WATCHER.lock().unwrap();
     if guard.is_some() {
-        return; // Already initialized
+        return;
     }
 
     let app_handle_clone = app_handle.clone();
 
-    let watcher = RecommendedWatcher::new(
-        move |res: Result<Event, notify::Error>| {
-            if let Ok(event) = res {
-                // Debounce: send event after a short delay
-                // For now, emit immediately; can add debouncing later
-                for path in &event.paths {
-                    let _ = app_handle_clone.emit("file-changed", path.to_string_lossy().to_string());
+    let mut debouncer = new_debouncer(
+        Duration::from_millis(500),
+        None,
+        move |res: DebounceEventResult| {
+            match res {
+                Ok(events) => {
+                    for event in events {
+                        let event_type = match event.kind {
+                            EventKind::Modify(ModifyKind::Name(_)) => "renamed",
+                            EventKind::Modify(_) => "modified",
+                            EventKind::Create(_) => "created",
+                            EventKind::Remove(_) => "removed",
+                            _ => continue,
+                        };
+
+                        for path in &event.paths {
+                            let path_str = path.to_string_lossy().to_string();
+                            let _ = app_handle_clone.emit(
+                                "file-watcher-event",
+                                serde_json::json!({
+                                    "type": event_type,
+                                    "path": path_str,
+                                }),
+                            );
+                        }
+                    }
+                }
+                Err(errors) => {
+                    for error in errors {
+                        eprintln!("File watcher error: {:?}", error);
+                    }
                 }
             }
         },
-        Config::default().with_poll_interval(Duration::from_secs(2)),
     )
-    .expect("Failed to create file watcher");
+    .expect("Failed to create debouncer");
 
     *guard = Some(FileWatcherState {
-        watcher: Some(watcher),
+        debouncer: Some(debouncer),
         watched_paths: Vec::new(),
     });
 }
@@ -60,13 +84,12 @@ pub fn watch_directory(path: String) -> Result<(), String> {
         return Err(format!("Path does not exist: {}", path));
     }
 
-    // Check if already watching this path
     if state.watched_paths.contains(&path_buf) {
         return Ok(());
     }
 
-    if let Some(ref mut watcher) = state.watcher {
-        watcher
+    if let Some(ref mut debouncer) = state.debouncer {
+        debouncer
             .watch(&path_buf, RecursiveMode::Recursive)
             .map_err(|e| format!("Failed to watch directory: {}", e))?;
 
@@ -84,8 +107,8 @@ pub fn unwatch_directory(path: String) -> Result<(), String> {
 
     let path_buf = PathBuf::from(&path);
 
-    if let Some(ref mut watcher) = state.watcher {
-        watcher
+    if let Some(ref mut debouncer) = state.debouncer {
+        debouncer
             .unwatch(&path_buf)
             .map_err(|e| format!("Failed to unwatch directory: {}", e))?;
 

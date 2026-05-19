@@ -18,6 +18,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
 import { saveSessionState, getSessionState } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { listen } from '@tauri-apps/api/event'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 
@@ -93,6 +94,39 @@ function App() {
     }
     window.addEventListener('tab-load-error', handleTabLoadError)
     return () => { window.removeEventListener('tab-load-error', handleTabLoadError) }
+  }, [])
+
+  useEffect(() => {
+    const unlisten = listen('file-watcher-event', (event) => {
+      const { type, path } = event.payload as { type: string; path: string }
+      
+      if (type === 'modified') {
+        const editorStore = useEditorStore.getState()
+        const tab = editorStore.tabs.find(t => t.path === path)
+        if (tab && !tab.isDirty) {
+          editorStore.loadTabContent(tab.id)
+        }
+      } else if (type === 'created' || type === 'removed' || type === 'renamed') {
+        const { workspaceMode } = useUIStore.getState()
+        const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
+        const parentPath = path.substring(0, path.lastIndexOf('/'))
+        
+        if (workspaceMode === 'workspace') {
+          for (const folder of workspaceFolders) {
+            if (parentPath === folder || parentPath.startsWith(folder + '/')) {
+              const fileTreeStore = useFileTreeStore.getState()
+              fileTreeStore.refreshNode(parentPath)
+              break
+            }
+          }
+        } else if (rootPath && (parentPath === rootPath || parentPath.startsWith(rootPath + '/'))) {
+          const fileTreeStore = useFileTreeStore.getState()
+          fileTreeStore.refreshNode(parentPath)
+        }
+      }
+    })
+    
+    return () => { unlisten.then(fn => fn()) }
   }, [])
 
   useEffect(() => {

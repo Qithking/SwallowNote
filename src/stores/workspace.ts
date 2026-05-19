@@ -2,7 +2,7 @@
  * Workspace Store - Manages workspace state
  */
 import { create } from 'zustand'
-import { getLatestFolder, saveFolderHistory, getFolderHistory, scanGitRepos } from '@/lib/tauri'
+import { getLatestFolder, saveFolderHistory, getFolderHistory, scanGitRepos, watchDirectory, unwatchDirectory } from '@/lib/tauri'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
 import { useEditorStore, EditorTab } from './editor'
@@ -47,6 +47,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const fileTreeStore = useFileTreeStore.getState()
       await fileTreeStore.loadRoot(path)
       set({ rootPath: path, isLoading: false })
+      
+      await watchDirectory(path)
     } catch (err) {
       set({ error: `Failed to open folder: ${err}`, isLoading: false })
     }
@@ -102,12 +104,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const fileTreeStore = useFileTreeStore.getState()
     await fileTreeStore.addRoot(path)
     
+    await watchDirectory(path)
+    
     await get().saveWorkspaceFile(true)
   },
   removeWorkspaceFolder: async (path: string) => {
     const { workspaceFolders } = get()
     const newFolders = workspaceFolders.filter(f => f !== path)
     set({ workspaceFolders: newFolders })
+    
+    await unwatchDirectory(path)
     
     await get().saveWorkspaceFile(true)
   },
@@ -149,10 +155,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         
         const fileTreeStore = useFileTreeStore.getState()
         fileTreeStore.clearAll()
-        for (const folder of workspace.folders) {
-          await fileTreeStore.addRoot(folder)
-        }
+        await fileTreeStore.addRoots(workspace.folders)
         fileTreeStore.clearExpanded()
+        
+        for (const folder of workspace.folders) {
+          await watchDirectory(folder)
+        }
       }
     } catch (err) {
       set({ error: `Failed to load workspace: ${err}`, isLoading: false })
