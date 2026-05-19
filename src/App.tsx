@@ -10,6 +10,7 @@ import { AIView } from '@/components/AI/AIView'
 import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
 import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
+import { StatusBar } from '@/components/StatusBar'
 import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEditorSettingsStore } from '@/stores'
 import { useTheme } from '@/hooks'
 import { TooltipProvider } from '@/components'
@@ -452,10 +453,7 @@ function App() {
         </div>
 
         {/* statusbar */}
-        <div className='flex overflow-hidden h-6'>
-            <div className='w-1/2'></div>
-            <div className='flex-auto'></div>
-        </div>
+        <StatusBar />
 
         {/* Toast Notification */}
         <Toaster 

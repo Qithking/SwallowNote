@@ -2,6 +2,7 @@
  * Tauri API utilities
  */
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { platform } from '@tauri-apps/plugin-os'
 
@@ -265,4 +266,50 @@ export async function openWorkspaceDialog(): Promise<string | null> {
     ],
   })
   return selected as string | null
+}
+
+export async function checkLatestVersion(): Promise<{ latest: string; current: string; hasUpdate: boolean } | null> {
+  try {
+    const packageJson = await import('../../package.json')
+    const current = packageJson.default.version
+    const response = await fetch('https://api.github.com/repos/Qithking/SwallowNote/releases/latest')
+    if (!response.ok) {
+      return null
+    }
+    const data = await response.json()
+    const latest = data.tag_name?.replace(/^v/, '') || current
+    const hasUpdate = latest !== current
+    return { latest, current, hasUpdate }
+  } catch (e) {
+    console.error('Failed to check latest version:', e)
+    return null
+  }
+}
+
+export interface DownloadProgress {
+  progress: number
+  downloaded: number
+  total: number
+}
+
+export interface DownloadComplete {
+  path: string
+}
+
+export function downloadLatestRelease(
+  onProgress: (progress: DownloadProgress) => void,
+  onComplete: (path: string) => void,
+  onError: (error: string) => void
+): void {
+  listen<DownloadProgress>('download-progress', (event) => {
+    onProgress(event.payload)
+  })
+
+  listen<DownloadComplete>('download-complete', (event) => {
+    onComplete(event.payload.path)
+  })
+
+  invoke('download_latest_release').catch((e) => {
+    onError(String(e))
+  })
 }

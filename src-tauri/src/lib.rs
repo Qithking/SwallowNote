@@ -49,6 +49,7 @@ pub fn run() {
             commands::folder_history::clear_other_folder_history,
             commands::session_state::save_session_state,
             commands::session_state::get_session_state,
+            commands::upgrade::download_latest_release,
             services::file_watcher::watch_directory,
             services::file_watcher::unwatch_directory,
             mac_rounded_corners::enable_rounded_corners,
