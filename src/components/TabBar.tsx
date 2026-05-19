@@ -185,14 +185,15 @@ function TabBar() {
     }
   }
 
-  const handleTabClick = (tabId: string) => {
+  const handleTabClick = async (tabId: string) => {
+    const tab = tabs.find(t => t.id === tabId)
+    if (tab && !tab.content && !tab.isLoading && tab.type !== 'diff') {
+      await useEditorStore.getState().loadTabContent(tabId)
+    }
     setActiveTab(tabId)
     scrollToTab(tabId)
-    // Sync file tree: expand to and select the file
-    const tab = tabs.find(t => t.id === tabId)
     if (tab) {
       if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
-        // Find which workspace folder contains this file
         const folder = workspaceFolders.find(f => tab.path.startsWith(f))
         if (folder) {
           useFileTreeStore.getState().revealPath(tab.path, folder)

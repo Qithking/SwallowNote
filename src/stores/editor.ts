@@ -60,6 +60,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => {
       const existing = state.tabs.find((t) => t.path === tab.path)
       if (existing) {
+        if (!existing.content && tab.content) {
+          return {
+            tabs: state.tabs.map((t) =>
+              t.path === tab.path
+                ? {
+                    ...t,
+                    content: tab.content,
+                    fileSize: tab.fileSize,
+                    modifiedTime: tab.modifiedTime,
+                    wordCount: tab.wordCount,
+                  }
+                : t
+            ),
+            activeTabId: existing.id,
+          }
+        }
         return { activeTabId: existing.id }
       }
       const newTabs = [...state.tabs, { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }]
@@ -118,13 +134,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })
   },
   setActiveTab: (id) => {
-    const tab = get().tabs.find((t) => t.id === id)
     set({ activeTabId: id })
-    
-    // 加载当前切换的tab内容
-    if (tab && !tab.content && !tab.isLoading) {
-      get().loadTabContent(id)
-    }
   },
   loadTabContent: async (id) => {
     const tab = get().tabs.find((t) => t.id === id)

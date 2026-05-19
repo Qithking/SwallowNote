@@ -14,7 +14,7 @@ export function useKeyboardShortcuts() {
   const { tabs, activeTabId, removeTab } = useEditorStore()
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
       const isMod = e.ctrlKey || e.metaKey
 
       // Ctrl/Cmd + P: Command Palette
@@ -48,7 +48,11 @@ export function useKeyboardShortcuts() {
         e.preventDefault()
         const index = parseInt(e.key) - 1
         if (tabs[index]) {
-          useEditorStore.getState().setActiveTab(tabs[index].id)
+          const tab = tabs[index]
+          if (!tab.content && !tab.isLoading && tab.type !== 'diff') {
+            await useEditorStore.getState().loadTabContent(tab.id)
+          }
+          useEditorStore.getState().setActiveTab(tab.id)
         }
       }
 
