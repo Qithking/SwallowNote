@@ -1,16 +1,27 @@
 /**
  * StatusBar Component - Bottom status bar
  */
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Link, User } from 'lucide-react'
 import { useUIStore } from '@/stores'
-import { checkLatestVersion, downloadLatestRelease, DownloadProgress } from '@/lib/tauri'
+import { checkLatestVersion, downloadLatestRelease, openInstaller, DownloadProgress } from '@/lib/tauri'
 import { open } from '@tauri-apps/plugin-shell'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import packageJson from '../../package.json'
+import { invoke } from '@tauri-apps/api/core'
 
-type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-failed' | 'downloading' | 'download-complete' | 'download-failed'
+type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-failed' | 'downloading' | 'download-ready' | 'download-failed'
 
 function StatusBar() {
   const { showToast } = useUIStore()
@@ -18,9 +29,31 @@ function StatusBar() {
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   const [versionStatus, setVersionStatus] = useState<VersionStatus>('idle')
   const [downloadProgress, setDownloadProgress] = useState<number>(0)
+  const [downloadedPath, setDownloadedPath] = useState<string | null>(null)
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false)
+
+  useEffect(() => {
+    checkDownloadedInstaller()
+  }, [])
+
+  const checkDownloadedInstaller = async () => {
+    try {
+      const platform_ext = await invoke<string>('get_platform_extension')
+      const packageName = `SwallowNote_${currentVersion}${platform_ext}`
+      const downloadDir = await invoke<string>('get_download_dir')
+      const filePath = `${downloadDir}/${packageName}`
+      const exists = await invoke<boolean>('path_exists', { path: filePath })
+      if (exists) {
+        setDownloadedPath(filePath)
+        setLatestVersion(currentVersion)
+        setVersionStatus('download-ready')
+      }
+    } catch {
+    }
+  }
 
   const handleVersionClick = useCallback(async () => {
-    if (versionStatus === 'downloading' || versionStatus === 'download-complete') {
+    if (versionStatus === 'downloading') {
       return
     }
 
@@ -51,8 +84,9 @@ function StatusBar() {
         (progress: DownloadProgress) => {
           setDownloadProgress(Math.round(progress.progress))
         },
-        () => {
-          setVersionStatus('download-complete')
+        (path: string) => {
+          setDownloadedPath(path)
+          setShowUpgradeDialog(true)
         },
         (error: string) => {
           setVersionStatus('download-failed')
@@ -60,7 +94,27 @@ function StatusBar() {
         }
       )
     }
+
+    if (versionStatus === 'download-ready') {
+      setShowUpgradeDialog(true)
+    }
   }, [versionStatus, showToast])
+
+  const handleUpgradeConfirm = useCallback(async () => {
+    setShowUpgradeDialog(false)
+    if (downloadedPath) {
+      try {
+        await openInstaller(downloadedPath)
+      } catch {
+        showToast('打开安装包失败')
+      }
+    }
+  }, [downloadedPath, showToast])
+
+  const handleUpgradeCancel = useCallback(() => {
+    setShowUpgradeDialog(false)
+    setVersionStatus('download-ready')
+  }, [])
 
   const handleRepoLinkClick = async () => {
     try {
@@ -100,11 +154,11 @@ function StatusBar() {
             {baseVersion} (下载中: {downloadProgress}%)
           </span>
         )
-      case 'download-complete':
+      case 'download-ready':
         return (
           <span className="flex items-center gap-1">
             <span className="opacity-60">{baseVersion}</span>
-            <span className="text-green-500">(下载完成)</span>
+            <span className="text-green-500">(新版本已就绪)</span>
           </span>
         )
       case 'download-failed':
@@ -133,8 +187,8 @@ function StatusBar() {
         return '检测失败，点击重试'
       case 'downloading':
         return `下载中: ${downloadProgress}%`
-      case 'download-complete':
-        return '下载完成'
+      case 'download-ready':
+        return '新版本已就绪，点击升级'
       case 'download-failed':
         return '下载失败，点击重试'
       default:
@@ -143,47 +197,64 @@ function StatusBar() {
   }
 
   return (
-    <div
-      className="mt-1 flex items-center justify-between px-3 text-[12px] shrink-0 select-none"
-    >
-      {/* Left Section */}
-      <div className="flex items-center gap-2">
-        
-      </div>
+    <>
+      <AlertDialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>发现新版本</AlertDialogTitle>
+            <AlertDialogDescription>
+              新版本 {latestVersion} 已下载完成。是否立即升级？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleUpgradeCancel}>否</AlertDialogCancel>
+            <AlertDialogAction onClick={handleUpgradeConfirm}>是</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      {/* Right Section */}
-      <div className="flex items-center gap-3">        
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              className="opacity-60 hover:opacity-100 cursor-pointer flex items-center gap-1"
-              onClick={handleRepoLinkClick}
-            >
-              <Link size={12} />
-              GitHub
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>打开 GitHub 仓库</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="opacity-60 hover:opacity-100 cursor-pointer flex items-center gap-1">
-              <User size={12} />
-              Qithking
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>作者</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span onClick={handleVersionClick}>
-              {renderVersionDisplay()}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{getVersionTooltip()}</TooltipContent>
-        </Tooltip>
+      <div
+        className="mt-1 flex items-center justify-between px-3 text-[12px] shrink-0 select-none"
+      >
+        {/* Left Section */}
+        <div className="flex items-center gap-2">
+
+        </div>
+
+        {/* Right Section */}
+        <div className="flex items-center gap-3">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="opacity-60 hover:opacity-100 cursor-pointer flex items-center gap-1"
+                onClick={handleRepoLinkClick}
+              >
+                <Link size={12} />
+                GitHub
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>打开 GitHub 仓库</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="opacity-60 hover:opacity-100 cursor-pointer flex items-center gap-1">
+                <User size={12} />
+                Qithking
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>作者</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span onClick={handleVersionClick}>
+                {renderVersionDisplay()}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{getVersionTooltip()}</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 

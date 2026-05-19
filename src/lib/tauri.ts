@@ -313,3 +313,7 @@ export function downloadLatestRelease(
     onError(String(e))
   })
 }
+
+export async function openInstaller(path: string): Promise<void> {
+  await invoke('open_installer', { path })
+}

@@ -48,21 +48,6 @@ fn get_default_download_dir() -> PathBuf {
     }
 }
 
-fn get_platform_extension() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        ".dmg"
-    }
-    #[cfg(target_os = "windows")]
-    {
-        ".exe"
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        ""
-    }
-}
-
 #[tauri::command]
 pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
     let client = Client::builder()
@@ -96,7 +81,7 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
     let asset = release
         .assets
         .iter()
-        .find(|a| a.name.ends_with(platform_ext))
+        .find(|a| a.name.ends_with(platform_ext.as_str()))
         .ok_or_else(|| format!("未找到 {} 安装包", platform_ext))?;
 
     let download_dir = get_default_download_dir();
@@ -137,5 +122,52 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         path: file_path.to_string_lossy().to_string(),
     });
 
-    std::process::exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_installer(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("打开安装包失败: {}", e))?;
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .map_err(|e| format!("打开安装包失败: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Err("Unsupported platform".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn get_platform_extension() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        ".dmg".to_string()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        ".exe".to_string()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        String::new()
+    }
+}
+
+#[tauri::command]
+pub fn get_download_dir() -> String {
+    dirs::download_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string())
 }
