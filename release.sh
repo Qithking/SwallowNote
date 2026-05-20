@@ -186,8 +186,15 @@ create_release() {
     
     # 检查版本是否已存在
     if git tag | grep -q "^${new_version}$"; then
-        echo_error "版本 $new_version 已存在"
-        exit 1
+        echo_warning "版本 $new_version 已存在"
+        read -p "是否删除旧 tag 并重新发布? (y/n): " confirm
+        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+            git tag -d "$new_version" 2>/dev/null && echo_info "已删除本地 tag: $new_version"
+            git push "$remote_name" --delete "$new_version" 2>/dev/null && echo_info "已删除远程 tag: $new_version" || echo_warning "远程 tag 可能不存在"
+        else
+            echo_info "已取消发布"
+            return
+        fi
     fi
     
     echo ""
