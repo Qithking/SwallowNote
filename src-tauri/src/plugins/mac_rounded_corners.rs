@@ -42,11 +42,6 @@ pub fn enable_rounded_corners<R: Runtime>(
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let config = TrafficLightsConfig {
-            offset_x: offset_x.unwrap_or(0.0),
-            offset_y: offset_y.unwrap_or(0.0),
-        };
-
         window
             .with_webview(move |webview| {
                 #[cfg(target_os = "macos")]
@@ -78,7 +73,7 @@ pub fn enable_rounded_corners<R: Runtime>(
                     content_view.setWantsLayer(cocoa::base::YES);
 
                     if has_decorations {
-                        position_traffic_lights(ns_window, config.offset_x, config.offset_y);
+                        position_traffic_lights(ns_window, offset_x.unwrap_or(0.0), offset_y.unwrap_or(0.0));
                     }
                 }
             })
@@ -103,14 +98,10 @@ pub fn enable_modern_window_style<R: Runtime>(
     offset_y: Option<f64>,
 ) -> Result<(), String> {
     let radius = corner_radius.unwrap_or(12.0);
+    let _ = (offset_x, offset_y);
 
     #[cfg(target_os = "macos")]
     {
-        let config = TrafficLightsConfig {
-            offset_x: offset_x.unwrap_or(0.0),
-            offset_y: offset_y.unwrap_or(0.0),
-        };
-
         window
             .with_webview(move |webview| {
                 #[cfg(target_os = "macos")]
@@ -119,23 +110,32 @@ pub fn enable_modern_window_style<R: Runtime>(
 
                     let mut style_mask = ns_window.styleMask();
 
-                    // Only add traffic light masks if decorations are enabled
-                    let has_decorations = style_mask.contains(NSWindowStyleMask::NSClosableWindowMask);
-
                     style_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
                     style_mask |= NSWindowStyleMask::NSResizableWindowMask;
 
-                    // Only add traffic lights if window originally had decorations
-                    if has_decorations {
-                        style_mask |= NSWindowStyleMask::NSClosableWindowMask;
-                        style_mask |= NSWindowStyleMask::NSMiniaturizableWindowMask;
-                    }
+                    // Force remove traffic light masks to hide system window buttons
+                    // regardless of initial window decoration state
+                    style_mask &= !(NSWindowStyleMask::NSClosableWindowMask | NSWindowStyleMask::NSMiniaturizableWindowMask);
 
                     ns_window.setStyleMask_(style_mask);
                     ns_window.setTitlebarAppearsTransparent_(cocoa::base::YES);
                     ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
                     ns_window.setHasShadow_(cocoa::base::YES);
                     ns_window.setOpaque_(cocoa::base::NO);
+
+                    // Also explicitly hide the traffic light button views
+                    let close_button: id = msg_send![ns_window, standardWindowButton: 0];
+                    let miniaturize_button: id = msg_send![ns_window, standardWindowButton: 1];
+                    let zoom_button: id = msg_send![ns_window, standardWindowButton: 2];
+                    if !close_button.is_null() {
+                        let _: () = msg_send![close_button, setHidden: cocoa::base::YES];
+                    }
+                    if !miniaturize_button.is_null() {
+                        let _: () = msg_send![miniaturize_button, setHidden: cocoa::base::YES];
+                    }
+                    if !zoom_button.is_null() {
+                        let _: () = msg_send![zoom_button, setHidden: cocoa::base::YES];
+                    }
 
                     let content_view = ns_window.contentView();
                     content_view.setWantsLayer(cocoa::base::YES);
@@ -144,10 +144,6 @@ pub fn enable_modern_window_style<R: Runtime>(
                     if !layer.is_null() {
                         let _: () = msg_send![layer, setCornerRadius: radius];
                         let _: () = msg_send![layer, setMasksToBounds: cocoa::base::YES];
-                    }
-
-                    if has_decorations {
-                        position_traffic_lights(ns_window, config.offset_x, config.offset_y);
                     }
                 }
             })
