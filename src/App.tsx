@@ -22,9 +22,11 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 
 function App() {
   useTheme()
+  const { t } = useTranslation()
   const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, setSidebarWidth, setRightPanelWidth } = useUIStore()
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
   const [isDraggingRight, setIsDraggingRight] = useState(false)
@@ -76,7 +78,7 @@ function App() {
   useEffect(() => {
     const handleSaveError = (e: Event) => {
       const detail = (e as CustomEvent).detail
-      toast.error(`保存失败: ${detail.path}`, { description: String(detail.error) })
+      toast.error(t('common.save') + `: ${detail.path}`, { description: String(detail.error) })
     }
     window.addEventListener('save-error', handleSaveError)
     return () => { window.removeEventListener('save-error', handleSaveError) }
@@ -477,9 +479,9 @@ function App() {
         <AlertDialog open={showSaveDialog} onOpenChange={(open: boolean) => { if (!open) handleCancelClose() }}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>保存更改</AlertDialogTitle>
+              <AlertDialogTitle>{t('dialog.saveChanges')}</AlertDialogTitle>
               <AlertDialogDescription className="text-left">
-                <div className="mb-2">你有{dirtyFileNames.length}个文件修改未保存：</div>
+                <div className="mb-2">{t('dialog.unsavedFiles', { count: dirtyFileNames.length })}</div>
                 <div className="max-h-32 overflow-y-auto">
                   {dirtyFileNames.map((name, i) => (
                     <p key={i} className="truncate text-xs font-mono" title={name}>
@@ -490,8 +492,8 @@ function App() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={handleDiscardAndClose}>取消</AlertDialogCancel>
-              <AlertDialogAction onClick={handleSaveAndClose}>保存</AlertDialogAction>
+              <AlertDialogCancel onClick={handleDiscardAndClose}>{t('common.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={handleSaveAndClose}>{t('common.save')}</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -508,9 +510,9 @@ function App() {
         }}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>文件加载失败</AlertDialogTitle>
+              <AlertDialogTitle>{t('dialog.fileLoadFailed')}</AlertDialogTitle>
               <AlertDialogDescription className="text-left">
-                <p className="mb-2">无法加载以下文件，文件可能已被删除或移动：</p>
+                <p className="mb-2">{t('dialog.fileLoadFailedDesc')}</p>
                 <p className="font-mono text-xs truncate" title={failedTabInfo?.path}>
                   {failedTabInfo?.name}
                 </p>
@@ -520,7 +522,7 @@ function App() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogAction>关闭</AlertDialogAction>
+              <AlertDialogAction>{t('common.close')}</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

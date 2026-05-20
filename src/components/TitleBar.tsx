@@ -11,10 +11,12 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { TitleBarRecentPopover } from './TitleBarRecentPopover'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
 
 function TitleBar() {
   const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode } = useUIStore()
   const { switchMode } = useWorkspaceStore()
+  const { t } = useTranslation()
 
   const handleMinimize = async () => {
     await getCurrentWindow().minimize()
@@ -52,8 +54,8 @@ function TitleBar() {
         <span className="text-xs font-medium text-[var(--text-primary)]">SwallowNote</span>
         <Tabs value={workspaceMode} onValueChange={(v) => switchMode(v as 'folder' | 'workspace')}>
           <TabsList className="h-6 p-0 bg-transparent border border-[var(--border)] rounded">
-            <TabsTrigger value="folder" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-black text-[var(--text-secondary)] shadow-none">文件夹</TabsTrigger>
-            <TabsTrigger value="workspace" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-black text-[var(--text-secondary)] shadow-none">工作区</TabsTrigger>
+            <TabsTrigger value="folder" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-black text-[var(--text-secondary)] shadow-none">{t('titleBar.folder')}</TabsTrigger>
+            <TabsTrigger value="workspace" className="h-5 px-2 text-xs data-[state=active]:bg-white data-[state=active]:text-black text-[var(--text-secondary)] shadow-none">{t('titleBar.workspace')}</TabsTrigger>
           </TabsList>
         </Tabs>
         <Separator orientation="vertical" className="h-4" />
@@ -89,7 +91,7 @@ function TitleBar() {
               <ThemeIcon size={14} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>主题: {theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '系统'}</TooltipContent>
+          <TooltipContent>{t('titleBar.themeSystem')}: {theme === 'light' ? t('titleBar.themeLight') : theme === 'dark' ? t('titleBar.themeDark') : t('titleBar.themeSystem')}</TooltipContent>
         </Tooltip>
 
         <div className="flex items-center h-full">

@@ -4,12 +4,14 @@ import { useEditorStore } from '@/stores'
 import { gitFileLog, GitFileLogEntry } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useTranslation } from 'react-i18next'
 
 const PAGE_SIZE = 50
 
 function HistoryView({ visible }: { visible: boolean }) {
   const { tabs, activeTabId, openDiffTab } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const { t } = useTranslation()
 
   const [entries, setEntries] = useState<GitFileLogEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -110,11 +112,11 @@ function HistoryView({ visible }: { visible: boolean }) {
       <div className="flex flex-col h-full">
         <div className="flex items-center h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium uppercase tracking-wider">历史</span>
+            <span className="text-sm font-medium uppercase tracking-wider">{t('history.title')}</span>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-          <p className="text-sm">未打开文件</p>
+          <p className="text-sm">{t('history.noFileOpen')}</p>
         </div>
       </div>
     )
@@ -124,19 +126,19 @@ function HistoryView({ visible }: { visible: boolean }) {
     <div className="flex flex-col h-full">
       <div className="flex items-center h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium uppercase tracking-wider">历史</span>
+          <span className="text-sm font-medium uppercase tracking-wider">{t('history.title')}</span>
         </div>
       </div>
 
       {notInRepo ? (
         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-          <p className="text-xs text-center px-4">请到文件根目录下右键同步初始化</p>
+          <p className="text-xs text-center px-4">{t('history.initGitFirst')}</p>
         </div>
       ) : (
         <ScrollArea className="flex-1 p-2" ref={scrollRef} onScroll={handleScroll}>
           {entries.length === 0 && !loading ? (
             <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-              <p className="text-xs">暂无提交历史</p>
+              <p className="text-xs">{t('history.noHistory')}</p>
             </div>
           ) : (
             <>
@@ -191,7 +193,7 @@ function HistoryView({ visible }: { visible: boolean }) {
               )}
               {!hasMore && entries.length > 0 && (
                 <p className="text-xs text-center py-2" style={{ color: 'var(--text-muted)' }}>
-                  已加载全部历史记录
+                  {t('history.allLoaded')}
                 </p>
               )}
             </>

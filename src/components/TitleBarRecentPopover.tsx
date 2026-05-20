@@ -11,6 +11,7 @@ import { useUIStore, useWorkspaceStore } from '@/stores'
 import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory, removeFolderHistory, gitClone } from '@/lib/tauri'
 import { useState, useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { useTranslation } from 'react-i18next'
 
 interface RecentItem {
   path: string
@@ -33,6 +34,7 @@ function getInitialAndColor(path: string): { initial: string; color: string } {
 export function TitleBarRecentPopover() {
   const { workspaceMode } = useUIStore()
   const { rootPath, currentWorkspacePath, openFolder, loadWorkspaceFile, switchMode, addWorkspaceFolder } = useWorkspaceStore()
+  const { t } = useTranslation()
   const [recentItems, setRecentItems] = useState<RecentItem[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -46,12 +48,12 @@ export function TitleBarRecentPopover() {
 
   const displayName = (() => {
     if (workspaceMode === 'workspace' && currentWorkspacePath) {
-      return currentWorkspacePath.split('/').pop()?.replace('.swallow-workspace', '') || '工作区'
+      return currentWorkspacePath.split('/').pop()?.replace('.swallow-workspace', '') || t('recent.workspace')
     }
     if (workspaceMode === 'folder' && rootPath) {
-      return rootPath.split('/').pop() || '文件夹'
+      return rootPath.split('/').pop() || t('recent.folder')
     }
-    return '最近记录'
+    return t('recent.title')
   })()
 
   const currentPath = workspaceMode === 'workspace' ? currentWorkspacePath : rootPath
@@ -131,7 +133,7 @@ export function TitleBarRecentPopover() {
     const exists = await pathExists(item.path)
     if (!exists) {
       const { showToast } = useUIStore.getState()
-      showToast(`路径不存在: ${item.path}`, 'error')
+      showToast(t('recent.pathNotFound', { path: item.path }), 'error')
       return
     }
 
@@ -177,12 +179,12 @@ export function TitleBarRecentPopover() {
   const handleClone = async () => {
     if (!cloneUrl.trim()) {
       const { showToast } = useUIStore.getState()
-      showToast('请输入仓库 URL', 'error')
+      showToast(t('recent.enterRepoUrl'), 'error')
       return
     }
     if (!cloneLocalPath.trim()) {
       const { showToast } = useUIStore.getState()
-      showToast('请选择本地地址', 'error')
+      showToast(t('recent.selectLocalPath'), 'error')
       return
     }
 
@@ -200,7 +202,7 @@ export function TitleBarRecentPopover() {
       }
     } catch (e: any) {
       const { showToast } = useUIStore.getState()
-      showToast(`克隆失败: ${e}`, 'error')
+      showToast(t('recent.cloneFailed', { error: e }), 'error')
     } finally {
       setIsCloning(false)
     }
@@ -244,7 +246,7 @@ export function TitleBarRecentPopover() {
               style={{ color: 'var(--text-primary)' }}
             >
               <FolderOpen size={14} />
-              <span>打开文件夹</span>
+              <span>{t('recent.openFolder')}</span>
             </button>
             <button
               onClick={handleOpenCloneDialog}
@@ -252,7 +254,7 @@ export function TitleBarRecentPopover() {
               style={{ color: 'var(--text-primary)' }}
             >
               <GitBranch size={14} />
-              <span>克隆 Git 仓库</span>
+              <span>{t('recent.cloneGitRepo')}</span>
             </button>
             <button
               onClick={() => setShowClearConfirm(true)}
@@ -260,7 +262,7 @@ export function TitleBarRecentPopover() {
               style={{ color: 'var(--text-primary)' }}
             >
               <AlertCircle size={14} />
-              <span>清空历史</span>
+              <span>{t('recent.clearHistory')}</span>
             </button>
           </div>
 
@@ -268,11 +270,11 @@ export function TitleBarRecentPopover() {
 
           <div className="py-1 max-h-64 overflow-y-auto">
             <div className="px-3 py-1.5 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-              最近
+              {t('recent.recent')}
             </div>
             {recentItems.length === 0 ? (
               <div className="px-3 py-4 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
-                暂无历史记录
+                {t('recent.noHistory')}
               </div>
             ) : (
               recentItems.map((item) => {
@@ -315,7 +317,7 @@ export function TitleBarRecentPopover() {
                             onClick={() => handleDeleteItem(item.path)}
                           >
                             <Trash2 size={14} className="mr-2" />
-                            <span>删除</span>
+                            <span>{t('common.delete')}</span>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -329,9 +331,9 @@ export function TitleBarRecentPopover() {
           {showClearConfirm && (
             <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
               <div className="w-64 rounded-lg p-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-                <div className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>确认清空历史</div>
+                <div className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>{t('dialog.confirmClearHistoryTitle')}</div>
                 <div className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
-                  确定要清空所有历史记录吗？（当前打开的记录将保留）
+                  {t('dialog.confirmClearHistory')}
                 </div>
                 <div className="flex gap-2 justify-end">
                   <button
@@ -339,13 +341,13 @@ export function TitleBarRecentPopover() {
                     className="px-3 py-1.5 text-xs rounded cursor-pointer hover:bg-[var(--bg-hover)]"
                     style={{ color: 'var(--text-primary)' }}
                   >
-                    取消
+                    {t('common.cancel')}
                   </button>
                   <button
                     onClick={handleClearHistory}
                     className="px-3 py-1.5 text-xs rounded cursor-pointer bg-red-500 text-white hover:bg-red-600"
                   >
-                    确认
+                    {t('common.confirm')}
                   </button>
                 </div>
               </div>
@@ -357,10 +359,10 @@ export function TitleBarRecentPopover() {
       {showCloneDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
           <div className="w-80 rounded-lg p-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-            <div className="text-sm font-medium mb-3" style={{ color: 'var(--text-primary)' }}>克隆 Git 仓库</div>
+            <div className="text-sm font-medium mb-3" style={{ color: 'var(--text-primary)' }}>{t('recent.cloneGitRepo')}</div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>仓库 URL</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('recent.repoUrl')}</label>
                 <input
                   type="text"
                   value={cloneUrl}
@@ -372,7 +374,7 @@ export function TitleBarRecentPopover() {
                 />
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>本地地址</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('recent.localPath')}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -414,7 +416,7 @@ export function TitleBarRecentPopover() {
                 style={{ color: 'var(--text-primary)' }}
                 disabled={isCloning}
               >
-                取消
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleClone}
@@ -422,7 +424,7 @@ export function TitleBarRecentPopover() {
                 disabled={isCloning}
               >
                 {isCloning && <Loader2 size={12} className="animate-spin" />}
-                {isCloning ? '克隆中...' : '克隆&打开'}
+                {isCloning ? t('recent.cloning') : t('recent.cloneAndOpen')}
               </button>
             </div>
           </div>

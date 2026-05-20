@@ -19,6 +19,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
 
 interface Message {
   id: string
@@ -34,6 +35,7 @@ function AIView() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const { t } = useTranslation()
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -62,7 +64,7 @@ function AIView() {
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'This is a placeholder response. AI integration coming soon.',
+        content: t('ai.placeholderResponse'),
         timestamp: Date.now(),
       }
       setMessages((prev) => [...prev, assistantMessage])
@@ -84,9 +86,9 @@ function AIView() {
   }
 
   const quickActions = [
-    { icon: Wand2, label: 'Complete', action: () => {} },
-    { icon: FileText, label: 'Rewrite', action: () => {} },
-    { icon: Globe, label: 'Fetch URL', action: () => {} },
+    { icon: Wand2, label: t('ai.complete'), action: () => {} },
+    { icon: FileText, label: t('ai.rewrite'), action: () => {} },
+    { icon: Globe, label: t('ai.fetchUrl'), action: () => {} },
   ]
 
   return (
@@ -95,7 +97,7 @@ function AIView() {
       <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
         <div className="flex items-center gap-2">
           <Bot size={14} style={{ color: 'var(--text-muted)' }} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>AI Assistant</span>
+          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{t('ai.title')}</span>
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -103,7 +105,7 @@ function AIView() {
               <Settings size={14} />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>设置</TooltipContent>
+          <TooltipContent>{t('common.settings')}</TooltipContent>
         </Tooltip>
       </div>
 
@@ -113,7 +115,7 @@ function AIView() {
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Sparkles size={32} className="mb-3 opacity-50" />
             <p className="text-sm text-center mb-4">
-              Ask me anything about your code or content
+              {t('ai.askAnything')}
             </p>
             <div className="flex items-center gap-2">
               {quickActions.map((action) => {
@@ -185,7 +187,7 @@ function AIView() {
             <div className="flex-1 p-3 rounded-lg bg-accent">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" />
-                <span className="text-sm">Thinking...</span>
+                <span className="text-sm">{t('ai.thinking')}</span>
               </div>
             </div>
           </div>
@@ -199,7 +201,7 @@ function AIView() {
           <textarea
             ref={inputRef}
             className="w-full h-20 p-3 rounded-lg border border-border bg-background resize-none text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="Ask AI anything..."
+            placeholder={t('ai.placeholder')}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

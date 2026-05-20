@@ -20,11 +20,13 @@ import {
 } from '@/components/ui/alert-dialog'
 import packageJson from '../../package.json'
 import { invoke } from '@tauri-apps/api/core'
+import { useTranslation } from 'react-i18next'
 
 type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-failed' | 'downloading' | 'download-ready' | 'download-failed'
 
 function StatusBar() {
   const { showToast } = useUIStore()
+  const { t } = useTranslation()
   const [currentVersion] = useState(packageJson.version)
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   const [versionStatus, setVersionStatus] = useState<VersionStatus>('idle')
@@ -90,7 +92,7 @@ function StatusBar() {
         },
         (error: string) => {
           setVersionStatus('download-failed')
-          showToast(`下载失败: ${error}`)
+          showToast(t('statusBar.downloadFailed', { error }))
         }
       )
     }
@@ -106,7 +108,7 @@ function StatusBar() {
       try {
         await openInstaller(downloadedPath)
       } catch {
-        showToast('打开安装包失败')
+        showToast(t('statusBar.openInstallerFailed'))
       }
     }
   }, [downloadedPath, showToast])
@@ -120,7 +122,7 @@ function StatusBar() {
     try {
       await open('https://github.com/Qithking/SwallowNote')
     } catch {
-      showToast('打开链接失败')
+      showToast(t('statusBar.openLinkFailed'))
     }
   }
 
@@ -131,9 +133,9 @@ function StatusBar() {
       case 'check-failed':
         return <span className="opacity-60 hover:opacity-100 cursor-pointer">{baseVersion}</span>
       case 'up-to-date':
-        return <span className="opacity-60 hover:opacity-100 cursor-pointer">{baseVersion} (已是最新版本)</span>
+        return <span className="opacity-60 hover:opacity-100 cursor-pointer">{baseVersion} ({t('statusBar.upToDate')})</span>
       case 'checking':
-        return <span className="opacity-60 animate-pulse">{baseVersion} (检测中...)</span>
+        return <span className="opacity-60 animate-pulse">{baseVersion} ({t('statusBar.checking')})</span>
       case 'has-update':
         return (
           <span className="flex items-center gap-1">
@@ -145,28 +147,28 @@ function StatusBar() {
               className="h-5 text-[10px] px-2 py-0"
               onClick={handleVersionClick}
             >
-              下载升级
+              {t('statusBar.download')}
             </Button>
           </span>
         )
       case 'downloading':
         return (
           <span className="opacity-60">
-            {baseVersion} (下载中: {downloadProgress}%)
+            {baseVersion} ({t('statusBar.downloading', { progress: downloadProgress })})
           </span>
         )
       case 'download-ready':
         return (
           <span className="flex items-center gap-1">
             <span className="opacity-60">{baseVersion}</span>
-            <span className="text-green-500">(新版本已就绪)</span>
+            <span className="text-green-500">({t('statusBar.downloadReady')})</span>
           </span>
         )
       case 'download-failed':
         return (
           <span className="flex items-center gap-1">
             <span className="opacity-60">{baseVersion}</span>
-            <span className="text-red-500">(下载失败)</span>
+            <span className="text-red-500">({t('statusBar.downloadFailedText')})</span>
           </span>
         )
       default:
@@ -177,23 +179,23 @@ function StatusBar() {
   const getVersionTooltip = () => {
     switch (versionStatus) {
       case 'idle':
-        return '点击检测新版本'
+        return t('statusBar.clickToCheck')
       case 'checking':
-        return '检测中...'
+        return t('statusBar.checking')
       case 'has-update':
-        return `发现新版本 ${latestVersion}，点击下载`
+        return t('statusBar.foundNewVersion', { version: latestVersion })
       case 'up-to-date':
-        return '已是最新版本'
+        return t('statusBar.upToDate')
       case 'check-failed':
-        return '检测失败，点击重试'
+        return t('statusBar.checkFailed')
       case 'downloading':
-        return `下载中: ${downloadProgress}%`
+        return t('statusBar.downloadingTooltip', { progress: downloadProgress })
       case 'download-ready':
-        return '新版本已就绪，点击升级'
+        return t('statusBar.downloadReadyTooltip')
       case 'download-failed':
-        return '下载失败，点击重试'
+        return t('statusBar.downloadFailedTooltip')
       default:
-        return '点击检测新版本'
+        return t('statusBar.clickToCheck')
     }
   }
 
@@ -202,14 +204,14 @@ function StatusBar() {
       <AlertDialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>发现新版本</AlertDialogTitle>
+            <AlertDialogTitle>{t('statusBar.newVersionFound')}</AlertDialogTitle>
             <AlertDialogDescription>
-              新版本 {latestVersion} 已下载完成。是否立即升级？
+              {t('statusBar.newVersionReady', { version: latestVersion })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleUpgradeCancel}>否</AlertDialogCancel>
-            <AlertDialogAction onClick={handleUpgradeConfirm}>是</AlertDialogAction>
+            <AlertDialogCancel onClick={handleUpgradeCancel}>{t('common.no')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleUpgradeConfirm}>{t('common.yes')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -234,7 +236,7 @@ function StatusBar() {
                 GitHub
               </span>
             </TooltipTrigger>
-            <TooltipContent>打开 GitHub 仓库</TooltipContent>
+            <TooltipContent>{t('statusBar.openGitHub')}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -243,7 +245,7 @@ function StatusBar() {
                 Qithking
               </span>
             </TooltipTrigger>
-            <TooltipContent>作者</TooltipContent>
+            <TooltipContent>{t('statusBar.author')}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

@@ -10,6 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import type { TocItem } from '@/utils/tableOfContents'
 import { buildTableOfContentsFromMarkdown } from '@/utils/tableOfContents'
+import { useTranslation } from 'react-i18next'
 
 interface TreeNode {
   key: string
@@ -20,6 +21,7 @@ interface TreeNode {
 function DirectoryView() {
   const { tabs, activeTabId } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const { t } = useTranslation()
   const [toc, setToc] = useState<TocItem | null>(null)
   const [treeData, setTreeData] = useState<TreeNode[]>([])
   const [selectedId, setSelectedId] = useState<string>('')
@@ -187,12 +189,12 @@ function DirectoryView() {
         >
           <div className="flex items-center gap-2">           
             <span className="text-sm font-medium uppercase tracking-wider">
-              目录
+              {t('directory.title')}
             </span>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-          <p className="text-sm">未打开文件</p>
+          <p className="text-sm">{t('directory.noFileOpen')}</p>
         </div>
       </div>
     )
@@ -208,14 +210,14 @@ function DirectoryView() {
           <span
             className="text-sm font-medium uppercase tracking-wider"
           >
-            目录
+            {t('directory.title')}
           </span>
         </div>
       </div>
       <ScrollArea className="flex-1 p-2">
         {treeData.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
-            <p className="text-sm">无目录</p>
+            <p className="text-sm">{t('directory.noToc')}</p>
           </div>
         ) : (
           <Tree

@@ -10,6 +10,7 @@ import { CodeEditor } from './editors/CodeEditor'
 import DiffViewer from './DiffViewer/DiffViewer'
 import { FileCode } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
+import { useTranslation } from 'react-i18next'
 
 interface UnsupportedEditorProps {
   filename: string
@@ -17,11 +18,12 @@ interface UnsupportedEditorProps {
 }
 
 function UnsupportedEditor({ filename, reason }: UnsupportedEditorProps) {
+  const { t } = useTranslation()
   return (
     <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)]">
       <div className="text-center">
         <FileCode size={48} className="mx-auto mb-4 opacity-40" />
-        <p className="text-lg text-[var(--text-muted)]">无法打开此文件</p>
+        <p className="text-lg text-[var(--text-muted)]">{t('editor.cannotOpen')}</p>
         <p className="text-sm text-[var(--text-muted)] mt-2">{filename}</p>
         <p className="text-xs text-[var(--text-muted)] mt-1 opacity-60">{reason}</p>
       </div>
@@ -30,11 +32,12 @@ function UnsupportedEditor({ filename, reason }: UnsupportedEditorProps) {
 }
 
 function WelcomeScreen() {
+  const { t } = useTranslation()
   return (
     <div className="flex-1 flex items-center justify-center  text-[var(--text-muted)]">
       <div className="text-center">
-        <p className="text-lg">Welcome to SwallowNote</p>
-        <p className="text-sm mt-2">Open a file or create a new one to start editing</p>
+        <p className="text-lg">{t('editor.welcome')}</p>
+        <p className="text-sm mt-2">{t('editor.welcomeHint')}</p>
       </div>
     </div>
   )
@@ -44,6 +47,7 @@ export function EditorView() {
   const { tabs, activeTabId, updateTabContent, scrollToLine } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const scrollToLineRef = useRef(scrollToLine)
+  const { t } = useTranslation()
 
   // Listen for scroll-to-line events
   useEffect(() => {
@@ -116,14 +120,14 @@ export function EditorView() {
       {fileType === 'binary' && (
         <UnsupportedEditor
           filename={activeTab.name}
-          reason="二进制文件无法在编辑器中显示"
+          reason={t('editor.binaryFile')}
         />
       )}
 
       {(fileType === 'unknown' || !fileType) && (
         <UnsupportedEditor
           filename={activeTab.name}
-          reason="不支持的文件类型"
+          reason={t('editor.unsupportedType')}
         />
       )}
     </div>

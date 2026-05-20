@@ -8,6 +8,7 @@ import { useWorkspaceStore, useEditorStore, useUIStore } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
+import { useTranslation } from 'react-i18next'
 
 interface SearchResult extends TSearchResult {}
 
@@ -16,6 +17,7 @@ function SearchView() {
   const { workspaceMode } = useUIStore()
   const { addTab } = useEditorStore()
   const inputRef = useRef<HTMLInputElement>(null)
+  const { t } = useTranslation()
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
@@ -151,7 +153,7 @@ function SearchView() {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center h-[40px] px-3 shrink-0 select-none" >
-        <span className="text-sm font-medium ">搜索</span>
+        <span className="text-sm font-medium ">{t('search.title')}</span>
       </div>
 
       {/* Search Input - VSCode style */}
@@ -167,7 +169,7 @@ function SearchView() {
             type="text"
             className="flex-1 h-full pl-2 bg-transparent text-sm focus:outline-none min-w-0"
             style={{ color: 'var(--text-primary)' }}
-            placeholder="搜索"
+            placeholder={t('search.placeholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -201,7 +203,7 @@ function SearchView() {
                   <span className="text-xs font-bold">Aa</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">大小写匹配</TooltipContent>
+              <TooltipContent side="bottom">{t('search.caseSensitive')}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -216,7 +218,7 @@ function SearchView() {
                   <span className="text-xs font-medium">ab</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">全词匹配</TooltipContent>
+              <TooltipContent side="bottom">{t('search.wholeWord')}</TooltipContent>
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -231,7 +233,7 @@ function SearchView() {
                   <span className="text-xs">.*</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">正则表达式</TooltipContent>
+              <TooltipContent side="bottom">{t('search.regex')}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -241,9 +243,9 @@ function SearchView() {
       {query && !isSearching && (
         <div className="px-3 py-1 text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
           {results.length > 0 ? (
-            `${results.length} 个文件，${totalMatches} 个匹配项`
+            t('search.resultSummary', { files: results.length, matches: totalMatches })
           ) : (
-            '无结果'
+            t('search.noResults')
           )}
         </div>
       )}
@@ -253,17 +255,17 @@ function SearchView() {
         {!query ? (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
             <Search size={24} className="mb-2 opacity-50" />
-            <p className="text-sm text-center">输入搜索内容</p>
+            <p className="text-sm text-center">{t('search.inputPlaceholder')}</p>
           </div>
         ) : isSearching ? (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
             <Search size={16} className="animate-spin mr-2" />
-            <span className="text-sm">搜索中...</span>
+            <span className="text-sm">{t('search.searching')}</span>
           </div>
         ) : results.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
             <Search size={24} className="mb-2 opacity-50" />
-            <p className="text-sm">未找到匹配项</p>
+            <p className="text-sm">{t('search.notFound')}</p>
           </div>
         ) : (
           <div className="py-1">

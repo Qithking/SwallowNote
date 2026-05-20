@@ -17,6 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWorkspaceStore, useUIStore } from '@/stores'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { useTranslation } from 'react-i18next'
 
 // Commit section with vertical layout
 function CommitSection({ 
@@ -30,6 +31,7 @@ function CommitSection({
 }) {
   const [isCommitting, setIsCommitting] = useState(false)
   const { showToast } = useUIStore()
+  const { t } = useTranslation()
 
   const handleCommit = async () => {
     const commitMessage = 'Sync changes'
@@ -39,13 +41,13 @@ function CommitSection({
       : allRepos.filter(r => r.hasUncommittedChanges)
 
     if (reposToCommit.length === 0) {
-      showToast('没有需要同步的仓库或没有变更', 'info')
+      showToast(t('git.noReposToSync'), 'info')
       return
     }
 
     const reposWithChanges = reposToCommit.filter(r => r.hasUncommittedChanges)
     if (reposWithChanges.length === 0 && selectedRepos.length === 0) {
-      showToast('没有需要同步的变更', 'info')
+      showToast(t('git.noChangesToSync'), 'info')
       return
     }
     
@@ -70,13 +72,13 @@ function CommitSection({
           successCount++
         } else if (errorMessage.includes('子模块内部有未提交的变更')) {
           successCount++
-          showToast(`${repo.name}: 子模块内部有未提交的变更，请先在子模块内提交`, 'error')
+          showToast(`${repo.name}: ${t('git.submoduleHasChanges')}`, 'error')
         } else if (errorMessage.includes('子模块引用需要更新')) {
           successCount++
-          showToast(`${repo.name}: 子模块引用需要更新，请先提交子模块变更`, 'error')
+          showToast(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`, 'error')
         } else {
           failCount++
-          showToast(`${repo.name}: ${errorMessage || '未知错误'}`, 'error')
+          showToast(`${repo.name}: ${errorMessage || t('git.unknownError')}`, 'error')
         }
       }
     }
@@ -87,10 +89,10 @@ function CommitSection({
     
     if (failCount === 0) {
       if (successCount > 0) {
-        showToast(`已同步 ${successCount} 个仓库`, 'success')
+        showToast(t('git.syncSuccess', { count: successCount }), 'success')
       }
     } else {
-      showToast(`成功 ${successCount} 个，失败 ${failCount} 个`, 'error')
+      showToast(t('git.syncPartial', { success: successCount, fail: failCount }), 'error')
     }
   }
   
@@ -103,7 +105,7 @@ function CommitSection({
         disabled={isCommitting}
       >
         {isCommitting && <Loader2 size={12} className="animate-spin" />}
-        {isCommitting ? '同步中...' : '同步'}
+        {isCommitting ? t('git.syncing') : t('git.sync')}
       </Button>
     </div>
   )
@@ -119,6 +121,7 @@ function RepositoryItem({
   isSelected: boolean
   onToggle: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -154,25 +157,25 @@ function RepositoryItem({
             </div>
             {/* Submodule indicator */}
             {repo.isSubmodule && (
-              <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>子模块</span>
+              <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>{t('git.submodule')}</span>
             )}
             <span style={{ color: 'var(--text-primary)' }}>{repo.name}</span>
           </div>
           
           {/* Git remote URL */}
           <div className="text-xs pl-7" style={{ color: 'var(--text-muted)' }}>
-            {repo.remoteUrl || '无远程仓库'}
+            {repo.remoteUrl || t('git.noRemote')}
           </div>
         </div>
       </TooltipTrigger>
       <TooltipContent side="bottom" align="start" className="max-w-[300px]">
         <div className="space-y-1">
-          <div><span className="font-medium">仓库目录:</span> {repo.path}</div>
+          <div><span className="font-medium">{t('git.repoPath')}:</span> {repo.path}</div>
           {repo.isSubmodule && repo.parentPath && (
-            <div><span className="font-medium">父仓库:</span> {repo.parentPath}</div>
+            <div><span className="font-medium">{t('git.parentRepo')}:</span> {repo.parentPath}</div>
           )}
           {repo.hasUncommittedChanges && (
-            <div><span className="font-medium">待提交文件:</span> {repo.uncommittedCount} 个文件</div>
+            <div><span className="font-medium">{t('git.pendingFiles')}:</span> {repo.uncommittedCount} {t('git.files')}</div>
           )}
         </div>
       </TooltipContent>
@@ -185,6 +188,7 @@ function GitView() {
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode } = useUIStore()
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
+  const { t } = useTranslation()
 
   useEffect(() => {
     setSelectedRepos([])
@@ -276,7 +280,7 @@ function GitView() {
       {/* Header */}
       <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none" >
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium uppercase tracking-wider">同步管理</span>
+          <span className="text-sm font-medium uppercase tracking-wider">{t('git.title')}</span>
         </div>
         <div className="flex items-center gap-1">
           <Tooltip>
@@ -285,7 +289,7 @@ function GitView() {
                 <RefreshCw size={12} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>刷新所有仓库列表</TooltipContent>
+            <TooltipContent>{t('git.refresh')}</TooltipContent>
           </Tooltip>          
         </div>
       </div>
@@ -312,7 +316,7 @@ function GitView() {
         {repositories.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <GitBranch size={32} className="mb-3 opacity-50" style={{ color: 'var(--text-muted)' }} />
-            <p className="text-sm mb-2" style={{ color: 'var(--text-muted)' }}>未发现 Git 仓库</p>
+            <p className="text-sm mb-2" style={{ color: 'var(--text-muted)' }}>{t('git.noGitRepos')}</p>
           </div>
         ) : (
           <div className="space-y-1">

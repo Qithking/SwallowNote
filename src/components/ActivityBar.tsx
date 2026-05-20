@@ -4,6 +4,7 @@
 import { FolderTree, Search, GitBranch, Settings } from 'lucide-react'
 import { useUIStore, SidebarView } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { useTranslation } from 'react-i18next'
 
 const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'explorer', icon: FolderTree },
@@ -11,16 +12,17 @@ const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'git', icon: GitBranch },
 ]
 
-const titleMap: Record<string, string> = {
-  explorer: '资源管理器',
-  search: '搜索',
-  git: '源代码管理',
-  ai: 'AI 助手',
-  settings: '设置',
+const activityKeyMap: Record<string, string> = {
+  explorer: 'activityBar.explorer',
+  search: 'activityBar.search',
+  git: 'activityBar.git',
+  ai: 'activityBar.ai',
+  settings: 'activityBar.settings',
 }
 
 function ActivityBar() {
   const { sidebarView, setSidebarView, settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
+  const { t } = useTranslation()
 
   return (
     <div className="w-[40px] flex flex-col items-center pt-1 shrink-0 mr-0.5" >
@@ -43,7 +45,7 @@ function ActivityBar() {
                 <Icon size={18} />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">{titleMap[item.id]}</TooltipContent>
+            <TooltipContent side="right">{t(activityKeyMap[item.id])}</TooltipContent>
           </Tooltip>
         )
       })}
@@ -60,7 +62,7 @@ function ActivityBar() {
             <Settings size={18} />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right">设置</TooltipContent>
+        <TooltipContent side="right">{t('activityBar.settings')}</TooltipContent>
       </Tooltip>
     </div>
   )

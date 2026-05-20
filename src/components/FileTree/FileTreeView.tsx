@@ -11,6 +11,7 @@ import { TreeNodeContextMenu } from './FileTreeContextMenu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
+import { useTranslation } from 'react-i18next'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -168,6 +169,7 @@ export function FileTreeView() {
   const { addTab, updateTabPath } = useEditorStore()
   const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, loadRoot, setNodes } = useFileTreeStore()
   const inputRef = useRef<HTMLInputElement>(null)
+  const { t } = useTranslation()
 
   // 重命名状态
   const [editingPath, setEditingPath] = useState<string | null>(null)
@@ -318,7 +320,7 @@ export function FileTreeView() {
     if (!selected || !selected.isDirectory) return
 
     const siblings = selected.children || []
-    const name = generateUniqueName('新文件.md', siblings)
+    const name = generateUniqueName(t('fileTree.defaultFileName'), siblings)
     setNewItem({ parentPath: selected.path, name, type: 'file' })
 
     if (!expanded.has(selected.path)) {
@@ -332,7 +334,7 @@ export function FileTreeView() {
     if (!selected || !selected.isDirectory) return
 
     const siblings = selected.children || []
-    const name = generateUniqueName('新文件夹', siblings)
+    const name = generateUniqueName(t('fileTree.defaultFolderName'), siblings)
     setNewItem({ parentPath: selected.path, name, type: 'folder' })
 
     if (!expanded.has(selected.path)) {
@@ -465,7 +467,7 @@ export function FileTreeView() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none">
-        <span className="text-sm font-medium">资源管理器</span>
+        <span className="text-sm font-medium">{t('fileTree.explorerTitle')}</span>
         <div className="flex items-center">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -473,7 +475,7 @@ export function FileTreeView() {
                 <FolderOpen size={12} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{workspaceMode === 'workspace' ? '添加文件夹到工作区' : '打开文件夹'}</TooltipContent>
+            <TooltipContent>{workspaceMode === 'workspace' ? t('fileTree.addToWorkspace') : t('fileTree.openFolder')}</TooltipContent>
           </Tooltip>
           {workspaceMode === 'folder' && (
             <>
@@ -483,7 +485,7 @@ export function FileTreeView() {
                     <FilePlus size={12} />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>新建文件</TooltipContent>
+                <TooltipContent>{t('fileTree.newFile')}</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -491,7 +493,7 @@ export function FileTreeView() {
                     <FolderPlus size={12} />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>新建文件夹</TooltipContent>
+                <TooltipContent>{t('fileTree.newFolder')}</TooltipContent>
               </Tooltip>
             </>
           )}
@@ -501,7 +503,7 @@ export function FileTreeView() {
                 <RefreshCw size={12} />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>刷新</TooltipContent>
+            <TooltipContent>{t('fileTree.refresh')}</TooltipContent>
           </Tooltip>
           {workspaceMode === 'workspace' && (
             <Tooltip>
@@ -510,7 +512,7 @@ export function FileTreeView() {
                   <Save size={12} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>保存工作区</TooltipContent>
+              <TooltipContent>{t('fileTree.saveWorkspace')}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -550,7 +552,7 @@ export function FileTreeView() {
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
             <FolderOpen size={24} className="mb-2 opacity-50" />
-            <p>未打开文件夹</p>
+            <p>{t('fileTree.noFolderOpened')}</p>
           </div>
         )}
       </ScrollArea>

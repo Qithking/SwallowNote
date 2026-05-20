@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 interface DiffViewerProps {
   diffContent: string
@@ -62,6 +63,7 @@ function parseDiff(diffContent: string): DiffLine[] {
 function DiffViewer({ diffContent }: DiffViewerProps) {
   const [lines, setLines] = useState<DiffLine[]>([])
   const [loading, setLoading] = useState(true)
+  const { t } = useTranslation()
 
   useEffect(() => {
     setLoading(true)
@@ -81,7 +83,7 @@ function DiffViewer({ diffContent }: DiffViewerProps) {
   if (!diffContent || diffContent.trim() === '') {
     return (
       <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
-        <p className="text-sm">暂无差异内容</p>
+        <p className="text-sm">{t('diffViewer.noDiff')}</p>
       </div>
     )
   }

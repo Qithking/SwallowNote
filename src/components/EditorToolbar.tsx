@@ -7,6 +7,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { useTranslation } from 'react-i18next'
 
 function EditorToolbar() {
   const { tabs, activeTabId, toggleViewMode } = useEditorStore()
@@ -17,6 +18,7 @@ function EditorToolbar() {
   const [copied, setCopied] = useState(false)
   const [isWide, setIsWide] = useState(noteWidth === 'wide')
   const savedPaddingRef = useRef({ vertical: normalPaddingVertical, horizontal: normalPaddingHorizontal })
+  const { t } = useTranslation()
 
   // Listen for padding changes from settings panel
   useEffect(() => {
@@ -104,7 +106,7 @@ function EditorToolbar() {
                 <BookOpen size={14} style={{ color: 'inherit' }} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>打开MarkDown目录</TooltipContent>
+            <TooltipContent>{t('editorToolbar.openMarkdownFolder')}</TooltipContent>
           </Tooltip>        
           <Tooltip>
             <TooltipTrigger asChild>
@@ -116,73 +118,73 @@ function EditorToolbar() {
                 <Code size={14} style={{ color: 'inherit' }} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>切换源码视图</TooltipContent>
+            <TooltipContent>{t('editorToolbar.toggleSourceView')}</TooltipContent>
+          </Tooltip>        
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setRightPanelType(rightPanelType === 'history' ? null : 'history')}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: rightPanelType === 'history' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                <History size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.openHistory')}</TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleOpenFolder}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <FolderOpen size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.openLocation')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleCopyPath}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: copied ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                <Copy size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.copyFullPath')}</TooltipContent>
+          </Tooltip>
+          {isMarkdown && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleToggleWidth}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('editorToolbar.toggleWidth')}</TooltipContent>
+            </Tooltip>
+          )}
+          {isMarkdown && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  <Settings size={14} style={{ color: 'inherit' }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
+            </Tooltip>
+          )}
         </>)}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setRightPanelType(rightPanelType === 'history' ? null : 'history')}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: rightPanelType === 'history' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-            >
-              <History size={14} style={{ color: 'inherit' }} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>打开历史记录</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={handleOpenFolder}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: 'var(--text-primary)' }}
-            >
-              <FolderOpen size={14} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>打开所在文件夹</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={handleCopyPath}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: copied ? 'var(--theme-color)' : 'var(--text-primary)' }}
-            >
-              <Copy size={14} style={{ color: 'inherit' }} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>复制完整路径</TooltipContent>
-        </Tooltip>
-        {isMarkdown && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleToggleWidth}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
-              >
-                {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>切换编辑器视图宽度</TooltipContent>
-          </Tooltip>
-        )}
-        {isMarkdown && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-              >
-                <Settings size={14} style={{ color: 'inherit' }} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>内容排版设置</TooltipContent>
-          </Tooltip>
-        )}
       </div>
     </div>
   )

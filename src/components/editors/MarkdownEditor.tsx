@@ -13,6 +13,7 @@ import { useUIStore, useEditorStore, useEditorSettingsStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { buildTableOfContents } from '@/utils/tableOfContents'
+import { useTranslation } from 'react-i18next'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -35,6 +36,7 @@ function BlockNoteInner({
   const theme = useUIStore((state) => state.theme)
   const { tabs, activeTabId } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
+  const { t } = useTranslation()
   const {
     h1Size,
     h2Size,
@@ -181,7 +183,7 @@ function BlockNoteInner({
     if (!editor || !editor.document) return
 
     try {
-      const entryTitle = activeTab?.name.replace(/\.md$/i, '') || '未命名'
+      const entryTitle = activeTab?.name.replace(/\.md$/i, '') || t('editor.untitled')
       const toc = buildTableOfContents(entryTitle, editor.document)
 
       window.dispatchEvent(new CustomEvent('block-editor-ready', {
@@ -279,6 +281,7 @@ function BlockNoteInner({
 export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
   const [initialBlocks, setInitialBlocks] = useState<PartialBlock[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { t } = useTranslation()
 
   useEffect(() => {
     let cancelled = false
@@ -309,7 +312,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
   if (error) {
     return (
       <div className="flex-1 flex items-center justify-center text-red-500 p-4">
-        <p>加载文件失败: {error}</p>
+        <p>{t('editor.loadFailed', { error })}</p>
       </div>
     )
   }
@@ -317,7 +320,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
   if (!initialBlocks) {
     return (
       <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-        <p>加载中...</p>
+        <p>{t('editor.loading')}</p>
       </div>
     )
   }

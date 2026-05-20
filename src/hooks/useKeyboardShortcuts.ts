@@ -53,7 +53,8 @@ async function handleNewFile() {
   }
 
   const children = (findNodeByPath(nodes, targetDir)?.children) || []
-  const name = generateUniqueName('新文件.md', children)
+  const defaultFileName = i18n.t('fileTree.defaultFileName')
+  const name = generateUniqueName(defaultFileName, children)
   const fullPath = targetDir + '/' + name
 
   try {
@@ -85,7 +86,8 @@ async function handleNewFolder() {
   }
 
   const children = (findNodeByPath(nodes, targetDir)?.children) || []
-  const name = generateUniqueName('新文件夹', children)
+  const defaultFolderName = i18n.t('fileTree.defaultFolderName')
+  const name = generateUniqueName(defaultFolderName, children)
   const fullPath = targetDir + '/' + name
 
   try {

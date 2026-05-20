@@ -116,7 +116,7 @@ function SettingsView() {
 
   const languages = [
     { value: 'en', labelKey: 'English' },
-    { value: 'zh-CN', labelKey: '简体中文' },
+    { value: 'zh-CN', labelKey: '中文' },
   ]
 
   const noteWidthOptions: { value: NoteWidth; labelKey: string }[] = [

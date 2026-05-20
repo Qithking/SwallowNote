@@ -26,6 +26,7 @@ import { deleteFile } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
 import { removeFolderHistory } from '@/lib/tauri'
+import { useTranslation } from 'react-i18next'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -73,6 +74,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
   const { nodes, setSelectedPath, toggleNode, setNodes, removeRoot } = useFileTreeStore()
   const { clipboardFiles, clipboardIsCut, setClipboardFiles, showToast } = useUIStore()
   const { repositories } = useGitStore()
+  const { t } = useTranslation()
 
   const isRootFolder = workspaceMode === 'workspace' && workspaceFolders.includes(node.path)
 
@@ -129,14 +131,14 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
     if (!node.isDirectory) return
     try {
       await invoke('git_init', { path: node.path })
-      showToast('Git 仓库初始化成功')
+      showToast(t('contextMenu.gitInitSuccess'))
       // Refresh the directory to show .git folder
       const children = await loadDirectory(node.path, hideGitIgnored, markdownOnly)
       const updatedNodes = updateNodesWithChildren(nodes, node.path, children)
       setNodes(updatedNodes)
     } catch (e) {
       console.error('Failed to init git:', e)
-      showToast(`初始化失败: ${e}`)
+      showToast(t('contextMenu.gitInitFailed', { error: String(e) }))
     }
   }
 
@@ -144,21 +146,21 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
     const pathToCopy = relative && rootPath ? getRelativePath(rootPath, node.path) : node.path
     try {
       await navigator.clipboard.writeText(pathToCopy)
-      showToast('路径已复制')
+      showToast(t('tabBar.pathCopied'))
     } catch (e) {
       console.error('Failed to copy path:', e)
-      showToast('复制路径失败')
+      showToast(t('contextMenu.copied', { name: 'path' }))
     }
   }
 
   const handleCopy = () => {
     setClipboardFiles([node.path], false)
-    showToast(`已复制: ${node.name}`)
+    showToast(t('contextMenu.copied', { name: node.name }))
   }
 
   const handleCut = () => {
     setClipboardFiles([node.path], true)
-    showToast(`已剪切: ${node.name}`)
+    showToast(t('contextMenu.cutted', { name: node.name }))
   }
 
   const handlePaste = async () => {
@@ -199,14 +201,14 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
     setNodes(updatedNodes)
 
     if (failCount === 0) {
-      showToast(`已粘贴 ${successCount} 个文件`)
+      showToast(t('contextMenu.pastedSuccess', { count: successCount }))
     } else {
-      showToast(`已粘贴 ${successCount} 个文件，${failCount} 个失败`)
+      showToast(t('contextMenu.pastedPartial', { count: successCount, failCount }))
     }
   }
 
   const handleDelete = async () => {
-    if (!confirm(`确定要删除 "${node.name}" 吗？${node.isDirectory ? '（包含所有内容）' : ''}`)) return
+    if (!confirm(t('dialog.confirmDelete', { name: node.name, extra: node.isDirectory ? t('dialog.confirmDeleteDir') : '' }))) return
     try {
       await deleteFile(node.path)
       // Refresh parent
@@ -230,7 +232,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
       const { removeWorkspaceFolder } = useWorkspaceStore.getState()
       removeWorkspaceFolder(node.path)
       
-      showToast(`已移除: ${node.name}`)
+      showToast(t('contextMenu.removed', { name: node.name }))
     } catch (e) {
       console.error('Failed to remove record:', e)
     }
@@ -262,7 +264,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
               className="cursor-pointer"
             >
               <ClipboardPaste size={12} />
-              <span>粘贴</span>
+              <span>{t('contextMenu.paste')}</span>
             </ContextMenuItem>
             <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
           </>
@@ -270,12 +272,12 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
 
         <ContextMenuItem onClick={handleOpen} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           {node.isDirectory ? <FolderOpen size={12} /> : <FileText size={12} />}
-          <span>打开</span>
+          <span>{t('contextMenu.open')}</span>
         </ContextMenuItem>
 
         <ContextMenuItem onClick={handleShowInFinder} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           <FolderOpen size={12} />
-          <span>在文件资源管理器中显示</span>
+          <span>{t('contextMenu.showInExplorer')}</span>
         </ContextMenuItem>
 
         <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
@@ -284,7 +286,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
         {isInGitRepo && (
           <ContextMenuItem onClick={handleOpenHistory} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
             <History size={12} />
-            <span>打开历史记录</span>
+            <span>{t('contextMenu.openHistory')}</span>
           </ContextMenuItem>
         )}
 
@@ -293,7 +295,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
           <>
             <ContextMenuItem onClick={handleGitInit} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
               <GitBranch size={12} />
-              <span>同步初始化</span>
+              <span>{t('contextMenu.syncInit')}</span>
             </ContextMenuItem>
           </>
         )}
@@ -304,19 +306,19 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
 
         <ContextMenuItem onClick={() => handleCopyPath(false)} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           <FileText size={12} />
-          <span>复制路径</span>
+          <span>{t('contextMenu.copyPath')}</span>
         </ContextMenuItem>
 
         <ContextMenuItem onClick={() => handleCopyPath(true)} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           <FileText size={12} />
-          <span>复制相对路径</span>
+          <span>{t('contextMenu.copyRelativePath')}</span>
         </ContextMenuItem>
 
         <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
 
         <ContextMenuItem onClick={handleCopy} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           <Copy size={12} />
-          <span>复制</span>
+          <span>{t('contextMenu.copy')}</span>
         </ContextMenuItem>
 
         <ContextMenuItem
@@ -325,14 +327,14 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
           className="cursor-pointer"
         >
           <Scissors size={12} />
-          <span>剪切</span>
+          <span>{t('contextMenu.cut')}</span>
         </ContextMenuItem>
 
         <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
 
         <ContextMenuItem onClick={handleRename} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           <Edit3 size={12} />
-          <span>重命名</span>
+          <span>{t('contextMenu.rename')}</span>
         </ContextMenuItem>
 
         {isRootFolder && (
@@ -342,7 +344,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
             className="cursor-pointer"
           >
             <Trash2 size={12} />
-            <span style={{ color: 'var(--danger-color, #f44336)' }}>删除记录</span>
+            <span style={{ color: 'var(--danger-color, #f44336)' }}>{t('contextMenu.softDelete')}</span>
           </ContextMenuItem>
         )}
 
@@ -352,7 +354,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
           className="cursor-pointer"
         >
           <Trash2 size={12} />
-          <span style={{ color: 'var(--danger-color, #f44336)' }}>物理删除</span>
+          <span style={{ color: 'var(--danger-color, #f44336)' }}>{t('contextMenu.hardDelete')}</span>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

@@ -15,12 +15,14 @@ import { useEditorStore, useFileTreeStore, useWorkspaceStore, useUIStore } from 
 import { invoke } from '@tauri-apps/api/core'
 import { cn } from '@/lib/utils'
 import type { EditorTab } from '@/stores/editor'
+import { useTranslation } from 'react-i18next'
 
 function TabBar() {
   const { tabs, activeTabId, setActiveTab, removeTab } = useEditorStore()
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode } = useUIStore()
   const { showToast } = useUIStore()
+  const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
   const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [canScrollLeft, setCanScrollLeft] = useState(false)
@@ -56,18 +58,18 @@ function TabBar() {
   const handleCopyPath = async (tab: EditorTab) => {
     try {
       await navigator.clipboard.writeText(tab.path)
-      showToast('路径已复制')
+      showToast(t('tabBar.pathCopied'))
     } catch (e) {
-      showToast('复制失败')
+      showToast(t('tabBar.copyFailed'))
     }
   }
 
   const handleCopyRelativePath = async (tab: EditorTab) => {
     try {
       await navigator.clipboard.writeText(getRelativePath(tab.path))
-      showToast('相对路径已复制')
+      showToast(t('tabBar.relativePathCopied'))
     } catch (e) {
-      showToast('复制失败')
+      showToast(t('tabBar.copyFailed'))
     }
   }
 
@@ -75,7 +77,7 @@ function TabBar() {
     try {
       await invoke('open_in_finder', { path: tab.path })
     } catch (e) {
-      showToast('打开失败')
+      showToast(t('tabBar.openFailed'))
     }
   }
 
@@ -303,7 +305,7 @@ function TabBar() {
                   className="cursor-pointer"
                 >
                   <X size={12} className="mr-2" />
-                  <span>关闭</span>
+                  <span>{t('tabs.close')}</span>
                 </ContextMenuItem>
                 {hasOtherTabs && (
                   <ContextMenuItem
@@ -312,7 +314,7 @@ function TabBar() {
                     className="cursor-pointer"
                   >
                     <X size={12} className="mr-2" />
-                    <span>关闭其他</span>
+                    <span>{t('tabs.closeOthers')}</span>
                   </ContextMenuItem>
                 )}
                 {hasRightTabs && (
@@ -322,7 +324,7 @@ function TabBar() {
                     className="cursor-pointer"
                   >
                     <X size={12} className="mr-2" />
-                    <span>关闭右侧标签页</span>
+                    <span>{t('tabBar.closeRightTabs')}</span>
                   </ContextMenuItem>
                 )}
                 {(hasOtherTabs || hasRightTabs) && (
@@ -334,7 +336,7 @@ function TabBar() {
                   className="cursor-pointer"
                 >
                   <FileText size={12} className="mr-2" />
-                  <span>复制路径</span>
+                  <span>{t('tabBar.copyPath')}</span>
                 </ContextMenuItem>
                 <ContextMenuItem
                   onClick={() => handleCopyRelativePath(tab)}
@@ -342,7 +344,7 @@ function TabBar() {
                   className="cursor-pointer"
                 >
                   <FileText size={12} className="mr-2" />
-                  <span>复制相对路径</span>
+                  <span>{t('tabBar.copyRelativePath')}</span>
                 </ContextMenuItem>
                 <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
                 <ContextMenuItem
@@ -351,7 +353,7 @@ function TabBar() {
                   className="cursor-pointer"
                 >
                   <FileText size={12} className="mr-2" />
-                  <span>在文件资源管理器中显示</span>
+                  <span>{t('tabBar.showInExplorer')}</span>
                 </ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>

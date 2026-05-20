@@ -6,8 +6,10 @@ import { RotateCcw } from 'lucide-react'
 import { useEditorSettingsStore } from '@/stores'
 import { NumberInput } from '@/components/ui/number-input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { useTranslation } from 'react-i18next'
 
 function EditorSettings() {
+  const { t } = useTranslation()
   const {
     h1Size,
     h2Size,
@@ -78,23 +80,23 @@ function EditorSettings() {
         style={{ fontSize: 'var(--font-size-md)' }} 
       >
         <span className="text-md font-medium uppercase tracking-wider ">
-          排版设置
+          {t('editorSettings.title')}
         </span>
         <button
           onClick={resetToDefault}
           className="flex items-center gap-1 px-2 py-1 text-xs rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]"
-          title="恢复默认"
+          title={t('editorSettings.resetToDefault')}
         >
           <RotateCcw size={12} />
-          <span>重置</span>
+          <span>{t('editorSettings.reset')}</span>
         </button>
       </div>
 
       {/* Content */}
       <ScrollArea className="flex-1 p-3">
         {/* Font Sizes */}
-        <Section title="字体大小">
-          <SettingRow label="标题 H1">
+        <Section title={t('editorSettings.sectionFont')}>
+          <SettingRow label={t('editorSettings.labelH1')}>
             <NumberInput
               value={h1Size}
               onChange={setH1Size}
@@ -103,7 +105,7 @@ function EditorSettings() {
               unit="px"
             />
           </SettingRow>
-          <SettingRow label="标题 H2">
+          <SettingRow label={t('editorSettings.labelH2')}>
             <NumberInput
               value={h2Size}
               onChange={setH2Size}
@@ -112,7 +114,7 @@ function EditorSettings() {
               unit="px"
             />
           </SettingRow>
-          <SettingRow label="标题 H3">
+          <SettingRow label={t('editorSettings.labelH3')}>
             <NumberInput
               value={h3Size}
               onChange={setH3Size}
@@ -121,7 +123,7 @@ function EditorSettings() {
               unit="px"
             />
           </SettingRow>
-          <SettingRow label="标题 H4">
+          <SettingRow label={t('editorSettings.labelH4')}>
             <NumberInput
               value={h4Size}
               onChange={setH4Size}
@@ -130,7 +132,7 @@ function EditorSettings() {
               unit="px"
             />
           </SettingRow>
-          <SettingRow label="标题 H5">
+          <SettingRow label={t('editorSettings.labelH5')}>
             <NumberInput
               value={h5Size}
               onChange={setH5Size}
@@ -139,7 +141,7 @@ function EditorSettings() {
               unit="px"
             />
           </SettingRow>
-          <SettingRow label="正文">
+          <SettingRow label={t('editorSettings.labelBody')}>
             <NumberInput
               value={bodySize}
               onChange={setBodySize}
@@ -151,8 +153,8 @@ function EditorSettings() {
         </Section>
 
         {/* Line Height */}
-        <Section title="行间距">
-          <SettingRow label="行距">
+        <Section title={t('editorSettings.sectionLineHeight')}>
+          <SettingRow label={t('editorSettings.labelLineHeight')}>
             <NumberInput
               value={lineHeight}
               onChange={setLineHeight}
@@ -164,8 +166,8 @@ function EditorSettings() {
         </Section>
 
         {/* Letter Spacing */}
-        <Section title="字间距">
-          <SettingRow label="字距">
+        <Section title={t('editorSettings.sectionLetterSpacing')}>
+          <SettingRow label={t('editorSettings.labelLetterSpacing')}>
             <NumberInput
               value={letterSpacing}
               onChange={setLetterSpacing}
@@ -178,8 +180,8 @@ function EditorSettings() {
         </Section>
 
         {/* Normal Note Padding */}
-        <Section title="普通笔记内边距">
-          <SettingRow label="上下">
+        <Section title={t('editorSettings.sectionNormalPadding')}>
+          <SettingRow label={t('editorSettings.labelPaddingTopBottom')}>
             <NumberInput
               value={normalPaddingVertical}
               onChange={setNormalPaddingVertical}
@@ -188,7 +190,7 @@ function EditorSettings() {
               unit="px"
             />
           </SettingRow>
-          <SettingRow label="左右">
+          <SettingRow label={t('editorSettings.labelPaddingLeftRight')}>
             <NumberInput
               value={normalPaddingHorizontal}
               onChange={setNormalPaddingHorizontal}
@@ -200,8 +202,8 @@ function EditorSettings() {
         </Section>
 
         {/* Wide Note Padding */}
-        <Section title="宽笔记内边距">
-          <SettingRow label="上下">
+        <Section title={t('editorSettings.sectionWidePadding')}>
+          <SettingRow label={t('editorSettings.labelPaddingTopBottom')}>
             <NumberInput
               value={widePaddingVertical}
               onChange={setWidePaddingVertical}
@@ -210,7 +212,7 @@ function EditorSettings() {
               unit="px"
             />
           </SettingRow>
-          <SettingRow label="左右">
+          <SettingRow label={t('editorSettings.labelPaddingLeftRight')}>
             <NumberInput
               value={widePaddingHorizontal}
               onChange={setWidePaddingHorizontal}
