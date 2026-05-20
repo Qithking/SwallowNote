@@ -153,7 +153,7 @@ jobs:
 
       - name: List Artifacts
         run: |
-          find artifacts -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" \) | grep -E 'bundle/(dmg|msi|nsis|appimage|deb)'
+          find artifacts -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" \)
 
       - name: Generate Release Body
         id: release_body
@@ -213,11 +213,11 @@ jobs:
         with:
           body_path: release_body.txt
           files: |
-            artifacts/**/SwallowNote-*.dmg
-            artifacts/**/SwallowNote-*.msi
-            artifacts/**/SwallowNote-*.exe
-            artifacts/**/SwallowNote-*.deb
-            artifacts/**/SwallowNote-*.AppImage
+            artifacts/**/SwallowNote_*.dmg
+            artifacts/**/SwallowNote_*.msi
+            artifacts/**/SwallowNote_*.exe
+            artifacts/**/SwallowNote_*.deb
+            artifacts/**/SwallowNote_*.AppImage
           draft: false
           prerelease: false
           overwrite: true
