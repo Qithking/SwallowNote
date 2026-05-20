@@ -204,5 +204,6 @@ jobs:
             artifacts/**/*.AppImage
           draft: false
           prerelease: false
+          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
