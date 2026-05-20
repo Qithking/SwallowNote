@@ -183,11 +183,11 @@ function App() {
           document.documentElement.style.overflow = 'hidden'
           document.body.style.borderRadius = '12px'
           document.body.style.overflow = 'hidden'
-        } else {
+        } else if (platform === 'macos') {
           await enableModernWindowStyle({ cornerRadius: 12 })
         }
       } catch {
-        await enableModernWindowStyle({ cornerRadius: 12 })
+        // ignore errors
       }
     }
     initRoundedCorners()
