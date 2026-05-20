@@ -5,7 +5,6 @@ import {
   Palette,
   Keyboard,
   Info,
-  RotateCcw,
 } from 'lucide-react'
 import { useUIStore, Theme, NoteWidth } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -24,28 +23,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { checkLatestVersion } from '@/lib/tauri'
+import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
+import { ShortcutRecorder } from './ShortcutRecorder'
 import packageJson from '../../../package.json'
 
 type SettingsSection = 'general' | 'appearance' | 'shortcuts' | 'about'
-
-interface ShortcutItem {
-  key: string
-  defaultKey: string
-}
-
-const DEFAULT_SHORTCUTS: ShortcutItem[] = [
-  { key: 'newFile', defaultKey: 'Ctrl+N' },
-  { key: 'newFolder', defaultKey: 'Ctrl+Shift+N' },
-  { key: 'openFile', defaultKey: 'Ctrl+O' },
-  { key: 'saveFile', defaultKey: 'Ctrl+S' },
-  { key: 'saveAll', defaultKey: 'Ctrl+Shift+S' },
-  { key: 'saveWorkspace', defaultKey: 'Ctrl+Shift+S' },
-  { key: 'closeFile', defaultKey: 'Ctrl+W' },
-  { key: 'closeAll', defaultKey: 'Ctrl+Shift+W' },
-  { key: 'toggleTheme', defaultKey: 'Ctrl+Shift+T' },
-  { key: 'toggleLanguage', defaultKey: 'Ctrl+Shift+L' },
-  { key: 'openExplorer', defaultKey: 'Ctrl+Shift+R' },
-]
 
 function SettingRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
   return (
@@ -292,7 +274,16 @@ function SettingsView() {
 
             {/* ===== 快捷键 ===== */}
             <section id="section-shortcuts" className="space-y-4">
-              <h2 className="text-base font-semibold">{t('settings.shortcuts.title')}</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold">{t('settings.shortcuts.title')}</h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => useUIStore.getState().resetAllShortcuts()}
+                >
+                  {t('settings.shortcuts.resetAll')}
+                </Button>
+              </div>
               <Card>
                 <CardContent className="divide-y divide-border p-0">
                   {DEFAULT_SHORTCUTS.map((item) => (
@@ -300,15 +291,11 @@ function SettingsView() {
                       key={item.key}
                       className="flex items-center justify-between px-4 py-3"
                     >
-                      <span className="text-sm">{t(`settings.shortcuts.${item.key}`)}</span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="font-mono text-xs px-2 py-1">
-                          {item.defaultKey}
-                        </Badge>
-                        <Button size="xs" variant="outline">
-                          <RotateCcw size={12} />
-                        </Button>
+                      <div className="flex-1 mr-4">
+                        <Label className="text-sm font-medium">{t(`settings.shortcuts.${item.key}`)}</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t(`settings.shortcuts.${item.key}.desc`)}</p>
                       </div>
+                      <ShortcutRecorder shortcutKey={item.key} />
                     </div>
                   ))}
                 </CardContent>

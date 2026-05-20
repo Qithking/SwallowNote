@@ -74,17 +74,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault()
-        useEditorStore.getState().saveAllDirtyTabs()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => { document.removeEventListener('keydown', handleKeyDown) }
-  }, [])
-
-  useEffect(() => {
     const handleSaveError = (e: Event) => {
       const detail = (e as CustomEvent).detail
       toast.error(`保存失败: ${detail.path}`, { description: String(detail.error) })

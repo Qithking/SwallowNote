@@ -275,6 +275,7 @@ export interface AppSettings {
   noteWidth: string
   hideGitIgnored: string
   markdownOnly: string
+  customShortcuts: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -288,6 +289,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     noteWidth: get('noteWidth', 'normal'),
     hideGitIgnored: get('hideGitIgnored', 'false'),
     markdownOnly: get('markdownOnly', 'false'),
+    customShortcuts: get('customShortcuts', '{}'),
   }
 }
 

@@ -4,6 +4,7 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled } from '@/lib/tauri'
+import { ShortcutKey } from '@/lib/shortcuts'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
@@ -34,6 +35,7 @@ export interface UIState {
   noteWidth: NoteWidth
   hideGitIgnored: boolean
   markdownOnly: boolean
+  customShortcuts: Record<string, string>
   setTheme: (theme: Theme) => void
   setThemeColor: (color: string) => void
   setSidebarView: (view: SidebarView) => void
@@ -58,6 +60,9 @@ export interface UIState {
   setNoteWidth: (width: NoteWidth) => void
   setHideGitIgnored: (value: boolean) => void
   setMarkdownOnly: (value: boolean) => void
+  setShortcut: (key: ShortcutKey, value: string) => void
+  resetShortcut: (key: ShortcutKey) => void
+  resetAllShortcuts: () => void
   loadSettings: () => Promise<void>
 }
 
@@ -83,6 +88,7 @@ export const useUIStore = create<UIState>((set) => ({
   noteWidth: 'normal',
   hideGitIgnored: false,
   markdownOnly: false,
+  customShortcuts: {},
   setTheme: (theme) => {
     set({ theme })
     saveAppSettings({ theme })
@@ -156,9 +162,38 @@ export const useUIStore = create<UIState>((set) => ({
     set({ markdownOnly: value })
     saveAppSettings({ markdownOnly: String(value) })
   },
+  setShortcut: (key, value) => {
+    set((state) => ({
+      customShortcuts: { ...state.customShortcuts, [key]: value },
+    }))
+    const updated = { ...useUIStore.getState().customShortcuts, [key]: value }
+    saveAppSettings({ customShortcuts: JSON.stringify(updated) })
+  },
+  resetShortcut: (key) => {
+    set((state) => {
+      const next = { ...state.customShortcuts }
+      delete next[key]
+      return { customShortcuts: next }
+    })
+    const updated = { ...useUIStore.getState().customShortcuts }
+    delete updated[key]
+    saveAppSettings({ customShortcuts: JSON.stringify(updated) })
+  },
+  resetAllShortcuts: () => {
+    set({ customShortcuts: {} })
+    saveAppSettings({ customShortcuts: '{}' })
+  },
   loadSettings: async () => {
     try {
       const s = await getAppSettings()
+      let customShortcuts: Record<string, string> = {}
+      if (s.customShortcuts) {
+        try {
+          customShortcuts = JSON.parse(s.customShortcuts)
+        } catch {
+          customShortcuts = {}
+        }
+      }
       set({
         theme: s.theme as Theme,
         themeColor: s.themeColor,
@@ -167,6 +202,7 @@ export const useUIStore = create<UIState>((set) => ({
         noteWidth: s.noteWidth as NoteWidth,
         hideGitIgnored: s.hideGitIgnored === 'true',
         markdownOnly: s.markdownOnly === 'true',
+        customShortcuts,
       })
     } catch {
       // DB not ready, use defaults
