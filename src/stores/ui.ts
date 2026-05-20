@@ -62,7 +62,7 @@ export interface UIState {
 }
 
 export const useUIStore = create<UIState>((set) => ({
-  theme: 'dark',
+  theme: 'light',
   themeColor: '#005fb8',
   sidebarView: 'explorer',
   sidebarVisible: true,
