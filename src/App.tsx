@@ -39,11 +39,13 @@ function App() {
   useEffect(() => {
     const init = async () => {
       const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
-      const { loadSettings } = useEditorSettingsStore.getState()
+      const { loadSettings: loadEditorSettings } = useEditorSettingsStore.getState()
+      const { loadSettings: loadUISettings } = useUIStore.getState()
       await initMode()
       await loadLatestByMode()
       await restoreSessionState()
-      await loadSettings()
+      await loadEditorSettings()
+      await loadUISettings()
     }
     init()
   }, [])

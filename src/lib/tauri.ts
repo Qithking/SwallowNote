@@ -256,6 +256,40 @@ export async function getSessionState(): Promise<Record<string, string>> {
   return await invoke('get_session_state')
 }
 
+// App Settings (persisted via session_state)
+const SETTINGS_PREFIX = 'settings.'
+
+export interface AppSettings {
+  theme: string
+  themeColor: string
+  autoStart: string
+  closeWithoutExit: string
+  noteWidth: string
+  hideGitIgnored: string
+  markdownOnly: string
+}
+
+export async function getAppSettings(): Promise<AppSettings> {
+  const all = await getSessionState()
+  const get = (key: string, fallback: string) => all[SETTINGS_PREFIX + key] ?? fallback
+  return {
+    theme: get('theme', 'dark'),
+    themeColor: get('themeColor', '#005fb8'),
+    autoStart: get('autoStart', 'false'),
+    closeWithoutExit: get('closeWithoutExit', 'false'),
+    noteWidth: get('noteWidth', 'normal'),
+    hideGitIgnored: get('hideGitIgnored', 'false'),
+    markdownOnly: get('markdownOnly', 'false'),
+  }
+}
+
+export async function saveAppSettings(settings: Partial<AppSettings>): Promise<void> {
+  const entries = Object.entries(settings).map(
+    ([key, value]) => [SETTINGS_PREFIX + key, String(value)] as [string, string]
+  )
+  await saveSessionState(Object.fromEntries(entries))
+}
+
 export async function openWorkspaceDialog(): Promise<string | null> {
   const selected = await open({
     directory: false,

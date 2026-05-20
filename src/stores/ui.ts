@@ -3,16 +3,18 @@
  */
 import { create } from 'zustand'
 import { toast } from 'sonner'
-import { getLatestFolder } from '@/lib/tauri'
+import { getLatestFolder, getAppSettings, saveAppSettings } from '@/lib/tauri'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
 export type EditorViewMode = 'edit' | 'preview' | 'split'
 export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | null
 export type WorkspaceMode = 'folder' | 'workspace'
+export type NoteWidth = 'normal' | 'wide'
 
 export interface UIState {
   theme: Theme
+  themeColor: string
   sidebarView: SidebarView
   sidebarVisible: boolean
   sidebarWidth: number
@@ -27,7 +29,13 @@ export interface UIState {
   clipboardFiles: string[]
   clipboardIsCut: boolean
   workspaceMode: WorkspaceMode
+  autoStart: boolean
+  closeWithoutExit: boolean
+  noteWidth: NoteWidth
+  hideGitIgnored: boolean
+  markdownOnly: boolean
   setTheme: (theme: Theme) => void
+  setThemeColor: (color: string) => void
   setSidebarView: (view: SidebarView) => void
   setSidebarWidth: (width: number) => void
   toggleSidebar: () => void
@@ -45,10 +53,17 @@ export interface UIState {
   clearClipboard: () => void
   setWorkspaceMode: (mode: WorkspaceMode) => void
   initWorkspaceMode: () => Promise<void>
+  setAutoStart: (value: boolean) => void
+  setCloseWithoutExit: (value: boolean) => void
+  setNoteWidth: (width: NoteWidth) => void
+  setHideGitIgnored: (value: boolean) => void
+  setMarkdownOnly: (value: boolean) => void
+  loadSettings: () => Promise<void>
 }
 
 export const useUIStore = create<UIState>((set) => ({
   theme: 'dark',
+  themeColor: '#005fb8',
   sidebarView: 'explorer',
   sidebarVisible: true,
   sidebarWidth: 240,
@@ -63,7 +78,19 @@ export const useUIStore = create<UIState>((set) => ({
   clipboardFiles: [],
   clipboardIsCut: false,
   workspaceMode: 'folder',
-  setTheme: (theme) => set({ theme }),
+  autoStart: false,
+  closeWithoutExit: false,
+  noteWidth: 'normal',
+  hideGitIgnored: false,
+  markdownOnly: false,
+  setTheme: (theme) => {
+    set({ theme })
+    saveAppSettings({ theme })
+  },
+  setThemeColor: (color) => {
+    set({ themeColor: color })
+    saveAppSettings({ themeColor: color })
+  },
   setSidebarView: (view) => set({ sidebarView: view }),
   setSidebarWidth: (width) => set({ sidebarWidth: Math.max(150, Math.min(500, width)) }),
   setRightPanelWidth: (width) => set({ rightPanelWidth: Math.max(150, Math.min(600, width)) }),
@@ -106,6 +133,42 @@ export const useUIStore = create<UIState>((set) => ({
       }
     } catch {
       set({ workspaceMode: 'folder' })
+    }
+  },
+  setAutoStart: (value) => {
+    set({ autoStart: value })
+    saveAppSettings({ autoStart: String(value) })
+  },
+  setCloseWithoutExit: (value) => {
+    set({ closeWithoutExit: value })
+    saveAppSettings({ closeWithoutExit: String(value) })
+  },
+  setNoteWidth: (width) => {
+    set({ noteWidth: width })
+    saveAppSettings({ noteWidth: width })
+  },
+  setHideGitIgnored: (value) => {
+    set({ hideGitIgnored: value })
+    saveAppSettings({ hideGitIgnored: String(value) })
+  },
+  setMarkdownOnly: (value) => {
+    set({ markdownOnly: value })
+    saveAppSettings({ markdownOnly: String(value) })
+  },
+  loadSettings: async () => {
+    try {
+      const s = await getAppSettings()
+      set({
+        theme: s.theme as Theme,
+        themeColor: s.themeColor,
+        autoStart: s.autoStart === 'true',
+        closeWithoutExit: s.closeWithoutExit === 'true',
+        noteWidth: s.noteWidth as NoteWidth,
+        hideGitIgnored: s.hideGitIgnored === 'true',
+        markdownOnly: s.markdownOnly === 'true',
+      })
+    } catch {
+      // DB not ready, use defaults
     }
   },
 }))
