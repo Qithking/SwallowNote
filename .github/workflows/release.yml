@@ -86,6 +86,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install NSIS (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          choco install nsis -y
+          $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
+          echo "NSIS_PATH=C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build (Windows)
         if: matrix.platform == 'windows-latest'
         run: |
@@ -94,6 +101,19 @@ jobs:
           npx tauri build --target x86_64-pc-windows-msvc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rename MSI to remove locale (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $msiFiles = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi" -Filter "*.msi" -Recurse
+          foreach ($file in $msiFiles) {
+            $newName = $file.Name -replace '_en-US\.msi$', '.msi'
+            if ($file.Name -ne $newName) {
+              Rename-Item -Path $file.FullName -NewName $newName
+              Write-Host "Renamed: $($file.Name) -> $newName"
+            }
+          }
 
       - name: Build (Linux)
         if: matrix.platform == 'ubuntu-22.04'
@@ -112,6 +132,7 @@ jobs:
           path: |
             src-tauri/target/**/*.dmg
             src-tauri/target/**/*.msi
+            src-tauri/target/**/*.exe
             src-tauri/target/**/*.deb
             src-tauri/target/**/*.AppImage
           retention-days: 7
@@ -132,7 +153,7 @@ jobs:
 
       - name: List Artifacts
         run: |
-          find artifacts -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.deb" -o -name "*.AppImage" \)
+          find artifacts -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" \)
 
       - name: Generate Release Body
         id: release_body
@@ -178,6 +199,7 @@ jobs:
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.msi
+            artifacts/**/*.exe
             artifacts/**/*.deb
             artifacts/**/*.AppImage
           draft: false
