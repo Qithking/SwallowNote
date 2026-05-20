@@ -128,9 +128,10 @@ function StatusBar() {
     const baseVersion = `v${currentVersion}`
     switch (versionStatus) {
       case 'idle':
-      case 'up-to-date':
       case 'check-failed':
         return <span className="opacity-60 hover:opacity-100 cursor-pointer">{baseVersion}</span>
+      case 'up-to-date':
+        return <span className="opacity-60 hover:opacity-100 cursor-pointer">{baseVersion} (已是最新版本)</span>
       case 'checking':
         return <span className="opacity-60 animate-pulse">{baseVersion} (检测中...)</span>
       case 'has-update':
