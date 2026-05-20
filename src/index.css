@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+html, body, #root {
+  background-color: transparent;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
