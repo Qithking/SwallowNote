@@ -23,8 +23,12 @@ function convertFileNode(node: BackendFileNode): FileNode {
   }
 }
 
-export async function loadDirectory(path: string): Promise<FileNode[]> {
-  const nodes = await listDirectory(path)
+export async function loadDirectory(
+  path: string,
+  hideGitIgnored?: boolean,
+  markdownOnly?: boolean,
+): Promise<FileNode[]> {
+  const nodes = await listDirectory(path, hideGitIgnored, markdownOnly)
   return nodes.map(convertFileNode)
 }
 

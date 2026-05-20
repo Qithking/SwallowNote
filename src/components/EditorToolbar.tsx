@@ -10,12 +10,12 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 function EditorToolbar() {
   const { tabs, activeTabId, toggleViewMode } = useEditorStore()
-  const { rightPanelType, setRightPanelType } = useUIStore()
+  const { rightPanelType, setRightPanelType, noteWidth } = useUIStore()
   const { rootPath } = useWorkspaceStore()
   const { normalPaddingVertical, normalPaddingHorizontal, widePaddingVertical, widePaddingHorizontal } = useEditorSettingsStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
-  const [isWide, setIsWide] = useState(false)
+  const [isWide, setIsWide] = useState(noteWidth === 'wide')
   const savedPaddingRef = useRef({ vertical: normalPaddingVertical, horizontal: normalPaddingHorizontal })
 
   // Listen for padding changes from settings panel
@@ -64,14 +64,13 @@ function EditorToolbar() {
     const scrollArea = container.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
     if (!scrollArea) return
 
+    const newWide = !isWide
     if (isWide) {
-      // 恢复到普通模式的内边距
       scrollArea.style.paddingTop = `${savedPaddingRef.current.vertical}px`
       scrollArea.style.paddingBottom = `${savedPaddingRef.current.vertical}px`
       scrollArea.style.paddingLeft = `${savedPaddingRef.current.horizontal}px`
       scrollArea.style.paddingRight = `${savedPaddingRef.current.horizontal}px`
     } else {
-      // 保存当前值并切换到宽模式
       savedPaddingRef.current = {
         vertical: parseInt(scrollArea.style.paddingTop) || normalPaddingVertical,
         horizontal: parseInt(scrollArea.style.paddingLeft) || normalPaddingHorizontal
@@ -81,7 +80,8 @@ function EditorToolbar() {
       scrollArea.style.paddingLeft = `${widePaddingHorizontal}px`
       scrollArea.style.paddingRight = `${widePaddingHorizontal}px`
     }
-    setIsWide(!isWide)
+    setIsWide(newWide)
+    useUIStore.getState().setNoteWidth(newWide ? 'wide' : 'normal')
   }
 
   return (

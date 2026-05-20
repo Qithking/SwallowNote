@@ -105,8 +105,16 @@ export async function pathExists(path: string): Promise<boolean> {
   return await invoke('path_exists', { path })
 }
 
-export async function listDirectory(path: string): Promise<FileNode[]> {
-  return await invoke('list_directory', { path })
+export async function listDirectory(
+  path: string,
+  hideGitIgnored?: boolean,
+  markdownOnly?: boolean,
+): Promise<FileNode[]> {
+  return await invoke('list_directory', {
+    path,
+    hideGitIgnored: hideGitIgnored ?? false,
+    markdownOnly: markdownOnly ?? false,
+  })
 }
 
 export async function readFile(path: string): Promise<string> {
@@ -288,6 +296,15 @@ export async function saveAppSettings(settings: Partial<AppSettings>): Promise<v
     ([key, value]) => [SETTINGS_PREFIX + key, String(value)] as [string, string]
   )
   await saveSessionState(Object.fromEntries(entries))
+}
+
+export async function setAutoStartEnabled(enabled: boolean): Promise<void> {
+  const { enable, disable } = await import('@tauri-apps/plugin-autostart')
+  if (enabled) {
+    await enable()
+  } else {
+    await disable()
+  }
 }
 
 export async function openWorkspaceDialog(): Promise<string | null> {

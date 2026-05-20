@@ -46,10 +46,29 @@ function BlockNoteInner({
     letterSpacing,
     normalPaddingVertical,
     normalPaddingHorizontal,
+    widePaddingVertical,
+    widePaddingHorizontal,
   } = useEditorSettingsStore()
+  const noteWidth = useUIStore((state) => state.noteWidth)
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState<number>(0)
+
+  useEffect(() => {
+    if (noteWidth !== 'wide') return
+    const apply = () => {
+      const container = editorContainerRef.current
+      if (!container) return
+      const scrollArea = container.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
+      if (!scrollArea) return
+      scrollArea.style.paddingTop = `${widePaddingVertical}px`
+      scrollArea.style.paddingBottom = `${widePaddingVertical}px`
+      scrollArea.style.paddingLeft = `${widePaddingHorizontal}px`
+      scrollArea.style.paddingRight = `${widePaddingHorizontal}px`
+    }
+    const timer = setTimeout(apply, 100)
+    return () => clearTimeout(timer)
+  }, [noteWidth, widePaddingVertical, widePaddingHorizontal])
 
   // codeBlock from @blocknote/code-block provides syntax highlighting via Shiki
   // In newer versions, we need to create the code block spec using createCodeBlockSpec

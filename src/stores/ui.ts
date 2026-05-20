@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand'
 import { toast } from 'sonner'
-import { getLatestFolder, getAppSettings, saveAppSettings } from '@/lib/tauri'
+import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled } from '@/lib/tauri'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
@@ -138,6 +138,7 @@ export const useUIStore = create<UIState>((set) => ({
   setAutoStart: (value) => {
     set({ autoStart: value })
     saveAppSettings({ autoStart: String(value) })
+    setAutoStartEnabled(value).catch(() => {})
   },
   setCloseWithoutExit: (value) => {
     set({ closeWithoutExit: value })

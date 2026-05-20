@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 #[cfg(target_os = "macos")]
@@ -64,8 +64,14 @@ pub async fn path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
-pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
+pub async fn list_directory(
+    path: String,
+    hide_git_ignored: Option<bool>,
+    markdown_only: Option<bool>,
+) -> Result<Vec<FileNode>, String> {
     let path = PathBuf::from(&path);
+    let hide_git_ignored = hide_git_ignored.unwrap_or(false);
+    let markdown_only = markdown_only.unwrap_or(false);
 
     if !path.exists() {
         return Err(format!("Path does not exist: {}", path.display()));
@@ -74,6 +80,12 @@ pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
     if !path.is_dir() {
         return Err(format!("Path is not a directory: {}", path.display()));
     }
+
+    let gitignore_set = if hide_git_ignored {
+        build_gitignore(&path)
+    } else {
+        None
+    };
 
     let mut entries = tokio::fs::read_dir(&path)
         .await
@@ -101,6 +113,22 @@ pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
         let entry_path = entry.path();
         let is_directory = entry_path.is_dir();
 
+        // Filter by .gitignore
+        if let Some(ref gitignore) = gitignore_set {
+            let relative = entry_path.strip_prefix(&path).unwrap_or(&entry_path);
+            if gitignore.matched(relative, is_directory).is_ignore() {
+                continue;
+            }
+        }
+
+        // Filter non-markdown files (keep directories)
+        if markdown_only && !is_directory {
+            let lower_name = file_name.to_lowercase();
+            if !lower_name.ends_with(".md") && !lower_name.ends_with(".markdown") {
+                continue;
+            }
+        }
+
         nodes.push(FileNode {
             id: Uuid::new_v4().to_string(),
             name: file_name,
@@ -120,6 +148,25 @@ pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
     });
 
     Ok(nodes)
+}
+
+fn build_gitignore(dir: &Path) -> Option<ignore::gitignore::Gitignore> {
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(dir);
+    let gitignore_path = dir.join(".gitignore");
+    if gitignore_path.exists() {
+        if builder.add(&gitignore_path).is_none() {
+            return None;
+        }
+    }
+    let mut current = dir.parent();
+    while let Some(parent) = current {
+        let parent_gitignore: PathBuf = parent.join(".gitignore");
+        if parent_gitignore.exists() {
+            builder.add(&parent_gitignore);
+        }
+        current = parent.parent();
+    }
+    builder.build().ok()
 }
 
 #[tauri::command]

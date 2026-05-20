@@ -53,6 +53,7 @@ function App() {
   useEffect(() => {
     const win = getCurrentWindow()
     const unlisten = win.listen('tauri://close-requested', async () => {
+      const { closeWithoutExit } = useUIStore.getState()
       const dirtyCount = useEditorStore.getState().getDirtyTabsCount()
       if (dirtyCount > 0) {
         const dirtyTabs = useEditorStore.getState().tabs.filter((t) => t.isDirty)
@@ -61,6 +62,9 @@ function App() {
         setDirtyFileNames(names)
         setShowSaveDialog(true)
         pendingCloseRef.current = true
+      } else if (closeWithoutExit) {
+        await saveSessionStateNow()
+        await win.hide()
       } else {
         await saveSessionStateNow()
         await win.destroy()
@@ -157,7 +161,12 @@ function App() {
     if (pendingCloseRef.current) {
       const win = getCurrentWindow()
       await saveSessionStateNow()
-      await win.destroy()
+      const { closeWithoutExit } = useUIStore.getState()
+      if (closeWithoutExit) {
+        await win.hide()
+      } else {
+        await win.destroy()
+      }
     }
   }
 
@@ -167,7 +176,12 @@ function App() {
     if (pendingCloseRef.current) {
       const win = getCurrentWindow()
       await saveSessionStateNow()
-      await win.destroy()
+      const { closeWithoutExit } = useUIStore.getState()
+      if (closeWithoutExit) {
+        await win.hide()
+      } else {
+        await win.destroy()
+      }
     }
   }
 

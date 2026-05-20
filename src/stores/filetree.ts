@@ -3,6 +3,7 @@
  */
 import { create } from 'zustand'
 import { loadDirectory } from '@/lib/api'
+import { useUIStore } from './ui'
 
 export interface FileNode {
   id: string
@@ -52,6 +53,11 @@ function updateNodesWithChildren(list: FileNode[], path: string, children: FileN
   })
 }
 
+function getFilterParams() {
+  const { hideGitIgnored, markdownOnly } = useUIStore.getState()
+  return { hideGitIgnored, markdownOnly }
+}
+
 export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   nodes: [],
   expanded: new Set(),
@@ -78,7 +84,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const node = findNodeInList(nodes, path)
     if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
       try {
-        const children = await loadDirectory(path)
+        const children = await loadDirectory(path, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
         set({
           nodes: updateNodesWithChildren(nodes, path, children),
           expanded: newExpanded,
@@ -99,7 +105,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
     set({ isLoading: true })
     try {
-      const data = await loadDirectory(rootPath)
+      const data = await loadDirectory(rootPath, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
       const rootNode: FileNode = {
         id: 'root',
         name: rootPath.split('/').pop() || rootPath,
@@ -121,7 +127,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (existingNode) return
 
     try {
-      const data = await loadDirectory(rootPath)
+      const data = await loadDirectory(rootPath, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
       const newNode: FileNode = {
         id: `root-${rootPath}`,
         name: rootPath.split('/').pop() || rootPath,
@@ -150,7 +156,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       if (existingNode) continue
 
       try {
-        const data = await loadDirectory(rootPath)
+        const data = await loadDirectory(rootPath, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
         const newNode: FileNode = {
           id: `root-${rootPath}`,
           name: rootPath.split('/').pop() || rootPath,
@@ -190,7 +196,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (!node || !node.isDirectory) return
 
     try {
-      const children = await loadDirectory(path)
+      const children = await loadDirectory(path, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
       set({ nodes: updateNodesWithChildren(nodes, path, children) })
     } catch (e) {
       console.error(e)
@@ -222,7 +228,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       const node = findNodeInList(currentNodes, currentPath)
       if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
         try {
-          const children = await loadDirectory(currentPath)
+          const children = await loadDirectory(currentPath, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
           currentNodes = updateNodesWithChildren(currentNodes, currentPath, children)
         } catch (e) {
           console.error(e)
