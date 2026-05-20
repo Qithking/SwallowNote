@@ -197,12 +197,16 @@ jobs:
           TAG_NAME=${GITHUB_REF#refs/tags/}
           echo "Deleting existing assets for tag: $TAG_NAME"
           ASSETS=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/Qithking/SwallowNote/releases/tags/$TAG_NAME" | jq -r '.assets[] | .id')
-          for ASSET_ID in $ASSETS; do
-            curl -s -X DELETE -H "Authorization: Bearer $GITHUB_TOKEN" \
-              "https://api.github.com/repos/Qithking/SwallowNote/releases/assets/$ASSET_ID"
-            echo "Deleted asset: $ASSET_ID"
-          done
+            "https://api.github.com/repos/Qithking/SwallowNote/releases/tags/$TAG_NAME" | jq -r '.assets // [] | .[] | .id')
+          if [ -z "$ASSETS" ]; then
+            echo "No existing assets to delete"
+          else
+            for ASSET_ID in $ASSETS; do
+              curl -s -X DELETE -H "Authorization: Bearer $GITHUB_TOKEN" \
+                "https://api.github.com/repos/Qithking/SwallowNote/releases/assets/$ASSET_ID"
+              echo "Deleted asset: $ASSET_ID"
+            done
+          fi
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
