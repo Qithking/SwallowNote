@@ -267,6 +267,9 @@
     "notFound": "未找到匹配项"
   },
   "git": {
+    "title":"同步管理",
+    "sync":"同步",
+    "refresh":"刷新",
     "commit": "提交",
     "push": "推送",
     "pull": "拉取",
@@ -283,12 +286,21 @@
     "syncing": "同步中...",
     "submodule": "子模块",
     "noRemote": "无远程仓库",
-    "repoPath": "仓库目录:",
-    "parentRepo": "父仓库:",
+    "repoPath": "仓库目录",
+    "parentRepo": "父仓库",
     "uncommittedFiles": "待提交文件: {{count}} 个文件",
     "syncManagement": "同步管理",
     "refreshRepos": "刷新所有仓库列表",
-    "noGitRepoFound": "未发现 Git 仓库"
+    "noGitRepoFound": "未发现 Git 仓库",
+    "noReposToSync": "没有需要同步的仓库或没有变更",
+    "noChangesToSync": "没有需要同步的变更",
+    "submoduleHasChanges": "子模块内部有未提交的变更，请先在子模块内提交",
+    "submoduleRefNeedsUpdate": "子模块引用需要更新，请先提交子模块变更",
+    "syncSuccess": "已同步 {{count}} 个仓库",
+    "syncPartial": "成功 {{success}} 个，失败 {{fail}} 个",
+    "noGitRepos": "未发现 Git 仓库",
+    "pendingFiles": "待提交文件",
+    "files": "个文件"
   },
   "history": {
     "title": "历史",

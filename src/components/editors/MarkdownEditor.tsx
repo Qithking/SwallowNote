@@ -33,6 +33,10 @@ function BlockNoteInner({
   blocks: PartialBlock[]
   onChange?: (content: string) => void
 }) {
+  const theme = useUIStore((state) => state.theme)
+  const [systemDark, setSystemDark] = useState(
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+  )
   const { tabs, activeTabId } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
@@ -54,6 +58,13 @@ function BlockNoteInner({
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState<number>(0)
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
 
   useEffect(() => {
     if (noteWidth !== 'wide') return
@@ -200,7 +211,7 @@ function BlockNoteInner({
     onChange(md)
   }
 
-  const blocknoteTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+  const blocknoteTheme = theme === 'dark' || (theme === 'system' && systemDark) ? 'dark' : 'light'
 
   // Apply typography settings by injecting a style element into the container
   useEffect(() => {

@@ -247,27 +247,7 @@ function SettingsView() {
                         </TabsList>
                       </Tabs>
                     </div>
-                  </div>
-                  <div className="py-3 px-4 opacity-50 pointer-events-none">
-                    <div className="flex items-start justify-between">
-                      <div className="mr-4 pt-1">
-                        <Label className="text-sm font-medium">
-                          {t('settings.appearance.customTheme')}
-                        </Label>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          ({t('settings.appearance.customTheme.comingSoon')})
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 opacity-40">
-                        <Badge variant="outline" className="justify-center py-2 min-w-[80px]">
-                          {t('settings.appearance.theme.light')}
-                        </Badge>
-                        <Badge variant="outline" className="justify-center py-2 min-w-[80px]">
-                          {t('settings.appearance.theme.dark')}
-                        </Badge>
-                      </div>
-                    </div>
-                  </div>
+                  </div>                  
                 </CardContent>
               </Card>
             </section>

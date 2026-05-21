@@ -87,7 +87,7 @@ function EditorToolbar() {
   }
 
   return (
-    <div className="flex items-center justify-between h-[25px] pl-3 pr-1 text-[11px]  bg-[var(--bg-tertiary)]  select-none">
+    <div className="flex items-center justify-between h-[25px] pl-3 pr-1 text-[11px]   select-none">
       {/* Left: File path - display relative path from root */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
         <span className="truncate" title={path}>{getRelativePath(path)}</span>

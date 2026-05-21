@@ -267,6 +267,9 @@
     "notFound": "No matches found"
   },
   "git": {
+    "title":"Sync Management",
+    "sync":"Sync",
+    "refresh":"Refresh",
     "commit": "Commit",
     "push": "Push",
     "pull": "Pull",
@@ -283,12 +286,21 @@
     "syncing": "Syncing...",
     "submodule": "Submodule",
     "noRemote": "No remote repository",
-    "repoPath": "Repo path:",
-    "parentRepo": "Parent repo:",
+    "repoPath": "Repo path",
+    "parentRepo": "Parent repo",
     "uncommittedFiles": "Uncommitted files: {{count}} file(s)",
     "syncManagement": "Sync Management",
     "refreshRepos": "Refresh all repositories list",
-    "noGitRepoFound": "No Git repositories found"
+    "noGitRepoFound": "No Git repositories found",
+    "noReposToSync": "No repos or changes to sync",
+    "noChangesToSync": "No changes to sync",
+    "submoduleHasChanges": "Submodule has uncommitted changes, please commit inside submodule first",
+    "submoduleRefNeedsUpdate": "Submodule reference needs update, please commit submodule changes first",
+    "syncSuccess": "Synced {{count}} repo(s)",
+    "syncPartial": "{{success}} succeeded, {{fail}} failed",
+    "noGitRepos": "No Git repositories found",
+    "pendingFiles": "Uncommitted files",
+    "files": "file(s)"
   },
   "history": {
     "title": "History",
