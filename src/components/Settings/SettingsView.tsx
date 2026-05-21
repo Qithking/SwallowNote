@@ -290,9 +290,7 @@ function SettingsView() {
                 <CardContent className="pt-4 pb-6 space-y-1">
                   <InfoRow label={t('settings.about.projectName')} value="SwallowNote" />
                   <InfoRow label={t('settings.about.projectVersion')} value={`v${packageJson.version}`} />
-                  <InfoRow label={t('settings.about.projectAuthor')} value="thking" />
-                  <InfoRow label={t('settings.about.projectRepo')} value="https://github.com/thking/SwallowNote" isLink />
-                  <InfoRow label={t('settings.about.projectLicense')} value="MIT" />
+                  <InfoRow label={t('settings.about.projectRepo')} value="https://github.com/Qithking/SwallowNote" isLink />
 
                   <div className="pt-4 mt-2">
                     <Button

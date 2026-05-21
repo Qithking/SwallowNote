@@ -559,18 +559,23 @@ fn get_remote_url(path: &str) -> Result<String, String> {
 }
 
 fn get_uncommitted_count(path: &str) -> (bool, usize) {
-    let modified = run_git(path, &["diff", "--name-only"]).unwrap_or_default();
-    let staged = run_git(path, &["diff", "--cached", "--name-only"]).unwrap_or_default();
-    let untracked = run_git(path, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default();
+    let status_output = run_git(path, &["status", "--porcelain"]).unwrap_or_default();
     
-    let mut count = 0usize;
-    for line in modified.lines().chain(staged.lines()).chain(untracked.lines()) {
-        if !line.is_empty() {
-            count += 1;
+    let mut file_count = 0usize;
+    for line in status_output.lines() {
+        if line.is_empty() {
+            continue;
         }
+        let xy = line.get(..2).unwrap_or("  ");
+        if xy.starts_with('?') || xy.ends_with('?') {
+            continue;
+        }
+        file_count += 1;
     }
+
+    let total_count = status_output.lines().filter(|l| !l.is_empty()).count();
     
-    (count > 0, count)
+    (total_count > 0, file_count)
 }
 
 fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
