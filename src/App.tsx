@@ -12,7 +12,7 @@ import { HistoryView } from '@/components/History/HistoryView'
 import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
 import { StatusBar } from '@/components/StatusBar'
 import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEditorSettingsStore } from '@/stores'
-import { useTheme } from '@/hooks'
+import { useTheme, useKeyboardShortcuts } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
 import { useState, useCallback, useEffect, useRef } from 'react'
@@ -26,6 +26,7 @@ import { useTranslation } from 'react-i18next'
 
 function App() {
   useTheme()
+  useKeyboardShortcuts()
   const { t } = useTranslation()
   const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, setSidebarWidth, setRightPanelWidth } = useUIStore()
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)

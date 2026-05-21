@@ -22,7 +22,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { key: 'openFile', defaultKey: 'Ctrl+O' },
   { key: 'saveFile', defaultKey: 'Ctrl+S' },
   { key: 'saveAll', defaultKey: 'Ctrl+Shift+S' },
-  { key: 'saveWorkspace', defaultKey: 'Ctrl+Shift+S' },
+  { key: 'saveWorkspace', defaultKey: 'Ctrl+Alt+S' },
   { key: 'closeFile', defaultKey: 'Ctrl+W' },
   { key: 'closeAll', defaultKey: 'Ctrl+Shift+W' },
   { key: 'toggleTheme', defaultKey: 'Ctrl+Shift+T' },

@@ -153,6 +153,10 @@ async function handleSaveAll() {
   await useEditorStore.getState().saveAllDirtyTabs()
 }
 
+async function handleSaveWorkspace() {
+  await useWorkspaceStore.getState().saveWorkspaceFile()
+}
+
 async function handleCloseFile() {
   const { activeTabId } = useEditorStore.getState()
   if (activeTabId) {
@@ -219,9 +223,14 @@ export function useKeyboardShortcuts() {
         handleSaveFile()
         return
       }
-      if (matchShortcut(e, getShortcut('saveAll')) || matchShortcut(e, getShortcut('saveWorkspace'))) {
+      if (matchShortcut(e, getShortcut('saveAll'))) {
         e.preventDefault()
         handleSaveAll()
+        return
+      }
+      if (matchShortcut(e, getShortcut('saveWorkspace'))) {
+        e.preventDefault()
+        handleSaveWorkspace()
         return
       }
       if (matchShortcut(e, getShortcut('closeFile'))) {
