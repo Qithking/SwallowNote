@@ -286,7 +286,7 @@ function App() {
           const activeTabId = states.activeTabId || null
           useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
           if (activeTabId) {
-            useEditorStore.getState().loadTabContent(activeTabId)
+            await useEditorStore.getState().loadTabContent(activeTabId)
             const activeTab = restoredTabs.find((t: any) => t.id === activeTabId)
             if (activeTab?.path) {
               const fileTreeStore = useFileTreeStore.getState()
