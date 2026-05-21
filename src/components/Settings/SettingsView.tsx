@@ -20,9 +20,19 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
-import { checkLatestVersion } from '@/lib/tauri'
+import { checkLatestVersion, downloadLatestRelease, openInstaller, DownloadProgress } from '@/lib/tauri'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { ShortcutRecorder } from './ShortcutRecorder'
 import packageJson from '../../../package.json'
@@ -75,8 +85,11 @@ function SettingsView() {
     markdownOnly, setMarkdownOnly,
   } = useUIStore()
 
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'has-update' | 'check-failed'>('idle')
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'has-update' | 'check-failed' | 'downloading' | 'download-ready' | 'download-failed'>('idle')
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
+  const [downloadProgress, setDownloadProgress] = useState<number>(0)
+  const [downloadedPath, setDownloadedPath] = useState<string | null>(null)
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false)
 
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; labelKey: string }[] = [
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },
@@ -84,6 +97,8 @@ function SettingsView() {
     { id: 'shortcuts', icon: Keyboard, labelKey: 'settings.shortcuts' },
     { id: 'about', icon: Info, labelKey: 'settings.about' },
   ]
+
+  const { showToast } = useUIStore()
 
   const scrollToSection = useCallback((sectionId: SettingsSection) => {
     setActiveSection(sectionId)
@@ -107,6 +122,51 @@ function SettingsView() {
       setUpdateStatus('check-failed')
     }
   }, [])
+
+  const handleDownloadUpdate = useCallback(() => {
+    setUpdateStatus('downloading')
+    setDownloadProgress(0)
+    downloadLatestRelease(
+      (progress: DownloadProgress) => {
+        setDownloadProgress(Math.round(progress.progress))
+      },
+      (path: string) => {
+        setDownloadedPath(path)
+        setShowUpgradeDialog(true)
+      },
+      (error: string) => {
+        setUpdateStatus('download-failed')
+        showToast(t('statusBar.downloadFailed', { error }))
+      }
+    )
+  }, [showToast])
+
+  const handleUpgradeConfirm = useCallback(async () => {
+    setShowUpgradeDialog(false)
+    if (downloadedPath) {
+      try {
+        await openInstaller(downloadedPath)
+      } catch {
+        showToast(t('statusBar.openInstallerFailed'))
+      }
+    }
+  }, [downloadedPath, showToast])
+
+  const handleUpgradeCancel = useCallback(() => {
+    setShowUpgradeDialog(false)
+    setUpdateStatus('download-ready')
+  }, [])
+
+  const handleUpdateClick = useCallback(() => {
+    if (updateStatus === 'downloading') return
+    if (updateStatus === 'idle' || updateStatus === 'check-failed' || updateStatus === 'up-to-date') {
+      handleCheckUpdate()
+    } else if (updateStatus === 'has-update' || updateStatus === 'download-failed') {
+      handleDownloadUpdate()
+    } else if (updateStatus === 'download-ready') {
+      setShowUpgradeDialog(true)
+    }
+  }, [updateStatus, handleCheckUpdate, handleDownloadUpdate])
 
   const themes: { value: Theme; labelKey: string; emoji: string }[] = [
     { value: 'light', labelKey: 'settings.appearance.theme.light', emoji: '\u2600\uFE0F' },
@@ -296,16 +356,34 @@ function SettingsView() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleCheckUpdate}
-                      disabled={updateStatus === 'checking'}
+                      onClick={handleUpdateClick}
+                      disabled={updateStatus === 'downloading'}
                     >
                       {updateStatus === 'checking' && t('settings.about.checking')}
                       {updateStatus === 'idle' && t('settings.about.checkUpdate')}
                       {updateStatus === 'up-to-date' && `\u2705 ${t('settings.about.upToDate')}`}
                       {updateStatus === 'has-update' && `${t('settings.about.hasUpdate')}: v${latestVersion}`}
                       {updateStatus === 'check-failed' && `\u274C ${t('settings.about.checkFailed')}`}
+                      {updateStatus === 'downloading' && t('statusBar.downloading', { progress: downloadProgress })}
+                      {updateStatus === 'download-ready' && `\u2705 ${t('statusBar.downloadReady')}`}
+                      {updateStatus === 'download-failed' && `\u274C ${t('statusBar.downloadFailedStatus')} (${t('settings.about.checkUpdate')})`}
                     </Button>
                   </div>
+
+                  <AlertDialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t('statusBar.newVersionFound')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t('statusBar.newVersionReady', { version: latestVersion })}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel onClick={handleUpgradeCancel}>{t('common.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleUpgradeConfirm}>{t('common.ok')}</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </CardContent>
               </Card>
             </section>
