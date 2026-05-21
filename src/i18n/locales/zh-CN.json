@@ -131,7 +131,13 @@
     "chat": "对话",
     "complete": "补全",
     "rewrite": "改写",
-    "explain": "解释"
+    "explain": "解释",
+    "title": "AI 助手",
+    "askAnything": "输入任意问题...",
+    "placeholder": "输入任意问题...",
+    "placeholderResponse": "你好！我是 AI 助手，有什么可以帮你的？",
+    "fetchUrl": "获取 URL 内容",
+    "thinking": "思考中..."
   },
   "common": {
     "ok": "确定",
@@ -142,7 +148,9 @@
     "confirm": "确认",
     "loading": "加载中...",
     "error": "错误",
-    "success": "成功"
+    "success": "成功",
+    "no": "否",
+    "yes": "是"
   },
   "activityBar": {
     "explorer": "资源管理器",
@@ -305,17 +313,24 @@
     "noFileOpened": "未打开文件",
     "initHint": "请到文件根目录下右键同步初始化",
     "noCommitHistory": "暂无提交历史",
-    "allLoaded": "已加载全部历史记录"
+    "allLoaded": "已加载全部历史记录",
+    "noFileOpen": "未打开文件",
+    "initGitFirst": "请到文件根目录下右键同步初始化",
+    "noHistory": "暂无提交历史"
   },
   "directory": {
     "title": "目录",
     "noFileOpened": "未打开文件",
-    "noDirectory": "无目录"
+    "noDirectory": "无目录",
+    "noToc": "无目录"
   },
   "diffViewer": {
-    "noDiffContent": "暂无差异内容"
+    "noDiffContent": "暂无差异内容",
+    "noDiff": "暂无差异"
   },
   "statusBar": {
+    "author":"作者",
+    "openGitHub":"打开GitHub仓库",
     "downloadFailed": "下载失败: {{error}}",
     "openInstallerFailed": "打开安装包失败",
     "openLinkFailed": "打开链接失败",
@@ -325,7 +340,17 @@
     "downloading": "下载中: {{progress}}%",
     "ready": "新版本已就绪",
     "downloadFailedStatus": "下载失败",
-    "clickToCheck": "点击检测新版本"
+    "download":"下载",
+    "foundNewVersion":"发布新版本",
+    "downloadingTooltip":"正在下载中",
+    "clickToCheck": "点击检测新版本",
+    "downloadReady": "新版本已就绪",
+    "downloadReadyTooltip": "点击安装新版本",
+    "newVersionFound": "发现新版本",
+    "newVersionReady": "新版本 v{{version}} 已准备就绪，是否立即安装？",
+    "downloadFailedText": "下载失败",
+    "checkFailed": "检测失败",
+    "downloadFailedTooltip": "点击重试"
   },
   "recent": {
     "workspaceName": "工作区",
@@ -349,6 +374,12 @@
     "repoUrlLabel": "仓库 URL",
     "localPathLabel": "本地地址",
     "cloning": "克隆中...",
-    "cloneAndOpen": "克隆&打开"
+    "cloneAndOpen": "克隆&打开",
+    "workspace": "工作区",
+    "folder": "文件夹",
+    "title": "最近记录",
+    "pathNotFound": "路径不存在: {{path}}",
+    "enterRepoUrl": "请输入仓库 URL",
+    "selectLocalPath": "请选择本地地址"
   }
 }

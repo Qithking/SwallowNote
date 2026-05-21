@@ -4,7 +4,6 @@ import {
   Settings as SettingsIcon,
   Palette,
   Keyboard,
-  Info,
 } from 'lucide-react'
 import { useUIStore, Theme, NoteWidth } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -18,26 +17,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
-import { checkLatestVersion, downloadLatestRelease, openInstaller, DownloadProgress } from '@/lib/tauri'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { ShortcutRecorder } from './ShortcutRecorder'
-import packageJson from '../../../package.json'
 
-type SettingsSection = 'general' | 'appearance' | 'shortcuts' | 'about'
+type SettingsSection = 'general' | 'appearance' | 'shortcuts'
 
 function SettingRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
   return (
@@ -47,26 +33,6 @@ function SettingRow({ label, desc, children }: { label: string; desc: string; ch
         <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
       </div>
       {children}
-    </div>
-  )
-}
-
-function InfoRow({ label, value, isLink }: { label: string; value: string; isLink?: boolean }) {
-  return (
-    <div className="flex items-center justify-between py-1.5">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      {isLink ? (
-        <a
-          href={value}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-primary hover:underline"
-        >
-          {value}
-        </a>
-      ) : (
-        <Badge variant="secondary" className="font-normal">{value}</Badge>
-      )}
     </div>
   )
 }
@@ -85,20 +51,11 @@ function SettingsView() {
     markdownOnly, setMarkdownOnly,
   } = useUIStore()
 
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'has-update' | 'check-failed' | 'downloading' | 'download-ready' | 'download-failed'>('idle')
-  const [latestVersion, setLatestVersion] = useState<string | null>(null)
-  const [downloadProgress, setDownloadProgress] = useState<number>(0)
-  const [downloadedPath, setDownloadedPath] = useState<string | null>(null)
-  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false)
-
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; labelKey: string }[] = [
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },
     { id: 'appearance', icon: Palette, labelKey: 'settings.appearance' },
     { id: 'shortcuts', icon: Keyboard, labelKey: 'settings.shortcuts' },
-    { id: 'about', icon: Info, labelKey: 'settings.about' },
   ]
-
-  const { showToast } = useUIStore()
 
   const scrollToSection = useCallback((sectionId: SettingsSection) => {
     setActiveSection(sectionId)
@@ -107,66 +64,6 @@ function SettingsView() {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   }, [])
-
-  const handleCheckUpdate = useCallback(async () => {
-    setUpdateStatus('checking')
-    try {
-      const result = await checkLatestVersion()
-      if (result) {
-        setLatestVersion(result.latest)
-        setUpdateStatus(result.hasUpdate ? 'has-update' : 'up-to-date')
-      } else {
-        setUpdateStatus('check-failed')
-      }
-    } catch {
-      setUpdateStatus('check-failed')
-    }
-  }, [])
-
-  const handleDownloadUpdate = useCallback(() => {
-    setUpdateStatus('downloading')
-    setDownloadProgress(0)
-    downloadLatestRelease(
-      (progress: DownloadProgress) => {
-        setDownloadProgress(Math.round(progress.progress))
-      },
-      (path: string) => {
-        setDownloadedPath(path)
-        setShowUpgradeDialog(true)
-      },
-      (error: string) => {
-        setUpdateStatus('download-failed')
-        showToast(t('statusBar.downloadFailed', { error }))
-      }
-    )
-  }, [showToast])
-
-  const handleUpgradeConfirm = useCallback(async () => {
-    setShowUpgradeDialog(false)
-    if (downloadedPath) {
-      try {
-        await openInstaller(downloadedPath)
-      } catch {
-        showToast(t('statusBar.openInstallerFailed'))
-      }
-    }
-  }, [downloadedPath, showToast])
-
-  const handleUpgradeCancel = useCallback(() => {
-    setShowUpgradeDialog(false)
-    setUpdateStatus('download-ready')
-  }, [])
-
-  const handleUpdateClick = useCallback(() => {
-    if (updateStatus === 'downloading') return
-    if (updateStatus === 'idle' || updateStatus === 'check-failed' || updateStatus === 'up-to-date') {
-      handleCheckUpdate()
-    } else if (updateStatus === 'has-update' || updateStatus === 'download-failed') {
-      handleDownloadUpdate()
-    } else if (updateStatus === 'download-ready') {
-      setShowUpgradeDialog(true)
-    }
-  }, [updateStatus, handleCheckUpdate, handleDownloadUpdate])
 
   const themes: { value: Theme; labelKey: string; emoji: string }[] = [
     { value: 'light', labelKey: 'settings.appearance.theme.light', emoji: '\u2600\uFE0F' },
@@ -338,52 +235,6 @@ function SettingsView() {
                       <ShortcutRecorder shortcutKey={item.key} />
                     </div>
                   ))}
-                </CardContent>
-              </Card>
-            </section>
-
-            {/* ===== 关于 ===== */}
-            <section id="section-about" className="space-y-4">
-              <h2 className="text-base font-semibold">{t('settings.about')}</h2>
-              
-              <Card>
-                <CardContent className="pt-4 pb-6 space-y-1">
-                  <InfoRow label={t('settings.about.projectName')} value="SwallowNote" />
-                  <InfoRow label={t('settings.about.projectVersion')} value={`v${packageJson.version}`} />
-                  <InfoRow label={t('settings.about.projectRepo')} value="https://github.com/Qithking/SwallowNote" isLink />
-
-                  <div className="pt-4 mt-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleUpdateClick}
-                      disabled={updateStatus === 'downloading'}
-                    >
-                      {updateStatus === 'checking' && t('settings.about.checking')}
-                      {updateStatus === 'idle' && t('settings.about.checkUpdate')}
-                      {updateStatus === 'up-to-date' && `\u2705 ${t('settings.about.upToDate')}`}
-                      {updateStatus === 'has-update' && `${t('settings.about.hasUpdate')}: v${latestVersion}`}
-                      {updateStatus === 'check-failed' && `\u274C ${t('settings.about.checkFailed')}`}
-                      {updateStatus === 'downloading' && t('statusBar.downloading', { progress: downloadProgress })}
-                      {updateStatus === 'download-ready' && `\u2705 ${t('statusBar.downloadReady')}`}
-                      {updateStatus === 'download-failed' && `\u274C ${t('statusBar.downloadFailedStatus')} (${t('settings.about.checkUpdate')})`}
-                    </Button>
-                  </div>
-
-                  <AlertDialog open={showUpgradeDialog} onOpenChange={setShowUpgradeDialog}>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>{t('statusBar.newVersionFound')}</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          {t('statusBar.newVersionReady', { version: latestVersion })}
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel onClick={handleUpgradeCancel}>{t('common.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleUpgradeConfirm}>{t('common.ok')}</AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
                 </CardContent>
               </Card>
             </section>

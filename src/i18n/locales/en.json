@@ -131,7 +131,13 @@
     "chat": "Chat",
     "complete": "Complete",
     "rewrite": "Rewrite",
-    "explain": "Explain"
+    "explain": "Explain",
+    "title": "AI Assistant",
+    "askAnything": "Ask anything...",
+    "placeholder": "Ask anything...",
+    "placeholderResponse": "Hello! I'm your AI assistant. How can I help you?",
+    "fetchUrl": "Fetch URL Content",
+    "thinking": "Thinking..."
   },
   "common": {
     "ok": "OK",
@@ -142,7 +148,9 @@
     "confirm": "Confirm",
     "loading": "Loading...",
     "error": "Error",
-    "success": "Success"
+    "success": "Success",
+    "no": "No",
+    "yes": "Yes"
   },
   "activityBar": {
     "explorer": "Explorer",
@@ -305,17 +313,24 @@
     "noFileOpened": "No file opened",
     "initHint": "Right-click on file root directory and select Sync Init",
     "noCommitHistory": "No commit history",
-    "allLoaded": "All history loaded"
+    "allLoaded": "All history loaded",
+    "noFileOpen": "No file opened",
+    "initGitFirst": "Right-click on file root directory and select Sync Init",
+    "noHistory": "No history"
   },
   "directory": {
     "title": "Directory",
     "noFileOpened": "No file opened",
-    "noDirectory": "No directory"
+    "noDirectory": "No directory",
+    "noToc": "No table of contents"
   },
   "diffViewer": {
-    "noDiffContent": "No diff content"
+    "noDiffContent": "No diff content",
+    "noDiff": "No diff"
   },
   "statusBar": {
+    "author": "Author",
+    "openGitHub": "Open GitHub Repository",
     "downloadFailed": "Download failed: {{error}}",
     "openInstallerFailed": "Failed to open installer",
     "openLinkFailed": "Failed to open link",
@@ -325,7 +340,17 @@
     "downloading": "Downloading: {{progress}}%",
     "ready": "Update ready",
     "downloadFailedStatus": "Download failed",
-    "clickToCheck": "Click to check for updates"
+    "clickToCheck": "Click to check for updates",
+    "downloadReady": "Update ready",
+    "downloadReadyTooltip": "Click to install update",
+    "newVersionFound": "New version found",
+    "newVersionReady": "New version v{{version}} is ready. Install now?",
+    "downloadFailedText": "Download failed",
+    "checkFailed": "Check failed",
+    "downloadFailedTooltip": "Click to retry",
+    "download": "Download",
+    "foundNewVersion": "New version available",
+    "downloadingTooltip": "Downloading..."
   },
   "recent": {
     "workspaceName": "Workspace",
@@ -349,6 +374,12 @@
     "repoUrlLabel": "Repository URL",
     "localPathLabel": "Local Path",
     "cloning": "Cloning...",
-    "cloneAndOpen": "Clone & Open"
+    "cloneAndOpen": "Clone & Open",
+    "workspace": "Workspace",
+    "folder": "Folder",
+    "title": "Recent",
+    "pathNotFound": "Path does not exist: {{path}}",
+    "enterRepoUrl": "Please enter a repository URL",
+    "selectLocalPath": "Please select a local path"
   }
 }
