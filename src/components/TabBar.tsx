@@ -208,13 +208,13 @@ function TabBar() {
 
   if (tabs.length === 0) {
     return (
-      <div className="h-10 flex items-center border-b border-[var(--border-color)] bg-[var(--tab-bg)]">
+      <div className="h-10 flex items-center bg-[var(--tab-bg)]">
       </div>
     )
   }
 
   return (
-    <div className="h-10 flex items-center border-b border-border bg-[var(--tab-bg)]">
+    <div className="h-10 flex items-center bg-[var(--tab-bg)]">
       {/* Left scroll button - only show when overflowing */}
       {isOverflowing && (
         <button
@@ -262,7 +262,7 @@ function TabBar() {
                     "transition-colors duration-75",
                     isActive
                       ? "bg-[var(--tab-active-bg)] text-[var(--text-primary)] shadow-[inset_0_1px_0_var(--tab-activeBorderTop)]"
-                      : "bg-transparent text-[var(--text-muted)] hover:bg-[var(--tab-hover-bg)] hover:text-[var(--text-secondary)]"
+                      : "border-b border-[var(--border-color)] bg-transparent text-[var(--text-muted)] hover:bg-[var(--tab-hover-bg)] hover:text-[var(--text-secondary)]"
                   )}
                 >
                   {/* Status dot - 编辑过才显示圆点 */}

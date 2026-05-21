@@ -9,6 +9,13 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+} from '@/components/ui/dropdown-menu'
 import { TitleBarRecentPopover } from './TitleBarRecentPopover'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
@@ -35,13 +42,13 @@ function TitleBar() {
     await getCurrentWindow().close()
   }
 
-  const cycleTheme = () => {
-    const themes: Array<'light' | 'dark'> = ['dark', 'light']
-    const currentIndex = themes.indexOf(theme as 'light' | 'dark')
-    setTheme(themes[(currentIndex + 1) % themes.length])
-  }
-
   const ThemeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor
+
+  const themeOptions = [
+    { value: 'system', label: t('titleBar.themeSystem'), icon: Monitor },
+    { value: 'light', label: t('titleBar.themeLight'), icon: Sun },
+    { value: 'dark', label: t('titleBar.themeDark'), icon: Moon },
+  ]
 
   return (
     <div data-tauri-drag-region className={cn(
@@ -79,20 +86,31 @@ function TitleBar() {
           <TooltipContent>AI Assistant</TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={cycleTheme}
-              className="h-full px-2 flex items-center justify-center cursor-pointer"
-              style={{ color: 'var(--text-muted)' }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
-            >
-              <ThemeIcon size={14} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{t('titleBar.themeSystem')}: {theme === 'light' ? t('titleBar.themeLight') : theme === 'dark' ? t('titleBar.themeDark') : t('titleBar.themeSystem')}</TooltipContent>
-        </Tooltip>
+        <DropdownMenu>
+          <Tooltip>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="h-full px-2 flex items-center justify-center cursor-pointer"
+                style={{ color: 'var(--text-muted)' }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+              >
+                <ThemeIcon size={14} />
+              </button>
+            </DropdownMenuTrigger>
+            <TooltipContent>{t('titleBar.themeSystem')}: {theme === 'light' ? t('titleBar.themeLight') : theme === 'dark' ? t('titleBar.themeDark') : t('titleBar.themeSystem')}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="min-w-[140px]">
+            <DropdownMenuRadioGroup value={theme} onValueChange={(v) => setTheme(v as typeof theme)}>
+              {themeOptions.map((option) => (
+                <DropdownMenuRadioItem key={option.value} value={option.value} className="cursor-pointer">
+                  <option.icon size={14} className="mr-2" />
+                  {option.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <div className="flex items-center h-full">
           <button
