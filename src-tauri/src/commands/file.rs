@@ -84,7 +84,8 @@ fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
 #[cfg(target_os = "linux")]
 fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
     use std::os::unix::ffi::OsStrExt;
-    let bytes = entry.file_name().as_os_str().as_bytes();
+    let file_name = entry.file_name();
+    let bytes = file_name.as_os_str().as_bytes();
     !bytes.is_empty() && bytes[0] == b'.'
 }
 

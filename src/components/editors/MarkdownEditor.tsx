@@ -33,7 +33,6 @@ function BlockNoteInner({
   blocks: PartialBlock[]
   onChange?: (content: string) => void
 }) {
-  const theme = useUIStore((state) => state.theme)
   const { tabs, activeTabId } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
@@ -201,7 +200,7 @@ function BlockNoteInner({
     onChange(md)
   }
 
-  const blocknoteTheme = theme === 'dark' ? 'dark' : 'light'
+  const blocknoteTheme = document.documentElement.classList.contains('dark') ? 'dark' : 'light'
 
   // Apply typography settings by injecting a style element into the container
   useEffect(() => {
