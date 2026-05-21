@@ -27,6 +27,7 @@ export interface FileTreeState {
   addRoots: (rootPaths: string[]) => Promise<void>
   removeRoot: (rootPath: string) => void
   refreshNode: (path: string) => Promise<void>
+  refreshExpanded: () => Promise<void>
   revealPath: (filePath: string, rootPath: string) => Promise<void>
   clearAll: () => void
   clearExpanded: () => void
@@ -54,8 +55,8 @@ function updateNodesWithChildren(list: FileNode[], path: string, children: FileN
 }
 
 function getFilterParams() {
-  const { hideGitIgnored, markdownOnly } = useUIStore.getState()
-  return { hideGitIgnored, markdownOnly }
+  const { showAllFiles, markdownOnly } = useUIStore.getState()
+  return { showAllFiles, markdownOnly }
 }
 
 export const useFileTreeStore = create<FileTreeState>((set, get) => ({
@@ -84,7 +85,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const node = findNodeInList(nodes, path)
     if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
       try {
-        const children = await loadDirectory(path, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
+        const children = await loadDirectory(path, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
         set({
           nodes: updateNodesWithChildren(nodes, path, children),
           expanded: newExpanded,
@@ -105,7 +106,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
     set({ isLoading: true })
     try {
-      const data = await loadDirectory(rootPath, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
+      const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
       const rootNode: FileNode = {
         id: 'root',
         name: rootPath.split('/').pop() || rootPath,
@@ -127,7 +128,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (existingNode) return
 
     try {
-      const data = await loadDirectory(rootPath, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
+      const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
       const newNode: FileNode = {
         id: `root-${rootPath}`,
         name: rootPath.split('/').pop() || rootPath,
@@ -156,7 +157,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       if (existingNode) continue
 
       try {
-        const data = await loadDirectory(rootPath, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
+        const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
         const newNode: FileNode = {
           id: `root-${rootPath}`,
           name: rootPath.split('/').pop() || rootPath,
@@ -196,11 +197,31 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (!node || !node.isDirectory) return
 
     try {
-      const children = await loadDirectory(path, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
+      const children = await loadDirectory(path, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
       set({ nodes: updateNodesWithChildren(nodes, path, children) })
     } catch (e) {
       console.error(e)
     }
+  },
+
+  refreshExpanded: async () => {
+    const { nodes, expanded } = get()
+    const filterParams = getFilterParams()
+    let currentNodes = nodes
+
+    for (const path of expanded) {
+      const node = findNodeInList(currentNodes, path)
+      if (!node || !node.isDirectory) continue
+
+      try {
+        const children = await loadDirectory(path, filterParams.showAllFiles, filterParams.markdownOnly)
+        currentNodes = updateNodesWithChildren(currentNodes, path, children)
+      } catch (e) {
+        console.error(e)
+      }
+    }
+
+    set({ nodes: currentNodes })
   },
 
   revealPath: async (filePath, rootPath) => {
@@ -228,7 +249,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       const node = findNodeInList(currentNodes, currentPath)
       if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
         try {
-          const children = await loadDirectory(currentPath, getFilterParams().hideGitIgnored, getFilterParams().markdownOnly)
+          const children = await loadDirectory(currentPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
           currentNodes = updateNodesWithChildren(currentNodes, currentPath, children)
         } catch (e) {
           console.error(e)

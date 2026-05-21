@@ -165,7 +165,7 @@ interface NewItemState {
 
 export function FileTreeView() {
   const { rootPath, addWorkspaceFolder, saveWorkspaceFile } = useWorkspaceStore()
-  const { workspaceMode, hideGitIgnored, markdownOnly } = useUIStore()
+  const { workspaceMode, showAllFiles, markdownOnly } = useUIStore()
   const { addTab, updateTabPath } = useEditorStore()
   const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, loadRoot, setNodes } = useFileTreeStore()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -284,12 +284,12 @@ export function FileTreeView() {
 
       // 刷新父节点
       if (parent) {
-        const children = await loadDirectory(parent.path, hideGitIgnored, markdownOnly)
+        const children = await loadDirectory(parent.path, showAllFiles, markdownOnly)
         const updatedNodes = updateNodesWithChildren(nodes, parent.path, children)
         setNodes(updatedNodes)
       } else {
         // 根节点重命名，刷新根
-        const children = await loadDirectory(rootPath || editingPath, hideGitIgnored, markdownOnly)
+        const children = await loadDirectory(rootPath || editingPath, showAllFiles, markdownOnly)
         const rootNode: FileNode = {
           id: 'root',
           name: rootPath?.split('/').pop() || rootPath || '',
@@ -351,7 +351,7 @@ export function FileTreeView() {
     try {
       const fullPath = newItem.parentPath + '/' + newItem.name.trim()
       await createFile(fullPath, newItem.type === 'folder')
-      const children = await loadDirectory(newItem.parentPath, hideGitIgnored, markdownOnly)
+      const children = await loadDirectory(newItem.parentPath, showAllFiles, markdownOnly)
       const updatedNodes = updateNodesWithChildren(nodes, newItem.parentPath, children)
       setNodes(updatedNodes)
     } catch (e) {

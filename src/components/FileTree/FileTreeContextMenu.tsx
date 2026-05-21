@@ -69,7 +69,7 @@ interface TreeNodeContextMenuProps {
 
 export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContextMenuProps) {
   const { rootPath, workspaceFolders } = useWorkspaceStore()
-  const { workspaceMode, hideGitIgnored, markdownOnly } = useUIStore()
+  const { workspaceMode, showAllFiles, markdownOnly } = useUIStore()
   const { addTab } = useEditorStore()
   const { nodes, setSelectedPath, toggleNode, setNodes, removeRoot } = useFileTreeStore()
   const { clipboardFiles, clipboardIsCut, setClipboardFiles, showToast } = useUIStore()
@@ -133,7 +133,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
       await invoke('git_init', { path: node.path })
       showToast(t('contextMenu.gitInitSuccess'))
       // Refresh the directory to show .git folder
-      const children = await loadDirectory(node.path, hideGitIgnored, markdownOnly)
+      const children = await loadDirectory(node.path, showAllFiles, markdownOnly)
       const updatedNodes = updateNodesWithChildren(nodes, node.path, children)
       setNodes(updatedNodes)
     } catch (e) {
@@ -196,7 +196,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
     }
 
     // 刷新目标目录
-    const children = await loadDirectory(node.path, hideGitIgnored, markdownOnly)
+    const children = await loadDirectory(node.path, showAllFiles, markdownOnly)
     const updatedNodes = updateNodesWithChildren(nodes, node.path, children)
     setNodes(updatedNodes)
 
@@ -214,7 +214,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
       // Refresh parent
       const parent = findNodeParent(node, nodes)
       if (parent) {
-        const children = await loadDirectory(parent.path, hideGitIgnored, markdownOnly)
+        const children = await loadDirectory(parent.path, showAllFiles, markdownOnly)
         const updatedNodes = updateNodesWithChildren(nodes, parent.path, children)
         setNodes(updatedNodes)
       }

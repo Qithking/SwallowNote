@@ -107,12 +107,12 @@ export async function pathExists(path: string): Promise<boolean> {
 
 export async function listDirectory(
   path: string,
-  hideGitIgnored?: boolean,
+  showAllFiles?: boolean,
   markdownOnly?: boolean,
 ): Promise<FileNode[]> {
   return await invoke('list_directory', {
     path,
-    hideGitIgnored: hideGitIgnored ?? false,
+    showAllFiles: showAllFiles ?? false,
     markdownOnly: markdownOnly ?? false,
   })
 }
@@ -273,7 +273,7 @@ export interface AppSettings {
   autoStart: string
   closeWithoutExit: string
   noteWidth: string
-  hideGitIgnored: string
+  showAllFiles: string
   markdownOnly: string
   customShortcuts: string
 }
@@ -287,7 +287,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     autoStart: get('autoStart', 'false'),
     closeWithoutExit: get('closeWithoutExit', 'false'),
     noteWidth: get('noteWidth', 'normal'),
-    hideGitIgnored: get('hideGitIgnored', 'false'),
+    showAllFiles: get('showAllFiles', 'false'),
     markdownOnly: get('markdownOnly', 'false'),
     customShortcuts: get('customShortcuts', '{}'),
   }

@@ -71,7 +71,7 @@ function SettingsView() {
     autoStart, setAutoStart,
     closeWithoutExit, setCloseWithoutExit,
     noteWidth, setNoteWidth,
-    hideGitIgnored, setHideGitIgnored,
+    showAllFiles, setShowAllFiles,
     markdownOnly, setMarkdownOnly,
   } = useUIStore()
 
@@ -200,8 +200,8 @@ function SettingsView() {
                     </SettingRow>
                   </div>                  
                   <div className="px-4">
-                    <SettingRow label={t('settings.general.hideGitIgnored')} desc={t('settings.general.hideGitIgnored.desc')}>
-                      <Switch checked={hideGitIgnored} onCheckedChange={setHideGitIgnored} />
+                    <SettingRow label={t('settings.general.showAllFiles')} desc={t('settings.general.showAllFiles.desc')}>
+                      <Switch checked={showAllFiles} onCheckedChange={setShowAllFiles} />
                     </SettingRow>
                   </div>
                   <div className="px-4">

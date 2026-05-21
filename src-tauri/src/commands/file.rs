@@ -63,14 +63,51 @@ pub async fn path_exists(path: String) -> bool {
     PathBuf::from(&path).exists()
 }
 
+#[cfg(target_os = "macos")]
+fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let file_name = entry.file_name();
+    let bytes = file_name.as_os_str().as_bytes();
+    if !bytes.is_empty() && bytes[0] == b'.' {
+        return true;
+    }
+    const UF_HIDDEN: u32 = 0x00008000;
+    if let Ok(metadata) = std::fs::metadata(entry.path()) {
+        use std::os::darwin::fs::MetadataExt;
+        if metadata.st_flags() & UF_HIDDEN != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "linux")]
+fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let bytes = entry.file_name().as_os_str().as_bytes();
+    !bytes.is_empty() && bytes[0] == b'.'
+}
+
+#[cfg(target_os = "windows")]
+fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x00000002;
+    if let Ok(metadata) = std::fs::metadata(entry.path()) {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0 {
+            return true;
+        }
+    }
+    false
+}
+
 #[tauri::command]
 pub async fn list_directory(
     path: String,
-    hide_git_ignored: Option<bool>,
+    show_all_files: Option<bool>,
     markdown_only: Option<bool>,
 ) -> Result<Vec<FileNode>, String> {
     let path = PathBuf::from(&path);
-    let hide_git_ignored = hide_git_ignored.unwrap_or(false);
+    let show_all_files = show_all_files.unwrap_or(false);
     let markdown_only = markdown_only.unwrap_or(false);
 
     if !path.exists() {
@@ -80,12 +117,6 @@ pub async fn list_directory(
     if !path.is_dir() {
         return Err(format!("Path is not a directory: {}", path.display()));
     }
-
-    let gitignore_set = if hide_git_ignored {
-        build_gitignore(&path)
-    } else {
-        None
-    };
 
     let mut entries = tokio::fs::read_dir(&path)
         .await
@@ -100,28 +131,18 @@ pub async fn list_directory(
     {
         let file_name = entry.file_name().to_string_lossy().to_string();
 
-        // Skip hidden files and directories (except .git)
-        if file_name.starts_with('.') && file_name != ".git" {
-            continue;
-        }
-
-        // Skip node_modules and other common ignore patterns
-        if file_name == "node_modules" || file_name == ".swallownote" {
-            continue;
+        if !show_all_files {
+            if is_hidden(&entry) {
+                continue;
+            }
+            if file_name == "node_modules" || file_name == ".swallownote" {
+                continue;
+            }
         }
 
         let entry_path = entry.path();
         let is_directory = entry_path.is_dir();
 
-        // Filter by .gitignore
-        if let Some(ref gitignore) = gitignore_set {
-            let relative = entry_path.strip_prefix(&path).unwrap_or(&entry_path);
-            if gitignore.matched(relative, is_directory).is_ignore() {
-                continue;
-            }
-        }
-
-        // Filter non-markdown files (keep directories)
         if markdown_only && !is_directory {
             let lower_name = file_name.to_lowercase();
             if !lower_name.ends_with(".md") && !lower_name.ends_with(".markdown") {
@@ -138,7 +159,6 @@ pub async fn list_directory(
         });
     }
 
-    // Sort: directories first, then alphabetically
     nodes.sort_by(|a, b| {
         match (a.is_directory, b.is_directory) {
             (true, false) => std::cmp::Ordering::Less,
@@ -148,25 +168,6 @@ pub async fn list_directory(
     });
 
     Ok(nodes)
-}
-
-fn build_gitignore(dir: &Path) -> Option<ignore::gitignore::Gitignore> {
-    let mut builder = ignore::gitignore::GitignoreBuilder::new(dir);
-    let gitignore_path = dir.join(".gitignore");
-    if gitignore_path.exists() {
-        if builder.add(&gitignore_path).is_none() {
-            return None;
-        }
-    }
-    let mut current = dir.parent();
-    while let Some(parent) = current {
-        let parent_gitignore: PathBuf = parent.join(".gitignore");
-        if parent_gitignore.exists() {
-            builder.add(&parent_gitignore);
-        }
-        current = parent.parent();
-    }
-    builder.build().ok()
 }
 
 #[tauri::command]
@@ -465,7 +466,6 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, String> {
-    use ignore::WalkBuilder;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::io::BufRead;
@@ -476,7 +476,6 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
         return Err(format!("Invalid root path: {}", root.display()));
     }
 
-    // Build regex pattern with options
     let pattern_str = if req.use_regex {
         req.query.clone()
     } else if req.whole_word {
@@ -485,95 +484,84 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
         req.query.clone()
     };
 
-    // Create regex matcher
     let regex = regex::Regex::new(&pattern_str)
         .map_err(|e| format!("Invalid pattern: {}", e))?;
 
-    // Thread-safe results storage
     let file_matches: Arc<Mutex<std::collections::HashMap<String, Vec<LineMatch>>>> = 
         Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-    // Build walker respecting .gitignore
-    let walker = WalkBuilder::new(&root)
-        .hidden(true)
-        .ignore(true)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .filter_entry(|entry| {
-            let path = entry.path();
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            !matches!(name, "node_modules" | "target" | "dist" | "build" | ".swallownote" | "__pycache__" | ".next" | ".nuxt")
-        })
-        .build();
-
-    for result in walker {
-        match result {
-            Ok(entry) => {
-                let path = entry.path();
-                if path.is_dir() {
+    fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy();
+                if name.starts_with('.') {
                     continue;
                 }
-
-                // Skip binary files by extension
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    let ext_lower = ext.to_lowercase();
-                    if matches!(ext_lower.as_str(),
-                        "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp"
-                        | "pdf" | "zip" | "tar" | "gz" | "rar" | "7z"
-                        | "exe" | "dll" | "so" | "dylib" | "a" | "o" | "obj"
-                        | "woff" | "woff2" | "ttf" | "eot" | "otf"
-                        | "mp3" | "mp4" | "wav" | "avi" | "mov" | "webm"
-                        | "wasm" | "pyc" | "class"
-                    ) {
-                        continue;
-                    }
+                if matches!(name.as_ref(), "node_modules" | "target" | "dist" | "build" | ".swallownote" | "__pycache__" | ".next" | ".nuxt") {
+                    continue;
                 }
-
-                // Read file and search using grep (SIMD accelerated)
-                let path_str = path.to_string_lossy().to_string();
-                
-                if let Ok(file) = std::fs::File::open(path) {
-                    let reader = BufReader::new(file);
-                    let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
-                    
-                    // Search each line using regex (SIMD accelerated via regex crate)
-                    let mut line_matches: Vec<LineMatch> = Vec::new();
-                    let case_insensitive = !req.case_sensitive;
-                    
-                    for (idx, line) in lines.iter().enumerate() {
-                        // Use regex for all searches (regex crate uses SIMD internally)
-                        for mat in regex.find_iter(line) {
-                            line_matches.push(LineMatch {
-                                line_number: idx + 1,
-                                content: line.clone(),
-                                start_col: mat.start(),
-                                end_col: mat.end(),
-                            });
-                        }
-                    }
-
-                    if !line_matches.is_empty() {
-                        let mut matches_map = file_matches.lock().unwrap();
-                        // Deduplicate by line number
-                        let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();
-                        for m in line_matches {
-                            line_map.entry(m.line_number).or_insert(m);
-                        }
-                        let unique: Vec<LineMatch> = line_map.into_values().collect();
-                        if !unique.is_empty() {
-                            matches_map.insert(path_str, unique);
-                        }
-                    }
+                let path = entry.path();
+                if path.is_dir() {
+                    collect_files(&path, files);
+                } else {
+                    files.push(path);
                 }
-            }
-            Err(e) => {
-                eprintln!("Walk error: {}", e);
             }
         }
     }
 
-    // Convert to result format
+    let mut all_files = Vec::new();
+    collect_files(&root, &mut all_files);
+
+    for path in all_files {
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            let ext_lower = ext.to_lowercase();
+            if matches!(ext_lower.as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp"
+                | "pdf" | "zip" | "tar" | "gz" | "rar" | "7z"
+                | "exe" | "dll" | "so" | "dylib" | "a" | "o" | "obj"
+                | "woff" | "woff2" | "ttf" | "eot" | "otf"
+                | "mp3" | "mp4" | "wav" | "avi" | "mov" | "webm"
+                | "wasm" | "pyc" | "class"
+            ) {
+                continue;
+            }
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+        
+        if let Ok(file) = std::fs::File::open(&path) {
+            let reader = BufReader::new(file);
+            let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+            
+            let mut line_matches: Vec<LineMatch> = Vec::new();
+            
+            for (idx, line) in lines.iter().enumerate() {
+                for mat in regex.find_iter(line) {
+                    line_matches.push(LineMatch {
+                        line_number: idx + 1,
+                        content: line.clone(),
+                        start_col: mat.start(),
+                        end_col: mat.end(),
+                    });
+                }
+            }
+
+            if !line_matches.is_empty() {
+                let mut matches_map = file_matches.lock().unwrap();
+                let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();
+                for m in line_matches {
+                    line_map.entry(m.line_number).or_insert(m);
+                }
+                let unique: Vec<LineMatch> = line_map.into_values().collect();
+                if !unique.is_empty() {
+                    matches_map.insert(path_str, unique);
+                }
+            }
+        }
+    }
+
     let matches_map = file_matches.lock().unwrap();
     let results: Vec<SearchResult> = matches_map.iter()
         .map(|(path, line_matches)| {

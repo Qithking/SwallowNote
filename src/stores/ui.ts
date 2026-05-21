@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { toast } from 'sonner'
 import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
+import { useFileTreeStore } from './filetree'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
@@ -33,7 +34,7 @@ export interface UIState {
   autoStart: boolean
   closeWithoutExit: boolean
   noteWidth: NoteWidth
-  hideGitIgnored: boolean
+  showAllFiles: boolean
   markdownOnly: boolean
   customShortcuts: Record<string, string>
   setTheme: (theme: Theme) => void
@@ -58,7 +59,7 @@ export interface UIState {
   setAutoStart: (value: boolean) => void
   setCloseWithoutExit: (value: boolean) => void
   setNoteWidth: (width: NoteWidth) => void
-  setHideGitIgnored: (value: boolean) => void
+  setShowAllFiles: (value: boolean) => void
   setMarkdownOnly: (value: boolean) => void
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
@@ -86,7 +87,7 @@ export const useUIStore = create<UIState>((set) => ({
   autoStart: false,
   closeWithoutExit: false,
   noteWidth: 'normal',
-  hideGitIgnored: false,
+  showAllFiles: false,
   markdownOnly: false,
   customShortcuts: {},
   setTheme: (theme) => {
@@ -154,13 +155,15 @@ export const useUIStore = create<UIState>((set) => ({
     set({ noteWidth: width })
     saveAppSettings({ noteWidth: width })
   },
-  setHideGitIgnored: (value) => {
-    set({ hideGitIgnored: value })
-    saveAppSettings({ hideGitIgnored: String(value) })
+  setShowAllFiles: (value) => {
+    set({ showAllFiles: value })
+    saveAppSettings({ showAllFiles: String(value) })
+    useFileTreeStore.getState().refreshExpanded()
   },
   setMarkdownOnly: (value) => {
     set({ markdownOnly: value })
     saveAppSettings({ markdownOnly: String(value) })
+    useFileTreeStore.getState().refreshExpanded()
   },
   setShortcut: (key, value) => {
     set((state) => ({
@@ -200,7 +203,7 @@ export const useUIStore = create<UIState>((set) => ({
         autoStart: s.autoStart === 'true',
         closeWithoutExit: s.closeWithoutExit === 'true',
         noteWidth: s.noteWidth as NoteWidth,
-        hideGitIgnored: s.hideGitIgnored === 'true',
+        showAllFiles: s.showAllFiles === 'true',
         markdownOnly: s.markdownOnly === 'true',
         customShortcuts,
       })

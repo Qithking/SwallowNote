@@ -59,8 +59,8 @@ async function handleNewFile() {
 
   try {
     await createFile(fullPath, false)
-    const { hideGitIgnored, markdownOnly } = useUIStore.getState()
-    const newChildren = await loadDirectory(targetDir, hideGitIgnored, markdownOnly)
+    const { showAllFiles, markdownOnly } = useUIStore.getState()
+    const newChildren = await loadDirectory(targetDir, showAllFiles, markdownOnly)
     useFileTreeStore.getState().setNodes(
       updateNodesWithChildrenInList(nodes, targetDir, newChildren)
     )
@@ -92,8 +92,8 @@ async function handleNewFolder() {
 
   try {
     await createFile(fullPath, true)
-    const { hideGitIgnored, markdownOnly } = useUIStore.getState()
-    const newChildren = await loadDirectory(targetDir, hideGitIgnored, markdownOnly)
+    const { showAllFiles, markdownOnly } = useUIStore.getState()
+    const newChildren = await loadDirectory(targetDir, showAllFiles, markdownOnly)
     useFileTreeStore.getState().setNodes(
       updateNodesWithChildrenInList(nodes, targetDir, newChildren)
     )
