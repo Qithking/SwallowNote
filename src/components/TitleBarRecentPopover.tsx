@@ -12,6 +12,7 @@ import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory
 import { useState, useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 interface RecentItem {
   path: string
@@ -280,32 +281,38 @@ export function TitleBarRecentPopover() {
               recentItems.map((item) => {
                 const { initial, color } = getInitialAndColor(item.path)
                 const displayName = item.name.replace('.swallow-workspace', '')
-                const dirPath = item.path.split('/').slice(0, -1).join('/')
                 const isCurrent = isCurrentItem(item.path)
                 return (
                   <div
                     key={item.path}
-                    className="w-full flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-[var(--bg-hover)]"
+                    className="w-full flex items-start gap-2 px-3 py-1.5 cursor-pointer hover:bg-[var(--bg-hover)] group"
                     onClick={() => !isCurrent && handleItemClick(item)}
                   >
                     <div className={`w-5 h-5 rounded flex items-center justify-center text-white text-xs font-medium shrink-0 mt-0.5 ${color}`}>
                       {initial}
                     </div>
-                    <div className="flex-1 min-w-0 text-left">
-                      <div className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
-                        {displayName}
-                      </div>
-                      <div className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
-                        {dirPath}
-                      </div>
-                    </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex-1 min-w-0 text-left">
+                          <div className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+                            {displayName}
+                          </div>
+                          <div className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
+                            {item.path}
+                          </div>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[400px] break-all">
+                        {item.path}
+                      </TooltipContent>
+                    </Tooltip>
                     {isCurrent ? (
                       <Check size={14} className="text-green-500 shrink-0 mt-1" />
                     ) : (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
-                            className="shrink-0 mt-0.5 p-0.5 rounded hover:bg-[var(--bg-hover)]"
+                            className="shrink-0 mt-0.5 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <MoreHorizontal size={14} style={{ color: 'var(--text-muted)' }} />
