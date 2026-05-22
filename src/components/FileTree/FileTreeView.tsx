@@ -292,7 +292,7 @@ export function FileTreeView() {
         const children = await loadDirectory(rootPath || editingPath, showAllFiles, markdownOnly)
         const rootNode: FileNode = {
           id: 'root',
-          name: rootPath?.split('/').pop() || rootPath || '',
+          name: rootPath?.split(/[\\/]/).pop() || rootPath || '',
           path: rootPath || '',
           isDirectory: true,
           children,

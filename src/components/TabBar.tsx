@@ -32,8 +32,17 @@ function TabBar() {
   const moreMenuRef = useRef<HTMLDivElement>(null)
 
   const getRelativePath = (path: string): string => {
-    if (!rootPath) return path
-    return path.substring(rootPath.length + 1)
+    if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
+      for (const folder of workspaceFolders) {
+        if (path === folder || path.startsWith(folder + '/')) {
+          return path.substring(folder.length + 1)
+        }
+      }
+    }
+    if (rootPath && path.startsWith(rootPath)) {
+      return path.substring(rootPath.length + 1)
+    }
+    return path
   }
 
   const handleClose = (tab: EditorTab) => {

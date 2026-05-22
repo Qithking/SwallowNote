@@ -20,7 +20,7 @@ interface RecentItem {
 }
 
 function getInitialAndColor(path: string): { initial: string; color: string } {
-  const name = path.split('/').pop() || path
+  const name = path.split(/[\\/]/).pop() || path
   const displayName = name.replace('.swallow-workspace', '')
   const initial = displayName.charAt(0).toUpperCase()
   const colors = [
@@ -48,10 +48,10 @@ export function TitleBarRecentPopover() {
 
   const displayName = (() => {
     if (workspaceMode === 'workspace' && currentWorkspacePath) {
-      return currentWorkspacePath.split('/').pop()?.replace('.swallow-workspace', '') || t('recent.workspace')
+      return currentWorkspacePath.split(/[\\/]/).pop()?.replace('.swallow-workspace', '') || t('recent.workspace')
     }
     if (workspaceMode === 'folder' && rootPath) {
-      return rootPath.split('/').pop() || t('recent.folder')
+      return rootPath.split(/[\\/]/).pop() || t('recent.folder')
     }
     return t('recent.title')
   })()
@@ -67,7 +67,7 @@ export function TitleBarRecentPopover() {
       })
       const items: RecentItem[] = filtered.map(path => ({
         path,
-        name: path.split('/').pop() || path,
+        name: path.split(/[\\/]/).pop() || path,
         isWorkspace: path.endsWith('.swallow-workspace'),
       }))
       setRecentItems(items)

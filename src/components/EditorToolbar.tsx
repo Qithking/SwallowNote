@@ -12,7 +12,8 @@ import { useTranslation } from 'react-i18next'
 function EditorToolbar() {
   const { tabs, activeTabId, toggleViewMode } = useEditorStore()
   const { rightPanelType, setRightPanelType, noteWidth } = useUIStore()
-  const { rootPath } = useWorkspaceStore()
+  const { rootPath, workspaceFolders } = useWorkspaceStore()
+  const { workspaceMode } = useUIStore()
   const { normalPaddingVertical, normalPaddingHorizontal, widePaddingVertical, widePaddingHorizontal } = useEditorSettingsStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
@@ -32,9 +33,17 @@ function EditorToolbar() {
 
   // Get path relative to workspace root directory, starting with /rootDir/
   const getRelativePath = (absolutePath: string): string => {
-    if (!rootPath) return absolutePath
-    if (absolutePath.startsWith(rootPath)) {
-      const rootDirName = rootPath.split('/').pop() || ''
+    if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
+      for (const folder of workspaceFolders) {
+        if (absolutePath === folder || absolutePath.startsWith(folder + '/')) {
+          const folderName = folder.split(/[\\/]/).pop() || ''
+          const relativePart = absolutePath.substring(folder.length + 1)
+          return relativePart ? `${folderName}/${relativePart}` : folderName
+        }
+      }
+    }
+    if (rootPath && absolutePath.startsWith(rootPath)) {
+      const rootDirName = rootPath.split(/[\\/]/).pop() || ''
       const relativePart = absolutePath.substring(rootPath.length + 1)
       return `${rootDirName}/${relativePart}`
     }

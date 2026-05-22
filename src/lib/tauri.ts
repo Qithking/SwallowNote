@@ -6,6 +6,16 @@ import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { platform } from '@tauri-apps/plugin-os'
 
+/**
+ * Normalize path separators to forward slashes for cross-platform consistency.
+ * On Windows, Tauri dialogs return paths with backslashes, but the backend
+ * normalizes all paths to forward slashes. This ensures consistency.
+ */
+function normalizePath(path: string | null): string | null {
+  if (!path) return null
+  return path.replace(/\\/g, '/')
+}
+
 // Types matching Rust backend
 export interface FileNode {
   id: string
@@ -63,7 +73,7 @@ export async function openFolderDialog(): Promise<string | null> {
     directory: true,
     multiple: false,
   })
-  return selected as string | null
+  return normalizePath(selected as string | null)
 }
 
 export async function openFileDialog(): Promise<string | null> {
@@ -75,7 +85,7 @@ export async function openFileDialog(): Promise<string | null> {
       { name: 'All Files', extensions: ['*'] },
     ],
   })
-  return selected as string | null
+  return normalizePath(selected as string | null)
 }
 
 export async function saveFileDialog(defaultPath?: string): Promise<string | null> {
@@ -86,7 +96,7 @@ export async function saveFileDialog(defaultPath?: string): Promise<string | nul
       { name: 'All Files', extensions: ['*'] },
     ],
   })
-  return selected
+  return normalizePath(selected)
 }
 
 export async function saveWorkspaceFileDialog(defaultPath?: string): Promise<string | null> {
@@ -97,7 +107,7 @@ export async function saveWorkspaceFileDialog(defaultPath?: string): Promise<str
       { name: 'All Files', extensions: ['*'] },
     ],
   })
-  return selected
+  return normalizePath(selected)
 }
 
 // File System APIs (using Tauri commands)
@@ -323,7 +333,7 @@ export async function openWorkspaceDialog(): Promise<string | null> {
       { name: 'All Files', extensions: ['*'] },
     ],
   })
-  return selected as string | null
+  return normalizePath(selected as string | null)
 }
 
 export async function checkLatestVersion(): Promise<{ latest: string; current: string; hasUpdate: boolean } | null> {

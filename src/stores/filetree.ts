@@ -109,7 +109,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
       const rootNode: FileNode = {
         id: 'root',
-        name: rootPath.split('/').pop() || rootPath,
+        name: rootPath.split(/[\\/]/).pop() || rootPath,
         path: rootPath,
         isDirectory: true,
         children: data,
@@ -131,7 +131,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
       const newNode: FileNode = {
         id: `root-${rootPath}`,
-        name: rootPath.split('/').pop() || rootPath,
+        name: rootPath.split(/[\\/]/).pop() || rootPath,
         path: rootPath,
         isDirectory: true,
         children: data,
@@ -160,7 +160,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
         const newNode: FileNode = {
           id: `root-${rootPath}`,
-          name: rootPath.split('/').pop() || rootPath,
+          name: rootPath.split(/[\\/]/).pop() || rootPath,
           path: rootPath,
           isDirectory: true,
           children: data,

@@ -131,7 +131,7 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
     }
 
     let _ = app.emit("download-complete", DownloadComplete {
-        path: file_path.to_string_lossy().to_string(),
+        path: file_path.to_string_lossy().to_string().replace('\\', "/"),
     });
 
     Ok(())
@@ -180,6 +180,6 @@ pub fn get_platform_extension() -> String {
 #[tauri::command]
 pub fn get_download_dir() -> String {
     dirs::download_dir()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
         .unwrap_or_else(|| ".".to_string())
 }

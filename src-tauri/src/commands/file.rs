@@ -151,10 +151,12 @@ pub async fn list_directory(
             }
         }
 
+        // Normalize path separators to forward slashes for cross-platform consistency
+        let path_str = entry_path.to_string_lossy().to_string().replace('\\', "/");
         nodes.push(FileNode {
             id: Uuid::new_v4().to_string(),
             name: file_name,
-            path: entry_path.to_string_lossy().to_string(),
+            path: path_str,
             is_directory,
             children: None,
         });
@@ -237,7 +239,7 @@ pub async fn create_file(req: CreateFileRequest) -> Result<String, String> {
             .map_err(|e| format!("Failed to create file: {}", e))?;
     }
 
-    Ok(path.to_string_lossy().to_string())
+    Ok(path.to_string_lossy().to_string().replace('\\', "/"))
 }
 
 #[tauri::command]
@@ -530,7 +532,7 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
             }
         }
 
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = path.to_string_lossy().to_string().replace('\\', "/");
         
         if let Ok(file) = std::fs::File::open(&path) {
             let reader = BufReader::new(file);

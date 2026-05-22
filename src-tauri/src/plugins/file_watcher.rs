@@ -51,7 +51,7 @@ pub fn start_watching<R: Runtime>(
                 Ok(events) => {
                     for event in events {
                         for path in event.paths {
-                            let path_str = path.to_string_lossy().to_string();
+                            let path_str = path.to_string_lossy().to_string().replace('\\', "/");
                             match event.kind {
                                 notify::EventKind::Modify(_) => {
                                     emit_event(&app_clone, "modified", &path_str);

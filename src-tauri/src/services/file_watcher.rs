@@ -46,7 +46,7 @@ pub fn init_watcher(app_handle: AppHandle) {
                         };
 
                         for path in &event.paths {
-                            let path_str = path.to_string_lossy().to_string();
+                            let path_str = path.to_string_lossy().to_string().replace('\\', "/");
                             let _ = app_handle_clone.emit(
                                 "file-watcher-event",
                                 serde_json::json!({

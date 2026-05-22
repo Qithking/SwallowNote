@@ -53,7 +53,7 @@ function getRelativePath(rootPath: string, fullPath: string): string {
 }
 
 function getFileName(path: string): string {
-  return path.split('/').pop() || path
+  return path.split(/[\\/]/).pop() || path
 }
 
 function getDestinationPath(targetDir: string, sourcePath: string): string {

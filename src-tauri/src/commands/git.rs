@@ -455,7 +455,7 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_pat
             .unwrap_or("unknown")
             .to_string();
         
-        let path_str = dir.to_string_lossy().to_string();
+        let path_str = dir.to_string_lossy().to_string().replace('\\', "/");
         
         // Check if .git is a file (indicating a submodule)
         let is_submodule = git_dir.is_file();
@@ -493,7 +493,7 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_pat
                             .unwrap_or("unknown")
                             .to_string();
                         
-                        let submodule_path_str = submodule_full_path.to_string_lossy().to_string();
+                        let submodule_path_str = submodule_full_path.to_string_lossy().to_string().replace('\\', "/");
                         let submodule_remote = get_remote_url(&submodule_path_str).ok();
                         let submodule_branch = get_branch(&submodule_path_str).unwrap_or_else(|_| "unknown".to_string());
                         let (submodule_has_changes, submodule_change_count) = get_uncommitted_count(&submodule_path_str);
@@ -653,7 +653,7 @@ pub async fn git_clone(app: AppHandle, url: String, local_path: String) -> Resul
             "status": "completed",
             "message": "克隆完成"
         }));
-        Ok(local_path)
+        Ok(local_path.replace('\\', "/"))
     } else {
         let _ = app.emit("git-clone-progress", serde_json::json!({
             "status": "error",

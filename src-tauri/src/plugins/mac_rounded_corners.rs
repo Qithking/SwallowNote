@@ -227,24 +227,29 @@ pub fn reposition_traffic_lights<R: Runtime>(
 /// Set Dock icon visibility on macOS
 /// When visible=true: NSApplicationActivationPolicyRegular (shows in Dock)
 /// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
+#[cfg(target_os = "macos")]
+unsafe fn set_dock_icon_visibility_impl(visible: bool) -> Result<(), String> {
+    let ns_app_class = objc::runtime::Class::get("NSApplication")
+        .ok_or_else(|| "NSApplication class not found".to_string())?;
+    let app: id = msg_send![ns_app_class, sharedApplication];
+    if app.is_null() {
+        return Err("sharedApplication returned nil".to_string());
+    }
+    let policy: i64 = if visible { 0 } else { 1 };
+    let _: () = msg_send![app, setActivationPolicy: policy];
+    if visible {
+        let current_icon: id = msg_send![app, applicationIconImage];
+        let _: () = msg_send![app, setApplicationIconImage: current_icon];
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        let result = std::panic::catch_unwind(|| unsafe {
-            let ns_app_class = objc::runtime::Class::get("NSApplication")
-                .ok_or_else(|| "NSApplication class not found".to_string())?;
-            let app: id = msg_send![ns_app_class, sharedApplication];
-            if app.is_null() {
-                return Err("sharedApplication returned nil".to_string());
-            }
-            let policy: i64 = if visible { 0 } else { 1 };
-            let _: () = msg_send![app, setActivationPolicy: policy];
-            if visible {
-                let current_icon: id = msg_send![app, applicationIconImage];
-                let _: () = msg_send![app, setApplicationIconImage: current_icon];
-            }
-            Ok::<(), String>(())
+        let result = std::panic::catch_unwind(|| {
+            unsafe { set_dock_icon_visibility_impl(visible) }
         });
         match result {
             Ok(Ok(())) => {}
