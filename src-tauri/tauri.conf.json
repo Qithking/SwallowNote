@@ -39,6 +39,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [
+      "icons/tray-icon.png"
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser"

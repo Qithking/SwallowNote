@@ -7,7 +7,9 @@ mod services;
 use plugins::mac_rounded_corners;
 use db::Database;
 use tauri::{
+    image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
+    path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, RunEvent,
 };
@@ -23,21 +25,44 @@ fn greet(name: &str) -> String {
 /// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
 #[tauri::command]
 fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let result = std::panic::catch_unwind(|| {
-            unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(visible) }
-        });
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err("panic in set_dock_icon_visibility".to_string()),
-        }
-    }
+    set_dock_icon_visibility_inner(visible)
+}
 
-    #[cfg(not(target_os = "macos"))]
-    let _ = visible;
+/// Inner implementation for setting Dock icon visibility
+#[cfg(target_os = "macos")]
+fn set_dock_icon_visibility_inner(visible: bool) -> Result<(), String> {
+    use objc::{msg_send, sel, sel_impl, runtime::Class};
+    let result = std::panic::catch_unwind(|| unsafe {
+        let ns_app_class = Class::get("NSApplication")
+            .ok_or_else(|| "NSApplication class not found".to_string())?;
+        let app: cocoa::base::id = msg_send![ns_app_class, sharedApplication];
+        if app.is_null() {
+            return Err("sharedApplication returned nil".to_string());
+        }
+        let policy: i64 = if visible { 0 } else { 1 };
+        let _: () = msg_send![app, setActivationPolicy: policy];
+        if visible {
+            let current_icon: cocoa::base::id = msg_send![app, applicationIconImage];
+            let _: () = msg_send![app, setApplicationIconImage: current_icon];
+        }
+        Ok(())
+    });
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err("panic in set_dock_icon_visibility".to_string()),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_dock_icon_visibility_inner(_visible: bool) -> Result<(), String> {
     Ok(())
+}
+
+/// Show Dock icon on macOS - used by tray menu/tray icon click
+/// This function is a no-op on non-macOS platforms
+fn show_dock_icon() {
+    let _ = set_dock_icon_visibility_inner(true);
 }
 
 pub fn run() {
@@ -122,8 +147,14 @@ pub fn run() {
                 .item(&quit_item)
                 .build()?;
 
+            let tray_icon = if let Ok(tray_icon_path) = app.path().resolve("icons/tray-icon.png", BaseDirectory::Resource) {
+                Image::from_path(&tray_icon_path).unwrap_or_else(|_| app.default_window_icon().unwrap().clone())
+            } else {
+                app.default_window_icon().unwrap().clone()
+            };
+
             let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
                 .tooltip("SwallowNote")
                 .menu(&menu)
                 .on_menu_event(move |app: &AppHandle, event| match event.id().as_ref() {
@@ -132,8 +163,7 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
-                        #[cfg(target_os = "macos")]
-                        let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
+                        show_dock_icon();
                     }
                     "quit" => {
                         app.exit(0);
@@ -152,8 +182,7 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
-                        #[cfg(target_os = "macos")]
-                        let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
+                        show_dock_icon();
                     }
                 })
                 .build(app)?;

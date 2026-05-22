@@ -224,9 +224,8 @@ pub fn reposition_traffic_lights<R: Runtime>(
     }
 }
 
-/// Set Dock icon visibility on macOS
-/// When visible=true: NSApplicationActivationPolicyRegular (shows in Dock)
-/// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
+/// Set Dock icon visibility - now implemented in lib.rs via set_dock_icon_visibility_inner
+/// These stubs are kept for backwards compatibility but are no longer called from lib.rs
 #[cfg(target_os = "macos")]
 pub unsafe fn set_dock_icon_visibility_impl(visible: bool) -> Result<(), String> {
     let ns_app_class = objc::runtime::Class::get("NSApplication")
