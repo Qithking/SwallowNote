@@ -79,6 +79,8 @@ pub fn run() {
             commands::file::list_directory,
             commands::file::read_file,
             commands::file::write_file,
+            commands::file::write_binary_file,
+            commands::file::get_home_dir,
             commands::file::create_file,
             commands::file::delete_file,
             commands::file::rename_file,

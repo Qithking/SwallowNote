@@ -63,6 +63,13 @@ pub async fn path_exists(path: String) -> bool {
     PathBuf::from(&path).exists()
 }
 
+#[tauri::command]
+pub async fn get_home_dir() -> Result<String, String> {
+    dirs::home_dir()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .ok_or_else(|| "Failed to get home directory".to_string())
+}
+
 #[cfg(target_os = "macos")]
 fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -210,6 +217,28 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
     tokio::fs::rename(&temp_path, &path)
         .await
         .map_err(|e| format!("Failed to rename temporary file: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn write_binary_file(path: String, data: String) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    let path = PathBuf::from(&path);
+
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Failed to create parent directory: {}", e))?;
+    }
+
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|e| format!("Failed to write binary file: {}", e))?;
 
     Ok(())
 }

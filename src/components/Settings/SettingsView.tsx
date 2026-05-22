@@ -27,6 +27,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { setAppLocale } from '@/lib/tauri'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { ShortcutRecorder } from './ShortcutRecorder'
 import {
@@ -66,6 +67,7 @@ function SettingsView() {
     showAllFiles, setShowAllFiles,
     markdownOnly, setMarkdownOnly,
     syncInterval, setSyncInterval,
+    uploadPath, setUploadPath,
     customThemes, activeLightCustomThemeId, activeDarkCustomThemeId,
     setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
   } = useUIStore()
@@ -225,6 +227,16 @@ function SettingsView() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </SettingRow>
+                  </div>
+                  <div className="px-4">
+                    <SettingRow label={t('settings.sync.uploadPath')} desc={t('settings.sync.uploadPath.desc')}>
+                      <Input
+                        className="w-[220px]"
+                        placeholder={t('settings.sync.uploadPath.placeholder')}
+                        value={uploadPath}
+                        onChange={(e) => setUploadPath(e.target.value)}
+                      />
                     </SettingRow>
                   </div>
                 </CardContent>

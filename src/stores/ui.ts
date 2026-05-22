@@ -100,6 +100,7 @@ export interface UIState {
   markdownOnly: boolean
   customShortcuts: Record<string, string>
   syncInterval: number
+  uploadPath: string
   customThemes: CustomTheme[]
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
@@ -128,6 +129,7 @@ export interface UIState {
   setShowAllFiles: (value: boolean) => void
   setMarkdownOnly: (value: boolean) => void
   setSyncInterval: (interval: number) => void
+  setUploadPath: (path: string) => void
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
   resetAllShortcuts: () => void
@@ -163,6 +165,7 @@ export const useUIStore = create<UIState>((set) => ({
   markdownOnly: false,
   customShortcuts: {},
   syncInterval: 10,
+  uploadPath: '',
   customThemes: [...BUILT_IN_THEMES],
   activeLightCustomThemeId: 'builtin-light',
   activeDarkCustomThemeId: 'builtin-dark',
@@ -244,6 +247,10 @@ export const useUIStore = create<UIState>((set) => ({
   setSyncInterval: (interval: number) => {
     set({ syncInterval: interval })
     saveAppSettings({ syncInterval: String(interval) })
+  },
+  setUploadPath: (path: string) => {
+    set({ uploadPath: path })
+    saveAppSettings({ uploadPath: path })
   },
   setShortcut: (key, value) => {
     set((state) => ({
@@ -356,6 +363,7 @@ export const useUIStore = create<UIState>((set) => ({
         markdownOnly: s.markdownOnly === 'true',
         customShortcuts,
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
+        uploadPath: s.uploadPath || '',
         customThemes,
         activeLightCustomThemeId: s.activeLightCustomThemeId || 'builtin-light',
         activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',

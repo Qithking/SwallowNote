@@ -135,6 +135,14 @@ export async function writeFile(path: string, content: string): Promise<void> {
   await invoke('write_file', { path, content })
 }
 
+export async function writeBinaryFile(path: string, data: string): Promise<void> {
+  await invoke('write_binary_file', { path, data })
+}
+
+export async function getHomeDir(): Promise<string> {
+  return await invoke('get_home_dir')
+}
+
 export async function createFile(path: string, isDirectory: boolean): Promise<string> {
   const req: CreateFileRequest = { path, is_directory: isDirectory }
   return await invoke('create_file', { req })
@@ -308,6 +316,7 @@ export interface AppSettings {
   customThemes: string
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
+  uploadPath: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -326,6 +335,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     customThemes: get('customThemes', '[]'),
     activeLightCustomThemeId: get('activeLightCustomThemeId', 'builtin-light'),
     activeDarkCustomThemeId: get('activeDarkCustomThemeId', 'builtin-dark'),
+    uploadPath: get('uploadPath', ''),
   }
 }
 

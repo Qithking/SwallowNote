@@ -9,10 +9,12 @@ import { BlockNoteEditor, PartialBlock, createCodeBlockSpec } from '@blocknote/c
 import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote } from '@blocknote/react'
 import { codeBlockOptions } from '@blocknote/code-block'
-import { useUIStore, useEditorStore, useEditorSettingsStore } from '@/stores'
+import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { buildTableOfContents } from '@/utils/tableOfContents'
+import { writeBinaryFile, getHomeDir } from '@/lib/tauri'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import '@blocknote/mantine/style.css'
 
@@ -34,6 +36,8 @@ function BlockNoteInner({
   onChange?: (content: string) => void
 }) {
   const theme = useUIStore((state) => state.theme)
+  const uploadPath = useUIStore((state) => state.uploadPath)
+  const { rootPath } = useWorkspaceStore()
   const [systemDark, setSystemDark] = useState(
     window.matchMedia('(prefers-color-scheme: dark)').matches
   )
@@ -86,10 +90,110 @@ function BlockNoteInner({
   // In newer versions, we need to create the code block spec using createCodeBlockSpec
   // Using type assertion to resolve shiki types conflict
   const codeBlock = createCodeBlockSpec(codeBlockOptions as any)
+
+  const resolveUploadDir = async (): Promise<string> => {
+    const filePath = activeTab?.path || ''
+    const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
+    const root = rootPath || folder
+    let userRoot = ''
+    try { userRoot = await getHomeDir() } catch { userRoot = folder }
+
+    if (!uploadPath.trim()) return folder
+
+    const resolved = uploadPath
+      .replace(/\$folder/g, folder)
+      .replace(/\$rootPath/g, root)
+      .replace(/\$userRootPath/g, userRoot)
+
+    return resolved
+  }
+
+  const uploadFile = async (file: File): Promise<string> => {
+    const filePath = activeTab?.path || ''
+    const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
+    const uploadDir = await resolveUploadDir()
+    const ext = file.name.split('.').pop() || 'bin'
+    const timestamp = Date.now()
+    const random = Math.random().toString(36).substring(2, 8)
+    const fileName = `${timestamp}-${random}.${ext}`
+    const fullPath = uploadDir ? `${uploadDir}/${fileName}` : fileName
+
+    const arrayBuffer = await file.arrayBuffer()
+    const uint8Array = new Uint8Array(arrayBuffer)
+    let binary = ''
+    for (let i = 0; i < uint8Array.length; i++) {
+      binary += String.fromCharCode(uint8Array[i])
+    }
+    const base64 = btoa(binary)
+
+    await writeBinaryFile(fullPath, base64)
+
+    // Return relative path based on the current file's directory (Markdown relative path semantics)
+    const fileDir = folder || rootPath || ''
+    if (fileDir && fullPath.startsWith(fileDir + '/')) {
+      // Path relative to the current file's directory
+      return './' + fullPath.substring(fileDir.length + 1)
+    }
+    // Fallback: if fullPath is under rootPath but not under fileDir, use rootPath-relative path
+    if (rootPath && fullPath.startsWith(rootPath + '/')) {
+      return fullPath.substring(rootPath.length + 1)
+    }
+    if (fullPath.startsWith('/')) {
+      return fileName
+    }
+    return fullPath
+  }
   
+  const resolveFileUrl = async (url: string): Promise<string> => {
+    try {
+      // Skip URLs that are already fully qualified
+      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('asset://')) {
+        return url
+      }
+
+      let absolutePath: string
+
+      // If the URL is already an absolute path (starts with / on Unix or drive letter on Windows)
+      if (url.startsWith('/') || /^[a-zA-Z]:/.test(url)) {
+        absolutePath = url
+      } else {
+        // Resolve relative path based on the current file's directory
+        const filePath = activeTab?.path || ''
+        const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/') || rootPath || ''
+
+        if (!fileDir) {
+          return url
+        }
+
+        // Normalize: remove leading ./ from relative path
+        const normalizedUrl = url.replace(/^\.\//, '')
+
+        // Handle ../ by resolving path segments
+        const urlParts = normalizedUrl.split('/')
+        const dirParts = fileDir.split('/')
+
+        for (const part of urlParts) {
+          if (part === '..') {
+            dirParts.pop()
+          } else if (part && part !== '.') {
+            dirParts.push(part)
+          }
+        }
+
+        absolutePath = dirParts.join('/')
+      }
+
+      return convertFileSrc(absolutePath)
+    } catch {
+      return url
+    }
+  }
+
   const editor = useCreateBlockNote({
     initialContent: blocks,
     codeBlock,
+    uploadFile,
+    resolveFileUrl,
   })
 
   // 监听容器宽度变化，触发重新渲染以适应宽度变化
