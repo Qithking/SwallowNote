@@ -1,7 +1,7 @@
 /**
  * useTheme Hook - Theme management
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useUIStore } from '@/stores'
 
 function hexToHSL(hex: string): { h: number; s: number; l: number } {
@@ -35,27 +35,40 @@ function hexToHSL(hex: string): { h: number; s: number; l: number } {
   }
 }
 
+/**
+ * Convert hex color to HSL string format used by Tailwind/shadcn
+ * e.g. "#ffffff" → "0 0% 100%"
+ */
+function hexToHSLString(hex: string): string {
+  const { h, s, l } = hexToHSL(hex)
+  return `${h} ${s}% ${l}%`
+}
+
 export function useTheme() {
   const { theme, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId } = useUIStore()
 
+  // Track system dark mode preference so the second useEffect re-runs
+  // when system preference changes (needed for theme === 'system')
+  const [systemIsDark, setSystemIsDark] = useState(
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches
+  )
+
+  // Effect 1: Apply dark class based on theme setting and system preference
   useEffect(() => {
     const root = document.documentElement
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)')
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
 
-    const applyTheme = () => {
-      if (theme === 'system') {
-        root.classList.toggle('dark', systemPrefersDark.matches)
-      } else {
-        root.classList.toggle('dark', theme === 'dark')
-      }
+    const applyDarkClass = () => {
+      const isDark = theme === 'dark' || (theme === 'system' && mediaQuery.matches)
+      root.classList.toggle('dark', isDark)
+      setSystemIsDark(isDark)
     }
 
-    applyTheme()
+    applyDarkClass()
 
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const handleChange = () => {
       if (theme === 'system') {
-        applyTheme()
+        applyDarkClass()
       }
     }
     mediaQuery.addEventListener('change', handleChange)
@@ -63,6 +76,8 @@ export function useTheme() {
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [theme])
 
+  // Effect 2: Apply custom theme CSS variables
+  // systemIsDark is a dependency so this re-runs when system preference changes
   useEffect(() => {
     const root = document.documentElement
     const isDark = root.classList.contains('dark')
@@ -85,7 +100,9 @@ export function useTheme() {
       root.style.setProperty('--bg-secondary', colors.contentBg)
       root.style.setProperty('--text-primary', colors.textColor)
       root.style.setProperty('--border-color', colors.borderColor)
-      root.style.setProperty('--popover', colors.tooltipColor)
+      // Convert tooltipColor hex to HSL string format for --popover
+      // Tailwind's bg-popover expects HSL values like "0 0% 100%"
+      root.style.setProperty('--popover', hexToHSLString(colors.tooltipColor))
       return
     }
 
@@ -104,5 +121,5 @@ export function useTheme() {
     root.style.setProperty('--text-primary', '')
     root.style.setProperty('--border-color', '')
     root.style.setProperty('--popover', '')
-  }, [themeColor, theme, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId])
+  }, [themeColor, theme, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId, systemIsDark])
 }
