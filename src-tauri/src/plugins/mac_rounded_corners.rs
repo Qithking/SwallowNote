@@ -179,7 +179,7 @@ pub fn enable_modern_window_style<R: Runtime>(
                         std::mem::size_of::<u32>() as u32,
                     );
 
-                    let border_color: u32 = 0xFFFFFFFF;
+                    let border_color: u32 = 0x00FFFFFF;
                     let _ = DwmSetWindowAttribute(
                         hwnd,
                         DWMWA_BORDER_COLOR,
