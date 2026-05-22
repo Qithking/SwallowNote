@@ -13,7 +13,7 @@ import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore }
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { buildTableOfContents } from '@/utils/tableOfContents'
-import { writeBinaryFile, getHomeDir } from '@/lib/tauri'
+import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile } from '@/lib/tauri'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import '@blocknote/mantine/style.css'
@@ -189,11 +189,147 @@ function BlockNoteInner({
     }
   }
 
+  /**
+   * Upload a file from a local path by copying it to the upload directory.
+   * Returns the relative URL for the copied file.
+   */
+  const uploadFileFromPath = async (sourcePath: string): Promise<string> => {
+    const filePath = activeTab?.path || ''
+    const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
+    const uploadDir = await resolveUploadDir()
+    const ext = sourcePath.split('.').pop() || 'bin'
+    const timestamp = Date.now()
+    const random = Math.random().toString(36).substring(2, 8)
+    const fileName = `${timestamp}-${random}.${ext}`
+    const fullPath = uploadDir ? `${uploadDir}/${fileName}` : fileName
+
+    // Copy the file from source path to upload directory using Tauri backend
+    await copyFile(sourcePath, fullPath)
+
+    // Return relative path based on the current file's directory (same logic as uploadFile)
+    const fileDir = folder || rootPath || ''
+    if (fileDir && fullPath.startsWith(fileDir + '/')) {
+      return './' + fullPath.substring(fileDir.length + 1)
+    }
+    if (rootPath && fullPath.startsWith(rootPath + '/')) {
+      return fullPath.substring(rootPath.length + 1)
+    }
+    if (fullPath.startsWith('/')) {
+      return fileName
+    }
+    return fullPath
+  }
+
+  /**
+   * Determine the file block type based on file extension/MIME type.
+   * Returns 'image' for image files, 'video' for video files, 'audio' for audio files, 'file' otherwise.
+   */
+  const getFileBlockType = (filePath: string): string => {
+    const ext = filePath.split('.').pop()?.toLowerCase() || ''
+    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'tiff', 'tif']
+    const videoExts = ['mp4', 'webm', 'avi', 'mov', 'mkv', 'flv', 'wmv', 'm4v']
+    const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma']
+
+    if (imageExts.includes(ext)) return 'image'
+    if (videoExts.includes(ext)) return 'video'
+    if (audioExts.includes(ext)) return 'audio'
+    return 'file'
+  }
+
+  /**
+   * Custom paste handler that supports:
+   * 1. Standard clipboard paste (text, HTML, markdown) - delegates to defaultPasteHandler
+   * 2. Image paste from screenshots - delegates to defaultPasteHandler (handles Files MIME type)
+   * 3. File paste from system file manager (Cmd+C in Finder then Cmd+V in editor)
+   *    - Reads file paths from system clipboard via Tauri backend
+   *    - Copies files to upload directory and inserts file blocks
+   */
+  const pasteHandler = async ({
+    event,
+    editor: bnEditor,
+    defaultPasteHandler,
+  }: {
+    event: ClipboardEvent
+    editor: BlockNoteEditor
+    defaultPasteHandler: (context?: {
+      prioritizeMarkdownOverHTML?: boolean
+      plainTextAsMarkdown?: boolean
+    }) => boolean | undefined
+  }): Promise<boolean | undefined> => {
+    // Check if the WebView clipboard event contains Files (e.g., screenshot paste)
+    // If so, let the default handler deal with it
+    const hasFiles = event.clipboardData?.types?.includes('Files')
+
+    if (hasFiles) {
+      return defaultPasteHandler()
+    }
+
+    // No Files in WebView clipboard - try reading system clipboard file paths
+    // This handles the case where user copied files in Finder/Explorer
+    try {
+      const filePaths = await readClipboardFilePaths()
+
+      if (filePaths.length > 0) {
+        // Process each file from the system clipboard
+        for (const sourcePath of filePaths) {
+          // Skip directories
+          try {
+            // We can't easily check if it's a directory from the frontend,
+            // but the copy will fail for directories anyway
+            const fileBlockType = getFileBlockType(sourcePath)
+            const fileName = sourcePath.split('/').pop() || 'file'
+
+            // Create a placeholder block
+            const currentBlock = bnEditor.getTextCursorPosition().block
+            const newBlock = {
+              type: fileBlockType,
+              props: {
+                name: fileName,
+              },
+            } as PartialBlock
+
+            let insertedBlockId: string | undefined
+
+            // Insert or update block
+            if (
+              Array.isArray(currentBlock.content) &&
+              currentBlock.content.length === 0
+            ) {
+              insertedBlockId = bnEditor.updateBlock(currentBlock, newBlock).id
+            } else {
+              insertedBlockId = bnEditor.insertBlocks(
+                [newBlock],
+                currentBlock,
+                'after',
+              )[0].id
+            }
+
+            // Upload file (copy to upload directory) and update block with URL
+            const url = await uploadFileFromPath(sourcePath)
+            bnEditor.updateBlock(insertedBlockId, {
+              props: { url },
+            } as PartialBlock)
+          } catch (e) {
+            console.error('Failed to paste file from clipboard:', sourcePath, e)
+          }
+        }
+        return true
+      }
+    } catch (e) {
+      // Failed to read clipboard file paths - fall through to default handler
+      console.debug('Failed to read clipboard file paths:', e)
+    }
+
+    // Default: let the default paste handler handle it (text, HTML, markdown)
+    return defaultPasteHandler()
+  }
+
   const editor = useCreateBlockNote({
     initialContent: blocks,
     codeBlock,
     uploadFile,
     resolveFileUrl,
+    pasteHandler,
   })
 
   // 监听容器宽度变化，触发重新渲染以适应宽度变化

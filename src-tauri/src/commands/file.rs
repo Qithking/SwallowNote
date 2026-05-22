@@ -437,6 +437,191 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Reads file paths from the system clipboard (e.g., files copied in Finder/Explorer).
+/// Returns a list of absolute file paths if the clipboard contains file references.
+#[tauri::command]
+pub async fn read_clipboard_file_paths() -> Result<Vec<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // Use NSPasteboard via osascript to read file URLs from the clipboard
+        let output = StdCommand::new("osascript")
+            .arg("-e")
+            .arg("use framework \"Foundation\"")
+            .arg("-e")
+            .arg("use framework \"AppKit\"")
+            .arg("-e")
+            .arg("set pb to current application's NSPasteboard's generalPasteboard()")
+            .arg("-e")
+            .arg("set theClasses to pb's types()")
+            .arg("-e")
+            .arg("if (theClasses's containsObject:\"public.file-url\") as boolean then")
+            .arg("-e")
+            .arg("set theObjects to pb's readObjectsForClasses:{current application's NSURL} options:(missing value)")
+            .arg("-e")
+            .arg("set outputPaths to {}")
+            .arg("-e")
+            .arg("repeat with anURL in theObjects")
+            .arg("-e")
+            .arg("if (anURL's isFileURL()) as boolean then")
+            .arg("-e")
+            .arg("set end of outputPaths to (anURL's |path|()) as text")
+            .arg("-e")
+            .arg("end if")
+            .arg("-e")
+            .arg("end repeat")
+            .arg("-e")
+            .arg("return outputPaths")
+            .arg("-e")
+            .arg("else")
+            .arg("-e")
+            .arg("return {}")
+            .arg("-e")
+            .arg("end if")
+            .output()
+            .map_err(|e| format!("Failed to execute osascript: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Read clipboard file paths failed: {}", stderr));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let result = stdout.trim();
+
+        // AppleScript list output format: "path1, path2" or empty
+        if result.is_empty() || result == "{}" {
+            return Ok(Vec::new());
+        }
+
+        // Parse AppleScript list: remove outer braces or just split
+        let cleaned = result.trim_start_matches('{').trim_end_matches('}');
+        let paths: Vec<String> = cleaned
+            .split(", ")
+            .filter_map(|s| {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                // Verify path exists and is a file (skip directories)
+                let path = PathBuf::from(trimmed);
+                if path.is_file() {
+                    Some(path.to_string_lossy().to_string().replace('\\', "/"))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(paths)
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Use PowerShell to read file drop list from clipboard
+        let ps_command = r#"
+Add-Type -AssemblyName System.Windows.Forms;
+$files = [System.Windows.Forms.Clipboard]::GetFileDropList();
+if ($files) { $files -join '|' } else { '' }
+"#;
+        let output = super::create_command("powershell")
+            .arg("-command")
+            .arg(ps_command)
+            .output()
+            .map_err(|e| format!("Failed to read clipboard: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Read clipboard file paths failed: {}", stderr));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let result = stdout.trim();
+
+        if result.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let paths: Vec<String> = result
+            .split('|')
+            .filter_map(|s| {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                let path = PathBuf::from(trimmed);
+                if path.is_file() {
+                    Some(path.to_string_lossy().to_string().replace('\\', "/"))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(paths)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Use xclip to read file URLs from clipboard
+        let output = StdCommand::new("sh")
+            .arg("-c")
+            .arg("xclip -selection clipboard -t text/uri-list -o 2>/dev/null")
+            .output()
+            .map_err(|e| format!("Failed to read clipboard: {}", e))?;
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let paths: Vec<String> = stdout
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                // Remove file:// prefix and decode URI
+                let path_str = if trimmed.starts_with("file://") {
+                    // Simple percent-decode for file URIs
+                    let uri = &trimmed[7..];
+                    let mut decoded = String::with_capacity(uri.len());
+                    let mut chars = uri.chars();
+                    while let Some(c) = chars.next() {
+                        if c == '%' {
+                            let hex: String = chars.by_ref().take(2).collect();
+                            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                                decoded.push(byte as char);
+                            } else {
+                                decoded.push('%');
+                                decoded.push_str(&hex);
+                            }
+                        } else {
+                            decoded.push(c);
+                        }
+                    }
+                    decoded
+                } else {
+                    trimmed.to_string()
+                };
+                let path = PathBuf::from(&path_str);
+                if path.is_file() {
+                    Some(path.to_string_lossy().to_string().replace('\\', "/"))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(paths)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Ok(Vec::new())
+    }
+}
+
 #[tauri::command]
 pub async fn open_in_finder(path: String) -> Result<(), String> {
     let path = PathBuf::from(&path);

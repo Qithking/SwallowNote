@@ -246,6 +246,11 @@ export async function scanGitRepos(rootPath: string): Promise<GitRepositoryInfo[
   return await invoke('scan_git_repos', { rootPath })
 }
 
+// Clipboard APIs
+export async function readClipboardFilePaths(): Promise<string[]> {
+  return await invoke('read_clipboard_file_paths')
+}
+
 // File watcher APIs
 export async function watchDirectory(path: string): Promise<void> {
   await invoke('watch_directory', { path })

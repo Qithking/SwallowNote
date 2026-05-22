@@ -86,6 +86,7 @@ pub fn run() {
             commands::file::rename_file,
             commands::file::copy_file,
             commands::file::copy_file_to_clipboard,
+            commands::file::read_clipboard_file_paths,
             commands::file::open_in_finder,
             commands::file::search_in_files,
             commands::git::git_is_repo,
