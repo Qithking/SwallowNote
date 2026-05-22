@@ -184,6 +184,7 @@ export function FileTreeView() {
 
   // 新建文件/文件夹状态
   const [newItem, setNewItem] = useState<NewItemState | null>(null)
+  const [isNewItemFirstEdit, setIsNewItemFirstEdit] = useState(false)
 
   const handleStartEdit = (path: string, name: string, isDirectory: boolean) => {
     // 保存完整文件名，useEffect 中会设置选中范围
@@ -213,17 +214,19 @@ export function FileTreeView() {
         }
       } else if (newItem !== null) {
         inputRef.current.focus()
-        // 新建文件时选中文件名（去除扩展名），新建目录时全选
-        const name = newItem.name
-        if (newItem.type === 'file' && name.includes('.')) {
-          const lastDot = name.lastIndexOf('.')
-          inputRef.current.setSelectionRange(0, lastDot)
-        } else {
-          inputRef.current.select()
+        if (isNewItemFirstEdit) {
+          const name = newItem.name
+          if (newItem.type === 'file' && name.includes('.')) {
+            const lastDot = name.lastIndexOf('.')
+            inputRef.current.setSelectionRange(0, lastDot)
+          } else {
+            inputRef.current.select()
+          }
+          setIsNewItemFirstEdit(false)
         }
       }
     })
-  }, [editingPath, newItem, editingName, nodes, isFirstEdit])
+  }, [editingPath, newItem, editingName, nodes, isFirstEdit, isNewItemFirstEdit])
 
   const handleSelect = (node: FileNode) => {
     setSelectedPath(node.path)
@@ -341,6 +344,7 @@ export function FileTreeView() {
     const siblings = selected.children || []
     const name = generateUniqueName(t('fileTree.defaultFileName'), siblings)
     setNewItem({ parentPath: selected.path, name, type: 'file' })
+    setIsNewItemFirstEdit(true)
 
     if (!expanded.has(selected.path)) {
       toggleNode(selected.path)
@@ -355,6 +359,7 @@ export function FileTreeView() {
     const siblings = selected.children || []
     const name = generateUniqueName(t('fileTree.defaultFolderName'), siblings)
     setNewItem({ parentPath: selected.path, name, type: 'folder' })
+    setIsNewItemFirstEdit(true)
 
     if (!expanded.has(selected.path)) {
       toggleNode(selected.path)

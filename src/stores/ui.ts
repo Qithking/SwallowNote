@@ -14,6 +14,68 @@ export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' |
 export type WorkspaceMode = 'folder' | 'workspace'
 export type NoteWidth = 'normal' | 'wide'
 
+export interface CustomThemeColors {
+  themeColor: string
+  appBg: string
+  contentBg: string
+  textColor: string
+  borderColor: string
+  tooltipColor: string
+}
+
+export interface CustomTheme {
+  id: string
+  name: string
+  isBuiltIn: boolean
+  light: CustomThemeColors
+  dark: CustomThemeColors
+}
+
+export const BUILT_IN_THEMES: CustomTheme[] = [
+  {
+    id: 'builtin-light',
+    name: '浅色主题',
+    isBuiltIn: true,
+    light: {
+      themeColor: '#005fb8',
+      appBg: '#EDEFF2',
+      contentBg: '#ffffff',
+      textColor: '#1f1f1f',
+      borderColor: '#e5e5e5',
+      tooltipColor: '#ffffff',
+    },
+    dark: {
+      themeColor: '#005fb8',
+      appBg: '#EDEFF2',
+      contentBg: '#ffffff',
+      textColor: '#1f1f1f',
+      borderColor: '#e5e5e5',
+      tooltipColor: '#ffffff',
+    },
+  },
+  {
+    id: 'builtin-dark',
+    name: '深色主题',
+    isBuiltIn: true,
+    light: {
+      themeColor: '#0078d4',
+      appBg: '#1e1e1e',
+      contentBg: '#252526',
+      textColor: '#ffffff',
+      borderColor: '#454545',
+      tooltipColor: '#1e1e1e',
+    },
+    dark: {
+      themeColor: '#0078d4',
+      appBg: '#1e1e1e',
+      contentBg: '#252526',
+      textColor: '#ffffff',
+      borderColor: '#454545',
+      tooltipColor: '#1e1e1e',
+    },
+  },
+]
+
 export interface UIState {
   theme: Theme
   themeColor: string
@@ -38,6 +100,8 @@ export interface UIState {
   markdownOnly: boolean
   customShortcuts: Record<string, string>
   syncInterval: number
+  customThemes: CustomTheme[]
+  activeCustomThemeId: string | null
   setTheme: (theme: Theme) => void
   setThemeColor: (color: string) => void
   setSidebarView: (view: SidebarView) => void
@@ -66,6 +130,11 @@ export interface UIState {
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
   resetAllShortcuts: () => void
+  setActiveCustomThemeId: (id: string | null) => void
+  addCustomTheme: (name: string) => void
+  deleteCustomTheme: (id: string) => void
+  renameCustomTheme: (id: string, name: string) => void
+  updateCustomThemeColor: (id: string, themeType: 'light' | 'dark', key: keyof CustomThemeColors, value: string) => void
   loadSettings: () => Promise<void>
 }
 
@@ -93,6 +162,8 @@ export const useUIStore = create<UIState>((set) => ({
   markdownOnly: false,
   customShortcuts: {},
   syncInterval: 10,
+  customThemes: [...BUILT_IN_THEMES],
+  activeCustomThemeId: null,
   setTheme: (theme) => {
     set({ theme })
     saveAppSettings({ theme })
@@ -193,6 +264,56 @@ export const useUIStore = create<UIState>((set) => ({
     set({ customShortcuts: {} })
     saveAppSettings({ customShortcuts: '{}' })
   },
+  setActiveCustomThemeId: (id) => {
+    set({ activeCustomThemeId: id })
+    saveAppSettings({ activeCustomThemeId: id ?? '' })
+  },
+  addCustomTheme: (name) => {
+    const id = 'custom-' + Date.now()
+    const newTheme: CustomTheme = {
+      id,
+      name,
+      isBuiltIn: false,
+      light: { ...BUILT_IN_THEMES[0].light },
+      dark: { ...BUILT_IN_THEMES[1].dark },
+    }
+    set((state) => ({ customThemes: [...state.customThemes, newTheme] }))
+    const updated = [...useUIStore.getState().customThemes]
+    saveAppSettings({ customThemes: JSON.stringify(updated) })
+  },
+  deleteCustomTheme: (id) => {
+    const theme = useUIStore.getState().customThemes.find((t) => t.id === id)
+    if (!theme || theme.isBuiltIn) return
+    set((state) => {
+      const next = state.customThemes.filter((t) => t.id !== id)
+      const activeId = state.activeCustomThemeId === id ? null : state.activeCustomThemeId
+      return { customThemes: next, activeCustomThemeId: activeId }
+    })
+    const s = useUIStore.getState()
+    saveAppSettings({
+      customThemes: JSON.stringify(s.customThemes),
+      activeCustomThemeId: s.activeCustomThemeId ?? '',
+    })
+  },
+  renameCustomTheme: (id, name) => {
+    const theme = useUIStore.getState().customThemes.find((t) => t.id === id)
+    if (!theme || theme.isBuiltIn || !name.trim()) return
+    set((state) => ({
+      customThemes: state.customThemes.map((t) => (t.id === id ? { ...t, name: name.trim() } : t)),
+    }))
+    saveAppSettings({ customThemes: JSON.stringify(useUIStore.getState().customThemes) })
+  },
+  updateCustomThemeColor: (id, themeType, key, value) => {
+    const theme = useUIStore.getState().customThemes.find((t) => t.id === id)
+    if (!theme || theme.isBuiltIn) return
+    set((state) => ({
+      customThemes: state.customThemes.map((t) => {
+        if (t.id !== id) return t
+        return { ...t, [themeType]: { ...t[themeType], [key]: value } }
+      }),
+    }))
+    saveAppSettings({ customThemes: JSON.stringify(useUIStore.getState().customThemes) })
+  },
   loadSettings: async () => {
     try {
       const s = await getAppSettings()
@@ -204,6 +325,14 @@ export const useUIStore = create<UIState>((set) => ({
           customShortcuts = {}
         }
       }
+      let customThemes: CustomTheme[] = [...BUILT_IN_THEMES]
+      if (s.customThemes) {
+        try {
+          const parsed = JSON.parse(s.customThemes) as CustomTheme[]
+          const userThemes = parsed.filter((t) => !t.isBuiltIn)
+          customThemes = [...BUILT_IN_THEMES, ...userThemes]
+        } catch {}
+      }
       set({
         theme: s.theme as Theme,
         themeColor: s.themeColor,
@@ -214,6 +343,8 @@ export const useUIStore = create<UIState>((set) => ({
         markdownOnly: s.markdownOnly === 'true',
         customShortcuts,
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
+        customThemes,
+        activeCustomThemeId: s.activeCustomThemeId || null,
       })
     } catch {
       // DB not ready, use defaults

@@ -5,8 +5,13 @@ import {
   Palette,
   Keyboard,
   RefreshCw,
+  Plus,
+  Trash2,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react'
-import { useUIStore, Theme, NoteWidth } from '@/stores'
+import { useUIStore, Theme, NoteWidth, CustomThemeColors } from '@/stores'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
@@ -24,6 +29,16 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { ShortcutRecorder } from './ShortcutRecorder'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
 
 type SettingsSection = 'general' | 'sync' | 'appearance' | 'shortcuts'
 
@@ -52,7 +67,14 @@ function SettingsView() {
     showAllFiles, setShowAllFiles,
     markdownOnly, setMarkdownOnly,
     syncInterval, setSyncInterval,
+    customThemes, activeCustomThemeId,
+    setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
   } = useUIStore()
+
+  const [customThemeTab, setCustomThemeTab] = useState<'light' | 'dark'>('light')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; labelKey: string }[] = [
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },
@@ -245,6 +267,127 @@ function SettingsView() {
                   </div>                  
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardContent className="p-0">
+                  <div className="px-4 py-3 border-b border-border">
+                    <Label className="text-sm font-medium">{t('settings.appearance.customTheme')}</Label>
+                  </div>
+                  <div className="px-4 py-2 border-b border-border">
+                    <Tabs value={customThemeTab} onValueChange={(v) => setCustomThemeTab(v as 'light' | 'dark')}>
+                      <TabsList>
+                        <TabsTrigger value="light">{t('settings.appearance.customTheme.lightTab')}</TabsTrigger>
+                        <TabsTrigger value="dark">{t('settings.appearance.customTheme.darkTab')}</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                  <div className="flex min-h-[280px]">
+                    <div className="w-44 border-r border-border py-2 px-2 flex flex-col">
+                      <div className="flex-1 overflow-y-auto space-y-0.5">
+                        {customThemes.map((ct) => (
+                          <div
+                            key={ct.id}
+                            className={cn(
+                              'flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer group',
+                              activeCustomThemeId === ct.id ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
+                            )}
+                            onClick={() => setActiveCustomThemeId(ct.id)}
+                          >
+                            <div className={cn(
+                              'w-3.5 h-3.5 rounded-full border shrink-0',
+                              activeCustomThemeId === ct.id ? 'border-primary bg-primary' : 'border-muted-foreground/40'
+                            )} />
+                            {renamingId === ct.id ? (
+                              <div className="flex items-center gap-1 flex-1 min-w-0">
+                                <input
+                                  className="flex-1 min-w-0 bg-background border border-border rounded px-1 py-0.5 text-xs"
+                                  value={renameValue}
+                                  onChange={(e) => setRenameValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      renameCustomTheme(ct.id, renameValue)
+                                      setRenamingId(null)
+                                    } else if (e.key === 'Escape') {
+                                      setRenamingId(null)
+                                    }
+                                  }}
+                                  autoFocus
+                                />
+                                <button onClick={() => { renameCustomTheme(ct.id, renameValue); setRenamingId(null) }}><Check size={12} /></button>
+                                <button onClick={() => setRenamingId(null)}><X size={12} /></button>
+                              </div>
+                            ) : (
+                              <span className="truncate flex-1">{ct.name}</span>
+                            )}
+                            {!ct.isBuiltIn && renamingId !== ct.id && (
+                              <div className="hidden group-hover:flex items-center gap-0.5">
+                                <button
+                                  className="p-0.5 hover:text-primary"
+                                  onClick={(e) => { e.stopPropagation(); setRenamingId(ct.id); setRenameValue(ct.name) }}
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                                <button
+                                  className="p-0.5 hover:text-destructive"
+                                  onClick={(e) => { e.stopPropagation(); setDeleteTarget(ct.id) }}
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mt-2 w-full justify-start gap-1.5 text-xs"
+                        onClick={() => addCustomTheme(t('settings.appearance.customTheme.add'))}
+                      >
+                        <Plus size={12} />
+                        {t('settings.appearance.customTheme.add')}
+                      </Button>
+                    </div>
+                    <div className="flex-1 p-4">
+                      {(() => {
+                        const activeTheme = customThemes.find((ct) => ct.id === activeCustomThemeId)
+                        if (!activeTheme) return <div className="text-sm text-muted-foreground">{t('settings.appearance.customTheme.comingSoon')}</div>
+                        const colors = customThemeTab === 'light' ? activeTheme.light : activeTheme.dark
+                        const colorFields: { key: keyof CustomThemeColors; labelKey: string; descKey: string }[] = [
+                          { key: 'themeColor', labelKey: 'settings.appearance.customTheme.themeColor', descKey: 'settings.appearance.customTheme.themeColor.desc' },
+                          { key: 'appBg', labelKey: 'settings.appearance.customTheme.appBg', descKey: 'settings.appearance.customTheme.appBg.desc' },
+                          { key: 'contentBg', labelKey: 'settings.appearance.customTheme.contentBg', descKey: 'settings.appearance.customTheme.contentBg.desc' },
+                          { key: 'textColor', labelKey: 'settings.appearance.customTheme.textColor', descKey: 'settings.appearance.customTheme.textColor.desc' },
+                          { key: 'borderColor', labelKey: 'settings.appearance.customTheme.borderColor', descKey: 'settings.appearance.customTheme.borderColor.desc' },
+                          { key: 'tooltipColor', labelKey: 'settings.appearance.customTheme.tooltipColor', descKey: 'settings.appearance.customTheme.tooltipColor.desc' },
+                        ]
+                        return (
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                            {colorFields.map((field) => (
+                              <div key={field.key} className="flex items-center justify-between">
+                                <div className="mr-2 min-w-0">
+                                  <Label className="text-xs font-medium">{t(field.labelKey)}</Label>
+                                  <p className="text-[10px] text-muted-foreground leading-tight">{t(field.descKey)}</p>
+                                </div>
+                                <input
+                                  type="color"
+                                  value={colors[field.key]}
+                                  onChange={(e) => updateCustomThemeColor(activeTheme.id, customThemeTab, field.key, e.target.value)}
+                                  disabled={activeTheme.isBuiltIn}
+                                  className={cn(
+                                    'w-7 h-7 rounded cursor-pointer border border-border bg-background shrink-0',
+                                    activeTheme.isBuiltIn && 'opacity-50 cursor-not-allowed'
+                                  )}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </section>
 
             {/* ===== 快捷键 ===== */}
@@ -279,6 +422,26 @@ function SettingsView() {
           </div>
         </ScrollArea>
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.appearance.customTheme.delete')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('settings.appearance.customTheme.deleteConfirm', { name: customThemes.find((ct) => ct.id === deleteTarget)?.name ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (deleteTarget) deleteCustomTheme(deleteTarget)
+              setDeleteTarget(null)
+            }}>
+              {t('common.confirm', 'Delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

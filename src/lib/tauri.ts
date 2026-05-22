@@ -305,6 +305,8 @@ export interface AppSettings {
   markdownOnly: string
   syncInterval: string
   customShortcuts: string
+  customThemes: string
+  activeCustomThemeId: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -320,6 +322,8 @@ export async function getAppSettings(): Promise<AppSettings> {
     markdownOnly: get('markdownOnly', 'false'),
     syncInterval: get('syncInterval', '10'),
     customShortcuts: get('customShortcuts', '{}'),
+    customThemes: get('customThemes', '[]'),
+    activeCustomThemeId: get('activeCustomThemeId', ''),
   }
 }
 
