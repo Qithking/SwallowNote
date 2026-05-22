@@ -2,7 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
+html {
+  background-color: transparent;
+  border-radius: 12px;
+}
+
+body, #root {
   background-color: transparent;
   overflow: hidden;
   border-radius: 12px;

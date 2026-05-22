@@ -153,7 +153,7 @@ pub fn enable_modern_window_style<R: Runtime>(
     #[cfg(target_os = "windows")]
     {
         use tauri::Manager;
-        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE};
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWA_USE_IMMERSIVE_DARK_MODE};
         use windows::Win32::Foundation::HWND;
         
         window
@@ -161,6 +161,15 @@ pub fn enable_modern_window_style<R: Runtime>(
                 #[cfg(target_os = "windows")]
                 unsafe {
                     let hwnd = HWND(webview.hwnd() as _);
+                    
+                    // Enable immersive dark mode for proper shadow rendering in dark theme
+                    let dark_mode: u32 = 1;
+                    let _ = DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_USE_IMMERSIVE_DARK_MODE,
+                        &dark_mode as *const _ as *const _,
+                        std::mem::size_of::<u32>() as u32,
+                    );
                     
                     // DWMWA_WINDOW_CORNER_PREFERENCE: 2 = Round, 3 = RoundSmall
                     let corner_preference: u32 = if radius > 12.0 { 2 } else { 3 };

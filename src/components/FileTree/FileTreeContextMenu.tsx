@@ -180,9 +180,13 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
         })
         successCount++
 
-        // 如果是剪切模式，删除源文件
+        // 如果是剪切模式，删除源文件并更新/关闭相关 tab
         if (clipboardIsCut) {
           await deleteFile(sourcePath)
+          // Update tabs: move from source path to destination path
+          const editorStore = useEditorStore.getState()
+          const destName = getFileName(destPath)
+          editorStore.updateTabPath(sourcePath, destPath, destName)
         }
       } catch (e) {
         console.error('Failed to paste:', e)
@@ -211,6 +215,21 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
     if (!confirm(t('dialog.confirmDelete', { name: node.name, extra: node.isDirectory ? t('dialog.confirmDeleteDir') : '' }))) return
     try {
       await deleteFile(node.path)
+      
+      // Close any open tabs for the deleted file or files within the deleted directory
+      const editorStore = useEditorStore.getState()
+      const tabsToClose = editorStore.tabs.filter(tab => {
+        if (node.isDirectory) {
+          // Close all tabs whose path starts with the deleted directory path
+          return tab.path === node.path || tab.path.startsWith(node.path + '/')
+        }
+        // Close the tab with the exact path
+        return tab.path === node.path
+      })
+      for (const tab of tabsToClose) {
+        editorStore.removeTab(tab.id)
+      }
+      
       // Refresh parent
       const parent = findNodeParent(node, nodes)
       if (parent) {

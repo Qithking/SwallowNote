@@ -117,6 +117,18 @@ function App() {
           }
         }
       } else if (type === 'created' || type === 'removed' || type === 'renamed') {
+        // Close tabs for removed files
+        if (type === 'removed') {
+          const editorStore = useEditorStore.getState()
+          // Check if the removed path matches any open tab (file) or is a parent of any tab (directory)
+          const tabsToClose = editorStore.tabs.filter(tab =>
+            tab.path === path || tab.path.startsWith(path + '/')
+          )
+          for (const tab of tabsToClose) {
+            editorStore.removeTab(tab.id)
+          }
+        }
+        
         const { workspaceMode } = useUIStore.getState()
         const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
         const parentPath = path.substring(0, path.lastIndexOf('/'))
@@ -203,10 +215,13 @@ function App() {
         const platform = await import('@tauri-apps/plugin-os').then(m => m.platform())
         if (platform === 'linux') {
           document.documentElement.style.borderRadius = '12px'
-          document.documentElement.style.overflow = 'hidden'
           document.body.style.borderRadius = '12px'
-          document.body.style.overflow = 'hidden'
+          // Linux shadow via CSS (window manager may not provide native shadow for transparent windows)
+          document.documentElement.style.boxShadow = '0 8px 40px rgba(0, 0, 0, 0.2), 0 2px 12px rgba(0, 0, 0, 0.1)'
         } else if (platform === 'macos') {
+          await enableModernWindowStyle({ cornerRadius: 12 })
+        } else if (platform === 'windows') {
+          // Windows: enable rounded corners and dark mode shadow support
           await enableModernWindowStyle({ cornerRadius: 12 })
         }
       } catch {
