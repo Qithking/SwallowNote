@@ -15,7 +15,7 @@ function Popover({ children, content, position = 'top', delay = 200 }: PopoverPr
   const [isVisible, setIsVisible] = useState(false)
   const [coords, setCoords] = useState({ x: 0, y: 0 })
   const triggerRef = useRef<HTMLDivElement>(null)
-  const timeoutRef = useRef<NodeJS.Timeout>()
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
 
   const handleMouseEnter = () => {
     timeoutRef.current = setTimeout(() => {
