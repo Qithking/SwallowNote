@@ -46,9 +46,11 @@ function App() {
       const { loadSettings: loadUISettings } = useUIStore.getState()
       await initMode()
       await loadLatestByMode()
-      await restoreSessionState()
-      await loadEditorSettings()
-      await loadUISettings()
+      await Promise.all([
+        restoreSessionState(),
+        loadEditorSettings(),
+        loadUISettings(),
+      ])
     }
     init()
   }, [])
@@ -286,7 +288,6 @@ function App() {
           const activeTabId = states.activeTabId || null
           useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
           if (activeTabId) {
-            await useEditorStore.getState().loadTabContent(activeTabId)
             const activeTab = restoredTabs.find((t: any) => t.id === activeTabId)
             if (activeTab?.path) {
               const fileTreeStore = useFileTreeStore.getState()
@@ -299,6 +300,7 @@ function App() {
                 fileTreeStore.collapseAllExceptPath(activeTab.path, rootPath)
               }
             }
+            useEditorStore.getState().loadTabContent(activeTabId)
           }
         }
       }
