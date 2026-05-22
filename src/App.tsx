@@ -216,12 +216,9 @@ function App() {
         if (platform === 'linux') {
           document.documentElement.style.borderRadius = '12px'
           document.body.style.borderRadius = '12px'
-          // Linux shadow via CSS (window manager may not provide native shadow for transparent windows)
-          document.documentElement.style.boxShadow = '0 8px 40px rgba(0, 0, 0, 0.2), 0 2px 12px rgba(0, 0, 0, 0.1)'
         } else if (platform === 'macos') {
           await enableModernWindowStyle({ cornerRadius: 12 })
         } else if (platform === 'windows') {
-          // Windows: enable rounded corners and dark mode shadow support
           await enableModernWindowStyle({ cornerRadius: 12 })
         }
       } catch {

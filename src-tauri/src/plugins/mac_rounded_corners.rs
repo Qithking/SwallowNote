@@ -88,7 +88,7 @@ pub fn enable_rounded_corners<R: Runtime>(
     }
 }
 
-/// Enables modern window style with rounded corners and shadow
+/// Enables modern window style with rounded corners (no shadow)
 #[tauri::command]
 pub fn enable_modern_window_style<R: Runtime>(
     _app: AppHandle<R>,
@@ -120,7 +120,7 @@ pub fn enable_modern_window_style<R: Runtime>(
                     ns_window.setStyleMask_(style_mask);
                     ns_window.setTitlebarAppearsTransparent_(cocoa::base::YES);
                     ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
-                    ns_window.setHasShadow_(cocoa::base::YES);
+                    ns_window.setHasShadow_(cocoa::base::NO);
                     ns_window.setOpaque_(cocoa::base::NO);
 
                     // Also explicitly hide the traffic light button views
