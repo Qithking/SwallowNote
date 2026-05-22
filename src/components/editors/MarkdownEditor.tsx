@@ -244,7 +244,7 @@ function BlockNoteInner({
    *    - Reads file paths from system clipboard via Tauri backend
    *    - Copies files to upload directory and inserts file blocks
    */
-  const pasteHandler = async ({
+  const pasteHandler = ({
     event,
     editor: bnEditor,
     defaultPasteHandler,
@@ -255,7 +255,7 @@ function BlockNoteInner({
       prioritizeMarkdownOverHTML?: boolean
       plainTextAsMarkdown?: boolean
     }) => boolean | undefined
-  }): Promise<boolean | undefined> => {
+  }): boolean | undefined => {
     // Check if the WebView clipboard event contains Files (e.g., screenshot paste)
     // If so, let the default handler deal with it
     const hasFiles = event.clipboardData?.types?.includes('Files')
@@ -264,64 +264,52 @@ function BlockNoteInner({
       return defaultPasteHandler()
     }
 
-    // No Files in WebView clipboard - try reading system clipboard file paths
-    // This handles the case where user copied files in Finder/Explorer
-    try {
-      const filePaths = await readClipboardFilePaths()
+    // No Files in WebView clipboard - try reading system clipboard file paths asynchronously
+    readClipboardFilePaths()
+      .then((filePaths) => {
+        if (filePaths.length > 0) {
+          filePaths.forEach((sourcePath) => {
+            try {
+              const fileBlockType = getFileBlockType(sourcePath)
+              const fileName = sourcePath.split('/').pop() || 'file'
 
-      if (filePaths.length > 0) {
-        // Process each file from the system clipboard
-        for (const sourcePath of filePaths) {
-          // Skip directories
-          try {
-            // We can't easily check if it's a directory from the frontend,
-            // but the copy will fail for directories anyway
-            const fileBlockType = getFileBlockType(sourcePath)
-            const fileName = sourcePath.split('/').pop() || 'file'
+              const currentBlock = bnEditor.getTextCursorPosition().block
+              const newBlock = {
+                type: fileBlockType,
+                props: { name: fileName },
+              } as PartialBlock
 
-            // Create a placeholder block
-            const currentBlock = bnEditor.getTextCursorPosition().block
-            const newBlock = {
-              type: fileBlockType,
-              props: {
-                name: fileName,
-              },
-            } as PartialBlock
+              let insertedBlockId: string | undefined
 
-            let insertedBlockId: string | undefined
+              if (
+                Array.isArray(currentBlock.content) &&
+                currentBlock.content.length === 0
+              ) {
+                insertedBlockId = bnEditor.updateBlock(currentBlock, newBlock).id
+              } else {
+                insertedBlockId = bnEditor.insertBlocks(
+                  [newBlock],
+                  currentBlock,
+                  'after',
+                )[0].id
+              }
 
-            // Insert or update block
-            if (
-              Array.isArray(currentBlock.content) &&
-              currentBlock.content.length === 0
-            ) {
-              insertedBlockId = bnEditor.updateBlock(currentBlock, newBlock).id
-            } else {
-              insertedBlockId = bnEditor.insertBlocks(
-                [newBlock],
-                currentBlock,
-                'after',
-              )[0].id
+              uploadFileFromPath(sourcePath).then((url) => {
+                if (insertedBlockId) {
+                  bnEditor.updateBlock(insertedBlockId, {
+                    props: { url },
+                  } as PartialBlock)
+                }
+              })
+            } catch (e) {
+              console.error('Failed to paste file from clipboard:', sourcePath, e)
             }
-
-            // Upload file (copy to upload directory) and update block with URL
-            const url = await uploadFileFromPath(sourcePath)
-            bnEditor.updateBlock(insertedBlockId, {
-              props: { url },
-            } as PartialBlock)
-          } catch (e) {
-            console.error('Failed to paste file from clipboard:', sourcePath, e)
-          }
+          })
         }
-        return true
-      }
-    } catch (e) {
-      // Failed to read clipboard file paths - fall through to default handler
-      console.debug('Failed to read clipboard file paths:', e)
-    }
+      })
+      .catch(() => {})
 
-    // Default: let the default paste handler handle it (text, HTML, markdown)
-    return defaultPasteHandler()
+    return false
   }
 
   const editor = useCreateBlockNote({
