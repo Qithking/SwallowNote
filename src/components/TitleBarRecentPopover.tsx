@@ -70,7 +70,15 @@ export function TitleBarRecentPopover() {
         const isWorkspace = p.endsWith('.swallow-workspace')
         return workspaceMode === 'workspace' ? isWorkspace : !isWorkspace
       })
-      const items: RecentItem[] = filtered.map(path => ({
+      // Deduplicate by normalized path (handle case where same path stored with different separators)
+      const seen = new Set<string>()
+      const deduped = filtered.filter(p => {
+        const normalized = p.replace(/\\/g, '/').toLowerCase()
+        if (seen.has(normalized)) return false
+        seen.add(normalized)
+        return true
+      })
+      const items: RecentItem[] = deduped.map(path => ({
         path,
         name: path.split(/[\\/]/).pop() || path,
         isWorkspace: path.endsWith('.swallow-workspace'),

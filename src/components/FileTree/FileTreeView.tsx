@@ -169,6 +169,8 @@ export function FileTreeView() {
   const { addTab, updateTabPath } = useEditorStore()
   const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, loadRoot, setNodes } = useFileTreeStore()
   const inputRef = useRef<HTMLInputElement>(null)
+  const editingCommitRef = useRef(false)
+  const newItemCommitRef = useRef(false)
   const { t } = useTranslation()
 
   // 重命名状态
@@ -192,25 +194,35 @@ export function FileTreeView() {
   }
 
   useEffect(() => {
-    if (editingPath !== null && inputRef.current) {
-      // 延迟到下一帧确保 DOM 已更新
-      requestAnimationFrame(() => {
-        if (inputRef.current) {
-          inputRef.current.focus()
-          // 只在初次编辑时选中文件名（去除扩展名）
-          if (isFirstEdit) {
-            const editingNode = findNodeByPath(editingPath, nodes)
-            if (editingNode && !editingNode.isDirectory && editingName.includes('.')) {
-              const lastDot = editingName.lastIndexOf('.')
-              inputRef.current.setSelectionRange(0, lastDot)
-            } else {
-              inputRef.current.select()
-            }
-            setIsFirstEdit(false)
+    // 延迟到下一帧确保 DOM 已更新
+    requestAnimationFrame(() => {
+      if (!inputRef.current) return
+
+      if (editingPath !== null) {
+        inputRef.current.focus()
+        // 只在初次编辑时选中文件名（去除扩展名）
+        if (isFirstEdit) {
+          const editingNode = findNodeByPath(editingPath, nodes)
+          if (editingNode && !editingNode.isDirectory && editingName.includes('.')) {
+            const lastDot = editingName.lastIndexOf('.')
+            inputRef.current.setSelectionRange(0, lastDot)
+          } else {
+            inputRef.current.select()
           }
+          setIsFirstEdit(false)
         }
-      })
-    }
+      } else if (newItem !== null) {
+        inputRef.current.focus()
+        // 新建文件时选中文件名（去除扩展名），新建目录时全选
+        const name = newItem.name
+        if (newItem.type === 'file' && name.includes('.')) {
+          const lastDot = name.lastIndexOf('.')
+          inputRef.current.setSelectionRange(0, lastDot)
+        } else {
+          inputRef.current.select()
+        }
+      }
+    })
   }, [editingPath, newItem, editingName, nodes, isFirstEdit])
 
   const handleSelect = (node: FileNode) => {
@@ -249,10 +261,14 @@ export function FileTreeView() {
   }
 
   const handleFinishEdit = async () => {
+    if (editingCommitRef.current) return // 防止 Enter + onBlur 重复触发
+    editingCommitRef.current = true
+
     if (!editingPath || !editingName.trim()) {
       setEditingPath(null)
       setEditingName('')
       setEditingType(null)
+      editingCommitRef.current = false
       return
     }
 
@@ -261,6 +277,7 @@ export function FileTreeView() {
       setEditingPath(null)
       setEditingName('')
       setEditingType(null)
+      editingCommitRef.current = false
       return
     }
 
@@ -269,6 +286,7 @@ export function FileTreeView() {
       setEditingPath(null)
       setEditingName('')
       setEditingType(null)
+      editingCommitRef.current = false
       return
     }
 
@@ -306,6 +324,7 @@ export function FileTreeView() {
     setEditingPath(null)
     setEditingName('')
     setEditingType(null)
+    editingCommitRef.current = false
   }
 
   const handleCancelEdit = () => {
@@ -343,8 +362,12 @@ export function FileTreeView() {
   }
 
   const handleFinishNewItem = async () => {
+    if (newItemCommitRef.current) return // 防止 Enter + onBlur 重复触发
+    newItemCommitRef.current = true
+
     if (!newItem || !newItem.name.trim()) {
       setNewItem(null)
+      newItemCommitRef.current = false
       return
     }
 
@@ -359,6 +382,7 @@ export function FileTreeView() {
     }
 
     setNewItem(null)
+    newItemCommitRef.current = false
   }
 
   const handleCancelNewItem = () => {
@@ -367,6 +391,7 @@ export function FileTreeView() {
 
   const handleNewItemKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
+      e.preventDefault() // 防止触发 onBlur 重复提交
       handleFinishNewItem()
     } else if (e.key === 'Escape') {
       handleCancelNewItem()
@@ -413,8 +438,12 @@ export function FileTreeView() {
             onChange={(e) => setEditingName(e.target.value)}
             onBlur={handleFinishEdit}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleFinishEdit()
-              else if (e.key === 'Escape') handleCancelEdit()
+              if (e.key === 'Enter') {
+                e.preventDefault() // 防止触发 onBlur 重复提交
+                handleFinishEdit()
+              } else if (e.key === 'Escape') {
+                handleCancelEdit()
+              }
             }}
             onClick={(e) => e.stopPropagation()}
           />

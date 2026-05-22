@@ -33,21 +33,29 @@ function EditorToolbar() {
 
   // Get path relative to workspace root directory, starting with /rootDir/
   const getRelativePath = (absolutePath: string): string => {
+    // Normalize path separators for comparison
+    const normalizedPath = absolutePath.replace(/\\/g, '/')
+
     if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
       for (const folder of workspaceFolders) {
-        if (absolutePath === folder || absolutePath.startsWith(folder + '/')) {
-          const folderName = folder.split(/[\\/]/).pop() || ''
-          const relativePart = absolutePath.substring(folder.length + 1)
+        const normalizedFolder = folder.replace(/\\/g, '/')
+        if (normalizedPath === normalizedFolder || normalizedPath.startsWith(normalizedFolder + '/')) {
+          const folderName = normalizedFolder.split('/').pop() || ''
+          const relativePart = normalizedPath.substring(normalizedFolder.length + 1)
           return relativePart ? `${folderName}/${relativePart}` : folderName
         }
       }
     }
-    if (rootPath && absolutePath.startsWith(rootPath)) {
-      const rootDirName = rootPath.split(/[\\/]/).pop() || ''
-      const relativePart = absolutePath.substring(rootPath.length + 1)
-      return `${rootDirName}/${relativePart}`
+    if (rootPath) {
+      const normalizedRoot = rootPath.replace(/\\/g, '/')
+      if (normalizedPath === normalizedRoot || normalizedPath.startsWith(normalizedRoot + '/')) {
+        const rootDirName = normalizedRoot.split('/').pop() || ''
+        const relativePart = normalizedPath.substring(normalizedRoot.length + 1)
+        return relativePart ? `${rootDirName}/${relativePart}` : rootDirName
+      }
     }
-    return absolutePath
+    // Fallback: if no root matches, just show the filename
+    return normalizedPath.split('/').pop() || normalizedPath
   }
 
   const handleOpenFolder = async () => {
