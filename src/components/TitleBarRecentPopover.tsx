@@ -1,4 +1,4 @@
-import { FolderOpen, ChevronDown, ChevronUp, Check, MoreHorizontal, Trash2, AlertCircle, GitBranch, FolderPlus, Loader2 } from 'lucide-react'
+import { FolderOpen, ChevronDown, ChevronUp, Check, MoreHorizontal, Trash2, AlertCircle, GitBranch, FolderPlus, Loader2, KeyRound, Eye, EyeOff } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 import { Button } from '@/components/ui/button'
 import {
@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useUIStore, useWorkspaceStore } from '@/stores'
-import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory, removeFolderHistory, gitClone } from '@/lib/tauri'
+import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory, removeFolderHistory, gitClone, gitCloneWithCredentials } from '@/lib/tauri'
 import { useState, useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
@@ -45,6 +45,10 @@ export function TitleBarRecentPopover() {
   const [isCloning, setIsCloning] = useState(false)
   const [cloneProgress, setCloneProgress] = useState('')
   const [cloneError, setCloneError] = useState('')
+  const [isPrivateRepo, setIsPrivateRepo] = useState(false)
+  const [cloneUsername, setCloneUsername] = useState('')
+  const [clonePassword, setClonePassword] = useState('')
+  const [showClonePassword, setShowClonePassword] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
 
   const displayName = (() => {
@@ -104,11 +108,11 @@ export function TitleBarRecentPopover() {
           setCloneProgress(payload.message)
           setCloneError('')
         } else if (payload.status === 'completed') {
-          setCloneProgress('克隆完成')
+          setCloneProgress(t('recent.cloneComplete'))
         } else if (payload.status === 'error') {
-          setCloneError(payload.message)
+          setCloneError(t('recent.cloneFailed', { error: payload.message }))
         } else if (payload.status === 'started') {
-          setCloneProgress(payload.message)
+          setCloneProgress(t('recent.cloning'))
           setCloneError('')
         }
       })
@@ -168,6 +172,10 @@ export function TitleBarRecentPopover() {
     setCloneLocalPath('')
     setCloneProgress('')
     setCloneError('')
+    setIsPrivateRepo(false)
+    setCloneUsername('')
+    setClonePassword('')
+    setShowClonePassword(false)
   }
 
   const handleSelectClonePath = async () => {
@@ -188,13 +196,23 @@ export function TitleBarRecentPopover() {
       showToast(t('recent.selectLocalPath'), 'error')
       return
     }
+    if (isPrivateRepo && (!cloneUsername.trim() || !clonePassword.trim())) {
+      const { showToast } = useUIStore.getState()
+      showToast(t('recent.enterCredentials'), 'error')
+      return
+    }
 
     setIsCloning(true)
     try {
-      const clonedPath = await gitClone(cloneUrl.trim(), cloneLocalPath.trim())
+      const clonedPath = isPrivateRepo
+        ? await gitCloneWithCredentials(cloneUrl.trim(), cloneLocalPath.trim(), cloneUsername.trim(), clonePassword.trim())
+        : await gitClone(cloneUrl.trim(), cloneLocalPath.trim())
       setShowCloneDialog(false)
       setCloneUrl('')
       setCloneLocalPath('')
+      setIsPrivateRepo(false)
+      setCloneUsername('')
+      setClonePassword('')
 
       if (workspaceMode === 'workspace') {
         await addWorkspaceFolder(clonedPath)
@@ -402,6 +420,59 @@ export function TitleBarRecentPopover() {
                   </button>
                 </div>
               </div>
+              {/* Private repo toggle */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPrivateRepo(!isPrivateRepo)}
+                  className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors ${isPrivateRepo ? 'bg-blue-500/10 text-blue-500' : ''}`}
+                  style={!isPrivateRepo ? { color: 'var(--text-secondary)', border: '1px solid var(--border-color)' } : { border: '1px solid rgba(59, 130, 246, 0.5)' }}
+                  disabled={isCloning}
+                >
+                  <KeyRound size={12} />
+                  {t('recent.privateRepo')}
+                </button>
+              </div>
+              {/* Credentials fields (shown when private repo is toggled) */}
+              {isPrivateRepo && (
+                <div className="space-y-2 p-2 rounded" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}>
+                  <div>
+                    <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('recent.username')}</label>
+                    <input
+                      type="text"
+                      value={cloneUsername}
+                      onChange={(e) => setCloneUsername(e.target.value)}
+                      placeholder={t('recent.usernamePlaceholder')}
+                      className="w-full px-2 py-1.5 text-xs rounded"
+                      style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                      disabled={isCloning}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('recent.passwordOrToken')}</label>
+                    <div className="relative">
+                      <input
+                        type={showClonePassword ? 'text' : 'password'}
+                        value={clonePassword}
+                        onChange={(e) => setClonePassword(e.target.value)}
+                        placeholder={t('recent.passwordPlaceholder')}
+                        className="w-full px-2 py-1.5 text-xs rounded pr-7"
+                        style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                        disabled={isCloning}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowClonePassword(!showClonePassword)}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 cursor-pointer hover:bg-[var(--bg-hover)] rounded"
+                        style={{ color: 'var(--text-muted)' }}
+                        tabIndex={-1}
+                      >
+                        {showClonePassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               {(cloneProgress || cloneError) && (
                 <div className="mt-2 p-2 rounded text-xs max-h-20 overflow-y-auto" style={{
                   background: cloneError ? 'rgba(239, 68, 68, 0.1)' : 'var(--bg-tertiary)',
@@ -428,7 +499,7 @@ export function TitleBarRecentPopover() {
               <button
                 onClick={handleClone}
                 className="px-3 py-1.5 text-xs rounded cursor-pointer bg-blue-500 text-white hover:bg-blue-600 flex items-center gap-1"
-                disabled={isCloning}
+                disabled={isCloning || (isPrivateRepo && (!cloneUsername.trim() || !clonePassword.trim()))}
               >
                 {isCloning && <Loader2 size={12} className="animate-spin" />}
                 {isCloning ? t('recent.cloning') : t('recent.cloneAndOpen')}

@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::io::{BufRead, BufReader};
 use tauri::{AppHandle, Emitter};
+use crate::i18n;
 
 #[derive(Serialize, Deserialize)]
 pub struct GitRepositoryInfo {
@@ -242,7 +243,7 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             Err(e) => {
                 // Submodule commit failed - this means submodule has uncommitted changes
                 // Return specific error for frontend to handle
-                return Err(format!("子模块内部有未提交的变更，请先在子模块内提交"));
+                return Err(format!("SUBMODULE_UNCOMMITTED:{}", i18n::t("backend.git.submoduleUncommitted")));
             }
         }
     } else {
@@ -694,8 +695,30 @@ fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Res
 /// Clone a git repository to a local path
 #[tauri::command]
 pub async fn git_clone(app: AppHandle, url: String, local_path: String) -> Result<String, String> {
+    do_git_clone(&app, &url, &local_path, None, None).await
+}
+
+/// Clone a private git repository with credentials
+#[tauri::command]
+pub async fn git_clone_with_credentials(
+    app: AppHandle,
+    url: String,
+    local_path: String,
+    username: String,
+    password: String,
+) -> Result<String, String> {
+    do_git_clone(&app, &url, &local_path, Some(&username), Some(&password)).await
+}
+
+async fn do_git_clone(
+    app: &AppHandle,
+    url: &str,
+    local_path: &str,
+    username: Option<&str>,
+    password: Option<&str>,
+) -> Result<String, String> {
     // Ensure parent directory exists
-    if let Some(parent) = Path::new(&local_path).parent() {
+    if let Some(parent) = Path::new(local_path).parent() {
         if !parent.exists() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create directory: {}", e))?;
@@ -703,20 +726,57 @@ pub async fn git_clone(app: AppHandle, url: String, local_path: String) -> Resul
     }
 
     // Check if target path already exists
-    if Path::new(&local_path).exists() {
-        return Err(format!("目标路径已存在: {}", local_path));
+    if Path::new(local_path).exists() {
+        return Err(format!("{}: {}", i18n::t("backend.git.targetPathExists"), local_path));
     }
 
     // Send start event
     let _ = app.emit("git-clone-progress", serde_json::json!({
         "status": "started",
-        "message": "开始克隆..."
+        "message": i18n::t("backend.git.cloning")
     }));
 
-    let mut child = super::create_command("git")
-        .args(["clone", "--progress", &url, &local_path])
+    // If credentials provided, set up GIT_ASKPASS
+    let askpass_script_path = if username.is_some() && password.is_some() {
+        let temp_dir = std::env::temp_dir();
+        let askpass_script = temp_dir.join("swallownote_git_clone_askpass.sh");
+
+        #[cfg(not(target_os = "windows"))]
+        let script_content = format!("#!/bin/sh\nif [ \"$1\" = \"Username*\" ]; then echo '{}'; elif [ \"$1\" = \"Password*\" ]; then echo '{}'; else echo '{}'; fi", username.unwrap(), password.unwrap(), password.unwrap());
+
+        #[cfg(target_os = "windows")]
+        let script_content = format!("@echo off\nif \"%1\"==\"Username*\" (echo {}) else (echo {})", username.unwrap(), password.unwrap());
+
+        std::fs::write(&askpass_script, &script_content)
+            .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&askpass_script)
+                .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&askpass_script, perms)
+                .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+        }
+
+        Some(askpass_script.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    let mut cmd = super::create_command("git");
+    cmd.args(["clone", "--progress", url, local_path])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if let Some(ref askpass_path) = askpass_script_path {
+        cmd.env("GIT_ASKPASS", askpass_path);
+        cmd.env("GIT_TERMINAL_PROMPT", "0");
+    }
+
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to execute git clone: {}", e))?;
 
@@ -736,17 +796,22 @@ pub async fn git_clone(app: AppHandle, url: String, local_path: String) -> Resul
 
     let status = child.wait().map_err(|e| format!("Failed to wait for git clone: {}", e))?;
 
+    // Clean up askpass script
+    if let Some(ref askpass_path) = askpass_script_path {
+        let _ = std::fs::remove_file(askpass_path);
+    }
+
     if status.success() {
         let _ = app.emit("git-clone-progress", serde_json::json!({
             "status": "completed",
-            "message": "克隆完成"
+            "message": i18n::t("backend.git.cloneCompleted")
         }));
         Ok(local_path.replace('\\', "/"))
     } else {
         let _ = app.emit("git-clone-progress", serde_json::json!({
             "status": "error",
-            "message": "克隆失败"
+            "message": i18n::t("backend.git.cloneFailed")
         }));
-        Err("Git clone failed".to_string())
+        Err(i18n::t("backend.git.cloneFailed"))
     }
 }

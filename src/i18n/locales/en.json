@@ -150,7 +150,8 @@
     "error": "Error",
     "success": "Success",
     "no": "No",
-    "yes": "Yes"
+    "yes": "Yes",
+    "settings": "Settings"
   },
   "activityBar": {
     "explorer": "Explorer",
@@ -239,7 +240,10 @@
     "loading": "Loading...",
     "cannotOpenFile": "Cannot open this file",
     "binaryFile": "Binary files cannot be displayed in editor",
-    "unsupportedType": "Unsupported file type"
+    "unsupportedType": "Unsupported file type",
+    "cannotOpen": "Cannot open this file type",
+    "welcome": "Welcome to SwallowNote",
+    "welcomeHint": "Open a file or folder to get started"
   },
   "editorSettings": {
     "title": "Typography Settings",
@@ -314,7 +318,9 @@
     "usernamePlaceholder": "Enter username",
     "passwordOrToken": "Password / Access Token",
     "passwordPlaceholder": "Enter password or Personal Access Token",
-    "pushWithCredential": "Authenticate & Push"
+    "pushWithCredential": "Authenticate & Push",
+    "scanning": "Scanning...",
+    "scanningPath": "Scanning {{path}}..."
   },
   "history": {
     "title": "History",
@@ -329,6 +335,7 @@
   "directory": {
     "title": "Directory",
     "noFileOpened": "No file opened",
+    "noFileOpen": "No file opened",
     "noDirectory": "No directory",
     "noToc": "No table of contents"
   },
@@ -372,6 +379,8 @@
     "openFolder": "Open Folder",
     "cloneRepo": "Clone Git Repository",
     "cloneGitRepo": "Clone Git Repository",
+    "repoUrl": "Repository URL",
+    "localPath": "Local Path",
     "clearHistory": "Clear History",
     "recent": "Recent",
     "noHistory": "No history",
@@ -388,6 +397,25 @@
     "title": "Recent",
     "pathNotFound": "Path does not exist: {{path}}",
     "enterRepoUrl": "Please enter a repository URL",
-    "selectLocalPath": "Please select a local path"
+    "selectLocalPath": "Please select a local path",
+    "privateRepo": "Private Repo",
+    "username": "Username",
+    "usernamePlaceholder": "Enter username",
+    "passwordOrToken": "Password/Token",
+    "passwordPlaceholder": "Enter password or access token",
+    "enterCredentials": "Please enter username and password"
+  },
+  "backend": {
+    "git": {
+      "cloning": "Cloning...",
+      "cloneCompleted": "Clone completed",
+      "cloneFailed": "Clone failed",
+      "targetPathExists": "Target path already exists",
+      "submoduleUncommitted": "Submodule has uncommitted changes, please commit inside submodule first"
+    }
+  },
+  "tray": {
+    "showWindow": "Show Window",
+    "quit": "Quit"
   }
 }

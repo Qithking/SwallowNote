@@ -150,7 +150,8 @@
     "error": "错误",
     "success": "成功",
     "no": "否",
-    "yes": "是"
+    "yes": "是",
+    "settings": "设置"
   },
   "activityBar": {
     "explorer": "资源管理器",
@@ -239,7 +240,10 @@
     "loading": "加载中...",
     "cannotOpenFile": "无法打开此文件",
     "binaryFile": "二进制文件无法在编辑器中显示",
-    "unsupportedType": "不支持的文件类型"
+    "unsupportedType": "不支持的文件类型",
+    "cannotOpen": "无法打开此文件类型",
+    "welcome": "欢迎使用 SwallowNote",
+    "welcomeHint": "打开文件或文件夹开始编辑"
   },
   "editorSettings": {
     "title": "排版设置",
@@ -314,7 +318,9 @@
     "usernamePlaceholder": "请输入用户名",
     "passwordOrToken": "密码/访问令牌",
     "passwordPlaceholder": "请输入密码或 Personal Access Token",
-    "pushWithCredential": "验证并推送"
+    "pushWithCredential": "验证并推送",
+    "scanning": "扫描中...",
+    "scanningPath": "扫描 {{path}}..."
   },
   "history": {
     "title": "历史",
@@ -329,6 +335,7 @@
   "directory": {
     "title": "目录",
     "noFileOpened": "未打开文件",
+    "noFileOpen": "未打开文件",
     "noDirectory": "无目录",
     "noToc": "无目录"
   },
@@ -379,7 +386,9 @@
     "confirm": "确认",
     "cloneDialogTitle": "克隆 Git 仓库",
     "cloneGitRepo":"克隆 Git 仓库",
+    "repoUrl": "仓库 URL",
     "repoUrlLabel": "仓库 URL",
+    "localPath": "本地地址",
     "localPathLabel": "本地地址",
     "cloning": "克隆中...",
     "cloneAndOpen": "克隆&打开",
@@ -388,6 +397,25 @@
     "title": "最近记录",
     "pathNotFound": "路径不存在: {{path}}",
     "enterRepoUrl": "请输入仓库 URL",
-    "selectLocalPath": "请选择本地地址"
+    "selectLocalPath": "请选择本地地址",
+    "privateRepo": "私有仓库",
+    "username": "用户名",
+    "usernamePlaceholder": "输入用户名",
+    "passwordOrToken": "密码/令牌",
+    "passwordPlaceholder": "输入密码或访问令牌",
+    "enterCredentials": "请输入用户名和密码"
+  },
+  "backend": {
+    "git": {
+      "cloning": "克隆中...",
+      "cloneCompleted": "克隆完成",
+      "cloneFailed": "克隆失败",
+      "targetPathExists": "目标路径已存在",
+      "submoduleUncommitted": "子模块内部有未提交的变更，请先在子模块内提交"
+    }
+  },
+  "tray": {
+    "showWindow": "显示窗口",
+    "quit": "退出"
   }
 }

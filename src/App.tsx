@@ -17,7 +17,7 @@ import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
-import { saveSessionState, getSessionState } from '@/lib/tauri'
+import { saveSessionState, getSessionState, setAppLocale } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
@@ -51,6 +51,9 @@ function App() {
         loadEditorSettings(),
         loadUISettings(),
       ])
+      // Sync current i18n language to the Rust backend
+      const { default: i18n } = await import('i18next')
+      setAppLocale(i18n.language).catch(() => {})
     }
     init()
   }, [])
@@ -298,18 +301,6 @@ function App() {
           const activeTabId = states.activeTabId || null
           useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
           if (activeTabId) {
-            const activeTab = restoredTabs.find((t: any) => t.id === activeTabId)
-            if (activeTab?.path) {
-              const fileTreeStore = useFileTreeStore.getState()
-              if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
-                const folder = workspaceFolders.find((f: string) => activeTab.path.startsWith(f))
-                if (folder) {
-                  fileTreeStore.collapseAllExceptPath(activeTab.path, folder)
-                }
-              } else if (rootPath) {
-                fileTreeStore.collapseAllExceptPath(activeTab.path, rootPath)
-              }
-            }
             useEditorStore.getState().loadTabContent(activeTabId)
           }
         }
@@ -321,6 +312,25 @@ function App() {
         useFileTreeStore.getState().restoreTreeState(expandedPaths, selectedPath)
       }
 
+      // After restoring tree state, reveal the active tab's path in the file tree
+      // This ensures the file tree scrolls to and loads nodes for the current tab
+      if (states.activeTabId) {
+        const editorState = useEditorStore.getState()
+        const activeTab = editorState.tabs.find((t: any) => t.id === states.activeTabId)
+        if (activeTab?.path) {
+          const fileTreeStore = useFileTreeStore.getState()
+          if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
+            const folder = workspaceFolders.find((f: string) => activeTab.path.startsWith(f))
+            if (folder) {
+              // Delay to ensure file tree nodes are rendered after restoreTreeState
+              setTimeout(() => fileTreeStore.revealPath(activeTab.path, folder), 100)
+            }
+          } else if (rootPath) {
+            setTimeout(() => fileTreeStore.revealPath(activeTab.path, rootPath), 100)
+          }
+        }
+      }
+
       if (states.sidebarWidth) {
         setSidebarWidth(Number(states.sidebarWidth))
       }
@@ -329,6 +339,33 @@ function App() {
       }
       if (states.editorViewMode) {
         useUIStore.getState().setEditorViewMode(states.editorViewMode as any)
+      }
+
+      // Restore window size and position
+      const win = getCurrentWindow()
+      try {
+        if (states.isMaximized === 'true') {
+          await win.maximize()
+        } else if (states.isFullscreen === 'true') {
+          await win.setFullscreen(true)
+        } else {
+          if (states.windowWidth && states.windowHeight) {
+            const width = Number(states.windowWidth)
+            const height = Number(states.windowHeight)
+            if (width > 0 && height > 0) {
+              await win.setSize(new (await import('@tauri-apps/api/dpi')).LogicalSize(width, height))
+            }
+          }
+          if (states.windowX && states.windowY) {
+            const x = Number(states.windowX)
+            const y = Number(states.windowY)
+            if (!isNaN(x) && !isNaN(y)) {
+              await win.setPosition(new (await import('@tauri-apps/api/dpi')).LogicalPosition(x, y))
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to restore window size:', e)
       }
     } catch (e) {
       console.error('Failed to restore session state:', e)
@@ -353,6 +390,31 @@ function App() {
 
       const activeTabId = fileTabs.find(t => t.id === editorState.activeTabId)?.id || (fileTabs.length > 0 ? fileTabs[0].id : '')
 
+      // Save window size and position
+      let windowWidth = ''
+      let windowHeight = ''
+      let windowX = ''
+      let windowY = ''
+      let isMaximized = ''
+      let isFullscreen = ''
+      try {
+        const win = getCurrentWindow()
+        isMaximized = String(await win.isMaximized())
+        isFullscreen = String(await win.isFullscreen())
+        if (isMaximized !== 'true' && isFullscreen !== 'true') {
+          const size = await win.innerSize()
+          // Convert from physical to logical pixels
+          const scaleFactor = await win.scaleFactor()
+          windowWidth = String(Math.round(size.width / scaleFactor))
+          windowHeight = String(Math.round(size.height / scaleFactor))
+          const position = await win.outerPosition()
+          windowX = String(Math.round(position.x / scaleFactor))
+          windowY = String(Math.round(position.y / scaleFactor))
+        }
+      } catch (e) {
+        console.error('Failed to save window size:', e)
+      }
+
       const updates: Record<string, string> = {
         tabs: JSON.stringify(tabsData),
         activeTabId,
@@ -361,6 +423,12 @@ function App() {
         sidebarWidth: String(uiState.sidebarWidth),
         rightPanelWidth: String(uiState.rightPanelWidth),
         editorViewMode: uiState.editorViewMode,
+        windowWidth,
+        windowHeight,
+        windowX,
+        windowY,
+        isMaximized,
+        isFullscreen,
         editor_h1Size: String(editorSettingsState.h1Size),
         editor_h2Size: String(editorSettingsState.h2Size),
         editor_h3Size: String(editorSettingsState.h3Size),

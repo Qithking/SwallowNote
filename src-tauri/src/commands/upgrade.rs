@@ -63,27 +63,27 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+        .map_err(|e| format!("Request failed: {}", e))?;
 
     if response.status() == 403 {
-        return Err("GitHub API 限流，请稍后重试".to_string());
+        return Err("GitHub API rate limited, please try again later".to_string());
     }
 
     if !response.status().is_success() {
-        return Err(format!("请求失败: {}", response.status()));
+        return Err(format!("Request failed: {}", response.status()));
     }
 
     let release: GithubRelease = response
         .json()
         .await
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     let platform_ext = get_platform_extension();
     let asset = release
         .assets
         .iter()
         .find(|a| a.name.ends_with(platform_ext.as_str()))
-        .ok_or_else(|| format!("未找到 {} 安装包", platform_ext))?;
+        .ok_or_else(|| format!("No {} installer found", platform_ext))?;
 
     let download_dir = get_default_download_dir();
     let file_path = download_dir.join(&asset.name);
@@ -92,14 +92,14 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         .get(&asset.browser_download_url)
         .send()
         .await
-        .map_err(|e| format!("下载失败: {}", e))?;
+        .map_err(|e| format!("Download failed: {}", e))?;
 
     let total_size = response.content_length().unwrap_or(0);
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
 
     let file = std::fs::File::create(&file_path)
-        .map_err(|e| format!("创建文件失败: {}", e))?;
+        .map_err(|e| format!("Failed to create file: {}", e))?;
     let mut writer = std::io::BufWriter::new(file);
 
     // Throttle progress events: only emit when progress changes by >=1% or 200ms elapsed
@@ -108,9 +108,9 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
     let emit_interval = std::time::Duration::from_millis(200);
 
     while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result.map_err(|e| format!("下载出错: {}", e))?;
+        let chunk = chunk_result.map_err(|e| format!("Download error: {}", e))?;
         std::io::Write::write_all(&mut writer, &chunk)
-            .map_err(|e| format!("写入文件失败: {}", e))?;
+            .map_err(|e| format!("Failed to write file: {}", e))?;
         downloaded += chunk.len() as u64;
         let progress = if total_size > 0 {
             (downloaded as f64 / total_size as f64) * 100.0
@@ -144,7 +144,7 @@ pub async fn open_installer(path: String) -> Result<(), String> {
         std::process::Command::new("open")
             .arg(&path)
             .spawn()
-            .map_err(|e| format!("打开安装包失败: {}", e))?;
+            .map_err(|e| format!("Failed to open installer: {}", e))?;
         Ok(())
     }
     #[cfg(target_os = "windows")]
@@ -152,7 +152,7 @@ pub async fn open_installer(path: String) -> Result<(), String> {
         super::create_command("cmd")
             .args(["/C", "start", "", &path])
             .spawn()
-            .map_err(|e| format!("打开安装包失败: {}", e))?;
+            .map_err(|e| format!("Failed to open installer: {}", e))?;
         Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]

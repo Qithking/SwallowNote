@@ -200,16 +200,15 @@ function CommitSection({
           })
           // Don't count as failure since user can retry with credentials
           successCount++
-        } else if (errorMessage.includes('没有需要提交的变更') || 
-            errorMessage.includes('nothing to commit') ||
+        } else if (errorMessage.includes('nothing to commit') ||
             errorMessage.includes('working tree clean') ||
             errorMessage.includes('no changes added to commit') ||
             (errorMessage.includes('modified content') && errorMessage.includes('submodule'))) {
           successCount++
-        } else if (errorMessage.includes('子模块内部有未提交的变更')) {
+        } else if (errorMessage.startsWith('SUBMODULE_UNCOMMITTED:')) {
           successCount++
           showToast(`${repo.name}: ${t('git.submoduleHasChanges')}`, 'error')
-        } else if (errorMessage.includes('子模块引用需要更新')) {
+        } else if (errorMessage.startsWith('SUBMODULE_REF_NEEDS_UPDATE:')) {
           successCount++
           showToast(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`, 'error')
         } else {

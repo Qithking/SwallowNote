@@ -7,6 +7,7 @@ import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
 import { useEditorStore, EditorTab } from './editor'
 import { useGitStore, mapRepoInfosToRepositories } from './git'
+import i18n from '@/i18n'
 
 export interface WorkspaceState {
   rootPath: string | null
@@ -229,11 +230,11 @@ async function scanAndCacheGitRepos() {
       return
     }
 
-    gitStore.setScanProgress({ current: 0, total: scanPaths.length, message: '扫描中...' })
+    gitStore.setScanProgress({ current: 0, total: scanPaths.length, message: i18n.t('git.scanning') })
 
     const scanPromises = scanPaths.map(async (path, index) => {
       try {
-        gitStore.setScanProgress({ current: index, total: scanPaths.length, message: `扫描 ${path}...` })
+        gitStore.setScanProgress({ current: index, total: scanPaths.length, message: i18n.t('git.scanningPath', { path }) })
         const repos = await scanGitRepos(path)
         return repos
       } catch (e) {

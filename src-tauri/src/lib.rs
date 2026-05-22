@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod i18n;
 mod plugins;
 mod services;
 
@@ -22,14 +23,20 @@ fn greet(name: &str) -> String {
 /// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
 #[tauri::command]
 fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
-    let result = std::panic::catch_unwind(|| {
-        unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(visible) }
-    });
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => return Err(e),
-        Err(_) => return Err("panic in set_dock_icon_visibility".to_string()),
+    #[cfg(target_os = "macos")]
+    {
+        let result = std::panic::catch_unwind(|| {
+            unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(visible) }
+        });
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err("panic in set_dock_icon_visibility".to_string()),
+        }
     }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = visible;
     Ok(())
 }
 
@@ -67,6 +74,7 @@ pub fn run() {
             commands::git::git_file_log,
             commands::git::git_show_diff,
             commands::git::git_clone,
+            commands::git::git_clone_with_credentials,
             commands::git::scan_git_repos,
             commands::folder_history::save_folder_history,
             commands::folder_history::get_latest_folder,
@@ -85,10 +93,14 @@ pub fn run() {
             mac_rounded_corners::enable_modern_window_style,
             mac_rounded_corners::reposition_traffic_lights,
             set_dock_icon_visibility,
+            i18n::set_app_locale,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
             std::fs::create_dir_all(&app_data_dir).ok();
+
+            // Initialize backend i18n translations
+            crate::i18n::init_translations();
 
             match db::init_db(app_data_dir) {
                 Ok(db) => {
@@ -102,8 +114,8 @@ pub fn run() {
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle.clone());
 
-            let show_item = MenuItemBuilder::with_id("show", "显示窗口").build(app)?;
-            let quit_item = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+            let show_item = MenuItemBuilder::with_id("show", crate::i18n::t("tray.showWindow")).build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", crate::i18n::t("tray.quit")).build(app)?;
             let menu = MenuBuilder::new(app)
                 .item(&show_item)
                 .separator()
@@ -120,6 +132,7 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                        #[cfg(target_os = "macos")]
                         let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
                     }
                     "quit" => {
@@ -139,6 +152,7 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                        #[cfg(target_os = "macos")]
                         let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
                     }
                 })

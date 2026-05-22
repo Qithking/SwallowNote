@@ -199,6 +199,10 @@ export async function gitClone(url: string, localPath: string): Promise<string> 
   return await invoke('git_clone', { url, localPath })
 }
 
+export async function gitCloneWithCredentials(url: string, localPath: string, username: string, password: string): Promise<string> {
+  return await invoke('git_clone_with_credentials', { url, localPath, username, password })
+}
+
 export interface GitFileLogEntry {
   hash: string
   message: string
@@ -272,6 +276,11 @@ export async function clearOtherFolderHistory(currentPath: string | null): Promi
 // macOS Dock Icon APIs
 export async function setDockIconVisibility(visible: boolean): Promise<void> {
   await invoke('set_dock_icon_visibility', { visible })
+}
+
+// Locale API - sync frontend language setting to backend
+export async function setAppLocale(locale: string): Promise<void> {
+  await invoke('set_app_locale', { locale })
 }
 
 // Session State APIs
