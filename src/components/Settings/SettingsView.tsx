@@ -60,14 +60,13 @@ function SettingsView() {
   const contentRef = useRef<HTMLDivElement>(null)
   const {
     theme, setTheme,
-    themeColor, setThemeColor,
     autoStart, setAutoStart,
     closeWithoutExit, setCloseWithoutExit,
     noteWidth, setNoteWidth,
     showAllFiles, setShowAllFiles,
     markdownOnly, setMarkdownOnly,
     syncInterval, setSyncInterval,
-    customThemes, activeCustomThemeId,
+    customThemes, activeLightCustomThemeId, activeDarkCustomThemeId,
     setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
   } = useUIStore()
 
@@ -75,6 +74,8 @@ function SettingsView() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+
+  const activeCustomThemeId = customThemeTab === 'light' ? activeLightCustomThemeId : activeDarkCustomThemeId
 
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; labelKey: string }[] = [
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },
@@ -235,19 +236,8 @@ function SettingsView() {
               <h2 className="text-base font-semibold">{t('settings.appearance')}</h2>
               
               <Card>
-                <CardContent className="p-0 divide-y divide-border">
-                  <div className="px-4">
-                    <SettingRow label={t('settings.appearance.themeColor')} desc={t('settings.appearance.themeColor.desc')}>
-                      <input
-                        type="color"
-                        value={themeColor}
-                        onChange={(e) => setThemeColor(e.target.value)}
-                        className="w-8 h-8 rounded cursor-pointer border border-border bg-background"
-                      />
-                    </SettingRow>
-                  </div>
-                  
-                  <div className="py-3 px-4">
+                <CardContent className="p-0">
+                  <div className="py-3 px-4 border-b border-border">
                     <div className="flex items-start justify-between">
                       <div className="mr-4 pt-1">
                         <Label className="text-sm font-medium">{t('settings.appearance.theme')}</Label>
@@ -264,14 +254,6 @@ function SettingsView() {
                         </TabsList>
                       </Tabs>
                     </div>
-                  </div>                  
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="p-0">
-                  <div className="px-4 py-3 border-b border-border">
-                    <Label className="text-sm font-medium">{t('settings.appearance.customTheme')}</Label>
                   </div>
                   <div className="px-4 py-2 border-b border-border">
                     <Tabs value={customThemeTab} onValueChange={(v) => setCustomThemeTab(v as 'light' | 'dark')}>
@@ -284,14 +266,16 @@ function SettingsView() {
                   <div className="flex min-h-[280px]">
                     <div className="w-44 border-r border-border py-2 px-2 flex flex-col">
                       <div className="flex-1 overflow-y-auto space-y-0.5">
-                        {customThemes.map((ct) => (
+                        {customThemes
+                          .filter((ct) => !ct.isBuiltIn || (customThemeTab === 'light' ? ct.id === 'builtin-light' : ct.id === 'builtin-dark'))
+                          .map((ct) => (
                           <div
                             key={ct.id}
                             className={cn(
                               'flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer group',
                               activeCustomThemeId === ct.id ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
                             )}
-                            onClick={() => setActiveCustomThemeId(ct.id)}
+                            onClick={() => setActiveCustomThemeId(customThemeTab, ct.id)}
                           >
                             <div className={cn(
                               'w-3.5 h-3.5 rounded-full border shrink-0',
@@ -342,7 +326,7 @@ function SettingsView() {
                         variant="ghost"
                         size="sm"
                         className="mt-2 w-full justify-start gap-1.5 text-xs"
-                        onClick={() => addCustomTheme(t('settings.appearance.customTheme.add'))}
+                        onClick={() => addCustomTheme(t('settings.appearance.customTheme.add'), customThemeTab)}
                       >
                         <Plus size={12} />
                         {t('settings.appearance.customTheme.add')}

@@ -36,7 +36,7 @@ function hexToHSL(hex: string): { h: number; s: number; l: number } {
 }
 
 export function useTheme() {
-  const { theme, themeColor, customThemes, activeCustomThemeId } = useUIStore()
+  const { theme, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId } = useUIStore()
 
   useEffect(() => {
     const root = document.documentElement
@@ -67,27 +67,26 @@ export function useTheme() {
     const root = document.documentElement
     const isDark = root.classList.contains('dark')
 
-    if (activeCustomThemeId) {
-      const activeTheme = customThemes.find((t) => t.id === activeCustomThemeId)
-      if (activeTheme) {
-        const colors = isDark ? activeTheme.dark : activeTheme.light
-        const { h, s, l } = hexToHSL(colors.themeColor)
-        const primaryL = isDark ? Math.min(l + 6, 80) : l
-        const hoverL = Math.min(primaryL + 7, 90)
+    const activeCustomThemeId = isDark ? activeDarkCustomThemeId : activeLightCustomThemeId
+    const activeTheme = customThemes.find((t) => t.id === activeCustomThemeId)
+    if (activeTheme) {
+      const colors = isDark ? activeTheme.dark : activeTheme.light
+      const { h, s, l } = hexToHSL(colors.themeColor)
+      const primaryL = isDark ? Math.min(l + 6, 80) : l
+      const hoverL = Math.min(primaryL + 7, 90)
 
-        root.style.setProperty('--theme-color', colors.themeColor)
-        root.style.setProperty('--theme-color-hover', `hsl(${h}, ${s}%, ${hoverL}%)`)
-        root.style.setProperty('--primary', `${h} ${s}% ${primaryL}%`)
-        root.style.setProperty('--ring', `${h} ${s}% ${primaryL}%`)
-        root.style.setProperty('--tab-activeBorderTop', colors.themeColor)
-        root.style.setProperty('--status-bg', colors.themeColor)
-        root.style.setProperty('--bg-primary', colors.appBg)
-        root.style.setProperty('--bg-secondary', colors.contentBg)
-        root.style.setProperty('--text-primary', colors.textColor)
-        root.style.setProperty('--border-color', colors.borderColor)
-        root.style.setProperty('--popover', colors.tooltipColor)
-        return
-      }
+      root.style.setProperty('--theme-color', colors.themeColor)
+      root.style.setProperty('--theme-color-hover', `hsl(${h}, ${s}%, ${hoverL}%)`)
+      root.style.setProperty('--primary', `${h} ${s}% ${primaryL}%`)
+      root.style.setProperty('--ring', `${h} ${s}% ${primaryL}%`)
+      root.style.setProperty('--tab-activeBorderTop', colors.themeColor)
+      root.style.setProperty('--status-bg', colors.themeColor)
+      root.style.setProperty('--bg-primary', colors.appBg)
+      root.style.setProperty('--bg-secondary', colors.contentBg)
+      root.style.setProperty('--text-primary', colors.textColor)
+      root.style.setProperty('--border-color', colors.borderColor)
+      root.style.setProperty('--popover', colors.tooltipColor)
+      return
     }
 
     const { h, s, l } = hexToHSL(themeColor)
@@ -105,5 +104,5 @@ export function useTheme() {
     root.style.setProperty('--text-primary', '')
     root.style.setProperty('--border-color', '')
     root.style.setProperty('--popover', '')
-  }, [themeColor, theme, customThemes, activeCustomThemeId])
+  }, [themeColor, theme, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId])
 }

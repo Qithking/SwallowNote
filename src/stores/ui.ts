@@ -101,7 +101,8 @@ export interface UIState {
   customShortcuts: Record<string, string>
   syncInterval: number
   customThemes: CustomTheme[]
-  activeCustomThemeId: string | null
+  activeLightCustomThemeId: string
+  activeDarkCustomThemeId: string
   setTheme: (theme: Theme) => void
   setThemeColor: (color: string) => void
   setSidebarView: (view: SidebarView) => void
@@ -130,8 +131,8 @@ export interface UIState {
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
   resetAllShortcuts: () => void
-  setActiveCustomThemeId: (id: string | null) => void
-  addCustomTheme: (name: string) => void
+  setActiveCustomThemeId: (themeType: 'light' | 'dark', id: string) => void
+  addCustomTheme: (name: string, themeType: 'light' | 'dark') => void
   deleteCustomTheme: (id: string) => void
   renameCustomTheme: (id: string, name: string) => void
   updateCustomThemeColor: (id: string, themeType: 'light' | 'dark', key: keyof CustomThemeColors, value: string) => void
@@ -163,7 +164,8 @@ export const useUIStore = create<UIState>((set) => ({
   customShortcuts: {},
   syncInterval: 10,
   customThemes: [...BUILT_IN_THEMES],
-  activeCustomThemeId: null,
+  activeLightCustomThemeId: 'builtin-light',
+  activeDarkCustomThemeId: 'builtin-dark',
   setTheme: (theme) => {
     set({ theme })
     saveAppSettings({ theme })
@@ -264,11 +266,16 @@ export const useUIStore = create<UIState>((set) => ({
     set({ customShortcuts: {} })
     saveAppSettings({ customShortcuts: '{}' })
   },
-  setActiveCustomThemeId: (id) => {
-    set({ activeCustomThemeId: id })
-    saveAppSettings({ activeCustomThemeId: id ?? '' })
+  setActiveCustomThemeId: (themeType, id) => {
+    if (themeType === 'light') {
+      set({ activeLightCustomThemeId: id })
+      saveAppSettings({ activeLightCustomThemeId: id })
+    } else {
+      set({ activeDarkCustomThemeId: id })
+      saveAppSettings({ activeDarkCustomThemeId: id })
+    }
   },
-  addCustomTheme: (name) => {
+  addCustomTheme: (name, themeType) => {
     const id = 'custom-' + Date.now()
     const newTheme: CustomTheme = {
       id,
@@ -277,22 +284,28 @@ export const useUIStore = create<UIState>((set) => ({
       light: { ...BUILT_IN_THEMES[0].light },
       dark: { ...BUILT_IN_THEMES[1].dark },
     }
-    set((state) => ({ customThemes: [...state.customThemes, newTheme] }))
+    if (themeType === 'light') {
+      set((state) => ({ customThemes: [...state.customThemes, newTheme], activeLightCustomThemeId: id }))
+    } else {
+      set((state) => ({ customThemes: [...state.customThemes, newTheme], activeDarkCustomThemeId: id }))
+    }
     const updated = [...useUIStore.getState().customThemes]
-    saveAppSettings({ customThemes: JSON.stringify(updated) })
+    saveAppSettings({ customThemes: JSON.stringify(updated), ...(themeType === 'light' ? { activeLightCustomThemeId: id } : { activeDarkCustomThemeId: id }) })
   },
   deleteCustomTheme: (id) => {
     const theme = useUIStore.getState().customThemes.find((t) => t.id === id)
     if (!theme || theme.isBuiltIn) return
     set((state) => {
       const next = state.customThemes.filter((t) => t.id !== id)
-      const activeId = state.activeCustomThemeId === id ? null : state.activeCustomThemeId
-      return { customThemes: next, activeCustomThemeId: activeId }
+      const lightId = state.activeLightCustomThemeId === id ? 'builtin-light' : state.activeLightCustomThemeId
+      const darkId = state.activeDarkCustomThemeId === id ? 'builtin-dark' : state.activeDarkCustomThemeId
+      return { customThemes: next, activeLightCustomThemeId: lightId, activeDarkCustomThemeId: darkId }
     })
     const s = useUIStore.getState()
     saveAppSettings({
       customThemes: JSON.stringify(s.customThemes),
-      activeCustomThemeId: s.activeCustomThemeId ?? '',
+      activeLightCustomThemeId: s.activeLightCustomThemeId,
+      activeDarkCustomThemeId: s.activeDarkCustomThemeId,
     })
   },
   renameCustomTheme: (id, name) => {
@@ -344,7 +357,8 @@ export const useUIStore = create<UIState>((set) => ({
         customShortcuts,
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
         customThemes,
-        activeCustomThemeId: s.activeCustomThemeId || null,
+        activeLightCustomThemeId: s.activeLightCustomThemeId || 'builtin-light',
+        activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',
       })
     } catch {
       // DB not ready, use defaults

@@ -306,7 +306,8 @@ export interface AppSettings {
   syncInterval: string
   customShortcuts: string
   customThemes: string
-  activeCustomThemeId: string
+  activeLightCustomThemeId: string
+  activeDarkCustomThemeId: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -323,7 +324,8 @@ export async function getAppSettings(): Promise<AppSettings> {
     syncInterval: get('syncInterval', '10'),
     customShortcuts: get('customShortcuts', '{}'),
     customThemes: get('customThemes', '[]'),
-    activeCustomThemeId: get('activeCustomThemeId', ''),
+    activeLightCustomThemeId: get('activeLightCustomThemeId', 'builtin-light'),
+    activeDarkCustomThemeId: get('activeDarkCustomThemeId', 'builtin-dark'),
   }
 }
 
