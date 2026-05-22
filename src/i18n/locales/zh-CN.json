@@ -307,7 +307,14 @@
     "syncPartial": "成功 {{success}} 个，失败 {{fail}} 个",
     "noGitRepos": "未发现 Git 仓库",
     "pendingFiles": "待提交文件",
-    "files": "个文件"
+    "files": "个文件",
+    "credentialTitle": "需要身份验证",
+    "credentialDesc": "推送 {{repo}} 需要账号验证，请输入用户名和密码（或访问令牌）",
+    "username": "用户名",
+    "usernamePlaceholder": "请输入用户名",
+    "passwordOrToken": "密码/访问令牌",
+    "passwordPlaceholder": "请输入密码或 Personal Access Token",
+    "pushWithCredential": "验证并推送"
   },
   "history": {
     "title": "历史",

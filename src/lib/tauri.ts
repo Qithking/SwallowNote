@@ -175,6 +175,10 @@ export async function gitPush(path: string): Promise<void> {
   await invoke('git_push', { path })
 }
 
+export async function gitPushWithCredentials(path: string, username: string, password: string): Promise<void> {
+  await invoke('git_push_with_credentials', { path, username, password })
+}
+
 export async function gitCommitAndPush(path: string, message: string): Promise<void> {
   await invoke('git_commit_and_push', { path, message })
 }

@@ -22,20 +22,14 @@ fn greet(name: &str) -> String {
 /// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
 #[tauri::command]
 fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let result = std::panic::catch_unwind(|| {
-            unsafe { mac_rounded_corners::set_dock_icon_visibility_impl(visible) }
-        });
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err("panic in set_dock_icon_visibility".to_string()),
-        }
+    let result = std::panic::catch_unwind(|| {
+        unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(visible) }
+    });
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => return Err(e),
+        Err(_) => return Err("panic in set_dock_icon_visibility".to_string()),
     }
-
-    #[cfg(not(target_os = "macos"))]
-    let _ = visible;
     Ok(())
 }
 
@@ -66,6 +60,7 @@ pub fn run() {
             commands::git::git_diff,
             commands::git::git_commit,
             commands::git::git_push,
+            commands::git::git_push_with_credentials,
             commands::git::git_commit_and_push,
             commands::git::git_auto_commit,
             commands::git::git_log,
@@ -125,10 +120,7 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
-                        #[cfg(target_os = "macos")]
-                        {
-                            let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
-                        }
+                        let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
                     }
                     "quit" => {
                         app.exit(0);
@@ -147,10 +139,7 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
-                        #[cfg(target_os = "macos")]
-                        {
-                            let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
-                        }
+                        let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
                     }
                 })
                 .build(app)?;

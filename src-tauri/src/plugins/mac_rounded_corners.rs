@@ -244,6 +244,11 @@ pub unsafe fn set_dock_icon_visibility_impl(visible: bool) -> Result<(), String>
     Ok(())
 }
 
+#[cfg(not(target_os = "macos"))]
+pub unsafe fn set_dock_icon_visibility_impl(_visible: bool) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 unsafe fn position_traffic_lights(ns_window: id, offset_x: f64, offset_y: f64) {
     let default_x = 20.0;

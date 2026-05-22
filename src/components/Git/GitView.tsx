@@ -8,16 +8,122 @@ import {
   Circle,
   Check,
   Loader2,
+  KeyRound,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, mapRepoInfosToRepositories } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush } from '@/lib/tauri'
+import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWorkspaceStore, useUIStore } from '@/stores'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+
+// Credential input dialog for git push authentication
+function CredentialDialog({
+  open,
+  onClose,
+  onSubmit,
+  repoName,
+  isLoading,
+}: {
+  open: boolean
+  onClose: () => void
+  onSubmit: (username: string, password: string) => void
+  repoName: string
+  isLoading: boolean
+}) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const { t } = useTranslation()
+
+  useEffect(() => {
+    if (open) {
+      setUsername('')
+      setPassword('')
+    }
+  }, [open])
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (username.trim() && password.trim()) {
+      onSubmit(username.trim(), password.trim())
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <KeyRound size={16} />
+            {t('git.credentialTitle')}
+          </DialogTitle>
+          <DialogDescription>
+            {t('git.credentialDesc', { repo: repoName })}
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+              {t('git.username')}
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={t('git.usernamePlaceholder')}
+              autoFocus
+              className="flex h-9 w-full rounded-md border px-3 py-2 text-sm bg-[var(--bg-primary)] border-[var(--border-color)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              disabled={isLoading}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+              {t('git.passwordOrToken')}
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t('git.passwordPlaceholder')}
+              className="flex h-9 w-full rounded-md border px-3 py-2 text-sm bg-[var(--bg-primary)] border-[var(--border-color)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              disabled={isLoading}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              disabled={isLoading}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!username.trim() || !password.trim() || isLoading}
+            >
+              {isLoading && <Loader2 size={12} className="animate-spin mr-1" />}
+              {t('git.pushWithCredential')}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 // Commit section with vertical layout
 function CommitSection({ 
@@ -30,8 +136,29 @@ function CommitSection({
   onRefresh: () => void
 }) {
   const [isCommitting, setIsCommitting] = useState(false)
+  const [credentialDialog, setCredentialDialog] = useState<{
+    open: boolean
+    repoPath: string
+    repoName: string
+  }>({ open: false, repoPath: '', repoName: '' })
+  const [isPushingWithCredentials, setIsPushingWithCredentials] = useState(false)
   const { showToast } = useUIStore()
   const { t } = useTranslation()
+
+  const handlePushWithCredentials = async (username: string, password: string) => {
+    setIsPushingWithCredentials(true)
+    try {
+      await gitPushWithCredentials(credentialDialog.repoPath, username, password)
+      setCredentialDialog({ open: false, repoPath: '', repoName: '' })
+      showToast(`${credentialDialog.repoName}: ${t('git.syncSuccess', { count: 1 })}`, 'success')
+      onRefresh()
+    } catch (e) {
+      const errorMessage = String(e).trim()
+      showToast(`${credentialDialog.repoName}: ${errorMessage || t('git.unknownError')}`, 'error')
+    } finally {
+      setIsPushingWithCredentials(false)
+    }
+  }
 
   const handleCommit = async () => {
     const commitMessage = 'Sync changes'
@@ -64,7 +191,16 @@ function CommitSection({
       } catch (e) {
         const errorMessage = String(e).trim()
         console.error('Failed to commit and push:', repo.path, errorMessage)
-        if (errorMessage.includes('没有需要提交的变更') || 
+        if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+          // Authentication failed - show credential dialog
+          setCredentialDialog({
+            open: true,
+            repoPath: repo.path,
+            repoName: repo.name,
+          })
+          // Don't count as failure since user can retry with credentials
+          successCount++
+        } else if (errorMessage.includes('没有需要提交的变更') || 
             errorMessage.includes('nothing to commit') ||
             errorMessage.includes('working tree clean') ||
             errorMessage.includes('no changes added to commit') ||
@@ -88,7 +224,7 @@ function CommitSection({
     onRefresh()
     
     if (failCount === 0) {
-      if (successCount > 0) {
+      if (successCount > 0 && !credentialDialog.open) {
         showToast(t('git.syncSuccess', { count: successCount }), 'success')
       }
     } else {
@@ -97,17 +233,26 @@ function CommitSection({
   }
   
   return (
-    <div className="p-2" style={{ borderColor: 'var(--border-color)' }}>
-      <Button
-        className="w-full h-8 text-xs"
-        variant="default"
-        onClick={handleCommit}
-        disabled={isCommitting}
-      >
-        {isCommitting && <Loader2 size={12} className="animate-spin" />}
-        {isCommitting ? t('git.syncing') : t('git.sync')}
-      </Button>
-    </div>
+    <>
+      <div className="p-2" style={{ borderColor: 'var(--border-color)' }}>
+        <Button
+          className="w-full h-8 text-xs"
+          variant="default"
+          onClick={handleCommit}
+          disabled={isCommitting}
+        >
+          {isCommitting && <Loader2 size={12} className="animate-spin" />}
+          {isCommitting ? t('git.syncing') : t('git.sync')}
+        </Button>
+      </div>
+      <CredentialDialog
+        open={credentialDialog.open}
+        onClose={() => setCredentialDialog({ open: false, repoPath: '', repoName: '' })}
+        onSubmit={handlePushWithCredentials}
+        repoName={credentialDialog.repoName}
+        isLoading={isPushingWithCredentials}
+      />
+    </>
   )
 }
 

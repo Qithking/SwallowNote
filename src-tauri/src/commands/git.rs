@@ -138,11 +138,85 @@ pub async fn git_commit(path: String, message: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Check if a git error is an authentication failure
+fn is_auth_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("authentication failed")
+        || lower.contains("could not read username")
+        || lower.contains("could not read password")
+        || lower.contains("permission denied")
+        || lower.contains("access denied")
+        || lower.contains("fatal: could not read from remote repository")
+        || lower.contains("403")
+        || lower.contains("invalid username or password")
+        || lower.contains("authentication error")
+        || lower.contains("credentials")
+        || lower.contains("logon failed")
+        || lower.contains("authentication required")
+        || lower.contains("username for")
+        || lower.contains("password for")
+        || lower.contains("fatal: unable to access")
+}
+
 /// Push commits to remote
 #[tauri::command]
 pub async fn git_push(path: String) -> Result<(), String> {
-    run_git(&path, &["push"]).map_err(|e| format!("Failed to push: {}", e))?;
-    Ok(())
+    let result = run_git(&path, &["push"]);
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if is_auth_error(&e) {
+                Err(format!("AUTH_REQUIRED:{}", e))
+            } else {
+                Err(format!("Failed to push: {}", e))
+            }
+        }
+    }
+}
+
+/// Push with provided credentials (username and password/token)
+/// Uses a temporary GIT_ASKPASS script to supply credentials
+#[tauri::command]
+pub async fn git_push_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
+    // Create a temporary askpass script
+    let temp_dir = std::env::temp_dir();
+    let askpass_script = temp_dir.join("swallownote_git_askpass.sh");
+
+    #[cfg(not(target_os = "windows"))]
+    let script_content = format!("#!/bin/sh\nif [ \"$1\" = \"Username*\" ]; then echo '{}'; elif [ \"$1\" = \"Password*\" ]; then echo '{}'; else echo '{}'; fi", username, password, password);
+
+    #[cfg(target_os = "windows")]
+    let script_content = format!("@echo off\nif \"%1\"==\"Username*\" (echo {}) else (echo {})", username, password);
+
+    std::fs::write(&askpass_script, &script_content)
+        .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&askpass_script)
+            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&askpass_script, perms)
+            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+    }
+
+    let askpass_path = askpass_script.to_string_lossy().to_string();
+
+    let result = run_git_with_env(
+        &path,
+        &["push"],
+        &[("GIT_ASKPASS", askpass_path.as_str()), ("GIT_TERMINAL_PROMPT", "0")],
+    );
+
+    // Clean up the askpass script
+    let _ = std::fs::remove_file(&askpass_script);
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to push: {}", e)),
+    }
 }
 
 /// Commit and push in one command
@@ -182,7 +256,13 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
     // Push - only if remote exists
     let remote_url = get_remote_url(&path);
     if remote_url.is_ok() {
-        run_git(&path, &["push"]).map_err(|e| format!("Failed to push: {}", e))?;
+        let push_result = run_git(&path, &["push"]);
+        if let Err(e) = push_result {
+            if is_auth_error(&e) {
+                return Err(format!("AUTH_REQUIRED:{}", e));
+            }
+            return Err(format!("Failed to push: {}", e));
+        }
     }
 
     Ok(())
@@ -579,10 +659,18 @@ fn get_uncommitted_count(path: &str) -> (bool, usize) {
 }
 
 fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
-    let output = super::create_command("git")
-        .current_dir(path)
-        .args(args)
-        .output()
+    run_git_with_env(path, args, &[])
+}
+
+fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Result<String, String> {
+    let mut cmd = super::create_command("git");
+    cmd.current_dir(path).args(args);
+
+    for (key, value) in env_vars {
+        cmd.env(key, value);
+    }
+
+    let output = cmd.output()
         .map_err(|e| format!("Failed to execute git: {}", e))?;
 
     if output.status.success() {

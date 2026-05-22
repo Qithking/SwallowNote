@@ -307,7 +307,14 @@
     "syncPartial": "{{success}} succeeded, {{fail}} failed",
     "noGitRepos": "No Git repositories found",
     "pendingFiles": "Uncommitted files",
-    "files": "file(s)"
+    "files": "file(s)",
+    "credentialTitle": "Authentication Required",
+    "credentialDesc": "Pushing {{repo}} requires authentication. Please enter your username and password (or access token)",
+    "username": "Username",
+    "usernamePlaceholder": "Enter username",
+    "passwordOrToken": "Password / Access Token",
+    "passwordPlaceholder": "Enter password or Personal Access Token",
+    "pushWithCredential": "Authenticate & Push"
   },
   "history": {
     "title": "History",
