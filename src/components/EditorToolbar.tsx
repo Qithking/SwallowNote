@@ -2,7 +2,7 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Copy, Settings, Maximize2, Minimize2 } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Copy, Settings, Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
@@ -91,6 +91,20 @@ function EditorToolbar() {
       {/* Left: File path - display relative path from root */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
         <span className="truncate" title={path}>{getRelativePath(path)}</span>
+        {activeTab.hasExternalChange && (
+          <span
+            className="flex items-center gap-1 ml-2 shrink-0 px-1.5 py-0.5 rounded text-[10px] cursor-pointer hover:opacity-80"
+            style={{ background: 'var(--bg-warning)', color: 'var(--text-warning)' }}
+            onClick={async () => {
+              await useEditorStore.getState().loadTabContent(activeTab.id)
+              useEditorStore.getState().clearExternalChange(activeTab.id)
+            }}
+          >
+            <AlertTriangle size={10} />
+            {t('editorToolbar.externalChange')}
+            <RefreshCw size={10} />
+          </span>
+        )}
       </div>
 
       {/* Right: Icons */}

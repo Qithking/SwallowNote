@@ -255,6 +255,11 @@ export async function clearOtherFolderHistory(currentPath: string | null): Promi
   await invoke('clear_other_folder_history', { currentPath })
 }
 
+// macOS Dock Icon APIs
+export async function setDockIconVisibility(visible: boolean): Promise<void> {
+  await invoke('set_dock_icon_visibility', { visible })
+}
+
 // Session State APIs
 export async function saveSessionState(states: Record<string, string>): Promise<void> {
   await invoke('save_session_state', { states })
@@ -353,18 +358,37 @@ export function downloadLatestRelease(
   onProgress: (progress: DownloadProgress) => void,
   onComplete: (path: string) => void,
   onError: (error: string) => void
-): void {
+): () => void {
+  let unlistenProgress: (() => void) | null = null
+  let unlistenComplete: (() => void) | null = null
+  let cleanedUp = false
+
+  const cleanup = () => {
+    if (cleanedUp) return
+    cleanedUp = true
+    unlistenProgress?.()
+    unlistenComplete?.()
+  }
+
   listen<DownloadProgress>('download-progress', (event) => {
     onProgress(event.payload)
+  }).then((fn) => {
+    if (cleanedUp) { fn() } else { unlistenProgress = fn }
   })
 
   listen<DownloadComplete>('download-complete', (event) => {
     onComplete(event.payload.path)
+    cleanup()
+  }).then((fn) => {
+    if (cleanedUp) { fn() } else { unlistenComplete = fn }
   })
 
   invoke('download_latest_release').catch((e) => {
     onError(String(e))
+    cleanup()
   })
+
+  return cleanup
 }
 
 export async function openInstaller(path: string): Promise<void> {

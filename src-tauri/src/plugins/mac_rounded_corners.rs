@@ -224,6 +224,28 @@ pub fn reposition_traffic_lights<R: Runtime>(
     }
 }
 
+/// Set Dock icon visibility on macOS
+/// When visible=true: NSApplicationActivationPolicyRegular (shows in Dock)
+/// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
+#[tauri::command]
+pub fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe {
+            let app: id = msg_send![objc::runtime::Class::get("NSApplication").unwrap(), sharedApplication];
+            let policy: i64 = if visible {
+                0 // NSApplicationActivationPolicyRegular
+            } else {
+                1 // NSApplicationActivationPolicyAccessory
+            };
+            let _: () = msg_send![app, setActivationPolicy: policy];
+        }
+    }
+
+    let _ = visible;
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 unsafe fn position_traffic_lights(ns_window: id, offset_x: f64, offset_y: f64) {
     let default_x = 20.0;

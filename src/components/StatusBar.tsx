@@ -1,7 +1,7 @@
 /**
  * StatusBar Component - Bottom status bar
  */
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link, User } from 'lucide-react'
 import { useUIStore } from '@/stores'
 import { checkLatestVersion, downloadLatestRelease, openInstaller, DownloadProgress } from '@/lib/tauri'
@@ -33,9 +33,13 @@ function StatusBar() {
   const [downloadProgress, setDownloadProgress] = useState<number>(0)
   const [downloadedPath, setDownloadedPath] = useState<string | null>(null)
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false)
+  const cancelDownloadRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     checkDownloadedInstaller()
+    return () => {
+      cancelDownloadRef.current?.()
+    }
   }, [])
 
   const checkDownloadedInstaller = async () => {
@@ -82,19 +86,24 @@ function StatusBar() {
     if (versionStatus === 'has-update' || versionStatus === 'download-failed') {
       setVersionStatus('downloading')
       setDownloadProgress(0)
-      downloadLatestRelease(
+      cancelDownloadRef.current?.()
+      const cancel = downloadLatestRelease(
         (progress: DownloadProgress) => {
           setDownloadProgress(Math.round(progress.progress))
         },
         (path: string) => {
           setDownloadedPath(path)
+          setVersionStatus('download-ready')
           setShowUpgradeDialog(true)
+          cancelDownloadRef.current = null
         },
         (error: string) => {
           setVersionStatus('download-failed')
           showToast(t('statusBar.downloadFailed', { error }))
+          cancelDownloadRef.current = null
         }
       )
+      cancelDownloadRef.current = cancel
     }
 
     if (versionStatus === 'download-ready') {

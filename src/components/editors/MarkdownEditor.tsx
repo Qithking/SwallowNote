@@ -290,13 +290,17 @@ function BlockNoteInner({
 
 export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
   const [initialBlocks, setInitialBlocks] = useState<PartialBlock[] | null>(null)
+  const [blocksKey, setBlocksKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const { t } = useTranslation()
+  const prevContentRef = useRef(content)
 
   useEffect(() => {
     let cancelled = false
     setError(null)
-    setInitialBlocks(null)
+
+    const wasEmpty = !prevContentRef.current
+    prevContentRef.current = content
 
     async function parseContent() {
       try {
@@ -308,6 +312,9 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
         } else {
           setInitialBlocks([{ type: 'paragraph' }])
         }
+        if (wasEmpty && content) {
+          setBlocksKey((k) => k + 1)
+        }
       } catch (e) {
         if (cancelled) return
         console.error('[MarkdownEditor] Failed to parse markdown:', e)
@@ -315,6 +322,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
       }
     }
 
+    setInitialBlocks(null)
     parseContent()
     return () => { cancelled = true }
   }, [content])
@@ -335,5 +343,5 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
     )
   }
 
-  return <BlockNoteInner blocks={initialBlocks} onChange={onChange} />
+  return <BlockNoteInner key={blocksKey} blocks={initialBlocks} onChange={onChange} />
 }

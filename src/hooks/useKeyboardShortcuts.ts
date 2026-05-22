@@ -143,7 +143,10 @@ async function handleSaveFile() {
       ),
     }))
     const { gitAutoCommit } = await import('@/lib/tauri')
-    gitAutoCommit(activeTab.path).catch(() => {})
+    try {
+      await gitAutoCommit(activeTab.path)
+    } catch {}
+    window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
   } catch (e) {
     console.error('Failed to save file:', e)
   }

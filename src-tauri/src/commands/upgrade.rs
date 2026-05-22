@@ -2,6 +2,7 @@ use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,6 +102,11 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("创建文件失败: {}", e))?;
     let mut writer = std::io::BufWriter::new(file);
 
+    // Throttle progress events: only emit when progress changes by >=1% or 200ms elapsed
+    let mut last_emitted_percent: u8 = 0;
+    let mut last_emit_time = Instant::now();
+    let emit_interval = std::time::Duration::from_millis(200);
+
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| format!("下载出错: {}", e))?;
         std::io::Write::write_all(&mut writer, &chunk)
@@ -111,11 +117,17 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         } else {
             0.0
         };
-        let _ = app.emit("download-progress", DownloadProgress {
-            progress,
-            downloaded,
-            total: total_size,
-        });
+        let current_percent = progress as u8;
+        let now = Instant::now();
+        if current_percent > last_emitted_percent || now.duration_since(last_emit_time) >= emit_interval {
+            last_emitted_percent = current_percent;
+            last_emit_time = now;
+            let _ = app.emit("download-progress", DownloadProgress {
+                progress,
+                downloaded,
+                total: total_size,
+            });
+        }
     }
 
     let _ = app.emit("download-complete", DownloadComplete {

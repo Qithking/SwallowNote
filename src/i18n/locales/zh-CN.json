@@ -228,7 +228,8 @@
     "openLocation": "打开所在文件夹",
     "copyFullPath": "复制完整路径",
     "toggleWidth": "切换编辑器视图宽度",
-    "contentLayout": "内容排版设置"
+    "contentLayout": "内容排版设置",
+    "externalChange": "文件已被外部修改，点击重新加载"
   },
   "editor": {
     "untitled": "未命名",

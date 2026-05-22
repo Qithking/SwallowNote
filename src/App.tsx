@@ -70,6 +70,8 @@ function App() {
       } else if (closeWithoutExit) {
         await saveSessionStateNow()
         await win.hide()
+        const { setDockIconVisibility } = await import('@/lib/tauri')
+        setDockIconVisibility(false).catch(() => {})
       } else {
         await saveSessionStateNow()
         await win.destroy()
@@ -104,8 +106,12 @@ function App() {
       if (type === 'modified') {
         const editorStore = useEditorStore.getState()
         const tab = editorStore.tabs.find(t => t.path === path)
-        if (tab && !tab.isDirty) {
-          editorStore.loadTabContent(tab.id)
+        if (tab) {
+          if (tab.isDirty) {
+            editorStore.markExternalChange(tab.id)
+          } else {
+            editorStore.loadTabContent(tab.id)
+          }
         }
       } else if (type === 'created' || type === 'removed' || type === 'renamed') {
         const { workspaceMode } = useUIStore.getState()
@@ -158,6 +164,8 @@ function App() {
       const { closeWithoutExit } = useUIStore.getState()
       if (closeWithoutExit) {
         await win.hide()
+        const { setDockIconVisibility } = await import('@/lib/tauri')
+        setDockIconVisibility(false).catch(() => {})
       } else {
         await win.destroy()
       }
@@ -173,6 +181,8 @@ function App() {
       const { closeWithoutExit } = useUIStore.getState()
       if (closeWithoutExit) {
         await win.hide()
+        const { setDockIconVisibility } = await import('@/lib/tauri')
+        setDockIconVisibility(false).catch(() => {})
       } else {
         await win.destroy()
       }

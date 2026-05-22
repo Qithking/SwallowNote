@@ -67,6 +67,7 @@ pub fn run() {
             mac_rounded_corners::enable_rounded_corners,
             mac_rounded_corners::enable_modern_window_style,
             mac_rounded_corners::reposition_traffic_lights,
+            mac_rounded_corners::set_dock_icon_visibility,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
@@ -102,6 +103,10 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = crate::plugins::mac_rounded_corners::set_dock_icon_visibility(true);
+                        }
                     }
                     "quit" => {
                         app.exit(0);
@@ -119,6 +124,10 @@ pub fn run() {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                        }
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = crate::plugins::mac_rounded_corners::set_dock_icon_visibility(true);
                         }
                     }
                 })

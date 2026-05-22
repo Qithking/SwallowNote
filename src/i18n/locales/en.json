@@ -228,7 +228,8 @@
     "openLocation": "Open Location",
     "copyFullPath": "Copy Full Path",
     "toggleWidth": "Toggle Editor Width",
-    "contentLayout": "Content Layout Settings"
+    "contentLayout": "Content Layout Settings",
+    "externalChange": "File modified externally, click to reload"
   },
   "editor": {
     "untitled": "Untitled",

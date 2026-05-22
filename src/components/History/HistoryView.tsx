@@ -68,6 +68,22 @@ function HistoryView({ visible }: { visible: boolean }) {
     }
   }, [visible, activeTab?.path, loadHistory])
 
+  // Listen for file-saved events to refresh history after save + auto commit
+  useEffect(() => {
+    const handleFileSaved = (e: Event) => {
+      const { path } = (e as CustomEvent).detail
+      if (visible && activeTab?.path && path === activeTab.path) {
+        setEntries([])
+        setHasMore(true)
+        setNotInRepo(false)
+        skipRef.current = 0
+        loadHistory(activeTab.path, 0)
+      }
+    }
+    window.addEventListener('file-saved', handleFileSaved)
+    return () => window.removeEventListener('file-saved', handleFileSaved)
+  }, [visible, activeTab?.path, loadHistory])
+
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const target = e.currentTarget

@@ -13,6 +13,7 @@ export interface EditorTab {
   isDirty: boolean
   isEdited: boolean // 文件是否被编辑过
   isLoading?: boolean // 文件是否正在加载中
+  hasExternalChange?: boolean // 文件被外部修改但未应用到编辑器
   fileSize?: string
   modifiedTime?: string
   wordCount?: number
@@ -40,6 +41,8 @@ export interface EditorState {
   updateTabContent: (id: string, content: string) => void
   updateTabDirty: (id: string, isDirty: boolean) => void
   updateTabEdited: (id: string, isEdited: boolean) => void
+  markExternalChange: (id: string) => void
+  clearExternalChange: (id: string) => void
   updateTabPath: (oldPath: string, newPath: string, newName: string) => void
   updateCursorPosition: (id: string, line: number, column: number) => void
   toggleViewMode: () => void
@@ -193,6 +196,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => ({
       tabs: state.tabs.map((t) => (t.id === id ? { ...t, isEdited } : t)),
     })),
+  markExternalChange: (id: string) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === id ? { ...t, hasExternalChange: true } : t)),
+    })),
+  clearExternalChange: (id: string) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) => (t.id === id ? { ...t, hasExternalChange: false } : t)),
+    })),
   updateTabPath: (oldPath, newPath, newName) =>
     set((state) => ({
       tabs: state.tabs.map((t) =>
@@ -252,7 +263,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           ),
         }))
         // Auto commit if file is in a git repo (async, non-blocking)
-        gitAutoCommit(tab.path).catch(() => {})
+        try {
+          await gitAutoCommit(tab.path)
+        } catch {}
+        window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: tab.path } }))
       } catch (e) {
         console.error('Failed to save tab:', tab.path, e)
         window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))
