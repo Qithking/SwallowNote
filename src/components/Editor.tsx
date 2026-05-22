@@ -20,7 +20,7 @@ interface UnsupportedEditorProps {
 function UnsupportedEditor({ filename, reason }: UnsupportedEditorProps) {
   const { t } = useTranslation()
   return (
-    <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)]">
+    <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary-gradient,var(--bg-primary))]">
       <div className="text-center">
         <FileCode size={48} className="mx-auto mb-4 opacity-40" />
         <p className="text-lg text-[var(--text-muted)]">{t('editor.cannotOpen')}</p>

@@ -17,7 +17,9 @@ export type NoteWidth = 'normal' | 'wide'
 export interface CustomThemeColors {
   themeColor: string
   appBg: string
+  appBgGradient?: string
   contentBg: string
+  contentBgGradient?: string
   textColor: string
   borderColor: string
   tooltipColor: string
@@ -27,6 +29,7 @@ export interface CustomTheme {
   id: string
   name: string
   isBuiltIn: boolean
+  themeType: 'light' | 'dark'
   light: CustomThemeColors
   dark: CustomThemeColors
 }
@@ -36,6 +39,7 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
     id: 'builtin-light',
     name: '浅色主题',
     isBuiltIn: true,
+    themeType: 'light',
     light: {
       themeColor: '#005fb8',
       appBg: '#EDEFF2',
@@ -57,6 +61,7 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
     id: 'builtin-dark',
     name: '深色主题',
     isBuiltIn: true,
+    themeType: 'dark',
     light: {
       themeColor: '#0078d4',
       appBg: '#1e1e1e',
@@ -296,12 +301,14 @@ export const useUIStore = create<UIState>((set) => ({
   },
   addCustomTheme: (name, themeType) => {
     const id = 'custom-' + Date.now()
+    const baseTheme = themeType === 'light' ? BUILT_IN_THEMES[0] : BUILT_IN_THEMES[1]
     const newTheme: CustomTheme = {
       id,
       name,
       isBuiltIn: false,
-      light: { ...BUILT_IN_THEMES[0].light },
-      dark: { ...BUILT_IN_THEMES[1].dark },
+      themeType,
+      light: { ...baseTheme.light },
+      dark: { ...baseTheme.dark },
     }
     if (themeType === 'light') {
       set((state) => ({ customThemes: [...state.customThemes, newTheme], activeLightCustomThemeId: id }))
@@ -361,7 +368,13 @@ export const useUIStore = create<UIState>((set) => ({
       if (s.customThemes) {
         try {
           const parsed = JSON.parse(s.customThemes) as CustomTheme[]
-          const userThemes = parsed.filter((t) => !t.isBuiltIn)
+          const userThemes = parsed
+            .filter((t) => !t.isBuiltIn)
+            .map((t) => ({
+              ...t,
+              // Migrate old themes without themeType: default to 'light'
+              themeType: t.themeType || 'light' as const,
+            }))
           customThemes = [...BUILT_IN_THEMES, ...userThemes]
         } catch {}
       }

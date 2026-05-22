@@ -98,6 +98,8 @@ export function useTheme() {
       root.style.setProperty('--status-bg', colors.themeColor)
       root.style.setProperty('--bg-primary', colors.appBg)
       root.style.setProperty('--bg-secondary', colors.contentBg)
+      root.style.setProperty('--bg-primary-gradient', colors.appBgGradient || '')
+      root.style.setProperty('--bg-secondary-gradient', colors.contentBgGradient || '')
       root.style.setProperty('--text-primary', colors.textColor)
       root.style.setProperty('--border-color', colors.borderColor)
       // Convert tooltipColor hex to HSL string format for --popover
@@ -118,6 +120,8 @@ export function useTheme() {
     root.style.setProperty('--status-bg', themeColor)
     root.style.setProperty('--bg-primary', '')
     root.style.setProperty('--bg-secondary', '')
+    root.style.setProperty('--bg-primary-gradient', '')
+    root.style.setProperty('--bg-secondary-gradient', '')
     root.style.setProperty('--text-primary', '')
     root.style.setProperty('--border-color', '')
     root.style.setProperty('--popover', '')

@@ -94,7 +94,7 @@ function AIView() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-secondary)' }}>
+      <div className="flex items-center h-10 px-3 shrink-0 border-b" style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)' }}>
         <div className="flex items-center gap-2">
           <Bot size={14} style={{ color: 'var(--text-muted)' }} />
           <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{t('ai.title')}</span>

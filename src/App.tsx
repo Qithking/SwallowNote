@@ -479,7 +479,7 @@ function App() {
     <TooltipProvider>
       <div
         className="h-screen w-screen flex flex-col overflow-hidden p-1"
-        style={{ background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
+        style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
       >
         {/* Title Bar */}
         <TitleBar />
@@ -493,7 +493,7 @@ function App() {
           {!settingsPanelVisible && (
             <div 
               className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 
-              style={{ width: sidebarWidth, background: 'var(--bg-secondary)' }}
+              style={{ width: sidebarWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))' }}
             >
               <Sidebar />
             </div>
@@ -518,7 +518,7 @@ function App() {
           )}
 
           {/* Editor Area */}
-          <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary)'}}>
+          <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary-gradient, var(--bg-secondary))'}}>
             {settingsPanelVisible ? (
               <SettingsView />
             ) : (
@@ -550,7 +550,7 @@ function App() {
 
           {/* Right Panel - moved outside editor, same level as sidebar */}
           {rightPanelType && (
-            <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] " style={{ width: rightPanelWidth, background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
+            <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] " style={{ width: rightPanelWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))', borderColor: 'var(--border-color)' }}>
               {renderRightPanel()}
             </div>
           )}

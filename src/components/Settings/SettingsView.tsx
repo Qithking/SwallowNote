@@ -279,7 +279,7 @@ function SettingsView() {
                     <div className="w-44 border-r border-border py-2 px-2 flex flex-col">
                       <div className="flex-1 overflow-y-auto space-y-0.5">
                         {customThemes
-                          .filter((ct) => !ct.isBuiltIn || (customThemeTab === 'light' ? ct.id === 'builtin-light' : ct.id === 'builtin-dark'))
+                          .filter((ct) => ct.themeType === customThemeTab)
                           .map((ct) => (
                           <div
                             key={ct.id}
@@ -349,32 +349,68 @@ function SettingsView() {
                         const activeTheme = customThemes.find((ct) => ct.id === activeCustomThemeId)
                         if (!activeTheme) return <div className="text-sm text-muted-foreground">{t('settings.appearance.customTheme.comingSoon')}</div>
                         const colors = customThemeTab === 'light' ? activeTheme.light : activeTheme.dark
-                        const colorFields: { key: keyof CustomThemeColors; labelKey: string; descKey: string }[] = [
+                        const colorFields: { key: keyof CustomThemeColors; labelKey: string; descKey: string; gradientKey?: keyof CustomThemeColors; gradientLabelKey?: string }[] = [
                           { key: 'themeColor', labelKey: 'settings.appearance.customTheme.themeColor', descKey: 'settings.appearance.customTheme.themeColor.desc' },
-                          { key: 'appBg', labelKey: 'settings.appearance.customTheme.appBg', descKey: 'settings.appearance.customTheme.appBg.desc' },
-                          { key: 'contentBg', labelKey: 'settings.appearance.customTheme.contentBg', descKey: 'settings.appearance.customTheme.contentBg.desc' },
                           { key: 'textColor', labelKey: 'settings.appearance.customTheme.textColor', descKey: 'settings.appearance.customTheme.textColor.desc' },
                           { key: 'borderColor', labelKey: 'settings.appearance.customTheme.borderColor', descKey: 'settings.appearance.customTheme.borderColor.desc' },
                           { key: 'tooltipColor', labelKey: 'settings.appearance.customTheme.tooltipColor', descKey: 'settings.appearance.customTheme.tooltipColor.desc' },
+                          { key: 'appBg', labelKey: 'settings.appearance.customTheme.appBg', descKey: 'settings.appearance.customTheme.appBg.desc', gradientKey: 'appBgGradient', gradientLabelKey: 'settings.appearance.customTheme.appBgGradient' },
+                          { key: 'contentBg', labelKey: 'settings.appearance.customTheme.contentBg', descKey: 'settings.appearance.customTheme.contentBg.desc', gradientKey: 'contentBgGradient', gradientLabelKey: 'settings.appearance.customTheme.contentBgGradient' },
                         ]
                         return (
                           <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                             {colorFields.map((field) => (
-                              <div key={field.key} className="flex items-center justify-between">
-                                <div className="mr-2 min-w-0">
-                                  <Label className="text-xs font-medium">{t(field.labelKey)}</Label>
-                                  <p className="text-[10px] text-muted-foreground leading-tight">{t(field.descKey)}</p>
+                              <div key={field.key} className={cn(field.gradientKey && 'col-span-2')}>
+                                <div className="flex items-center justify-between">
+                                  <div className="mr-2 min-w-0">
+                                    <Label className="text-xs font-medium">{t(field.labelKey)}</Label>
+                                    <p className="text-[10px] text-muted-foreground leading-tight">{t(field.descKey)}</p>
+                                  </div>
+                                  <input
+                                    type="color"
+                                    value={colors[field.key]}
+                                    onChange={(e) => updateCustomThemeColor(activeTheme.id, customThemeTab, field.key, e.target.value)}
+                                    disabled={activeTheme.isBuiltIn}
+                                    className={cn(
+                                      'w-7 h-7 rounded cursor-pointer border border-border bg-background shrink-0',
+                                      activeTheme.isBuiltIn && 'opacity-50 cursor-not-allowed'
+                                    )}
+                                  />
                                 </div>
-                                <input
-                                  type="color"
-                                  value={colors[field.key]}
-                                  onChange={(e) => updateCustomThemeColor(activeTheme.id, customThemeTab, field.key, e.target.value)}
-                                  disabled={activeTheme.isBuiltIn}
-                                  className={cn(
-                                    'w-7 h-7 rounded cursor-pointer border border-border bg-background shrink-0',
-                                    activeTheme.isBuiltIn && 'opacity-50 cursor-not-allowed'
-                                  )}
-                                />
+                                {field.gradientKey && field.gradientLabelKey && (
+                                  <div className="mt-1.5 space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <Label className="text-[10px] text-muted-foreground shrink-0">{t(field.gradientLabelKey)}</Label>
+                                      {!activeTheme.isBuiltIn && colors[field.gradientKey] && (
+                                        <button
+                                          className="text-[10px] text-muted-foreground hover:text-destructive"
+                                          onClick={() => updateCustomThemeColor(activeTheme.id, customThemeTab, field.gradientKey!, '')}
+                                        >
+                                          {t('common.clear', 'Clear')}
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        value={colors[field.gradientKey] || ''}
+                                        onChange={(e) => updateCustomThemeColor(activeTheme.id, customThemeTab, field.gradientKey!, e.target.value)}
+                                        disabled={activeTheme.isBuiltIn}
+                                        placeholder="linear-gradient(135deg, #a, #b)"
+                                        className={cn(
+                                          'flex-1 h-6 px-2 text-[10px] rounded border border-border bg-background font-mono',
+                                          activeTheme.isBuiltIn && 'opacity-50 cursor-not-allowed'
+                                        )}
+                                      />
+                                      {colors[field.gradientKey] && (
+                                        <div
+                                          className="w-7 h-6 rounded border border-border shrink-0"
+                                          style={{ background: colors[field.gradientKey] }}
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

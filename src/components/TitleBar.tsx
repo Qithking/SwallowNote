@@ -54,7 +54,7 @@ function TitleBar() {
     <div data-tauri-drag-region className={cn(
       'titlebar',
       'h-[35px] flex items-center justify-between select-none',
-      'bg-[var(--bg-primary)]',
+      'bg-[var(--bg-primary-gradient,var(--bg-primary))]',
       'text-[var(--text-secondary)]'
     )}>
       <div className="flex items-center gap-2 pl-3">
