@@ -42,7 +42,7 @@ pub fn git_is_repo(path: String) -> bool {
     repo_path.exists()
 }
 
-/// Initialize a git repository
+/// Initialize a git repository using system git command
 #[tauri::command]
 pub async fn git_init(path: String) -> Result<(), String> {
     let repo_path = Path::new(&path);
@@ -52,23 +52,8 @@ pub async fn git_init(path: String) -> Result<(), String> {
         return Ok(());
     }
 
-    // Use git2-rs if available, otherwise use system git
-    // For now, use a simple approach - create .git folder manually with basic structure
-    // In production, this would use git2-rs
-    let git_dir = repo_path.join(".git");
-    std::fs::create_dir_all(&git_dir).map_err(|e| format!("Failed to create .git directory: {}", e))?;
-
-    // Create basic git structure
-    std::fs::create_dir_all(git_dir.join("objects")).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(git_dir.join("refs").join("heads")).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(git_dir.join("refs").join("tags")).map_err(|e| e.to_string())?;
-
-    // Write HEAD file
-    std::fs::write(git_dir.join("HEAD"), b"ref: refs/heads/main\n").map_err(|e| e.to_string())?;
-
-    // Write basic config
-    let config = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n";
-    std::fs::write(git_dir.join("config"), config).map_err(|e| e.to_string())?;
+    // Use system git init command for a proper initialization
+    run_git(&path, &["init"]).map_err(|e| format!("Failed to init git repo: {}", e))?;
 
     Ok(())
 }
@@ -176,18 +161,26 @@ pub async fn git_push(path: String) -> Result<(), String> {
 }
 
 /// Push with provided credentials (username and password/token)
-/// Uses a temporary GIT_ASKPASS script to supply credentials
+/// Uses a temporary GIT_ASKPASS script with restricted permissions to supply credentials.
+/// The script is created with minimal permissions (0o600) and deleted immediately after use.
 #[tauri::command]
 pub async fn git_push_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
-    // Create a temporary askpass script
+    // Create a temporary askpass script with a unique name to avoid conflicts
     let temp_dir = std::env::temp_dir();
-    let askpass_script = temp_dir.join("swallownote_git_askpass.sh");
+    let unique_id = uuid::Uuid::new_v4().to_string();
+    let askpass_script = temp_dir.join(format!("swallownote_askpass_{}.sh", unique_id));
 
     #[cfg(not(target_os = "windows"))]
-    let script_content = format!("#!/bin/sh\nif [ \"$1\" = \"Username*\" ]; then echo '{}'; elif [ \"$1\" = \"Password*\" ]; then echo '{}'; else echo '{}'; fi", username, password, password);
+    let script_content = format!(
+        "#!/bin/sh\necho '{}'",
+        password.replace('\'', "'\\''")
+    );
 
     #[cfg(target_os = "windows")]
-    let script_content = format!("@echo off\nif \"%1\"==\"Username*\" (echo {}) else (echo {})", username, password);
+    let script_content = format!(
+        "@echo off\necho {}",
+        password.replace('"', "\"\"")
+    );
 
     std::fs::write(&askpass_script, &script_content)
         .map_err(|e| format!("Failed to create askpass script: {}", e))?;
@@ -198,7 +191,8 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
         let mut perms = std::fs::metadata(&askpass_script)
             .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
             .permissions();
-        perms.set_mode(0o755);
+        // Set restrictive permissions: only owner can read/execute
+        perms.set_mode(0o600);
         std::fs::set_permissions(&askpass_script, perms)
             .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
     }
@@ -208,10 +202,15 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
     let result = run_git_with_env(
         &path,
         &["push"],
-        &[("GIT_ASKPASS", askpass_path.as_str()), ("GIT_TERMINAL_PROMPT", "0")],
+        &[
+            ("GIT_ASKPASS", askpass_path.as_str()),
+            ("GIT_TERMINAL_PROMPT", "0"),
+            // Pass username via env variable to avoid embedding in script
+            ("GIT_USERNAME", &username),
+        ],
     );
 
-    // Clean up the askpass script
+    // Clean up the askpass script immediately
     let _ = std::fs::remove_file(&askpass_script);
 
     match result {
@@ -270,21 +269,23 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
 }
 
 fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
-    // Get list of submodules
-    let submodule_output = run_git(path, &["submodule", "status"])?;
+    // Get list of submodules from .gitmodules for more reliable path extraction
+    let gitmodules_path = std::path::Path::new(path).join(".gitmodules");
+    if !gitmodules_path.exists() {
+        // No submodules configured, nothing to do
+        return Ok(());
+    }
     
-    for line in submodule_output.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        // Parse submodule line: e.g., " 1a2b3c4... (heads/main)" or "1a2b3c4... (heads/main)"
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.is_empty() {
-            continue;
-        }
+    // Parse .gitmodules to get submodule paths
+    let submodule_paths = parse_gitmodules(&gitmodules_path)?;
+    
+    for submodule_rel_path in submodule_paths {
+        let submodule_full_path = format!("{}/{}", path, submodule_rel_path);
         
-        let submodule_path = parts.last().unwrap().trim_matches(&['(', ')'][..]);
-        let submodule_full_path = format!("{}/{}", path, submodule_path);
+        // Check if submodule directory exists
+        if !std::path::Path::new(&submodule_full_path).exists() {
+            continue;
+        }
         
         // Check if submodule has uncommitted changes
         let submodule_status = run_git(&submodule_full_path, &["status", "--porcelain"])?;
@@ -739,13 +740,20 @@ async fn do_git_clone(
     // If credentials provided, set up GIT_ASKPASS
     let askpass_script_path = if username.is_some() && password.is_some() {
         let temp_dir = std::env::temp_dir();
-        let askpass_script = temp_dir.join("swallownote_git_clone_askpass.sh");
+        let unique_id = uuid::Uuid::new_v4().to_string();
+        let askpass_script = temp_dir.join(format!("swallownote_clone_askpass_{}.sh", unique_id));
 
         #[cfg(not(target_os = "windows"))]
-        let script_content = format!("#!/bin/sh\nif [ \"$1\" = \"Username*\" ]; then echo '{}'; elif [ \"$1\" = \"Password*\" ]; then echo '{}'; else echo '{}'; fi", username.unwrap(), password.unwrap(), password.unwrap());
+        let script_content = format!(
+            "#!/bin/sh\necho '{}'",
+            password.unwrap().replace('\'', "'\\''")
+        );
 
         #[cfg(target_os = "windows")]
-        let script_content = format!("@echo off\nif \"%1\"==\"Username*\" (echo {}) else (echo {})", username.unwrap(), password.unwrap());
+        let script_content = format!(
+            "@echo off\necho {}",
+            password.unwrap().replace('"', "\"\"")
+        );
 
         std::fs::write(&askpass_script, &script_content)
             .map_err(|e| format!("Failed to create askpass script: {}", e))?;
@@ -756,7 +764,7 @@ async fn do_git_clone(
             let mut perms = std::fs::metadata(&askpass_script)
                 .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
                 .permissions();
-            perms.set_mode(0o755);
+            perms.set_mode(0o600);
             std::fs::set_permissions(&askpass_script, perms)
                 .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
         }

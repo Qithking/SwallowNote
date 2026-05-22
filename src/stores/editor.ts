@@ -5,6 +5,25 @@ import { create } from 'zustand'
 import { loadFileContent } from '@/lib/api'
 import { writeFile, gitAutoCommit } from '@/lib/tauri'
 
+/**
+ * Count words in content, properly handling CJK (Chinese, Japanese, Korean) characters.
+ * CJK characters are counted individually as words, while Latin words are counted by whitespace separation.
+ */
+function countWords(content: string): number {
+  let count = 0
+  // Match CJK ideographs (Han), Hiragana, Katakana, Hangul
+  const cjkRegex = /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g
+  const cjkMatches = content.match(cjkRegex)
+  if (cjkMatches) {
+    count += cjkMatches.length
+  }
+  // Remove CJK characters and count remaining words
+  const withoutCjk = content.replace(cjkRegex, ' ')
+  const latinWords = withoutCjk.split(/\s+/).filter(Boolean)
+  count += latinWords.length
+  return count
+}
+
 export interface EditorTab {
   id: string
   path: string
@@ -36,6 +55,7 @@ export interface EditorState {
   addTab: (tab: EditorTab) => void
   openDiffTab: (filePath: string, commitHash: string, commitMessage: string) => Promise<void>
   removeTab: (id: string) => void
+  removeTabs: (ids: string[]) => void
   setActiveTab: (id: string) => void
   loadTabContent: (id: string) => Promise<void>
   updateTabContent: (id: string, content: string) => void
@@ -51,7 +71,7 @@ export interface EditorState {
   restoreTabs: (tabsData: EditorTab[], activeTabId: string | null) => void
   filterTabs: (predicate: (tab: EditorTab) => boolean) => void
   saveAllDirtyTabs: () => Promise<void>
-  resetDirtyTabs: () => void
+  resetDirtyTabs: () => Promise<void>
   getDirtyTabsCount: () => number
   restoreTabsState: () => Promise<void>
 }
@@ -63,6 +83,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => {
       const existing = state.tabs.find((t) => t.path === tab.path)
       if (existing) {
+        // If same path exists, always reuse the existing tab's id for consistency
         if (!existing.content && tab.content) {
           return {
             tabs: state.tabs.map((t) =>
@@ -136,6 +157,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { tabs: newTabs, activeTabId: newActiveId }
     })
   },
+  removeTabs: (ids) => {
+    const idSet = new Set(ids)
+    set((state) => {
+      const newTabs = state.tabs.filter((t) => !idSet.has(t.id))
+      let newActiveId = state.activeTabId
+      if (newActiveId && idSet.has(newActiveId)) {
+        newActiveId = newTabs.length > 0 ? newTabs[0].id : null
+      }
+      return { tabs: newTabs, activeTabId: newActiveId }
+    })
+  },
   setActiveTab: (id) => {
     set({ activeTabId: id })
   },
@@ -152,6 +184,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const content = await loadFileContent(tab.path)
       const cursorPosition = tab.cursorPosition || { line: 1, column: 1 }
+      // Get actual file modification time from backend
+      let modifiedTime = new Date().toLocaleString()
+      try {
+        const { getFileMetadata } = await import('@/lib/tauri')
+        const metadata = await getFileMetadata(tab.path)
+        if (metadata?.modified_time) {
+          modifiedTime = metadata.modified_time
+        }
+      } catch {}
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === id
@@ -160,8 +201,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
                 content,
                 isLoading: false,
                 fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
-                modifiedTime: new Date().toLocaleString(),
-                wordCount: content.split(/\s+/).filter(Boolean).length,
+                modifiedTime,
+                wordCount: countWords(content),
                 cursorPosition,
               }
             : t
@@ -207,7 +248,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateTabPath: (oldPath, newPath, newName) =>
     set((state) => ({
       tabs: state.tabs.map((t) =>
-        t.path === oldPath ? { ...t, path: newPath, name: newName } : t
+        // Update tabs whose path starts with oldPath (handles both file and directory moves)
+        t.path === oldPath
+          ? { ...t, path: newPath, name: newName }
+          : t.path.startsWith(oldPath + '/')
+            ? { ...t, path: newPath + t.path.slice(oldPath.length), name: newName || t.name }
+            : t
       ),
     })),
   updateCursorPosition: (id, line, column) =>
@@ -273,12 +319,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
   },
-  resetDirtyTabs: () =>
-    set((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.isDirty ? { ...t, isDirty: false, isEdited: false } : t
-      ),
-    })),
+  resetDirtyTabs: async () => {
+    const dirtyTabs = get().tabs.filter((t) => t.isDirty && t.type !== 'diff')
+    for (const tab of dirtyTabs) {
+      try {
+        const content = await loadFileContent(tab.path)
+        set((state) => ({
+          tabs: state.tabs.map((t) =>
+            t.id === tab.id ? { ...t, content, isDirty: false, isEdited: false } : t
+          ),
+        }))
+      } catch (e) {
+        console.error('Failed to reset dirty tab:', tab.path, e)
+        // Fallback: just mark as not dirty even though content couldn't be reloaded
+        set((state) => ({
+          tabs: state.tabs.map((t) =>
+            t.id === tab.id ? { ...t, isDirty: false, isEdited: false } : t
+          ),
+        }))
+      }
+    }
+  },
   getDirtyTabsCount: () => {
     return get().tabs.filter((t) => t.isDirty).length
   },

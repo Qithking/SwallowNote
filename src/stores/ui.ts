@@ -235,13 +235,25 @@ export const useUIStore = create<UIState>((set) => ({
     saveAppSettings({ noteWidth: width })
   },
   setShowAllFiles: (value) => {
-    set({ showAllFiles: value })
-    saveAppSettings({ showAllFiles: String(value) })
+    // If enabling showAllFiles, disable markdownOnly since they are mutually exclusive
+    if (value) {
+      set({ showAllFiles: true, markdownOnly: false })
+      saveAppSettings({ showAllFiles: 'true', markdownOnly: 'false' })
+    } else {
+      set({ showAllFiles: false })
+      saveAppSettings({ showAllFiles: 'false' })
+    }
     useFileTreeStore.getState().refreshExpanded()
   },
   setMarkdownOnly: (value) => {
-    set({ markdownOnly: value })
-    saveAppSettings({ markdownOnly: String(value) })
+    // If enabling markdownOnly, disable showAllFiles since they are mutually exclusive
+    if (value) {
+      set({ markdownOnly: true, showAllFiles: false })
+      saveAppSettings({ markdownOnly: 'true', showAllFiles: 'false' })
+    } else {
+      set({ markdownOnly: false })
+      saveAppSettings({ markdownOnly: 'false' })
+    }
     useFileTreeStore.getState().refreshExpanded()
   },
   setSyncInterval: (interval: number) => {

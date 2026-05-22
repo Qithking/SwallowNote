@@ -76,6 +76,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             commands::file::path_exists,
+            commands::file::get_file_metadata,
             commands::file::list_directory,
             commands::file::read_file,
             commands::file::write_file,

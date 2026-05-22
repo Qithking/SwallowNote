@@ -45,23 +45,32 @@ function TabBar() {
     return path
   }
 
+  const confirmCloseDirty = (dirtyTabs: EditorTab[]): boolean => {
+    if (dirtyTabs.length === 0) return true
+    const names = dirtyTabs.map(t => t.name).join(', ')
+    return confirm(t('dialog.unsavedFiles', { count: dirtyTabs.length }) + '\n' + names)
+  }
+
   const handleClose = (tab: EditorTab) => {
+    if (tab.isDirty && !confirmCloseDirty([tab])) return
     removeTab(tab.id)
   }
 
   const handleCloseOthers = (tab: EditorTab) => {
-    tabs.forEach(t => {
-      if (t.id !== tab.id) {
-        removeTab(t.id)
-      }
-    })
+    const others = tabs.filter(t => t.id !== tab.id)
+    const dirtyOthers = others.filter(t => t.isDirty)
+    if (dirtyOthers.length > 0 && !confirmCloseDirty(dirtyOthers)) return
+    const editorStore = useEditorStore.getState()
+    editorStore.removeTabs(others.map(t => t.id))
   }
 
   const handleCloseRight = (tab: EditorTab) => {
     const tabIndex = tabs.findIndex(t => t.id === tab.id)
-    tabs.slice(tabIndex + 1).forEach(t => {
-      removeTab(t.id)
-    })
+    const rightTabs = tabs.slice(tabIndex + 1)
+    const dirtyRight = rightTabs.filter(t => t.isDirty)
+    if (dirtyRight.length > 0 && !confirmCloseDirty(dirtyRight)) return
+    const editorStore = useEditorStore.getState()
+    editorStore.removeTabs(rightTabs.map(t => t.id))
   }
 
   const handleCopyPath = async (tab: EditorTab) => {
@@ -175,6 +184,8 @@ function TabBar() {
 
   const handleTabClose = (e: React.MouseEvent, tabId: string) => {
     e.stopPropagation()
+    const tab = tabs.find(t => t.id === tabId)
+    if (tab && tab.isDirty && !confirmCloseDirty([tab])) return
     removeTab(tabId)
   }
 

@@ -522,8 +522,25 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
   const [error, setError] = useState<string | null>(null)
   const { t } = useTranslation()
   const prevContentRef = useRef(content)
+  const isInternalChange = useRef(false)
+
+  // Track internal changes from the editor's onChange callback
+  const handleChangeWrapper = (newContent: string) => {
+    isInternalChange.current = true
+    onChange?.(newContent)
+    // Reset after a microtask to allow the state update to propagate
+    queueMicrotask(() => {
+      isInternalChange.current = false
+    })
+  }
 
   useEffect(() => {
+    // Skip re-parsing when the content change originated from the editor itself
+    if (isInternalChange.current) {
+      prevContentRef.current = content
+      return
+    }
+
     let cancelled = false
     setError(null)
 
@@ -571,5 +588,5 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
     )
   }
 
-  return <BlockNoteInner key={blocksKey} blocks={initialBlocks} onChange={onChange} />
+  return <BlockNoteInner key={blocksKey} blocks={initialBlocks} onChange={handleChangeWrapper} />
 }

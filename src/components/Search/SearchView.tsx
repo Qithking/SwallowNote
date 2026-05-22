@@ -12,6 +12,22 @@ import { useTranslation } from 'react-i18next'
 
 interface SearchResult extends TSearchResult {}
 
+/**
+ * Count words in content, properly handling CJK characters.
+ */
+function countWords(content: string): number {
+  let count = 0
+  const cjkRegex = /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g
+  const cjkMatches = content.match(cjkRegex)
+  if (cjkMatches) {
+    count += cjkMatches.length
+  }
+  const withoutCjk = content.replace(cjkRegex, ' ')
+  const latinWords = withoutCjk.split(/\s+/).filter(Boolean)
+  count += latinWords.length
+  return count
+}
+
 function SearchView() {
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode } = useUIStore()
@@ -126,7 +142,7 @@ function SearchView() {
     })
   }
 
-  const handleResultClick = async (result: SearchResult) => {
+  const handleResultClick = async (result: SearchResult, lineNumber?: number) => {
     try {
       const { readFile } = await import('@/lib/tauri')
       const content = await readFile(result.file_path)
@@ -137,11 +153,18 @@ function SearchView() {
         content,
         isDirty: false,
         isEdited: false,
-        viewMode: 'preview' as const,
+        viewMode: 'source' as const,
         fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
         modifiedTime: new Date().toLocaleString(),
-        wordCount: content.split(/\s+/).filter(Boolean).length,
+        wordCount: countWords(content),
+        cursorPosition: lineNumber ? { line: lineNumber, column: 1 } : undefined,
       })
+      // Scroll to the matched line after a short delay
+      if (lineNumber) {
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('scroll-to-line', { detail: { line: lineNumber } }))
+        }, 200)
+      }
     } catch (e) {
       console.error('Failed to open file:', e)
     }
@@ -310,7 +333,7 @@ function SearchView() {
                     <div
                       key={`${result.file_path}-${match.line_number}-${idx}`}
                       className="flex items-center h-5 cursor-pointer hover:bg-[var(--bg-hover)]"
-                      onClick={() => handleResultClick(result)}
+                      onClick={() => handleResultClick(result, match.line_number)}
                     >
                       {/* Spacer = arrow(14) + gap(4) = 18px to align with icon */}
                       <div className="w-[26px] shrink-0" />

@@ -153,7 +153,7 @@ pub fn enable_modern_window_style<R: Runtime>(
     #[cfg(target_os = "windows")]
     {
         use tauri::Manager;
-        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_BORDER_COLOR};
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_BORDER_COLOR, DwmExtendFrameIntoClientArea, MARGINS};
         use windows::Win32::Foundation::HWND;
         
         window
@@ -162,6 +162,7 @@ pub fn enable_modern_window_style<R: Runtime>(
                 unsafe {
                     let hwnd = HWND(webview.hwnd() as _);
                     
+                    // Enable immersive dark mode for proper title bar rendering
                     let dark_mode: u32 = 1;
                     let _ = DwmSetWindowAttribute(
                         hwnd,
@@ -170,8 +171,8 @@ pub fn enable_modern_window_style<R: Runtime>(
                         std::mem::size_of::<u32>() as u32,
                     );
                     
+                    // Set rounded corners preference (Windows 11 only)
                     let corner_preference: u32 = if radius > 12.0 { 2 } else { 3 };
-                    
                     let _ = DwmSetWindowAttribute(
                         hwnd,
                         DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -179,6 +180,7 @@ pub fn enable_modern_window_style<R: Runtime>(
                         std::mem::size_of::<u32>() as u32,
                     );
 
+                    // Disable the DWM border (Windows 11 only, DWM_BORDER_COLOR_DISABLE = 0xFFFFFFFF)
                     let border_color: u32 = 0xFFFFFFFF;
                     let _ = DwmSetWindowAttribute(
                         hwnd,
@@ -186,6 +188,18 @@ pub fn enable_modern_window_style<R: Runtime>(
                         &border_color as *const _ as *const _,
                         std::mem::size_of::<u32>() as u32,
                     );
+
+                    // Extend the frame into the client area to eliminate the black border
+                    // on Windows 10. By extending the frame with -1 margins, the entire
+                    // window is covered by the DWM frame, making the black border invisible
+                    // while preserving window resizing functionality (WS_THICKFRAME).
+                    let margins = MARGINS {
+                        cxLeftWidth: -1,
+                        cxRightWidth: -1,
+                        cyTopHeight: -1,
+                        cyBottomHeight: -1,
+                    };
+                    let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
                 }
             })
             .map_err(|e| e.to_string())?;

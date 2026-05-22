@@ -161,17 +161,24 @@ async function handleSaveWorkspace() {
 }
 
 async function handleCloseFile() {
-  const { activeTabId } = useEditorStore.getState()
-  if (activeTabId) {
-    useEditorStore.getState().removeTab(activeTabId)
+  const { tabs, activeTabId } = useEditorStore.getState()
+  if (!activeTabId) return
+  const tab = tabs.find((t) => t.id === activeTabId)
+  if (tab?.isDirty) {
+    const names = tab.name
+    if (!confirm(i18n.t('dialog.unsavedFiles', { count: 1 }) + '\n' + names)) return
   }
+  useEditorStore.getState().removeTab(activeTabId)
 }
 
 function handleCloseAll() {
   const { tabs } = useEditorStore.getState()
-  for (const tab of tabs) {
-    useEditorStore.getState().removeTab(tab.id)
+  const dirtyTabs = tabs.filter((t) => t.isDirty)
+  if (dirtyTabs.length > 0) {
+    const names = dirtyTabs.map((t) => t.name).join(', ')
+    if (!confirm(i18n.t('dialog.unsavedFiles', { count: dirtyTabs.length }) + '\n' + names)) return
   }
+  useEditorStore.getState().removeTabs(tabs.map((t) => t.id))
 }
 
 function handleToggleTheme() {

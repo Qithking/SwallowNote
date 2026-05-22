@@ -220,6 +220,10 @@ function App() {
           await enableModernWindowStyle({ cornerRadius: 12 })
         } else if (platform === 'windows') {
           await enableModernWindowStyle({ cornerRadius: 12 })
+          // Windows 11 provides rounded corners via DWM, but the web content
+          // also needs matching border-radius to prevent black corner artifacts
+          document.documentElement.style.borderRadius = '8px'
+          document.body.style.borderRadius = '8px'
         }
       } catch {
         // ignore errors

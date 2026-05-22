@@ -115,6 +115,15 @@ export async function pathExists(path: string): Promise<boolean> {
   return await invoke('path_exists', { path })
 }
 
+export interface FileMetadata {
+  modified_time: string
+  file_size: number
+}
+
+export async function getFileMetadata(path: string): Promise<FileMetadata> {
+  return await invoke('get_file_metadata', { path })
+}
+
 export async function listDirectory(
   path: string,
   showAllFiles?: boolean,

@@ -108,12 +108,18 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
     if (viewRef.current) {
       const currentContent = viewRef.current.state.doc.toString()
       if (content !== currentContent) {
+        // Preserve cursor position when updating content from external changes
+        const currentCursor = viewRef.current.state.selection.main.head
+        const newDocLength = content.length
+        // Clamp cursor position to valid range in new content
+        const newCursor = Math.min(currentCursor, newDocLength)
         viewRef.current.dispatch({
           changes: {
             from: 0,
             to: currentContent.length,
             insert: content,
           },
+          selection: { anchor: newCursor },
         })
       }
     }

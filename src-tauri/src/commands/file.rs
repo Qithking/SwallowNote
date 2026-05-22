@@ -2,6 +2,29 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+#[derive(Serialize)]
+pub struct FileMetadata {
+    pub modified_time: String,
+    pub file_size: u64,
+}
+
+#[tauri::command]
+pub async fn get_file_metadata(path: String) -> Result<FileMetadata, String> {
+    let path = PathBuf::from(&path);
+    if !path.exists() {
+        return Err(format!("Path does not exist: {}", path.display()));
+    }
+    let metadata = std::fs::metadata(&path)
+        .map_err(|e| format!("Failed to read metadata: {}", e))?;
+    let modified = metadata.modified()
+        .map_err(|e| format!("Failed to get modification time: {}", e))?;
+    let modified_time: chrono::DateTime<chrono::Local> = modified.into();
+    Ok(FileMetadata {
+        modified_time: modified_time.format("%Y/%m/%d %H:%M:%S").to_string(),
+        file_size: metadata.len(),
+    })
+}
+
 #[cfg(target_os = "macos")]
 use std::process::Command as StdCommand;
 
@@ -443,12 +466,16 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
 pub async fn read_clipboard_file_paths() -> Result<Vec<String>, String> {
     #[cfg(target_os = "macos")]
     {
-        // Use NSPasteboard via osascript to read file URLs from the clipboard
+        // Use NSPasteboard via osascript to read file URLs from the clipboard.
+        // Use AppleScript's text item delimiters with linefeed to properly handle
+        // paths that contain commas (which would otherwise be misinterpreted as list separators).
         let output = StdCommand::new("osascript")
             .arg("-e")
             .arg("use framework \"Foundation\"")
             .arg("-e")
             .arg("use framework \"AppKit\"")
+            .arg("-e")
+            .arg("use scripting additions")
             .arg("-e")
             .arg("set pb to current application's NSPasteboard's generalPasteboard()")
             .arg("-e")
@@ -470,11 +497,13 @@ pub async fn read_clipboard_file_paths() -> Result<Vec<String>, String> {
             .arg("-e")
             .arg("end repeat")
             .arg("-e")
-            .arg("return outputPaths")
+            .arg("set AppleScript's text item delimiters to linefeed")
+            .arg("-e")
+            .arg("return outputPaths as text")
             .arg("-e")
             .arg("else")
             .arg("-e")
-            .arg("return {}")
+            .arg("return \"\"")
             .arg("-e")
             .arg("end if")
             .output()
@@ -488,15 +517,13 @@ pub async fn read_clipboard_file_paths() -> Result<Vec<String>, String> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let result = stdout.trim();
 
-        // AppleScript list output format: "path1, path2" or empty
-        if result.is_empty() || result == "{}" {
+        if result.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Parse AppleScript list: remove outer braces or just split
-        let cleaned = result.trim_start_matches('{').trim_end_matches('}');
-        let paths: Vec<String> = cleaned
-            .split(", ")
+        // Split by linefeed which won't conflict with commas in paths
+        let paths: Vec<String> = result
+            .split('\n')
             .filter_map(|s| {
                 let trimmed = s.trim();
                 if trimmed.is_empty() {
@@ -697,8 +724,10 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
         req.query.clone()
     } else if req.whole_word {
         format!("\\b{}\\b", regex::escape(&req.query))
-    } else {
+    } else if req.case_sensitive {
         req.query.clone()
+    } else {
+        format!("(?i){}", regex::escape(&req.query))
     };
 
     let regex = regex::Regex::new(&pattern_str)
@@ -707,77 +736,81 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
     let file_matches: Arc<Mutex<std::collections::HashMap<String, Vec<LineMatch>>>> = 
         Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-    fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let file_name = entry.file_name();
-                let name = file_name.to_string_lossy();
-                if name.starts_with('.') {
+    // Run the blocking file I/O on a separate thread to avoid blocking the tokio runtime
+    let file_matches_clone = file_matches.clone();
+    tokio::task::spawn_blocking(move || {
+        fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let file_name = entry.file_name();
+                    let name = file_name.to_string_lossy();
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    if matches!(name.as_ref(), "node_modules" | "target" | "dist" | "build" | ".swallownote" | "__pycache__" | ".next" | ".nuxt") {
+                        continue;
+                    }
+                    let path = entry.path();
+                    if path.is_dir() {
+                        collect_files(&path, files);
+                    } else {
+                        files.push(path);
+                    }
+                }
+            }
+        }
+
+        let mut all_files = Vec::new();
+        collect_files(&root, &mut all_files);
+
+        for path in all_files {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let ext_lower = ext.to_lowercase();
+                if matches!(ext_lower.as_str(),
+                    "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp"
+                    | "pdf" | "zip" | "tar" | "gz" | "rar" | "7z"
+                    | "exe" | "dll" | "so" | "dylib" | "a" | "o" | "obj"
+                    | "woff" | "woff2" | "ttf" | "eot" | "otf"
+                    | "mp3" | "mp4" | "wav" | "avi" | "mov" | "webm"
+                    | "wasm" | "pyc" | "class"
+                ) {
                     continue;
                 }
-                if matches!(name.as_ref(), "node_modules" | "target" | "dist" | "build" | ".swallownote" | "__pycache__" | ".next" | ".nuxt") {
-                    continue;
-                }
-                let path = entry.path();
-                if path.is_dir() {
-                    collect_files(&path, files);
-                } else {
-                    files.push(path);
-                }
             }
-        }
-    }
 
-    let mut all_files = Vec::new();
-    collect_files(&root, &mut all_files);
-
-    for path in all_files {
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            let ext_lower = ext.to_lowercase();
-            if matches!(ext_lower.as_str(),
-                "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp"
-                | "pdf" | "zip" | "tar" | "gz" | "rar" | "7z"
-                | "exe" | "dll" | "so" | "dylib" | "a" | "o" | "obj"
-                | "woff" | "woff2" | "ttf" | "eot" | "otf"
-                | "mp3" | "mp4" | "wav" | "avi" | "mov" | "webm"
-                | "wasm" | "pyc" | "class"
-            ) {
-                continue;
-            }
-        }
-
-        let path_str = path.to_string_lossy().to_string().replace('\\', "/");
-        
-        if let Ok(file) = std::fs::File::open(&path) {
-            let reader = BufReader::new(file);
-            let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+            let path_str = path.to_string_lossy().to_string().replace('\\', "/");
             
-            let mut line_matches: Vec<LineMatch> = Vec::new();
-            
-            for (idx, line) in lines.iter().enumerate() {
-                for mat in regex.find_iter(line) {
-                    line_matches.push(LineMatch {
-                        line_number: idx + 1,
-                        content: line.clone(),
-                        start_col: mat.start(),
-                        end_col: mat.end(),
-                    });
+            if let Ok(file) = std::fs::File::open(&path) {
+                let reader = BufReader::new(file);
+                let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+                
+                let mut line_matches: Vec<LineMatch> = Vec::new();
+                
+                for (idx, line) in lines.iter().enumerate() {
+                    for mat in regex.find_iter(line) {
+                        line_matches.push(LineMatch {
+                            line_number: idx + 1,
+                            content: line.clone(),
+                            start_col: mat.start(),
+                            end_col: mat.end(),
+                        });
+                    }
                 }
-            }
 
-            if !line_matches.is_empty() {
-                let mut matches_map = file_matches.lock().unwrap();
-                let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();
-                for m in line_matches {
-                    line_map.entry(m.line_number).or_insert(m);
-                }
-                let unique: Vec<LineMatch> = line_map.into_values().collect();
-                if !unique.is_empty() {
-                    matches_map.insert(path_str, unique);
+                if !line_matches.is_empty() {
+                    let mut matches_map = file_matches_clone.lock().unwrap();
+                    let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();
+                    for m in line_matches {
+                        line_map.entry(m.line_number).or_insert(m);
+                    }
+                    let unique: Vec<LineMatch> = line_map.into_values().collect();
+                    if !unique.is_empty() {
+                        matches_map.insert(path_str, unique);
+                    }
                 }
             }
         }
-    }
+    }).await.map_err(|e| format!("Search task failed: {}", e))?;
 
     let matches_map = file_matches.lock().unwrap();
     let results: Vec<SearchResult> = matches_map.iter()
