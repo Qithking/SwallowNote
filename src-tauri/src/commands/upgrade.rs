@@ -102,10 +102,12 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to create file: {}", e))?;
     let mut writer = std::io::BufWriter::new(file);
 
-    // Throttle progress events: only emit when progress changes by >=1% or 200ms elapsed
+    // Throttle progress events: only emit when integer percentage actually changes
+    // and at least 500ms has passed since last emit. This prevents UI flickering
+    // caused by too-frequent updates with minimal visual change.
     let mut last_emitted_percent: u8 = 0;
     let mut last_emit_time = Instant::now();
-    let emit_interval = std::time::Duration::from_millis(200);
+    let emit_interval = std::time::Duration::from_millis(500);
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| format!("Download error: {}", e))?;
@@ -119,11 +121,12 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         };
         let current_percent = progress as u8;
         let now = Instant::now();
-        if current_percent > last_emitted_percent || now.duration_since(last_emit_time) >= emit_interval {
+        // Only emit when: percentage increased AND enough time has passed
+        if current_percent > last_emitted_percent && now.duration_since(last_emit_time) >= emit_interval {
             last_emitted_percent = current_percent;
             last_emit_time = now;
             let _ = app.emit("download-progress", DownloadProgress {
-                progress,
+                progress: current_percent as f64,
                 downloaded,
                 total: total_size,
             });

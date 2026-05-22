@@ -34,6 +34,8 @@ function StatusBar() {
   const [downloadedPath, setDownloadedPath] = useState<string | null>(null)
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false)
   const cancelDownloadRef = useRef<(() => void) | null>(null)
+  // Track last emitted progress to skip redundant setState calls
+  const lastProgressRef = useRef<number>(-1)
 
   useEffect(() => {
     checkDownloadedInstaller()
@@ -86,10 +88,16 @@ function StatusBar() {
     if (versionStatus === 'has-update' || versionStatus === 'download-failed') {
       setVersionStatus('downloading')
       setDownloadProgress(0)
+      lastProgressRef.current = -1
       cancelDownloadRef.current?.()
       const cancel = downloadLatestRelease(
         (progress: DownloadProgress) => {
-          setDownloadProgress(Math.round(progress.progress))
+          const rounded = Math.round(progress.progress)
+          // Skip setState if the integer progress hasn't changed
+          if (rounded !== lastProgressRef.current) {
+            lastProgressRef.current = rounded
+            setDownloadProgress(rounded)
+          }
         },
         (path: string) => {
           setDownloadedPath(path)
@@ -162,8 +170,21 @@ function StatusBar() {
         )
       case 'downloading':
         return (
-          <span className="opacity-60">
-            {baseVersion} ({t('statusBar.downloading', { progress: downloadProgress })})
+          <span className="flex items-center gap-1.5 opacity-60">
+            <span>{baseVersion}</span>
+            <span
+              className="inline-block h-1.5 w-16 rounded-full overflow-hidden"
+              style={{ backgroundColor: 'var(--border)' }}
+            >
+              <span
+                className="block h-full rounded-full transition-[width] duration-300 ease-out"
+                style={{
+                  width: `${downloadProgress}%`,
+                  backgroundColor: 'var(--theme-color)',
+                }}
+              />
+            </span>
+            <span className="tabular-nums min-w-[2ch] text-right">{downloadProgress}%</span>
           </span>
         )
       case 'download-ready':
