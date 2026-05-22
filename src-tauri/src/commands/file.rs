@@ -380,7 +380,7 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
 [System.Windows.Forms.Clipboard]::SetFileDropList(@("{}"));"#,
             escaped_path
         );
-        StdCommand::new("powershell")
+        super::create_command("powershell")
             .arg("-command")
             .arg(&ps_command)
             .output()
@@ -444,12 +444,12 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
     {
         // explorer /select,<file> opens Explorer and selects the file
         if path.is_file() {
-            StdCommand::new("explorer")
+            super::create_command("explorer")
                 .arg(format!("/select,{}", path.display()))
                 .spawn()
                 .map_err(|e| format!("Failed to open folder: {}", e))?;
         } else {
-            StdCommand::new("explorer")
+            super::create_command("explorer")
                 .arg(&target)
                 .spawn()
                 .map_err(|e| format!("Failed to open folder: {}", e))?;

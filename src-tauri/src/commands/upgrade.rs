@@ -137,7 +137,7 @@ pub async fn open_installer(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
+        super::create_command("cmd")
             .args(["/C", "start", "", &path])
             .spawn()
             .map_err(|e| format!("打开安装包失败: {}", e))?;

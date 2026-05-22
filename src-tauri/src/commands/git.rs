@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::io::{BufRead, BufReader};
 use tauri::{AppHandle, Emitter};
 
@@ -579,7 +579,7 @@ fn get_uncommitted_count(path: &str) -> (bool, usize) {
 }
 
 fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
-    let output = std::process::Command::new("git")
+    let output = super::create_command("git")
         .current_dir(path)
         .args(args)
         .output()
@@ -625,7 +625,7 @@ pub async fn git_clone(app: AppHandle, url: String, local_path: String) -> Resul
         "message": "开始克隆..."
     }));
 
-    let mut child = Command::new("git")
+    let mut child = super::create_command("git")
         .args(["clone", "--progress", &url, &local_path])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
