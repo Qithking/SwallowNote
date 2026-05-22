@@ -4,6 +4,7 @@ import {
   Settings as SettingsIcon,
   Palette,
   Keyboard,
+  RefreshCw,
 } from 'lucide-react'
 import { useUIStore, Theme, NoteWidth } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -24,7 +25,7 @@ import { Label } from '@/components/ui/label'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { ShortcutRecorder } from './ShortcutRecorder'
 
-type SettingsSection = 'general' | 'appearance' | 'shortcuts'
+type SettingsSection = 'general' | 'sync' | 'appearance' | 'shortcuts'
 
 function SettingRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
   return (
@@ -50,10 +51,12 @@ function SettingsView() {
     noteWidth, setNoteWidth,
     showAllFiles, setShowAllFiles,
     markdownOnly, setMarkdownOnly,
+    syncInterval, setSyncInterval,
   } = useUIStore()
 
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; labelKey: string }[] = [
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },
+    { id: 'sync', icon: RefreshCw, labelKey: 'settings.sync' },
     { id: 'appearance', icon: Palette, labelKey: 'settings.appearance' },
     { id: 'shortcuts', icon: Keyboard, labelKey: 'settings.shortcuts' },
   ]
@@ -80,6 +83,14 @@ function SettingsView() {
   const noteWidthOptions: { value: NoteWidth; labelKey: string }[] = [
     { value: 'normal', labelKey: 'settings.general.noteWidth.normal' },
     { value: 'wide', labelKey: 'settings.general.noteWidth.wide' },
+  ]
+
+  const syncIntervalOptions = [
+    { value: 5, label: '5' },
+    { value: 10, label: '10' },
+    { value: 15, label: '15' },
+    { value: 30, label: '30' },
+    { value: 60, label: '60' },
   ]
 
   return (
@@ -165,6 +176,32 @@ function SettingsView() {
                   <div className="px-4">
                     <SettingRow label={t('settings.general.markdownOnly')} desc={t('settings.general.markdownOnly.desc')}>
                       <Switch checked={markdownOnly} onCheckedChange={setMarkdownOnly} />
+                    </SettingRow>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+
+            {/* ===== 同步 ===== */}
+            <section id="section-sync" className="space-y-4">
+              <h2 className="text-base font-semibold">{t('settings.sync')}</h2>
+              
+              <Card>
+                <CardContent className="p-0 divide-y divide-border">
+                  <div className="px-4">
+                    <SettingRow label={t('settings.sync.interval')} desc={t('settings.sync.interval.desc')}>
+                      <Select value={String(syncInterval)} onValueChange={(v) => setSyncInterval(Number(v))}>
+                        <SelectTrigger className="w-[160px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {syncIntervalOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={String(opt.value)}>
+                              {opt.label} {t('settings.sync.interval.minute')}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </SettingRow>
                   </div>
                 </CardContent>

@@ -37,6 +37,7 @@ export interface UIState {
   showAllFiles: boolean
   markdownOnly: boolean
   customShortcuts: Record<string, string>
+  syncInterval: number
   setTheme: (theme: Theme) => void
   setThemeColor: (color: string) => void
   setSidebarView: (view: SidebarView) => void
@@ -61,6 +62,7 @@ export interface UIState {
   setNoteWidth: (width: NoteWidth) => void
   setShowAllFiles: (value: boolean) => void
   setMarkdownOnly: (value: boolean) => void
+  setSyncInterval: (interval: number) => void
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
   resetAllShortcuts: () => void
@@ -90,6 +92,7 @@ export const useUIStore = create<UIState>((set) => ({
   showAllFiles: false,
   markdownOnly: false,
   customShortcuts: {},
+  syncInterval: 10,
   setTheme: (theme) => {
     set({ theme })
     saveAppSettings({ theme })
@@ -165,6 +168,10 @@ export const useUIStore = create<UIState>((set) => ({
     saveAppSettings({ markdownOnly: String(value) })
     useFileTreeStore.getState().refreshExpanded()
   },
+  setSyncInterval: (interval: number) => {
+    set({ syncInterval: interval })
+    saveAppSettings({ syncInterval: String(interval) })
+  },
   setShortcut: (key, value) => {
     set((state) => ({
       customShortcuts: { ...state.customShortcuts, [key]: value },
@@ -206,6 +213,7 @@ export const useUIStore = create<UIState>((set) => ({
         showAllFiles: s.showAllFiles === 'true',
         markdownOnly: s.markdownOnly === 'true',
         customShortcuts,
+        syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
       })
     } catch {
       // DB not ready, use defaults

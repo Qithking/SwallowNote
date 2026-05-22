@@ -303,6 +303,7 @@ export interface AppSettings {
   noteWidth: string
   showAllFiles: string
   markdownOnly: string
+  syncInterval: string
   customShortcuts: string
 }
 
@@ -317,6 +318,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     noteWidth: get('noteWidth', 'normal'),
     showAllFiles: get('showAllFiles', 'false'),
     markdownOnly: get('markdownOnly', 'false'),
+    syncInterval: get('syncInterval', '10'),
     customShortcuts: get('customShortcuts', '{}'),
   }
 }
