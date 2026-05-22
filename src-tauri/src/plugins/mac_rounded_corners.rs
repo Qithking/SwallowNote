@@ -228,7 +228,7 @@ pub fn reposition_traffic_lights<R: Runtime>(
 /// When visible=true: NSApplicationActivationPolicyRegular (shows in Dock)
 /// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
 #[cfg(target_os = "macos")]
-unsafe fn set_dock_icon_visibility_impl(visible: bool) -> Result<(), String> {
+pub unsafe fn set_dock_icon_visibility_impl(visible: bool) -> Result<(), String> {
     let ns_app_class = objc::runtime::Class::get("NSApplication")
         .ok_or_else(|| "NSApplication class not found".to_string())?;
     let app: id = msg_send![ns_app_class, sharedApplication];
@@ -241,24 +241,6 @@ unsafe fn set_dock_icon_visibility_impl(visible: bool) -> Result<(), String> {
         let current_icon: id = msg_send![app, applicationIconImage];
         let _: () = msg_send![app, setApplicationIconImage: current_icon];
     }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let result = std::panic::catch_unwind(|| {
-            unsafe { set_dock_icon_visibility_impl(visible) }
-        });
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err("panic in set_dock_icon_visibility".to_string()),
-        }
-    }
-
-    let _ = visible;
     Ok(())
 }
 

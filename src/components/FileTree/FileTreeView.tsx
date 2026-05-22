@@ -376,7 +376,7 @@ export function FileTreeView() {
   const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath, nodes)?.isDirectory ?? false) : false
 
   const renderNode = (node: FileNode, depth: number): React.ReactNode => {
-    const isNewItemNode = newItem?.parentPath === node.path && node.children?.length === 0
+    const isNewItemNode = newItem?.parentPath === node.path
     const isEditing = editingPath === node.path
     const isSelected = node.path === selectedPath
 
@@ -477,9 +477,7 @@ export function FileTreeView() {
             </TooltipTrigger>
             <TooltipContent>{workspaceMode === 'workspace' ? t('fileTree.addToWorkspace') : t('fileTree.openFolder')}</TooltipContent>
           </Tooltip>
-          {workspaceMode === 'folder' && (
-            <>
-              <Tooltip>
+          <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFile} disabled={!isSelectedDirectory}>
                     <FilePlus size={12} />
@@ -495,8 +493,6 @@ export function FileTreeView() {
                 </TooltipTrigger>
                 <TooltipContent>{t('fileTree.newFolder')}</TooltipContent>
               </Tooltip>
-            </>
-          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => rootPath && loadRoot(rootPath)}>

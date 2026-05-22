@@ -17,6 +17,28 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// Set Dock icon visibility on macOS
+/// When visible=true: NSApplicationActivationPolicyRegular (shows in Dock)
+/// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
+#[tauri::command]
+fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let result = std::panic::catch_unwind(|| {
+            unsafe { mac_rounded_corners::set_dock_icon_visibility_impl(visible) }
+        });
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err("panic in set_dock_icon_visibility".to_string()),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = visible;
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -67,7 +89,7 @@ pub fn run() {
             mac_rounded_corners::enable_rounded_corners,
             mac_rounded_corners::enable_modern_window_style,
             mac_rounded_corners::reposition_traffic_lights,
-            mac_rounded_corners::set_dock_icon_visibility,
+            set_dock_icon_visibility,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
@@ -105,7 +127,7 @@ pub fn run() {
                         }
                         #[cfg(target_os = "macos")]
                         {
-                            let _ = crate::plugins::mac_rounded_corners::set_dock_icon_visibility(true);
+                            let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
                         }
                     }
                     "quit" => {
@@ -127,7 +149,7 @@ pub fn run() {
                         }
                         #[cfg(target_os = "macos")]
                         {
-                            let _ = crate::plugins::mac_rounded_corners::set_dock_icon_visibility(true);
+                            let _ = std::panic::catch_unwind(|| unsafe { crate::plugins::mac_rounded_corners::set_dock_icon_visibility_impl(true) });
                         }
                     }
                 })
