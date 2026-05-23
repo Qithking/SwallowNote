@@ -91,6 +91,9 @@
     "ai.model": "Model",
     "ai.model.desc": "Select or enter the AI model to use",
     "ai.model.placeholder": "Enter model name",
+    "ai.modelName": "Model Name",
+    "ai.modelName.desc": "Custom display name, defaults to model ID if empty",
+    "ai.modelName.placeholder": "Enter display name",
     "ai.port": "Proxy Port",
     "ai.port.desc": "Local AI proxy server port, default 4017",
     "ai.category.local": "Local Models",
@@ -275,6 +278,8 @@
     "gitInitFailed": "Initialization failed: {{error}}",
     "copied": "Copied: {{name}}",
     "cutted": "Cut: {{name}}",
+    "addToChat": "Add to Chat",
+    "addedToChat": "Added: {{name}}",
     "pastedSuccess": "Pasted {{count}} file(s)",
     "pastedPartial": "Pasted {{count}} file(s), {{failCount}} failed",
     "removed": "Removed: {{name}}"

@@ -91,6 +91,9 @@
     "ai.model": "模型",
     "ai.model.desc": "选择或输入要使用的 AI 模型",
     "ai.model.placeholder": "输入模型名称",
+    "ai.modelName": "模型名称",
+    "ai.modelName.desc": "自定义模型显示名称，留空则使用模型 ID",
+    "ai.modelName.placeholder": "输入显示名称",
     "ai.port": "代理端口",
     "ai.port.desc": "本地 AI 代理服务器端口，默认 4017",
     "ai.category.local": "本地模型",
@@ -275,6 +278,8 @@
     "gitInitFailed": "初始化失败: {{error}}",
     "copied": "已复制: {{name}}",
     "cutted": "已剪切: {{name}}",
+    "addToChat": "添加到对话框",
+    "addedToChat": "已添加: {{name}}",
     "pastedSuccess": "已粘贴 {{count}} 个文件",
     "pastedPartial": "已粘贴 {{count}} 个文件，{{failCount}} 个失败",
     "removed": "已移除: {{name}}"

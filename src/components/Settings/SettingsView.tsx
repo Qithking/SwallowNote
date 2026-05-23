@@ -88,6 +88,7 @@ function SettingsView() {
   const [aiFormProvider, setAiFormProvider] = useState('ollama')
   const [aiFormApiKey, setAiFormApiKey] = useState('')
   const [aiFormBaseUrl, setAiFormBaseUrl] = useState('')
+  const [aiFormName, setAiFormName] = useState('')
   const [aiFormModel, setAiFormModel] = useState('')
   const [aiTesting, setAiTesting] = useState(false)
 
@@ -547,6 +548,19 @@ function SettingsView() {
 
                         <div className="flex items-center justify-between">
                           <div className="mr-2 min-w-0">
+                            <Label className="text-xs font-medium">{t('settings.ai.modelName')}</Label>
+                            <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.modelName.desc')}</p>
+                          </div>
+                          <Input
+                            className="w-[200px] h-7 text-xs"
+                            placeholder={t('settings.ai.modelName.placeholder')}
+                            value={aiFormName}
+                            onChange={(e) => setAiFormName(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div className="mr-2 min-w-0">
                             <Label className="text-xs font-medium">{t('settings.ai.modelId')}</Label>
                             <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.model.desc')}</p>
                           </div>
@@ -564,7 +578,7 @@ function SettingsView() {
                               disabled={!aiFormProvider || !aiFormModel}
                               onClick={() => {
                                 addAiModel({
-                                  name: aiFormModel,
+                                  name: aiFormName || aiFormModel,
                                   category: aiCategoryTab,
                                   provider: aiFormProvider,
                                   apiKey: '',
@@ -579,6 +593,7 @@ function SettingsView() {
                                 setAiFormProvider('')
                                 setAiFormApiKey('')
                                 setAiFormBaseUrl('')
+                                setAiFormName('')
                                 setAiFormModel('')
                               }}
                             >

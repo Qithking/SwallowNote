@@ -10,6 +10,7 @@ import {
   Check,
   Settings,
   Square,
+  X,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Button } from '@/components/ui/button'
@@ -34,7 +35,7 @@ function AIView() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const { aiModels, activeAiModelId, aiPort, setSettingsPanelVisible, setActiveAiModel } = useUIStore()
+  const { aiModels, activeAiModelId, aiPort, setSettingsPanelVisible, setActiveAiModel, aiAttachedFiles, removeAiAttachedFile } = useUIStore()
 
   const activeModel = aiModels.find((m) => m.id === activeAiModelId)
   const isConfigured = !!activeModel
@@ -102,7 +103,11 @@ function AIView() {
   const onFormSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!isConfigured || !inputValue.trim()) return
-    sendMessage({ text: inputValue.trim() })
+    let text = inputValue.trim()
+    if (aiAttachedFiles.length > 0) {
+      text += '\n\n--- attached files ---\n' + aiAttachedFiles.join('\n')
+    }
+    sendMessage({ text })
     setInputValue('')
     setMessages((prev) => prev.length > 100 ? prev.slice(-100) : prev)
   }
@@ -112,7 +117,7 @@ function AIView() {
       <div className="flex items-center h-10 px-3 shrink-0 " style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)' }}>
         <div className="flex items-center gap-2">
           <Bot size={14} style={{ color: 'var(--text-muted)' }} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{t('ai.title')}</span>
+          <span className="text-sm font-medium uppercase tracking-wider" >{t('ai.title')}</span>
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -211,13 +216,13 @@ function AIView() {
             <div className="flex-1 p-3 rounded-lg bg-accent">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" />
-                <span className="text-sm">{t('ai.thinking')}</span>
+                <span className="text-xs">{t('ai.thinking')}</span>
               </div>
             </div>
           </div>
         )}
         {error && (
-          <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <div className="p-3 mt-2 rounded-lg bg-destructive/10 text-destructive text-xs">
             {error.message || t('ai.error')}
           </div>
         )}
@@ -225,9 +230,32 @@ function AIView() {
       </ScrollArea>
 
       <div className="p-3 ">
+        {aiAttachedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {aiAttachedFiles.map((filePath, index) => {
+              const fileName = filePath.split(/[\\/]/).pop() || filePath
+              return (
+                <span
+                  key={filePath}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-xs text-primary max-w-[180px] truncate"
+                  title={filePath}
+                >
+                  <span className="truncate">{fileName}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAiAttachedFile(index)}
+                    className="ml-0.5 p-0.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-foreground"
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              )
+            })}
+          </div>
+        )}
         <form onSubmit={onFormSubmit} className="relative">
           <textarea
-            className="w-full h-24 p-3 rounded-lg border border-border bg-background resize-none text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full h-24 p-3 rounded-lg border border-border bg-background resize-none text-xs focus:outline-none focus:ring-1 focus:ring-ring"
             placeholder={isConfigured ? t('ai.placeholder') : t('ai.notConfigured')}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}

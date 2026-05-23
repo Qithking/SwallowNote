@@ -115,6 +115,7 @@ export interface UIState {
   aiPort: number
   aiModels: AiModelConfig[]
   activeAiModelId: string
+  aiAttachedFiles: string[]
   customThemes: CustomTheme[]
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
@@ -152,6 +153,8 @@ export interface UIState {
   addAiModel: (model: Omit<AiModelConfig, 'id'>) => void
   removeAiModel: (id: string) => void
   setActiveAiModel: (id: string) => void
+  addAiAttachedFile: (filePath: string) => void
+  removeAiAttachedFile: (index: number) => void
   updateAiModelApiKey: (id: string, key: string) => Promise<void>
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
@@ -197,6 +200,7 @@ export const useUIStore = create<UIState>((set) => ({
   aiPort: 4017,
   aiModels: [],
   activeAiModelId: '',
+  aiAttachedFiles: [],
   customThemes: [...BUILT_IN_THEMES],
   activeLightCustomThemeId: 'builtin-light',
   activeDarkCustomThemeId: 'builtin-dark',
@@ -354,12 +358,25 @@ export const useUIStore = create<UIState>((set) => ({
     set({ activeAiModelId: id })
     saveAppSettings({ activeAiModelId: id })
   },
+  addAiAttachedFile: (filePath: string) => {
+    set((state) => {
+      if (state.aiAttachedFiles.includes(filePath)) return state
+      return { aiAttachedFiles: [...state.aiAttachedFiles, filePath] }
+    })
+  },
+  removeAiAttachedFile: (index: number) => {
+    set((state) => {
+      const files = [...state.aiAttachedFiles]
+      files.splice(index, 1)
+      return { aiAttachedFiles: files }
+    })
+  },
   updateAiModelApiKey: async (id: string, key: string) => {
     try {
       const encrypted = key ? await encryptApiKey(key) : ''
       set((state) => {
         const aiModels = state.aiModels.map((m) =>
-          m.id === id ? { ...m, apiKey: encrypted } : m
+          m.id === id ? { ...m, apiKey: encrypted, _decryptedApiKey: key } : m
         )
         saveAppSettings({ aiModels: JSON.stringify(aiModels) })
         return { aiModels }

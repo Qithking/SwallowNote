@@ -19,6 +19,7 @@ import {
   Trash2,
   History,
   GitBranch,
+  MessageSquare,
 } from 'lucide-react'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGitStore } from '@/stores'
 import { loadFileContent, loadDirectory } from '@/lib/api'
@@ -88,7 +89,7 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
   const { workspaceMode, showAllFiles, markdownOnly } = useUIStore()
   const { addTab } = useEditorStore()
   const { nodes, setSelectedPath, toggleNode, setNodes, removeRoot } = useFileTreeStore()
-  const { clipboardFiles, clipboardIsCut, setClipboardFiles, showToast } = useUIStore()
+  const { clipboardFiles, clipboardIsCut, setClipboardFiles, showToast, addAiAttachedFile } = useUIStore()
   const { repositories } = useGitStore()
   const { t } = useTranslation()
 
@@ -167,6 +168,11 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
       console.error('Failed to copy path:', e)
       showToast(t('contextMenu.copied', { name: 'path' }))
     }
+  }
+
+  const handleAddToChat = () => {
+    addAiAttachedFile(node.path)
+    showToast(t('contextMenu.addedToChat', { name: node.name }))
   }
 
   const handleCopy = () => {
@@ -350,6 +356,17 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
         </ContextMenuItem>
 
         <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
+
+        {!node.isDirectory && (
+          <ContextMenuItem onClick={handleAddToChat} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
+            <MessageSquare size={12} />
+            <span>{t('contextMenu.addToChat')}</span>
+          </ContextMenuItem>
+        )}
+
+        {(!node.isDirectory || canPaste) && (
+          <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
+        )}
 
         <ContextMenuItem onClick={handleCopy} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           <Copy size={12} />

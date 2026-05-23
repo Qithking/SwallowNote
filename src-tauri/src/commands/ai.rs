@@ -70,14 +70,14 @@ pub async fn restart_ai_proxy_cmd(
     model: String,
     port: u16,
 ) -> Result<u16, String> {
-    {
+    let old_server = {
         let mut guard = holder.server.lock().unwrap();
-        if let Some(server) = guard.take() {
-            let _ = server.shutdown_tx.send(());
-        }
+        guard.take()
+    };
+    if let Some(server) = old_server {
+        let _ = server.shutdown_tx.send(());
+        let _ = server.shutdown_handle.await;
     }
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let settings = AiSettings {
         provider,

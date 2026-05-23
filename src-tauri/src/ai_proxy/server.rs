@@ -6,6 +6,7 @@ use tower_http::cors::CorsLayer;
 
 pub struct AiProxyServer {
     pub shutdown_tx: tokio::sync::oneshot::Sender<()>,
+    pub shutdown_handle: tokio::task::JoinHandle<()>,
     pub port: u16,
 }
 
@@ -29,7 +30,7 @@ pub async fn start_ai_proxy(settings: AiSettings) -> Result<AiProxyServer, Strin
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-    tokio::spawn(async move {
+    let shutdown_handle = tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -40,6 +41,7 @@ pub async fn start_ai_proxy(settings: AiSettings) -> Result<AiProxyServer, Strin
 
     Ok(AiProxyServer {
         shutdown_tx,
+        shutdown_handle,
         port: actual_port,
     })
 }
