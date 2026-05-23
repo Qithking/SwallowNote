@@ -19,8 +19,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { useUIStore } from '@/stores'
+import { MarkdownRenderer } from './MarkdownRenderer'
 import { getAiProxyUrl } from '@/lib/ai'
-import { restartAiProxy, saveAiMessage, loadAiMessages } from '@/lib/tauri'
+import { restartAiProxy, saveAiMessage, loadAiMessages, loadAiRolePrompts, type AiRolePrompt } from '@/lib/tauri'
 
 function getMessageText(message: { parts?: Array<{ type: string; text?: string }> }): string {
   if (!message.parts) return ''
@@ -49,7 +50,17 @@ function AIView() {
   const [hasMoreHistory, setHasMoreHistory] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const historyLoadedRef = useRef(false)
-  const { aiModels, activeAiModelId, aiPort, setSettingsPanelVisible, setActiveAiModel, aiAttachedFiles, removeAiAttachedFile } = useUIStore()
+  const [aiRolePrompts, setAiRolePrompts] = useState<AiRolePrompt[]>([])
+  const [activeRoleKey, setActiveRoleKey] = useState('chat')
+  // Map from message ID to display text for context-menu-triggered messages
+  // (so the chat bubble shows "[润色] src/App.tsx (L10-L25)" instead of the entire file content)
+  const contextMenuDisplayTexts = useRef<Map<string, string>>(new Map())
+
+  // Pending display text mappings: maps messages.length at send time to display text
+  // Once the new message appears in messages array, we map it by message.id instead
+  const pendingDisplayTexts = useRef<Map<number, string>>(new Map())
+
+  const { aiModels, activeAiModelId, aiPort, setSettingsPanelVisible, setActiveAiModel, aiAttachedFiles, removeAiAttachedFile, aiContextMenuRequest, setAiContextMenuRequest, setRightPanelType } = useUIStore()
 
   const activeModel = aiModels.find((m) => m.id === activeAiModelId)
   const isConfigured = !!activeModel
@@ -62,6 +73,18 @@ function AIView() {
 
   const { messages, status, stop, error, sendMessage, setMessages } = chat
   const isLoading = status === 'submitted' || status === 'streaming'
+
+  // When messages change, resolve any pending display text mappings to message IDs
+  useEffect(() => {
+    if (pendingDisplayTexts.current.size === 0) return
+    for (const [countAtSend, displayText] of pendingDisplayTexts.current) {
+      const msg = messages[countAtSend]
+      if (msg && msg.role === 'user') {
+        contextMenuDisplayTexts.current.set(msg.id, displayText)
+        pendingDisplayTexts.current.delete(countAtSend)
+      }
+    }
+  }, [messages])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -82,6 +105,13 @@ function AIView() {
         restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, aiPort).catch(console.error)
       }
     }
+  }, [])
+
+  // Load role prompts on mount
+  useEffect(() => {
+    loadAiRolePrompts()
+      .then((prompts) => setAiRolePrompts(prompts))
+      .catch((e) => console.error('Failed to load AI role prompts:', e))
   }, [])
 
   useEffect(() => {
@@ -223,13 +253,83 @@ function AIView() {
     }
   }, [messages])
 
+  // Listen for context menu requests from the store — process once and clear
+  // Uses a processed-ID set to prevent duplicate processing from React re-renders or Strict Mode
+  const processedRequestIds = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!aiContextMenuRequest || !isConfigured) return
+
+    // Build a unique ID for this request to detect duplicates
+    const requestId = `${aiContextMenuRequest.roleKey}:${aiContextMenuRequest.filePath}:${aiContextMenuRequest.hasSelection}:${aiContextMenuRequest.lineRange?.join('-')}:${aiContextMenuRequest.content.length}`
+
+    // Skip if this request was already processed (prevents React Strict Mode double-fire)
+    if (processedRequestIds.current.has(requestId)) return
+    processedRequestIds.current.add(requestId)
+
+    // Clear from store immediately to prevent re-trigger
+    setAiContextMenuRequest(null)
+
+    const { roleKey, roleName, hasSelection, content, lineRange, filePath } = aiContextMenuRequest
+
+    // Switch to AI panel
+    setRightPanelType('ai')
+
+    // Build the display message (what the user sees in the chat bubble)
+    let displayMessage: string
+    if (hasSelection && lineRange) {
+      displayMessage = `[${roleName}] ${filePath} (L${lineRange[0]}-L${lineRange[1]})`
+    } else {
+      displayMessage = `[${roleName}] ${filePath}`
+    }
+
+    // Build the actual content sent to AI
+    const aiContent = `${displayMessage}\n\n${content}`
+
+    // Set the role key
+    setActiveRoleKey(roleKey)
+
+    // Record the local timestamp
+    const now = new Date()
+    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+    const countBeforeSend = messages.length
+    pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
+
+    // Store the display text as pending; it will be mapped to message.id once the message appears
+    pendingDisplayTexts.current.set(countBeforeSend, displayMessage)
+
+    const rolePrompt = aiRolePrompts.find((p) => p.role_key === roleKey)
+    const systemPrompt = rolePrompt?.prompt || ''
+
+    // Send to AI with full content
+    if (systemPrompt) {
+      sendMessage({ text: aiContent }, { body: { systemPrompt } })
+    } else {
+      sendMessage({ text: aiContent })
+    }
+
+    // Save display message to DB (not the full content)
+    saveAiMessage('user', displayMessage, activeAiModelId || '').catch(console.error)
+  }, [aiContextMenuRequest]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const persistAndSend = (text: string) => {
     // Record the local timestamp and current message count before sending
     const now = new Date()
     const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
     const countBeforeSend = messages.length
     pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
-    sendMessage({ text })
+
+    // Get system prompt for the active role
+    const activePrompt = aiRolePrompts.find((p) => p.role_key === activeRoleKey)
+    const systemPrompt = activePrompt?.prompt || ''
+
+    // Pass systemPrompt via body option; the proxy handler will inject it as a system message
+    if (systemPrompt) {
+      sendMessage({ text }, { body: { systemPrompt } })
+    } else {
+      sendMessage({ text })
+    }
+
     saveAiMessage('user', text, activeAiModelId || '').catch(console.error)
   }
 
@@ -270,19 +370,35 @@ function AIView() {
           <Bot size={14} style={{ color: 'var(--text-muted)' }} />
           <span className="text-sm font-medium uppercase tracking-wider" >{t('ai.title')}</span>
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 ml-auto"
-              onClick={() => setSettingsPanelVisible(true)}
-            >
-              <Settings size={14} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t('common.settings')}</TooltipContent>
-        </Tooltip>
+        <div className="ml-auto flex items-center gap-1">
+          {isConfigured && (
+            <Select value={activeAiModelId} onValueChange={handleModelChange}>
+              <SelectTrigger className="h-7 w-auto border-0 bg-transparent shadow-none px-1 text-xs text-muted-foreground hover:text-foreground focus:ring-0 max-w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="min-w-[120px]">
+                {aiModels.map((m) => (
+                  <SelectItem key={m.id} value={m.id} className="text-xs py-1 pl-7 pr-2">
+                    {m.name || m.model}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setSettingsPanelVisible(true)}
+              >
+                <Settings size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('common.settings')}</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       <ScrollArea ref={scrollAreaRef} className="flex-1 p-3 space-y-4">
@@ -317,6 +433,10 @@ function AIView() {
             )}
             {messages.map((message) => {
               const text = getMessageText(message)
+              // For context-menu-triggered messages, show the display summary instead of full content
+              const displayText = message.role === 'user' && contextMenuDisplayTexts.current.has(message.id)
+                ? contextMenuDisplayTexts.current.get(message.id)!
+                : text
               return (
                 <div
                   key={message.id}
@@ -324,6 +444,7 @@ function AIView() {
                     'flex gap-3 mt-4',
                     message.role === 'user' && 'flex-row-reverse'
                   )}
+                  style={{ maxWidth: '100%' }}
                 >
                   <div
                     className={cn(
@@ -339,13 +460,19 @@ function AIView() {
                   </div>
                   <div
                     className={cn(
-                      'flex-1 p-3 rounded-lg',
+                      'p-3 rounded-lg overflow-hidden',
                       message.role === 'user'
-                        ? 'bg-primary/15 text-foreground'
-                        : 'bg-accent'
+                        ? 'bg-primary/15 text-foreground max-w-[85%]'
+                        : 'bg-accent max-w-[85%]'
                     )}
                   >
-                    <p className="text-xs whitespace-pre-wrap">{text}</p>
+                    {message.role === 'assistant' ? (
+                      <div className="min-w-0 overflow-hidden">
+                        <MarkdownRenderer content={displayText} />
+                      </div>
+                    ) : (
+                      <p className="text-xs whitespace-pre-wrap break-words">{displayText}</p>
+                    )}
                     {message.role === 'user' && messageTimestamps.get(message.id) && (
                       <p className="text-[10px] text-muted-foreground mt-1 text-right">
                         {formatTimeStr(messageTimestamps.get(message.id)!)}
@@ -376,7 +503,7 @@ function AIView() {
             <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center">
               <Bot size={14} />
             </div>
-            <div className="flex-1 p-3 rounded-lg bg-accent">
+            <div className="max-w-[85%] p-3 rounded-lg bg-accent">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" />
                 <span className="text-xs">{t('ai.thinking')}</span>
@@ -416,46 +543,50 @@ function AIView() {
             })}
           </div>
         )}
-        <form onSubmit={onFormSubmit} className="relative">
+        <form onSubmit={onFormSubmit} className="relative min-h-[120px] max-h-[250px] rounded-lg border border-border bg-background overflow-hidden">
           <textarea
-            className="w-full h-24 p-3 rounded-lg border border-border bg-background resize-none text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full  p-3 resize-y text-xs focus:outline-none focus:ring-1 focus:ring-ring overflow-y-auto"
             placeholder={isConfigured ? t('ai.placeholder') : t('ai.notConfigured')}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={!isConfigured}
           />
-          <div className="absolute bottom-3 right-3 flex items-center gap-1">
-            {isConfigured && (
-              <Select value={activeAiModelId} onValueChange={handleModelChange}>
-                <SelectTrigger className="h-7 w-auto border-0 bg-transparent shadow-none px-1 text-xs text-muted-foreground hover:text-foreground focus:ring-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="min-w-[120px]">
-                  {aiModels.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs py-1 pl-7 pr-2">
-                      {m.name || m.model}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            {isLoading && (
+          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 py-1.5 bg-background rounded-b-lg" >
+            <div className="flex items-center gap-1">
+              {isConfigured && (
+                <Select value={activeRoleKey} onValueChange={setActiveRoleKey}>
+                  <SelectTrigger className="h-6 w-auto border-0 bg-transparent shadow-none px-1 text-[11px] text-muted-foreground hover:text-foreground focus:ring-0 max-w-[100px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="min-w-[120px]">
+                    {aiRolePrompts.map((role) => (
+                      <SelectItem key={role.role_key} value={role.role_key} className="text-xs py-1 pl-7 pr-2">
+                        {role.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {isLoading && (
+                <button
+                  type="button"
+                  onClick={() => stop()}
+                  className="p-1.5 rounded-md bg-destructive text-destructive-foreground hover:opacity-90"
+                >
+                  <Square size={12} />
+                </button>
+              )}
               <button
-                type="button"
-                onClick={() => stop()}
-                className="p-2 rounded-lg bg-destructive text-destructive-foreground hover:opacity-90"
+                type="submit"
+                disabled={!isConfigured || !inputValue.trim() || isLoading}
+                className="p-1.5 rounded-md bg-primary text-primary-foreground disabled:opacity-50 hover:opacity-90"
               >
-                <Square size={14} />
+                <Send size={12} />
               </button>
-            )}
-            <button
-              type="submit"
-              disabled={!isConfigured || !inputValue.trim() || isLoading}
-              className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-50 hover:opacity-90"
-            >
-              <Send size={14} />
-            </button>
+            </div>
           </div>
         </form>
       </div>

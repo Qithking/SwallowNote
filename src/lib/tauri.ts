@@ -533,3 +533,25 @@ export async function loadAiMessages(
 export async function clearAiMessages(): Promise<void> {
   await invoke('clear_ai_messages')
 }
+
+export interface AiRolePrompt {
+  id: number
+  role_key: string
+  name: string
+  prompt: string
+  is_builtin: boolean
+  created_at: string
+  updated_at: string
+}
+
+export async function loadAiRolePrompts(): Promise<AiRolePrompt[]> {
+  return await invoke('load_ai_role_prompts')
+}
+
+export async function getAiRolePrompt(roleKey: string): Promise<AiRolePrompt | null> {
+  return await invoke('get_ai_role_prompt', { roleKey })
+}
+
+export async function updateAiRolePrompt(roleKey: string, prompt: string): Promise<void> {
+  await invoke('update_ai_role_prompt', { roleKey, prompt })
+}

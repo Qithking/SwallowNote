@@ -1,7 +1,7 @@
 /**
  * Code Editor Component using CodeMirror
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorView as CMView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
@@ -18,6 +18,7 @@ import { yaml } from '@codemirror/lang-yaml'
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { EditorContextMenu } from './EditorContextMenu'
 
 interface CodeEditorProps {
   content: string
@@ -125,14 +126,43 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
     }
   }, [content])
 
+  // Methods for the context menu
+  const getSelectedText = useCallback(() => {
+    const view = viewRef.current
+    if (!view) return ''
+    const { from, to } = view.state.selection.main
+    if (from === to) return '' // No selection
+    return view.state.sliceDoc(from, to)
+  }, [])
+
+  const getSelectionLineRange = useCallback((): [number, number] | null => {
+    const view = viewRef.current
+    if (!view) return null
+    const { from, to } = view.state.selection.main
+    if (from === to) return null // No selection
+    const startLine = view.state.doc.lineAt(from).number
+    const endLine = view.state.doc.lineAt(to).number
+    return [startLine, endLine]
+  }, [])
+
+  const getFullContent = useCallback(() => {
+    return viewRef.current?.state.doc.toString() || ''
+  }, [])
+
   return (
-    <ScrollArea className={`h-full ${className}`}>
-      <div
-        ref={editorRef}
-        style={{
-          minHeight: '100%',
-        }}
-      />
-    </ScrollArea>
+    <EditorContextMenu
+      getSelectedText={getSelectedText}
+      getSelectionLineRange={getSelectionLineRange}
+      getFullContent={getFullContent}
+    >
+      <ScrollArea className={`h-full ${className}`}>
+        <div
+          ref={editorRef}
+          style={{
+            minHeight: '100%',
+          }}
+        />
+      </ScrollArea>
+    </EditorContextMenu>
   )
 }

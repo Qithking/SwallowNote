@@ -12,6 +12,22 @@ export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
 export type EditorViewMode = 'edit' | 'preview' | 'split'
 export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | null
+
+/** Request from editor context menu to trigger an AI action */
+export interface AiContextMenuRequest {
+  /** The AI role key (e.g. 'continue_writing', 'polish') */
+  roleKey: string
+  /** The role display name */
+  roleName: string
+  /** Whether the user had selected text in the editor */
+  hasSelection: boolean
+  /** The selected text content (if hasSelection) or full file content */
+  content: string
+  /** For selected content: the line range [startLine, endLine] (1-based) */
+  lineRange?: [number, number]
+  /** The file path relative to rootPath */
+  filePath: string
+}
 export type WorkspaceMode = 'folder' | 'workspace'
 export type NoteWidth = 'normal' | 'wide'
 
@@ -116,6 +132,7 @@ export interface UIState {
   aiModels: AiModelConfig[]
   activeAiModelId: string
   aiAttachedFiles: string[]
+  aiContextMenuRequest: AiContextMenuRequest | null
   customThemes: CustomTheme[]
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
@@ -155,6 +172,7 @@ export interface UIState {
   setActiveAiModel: (id: string) => void
   addAiAttachedFile: (filePath: string) => void
   removeAiAttachedFile: (index: number) => void
+  setAiContextMenuRequest: (request: AiContextMenuRequest | null) => void
   updateAiModelApiKey: (id: string, key: string) => Promise<void>
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
@@ -201,6 +219,7 @@ export const useUIStore = create<UIState>((set) => ({
   aiModels: [],
   activeAiModelId: '',
   aiAttachedFiles: [],
+  aiContextMenuRequest: null,
   customThemes: [...BUILT_IN_THEMES],
   activeLightCustomThemeId: 'builtin-light',
   activeDarkCustomThemeId: 'builtin-dark',
@@ -371,6 +390,7 @@ export const useUIStore = create<UIState>((set) => ({
       return { aiAttachedFiles: files }
     })
   },
+  setAiContextMenuRequest: (request) => set({ aiContextMenuRequest: request }),
   updateAiModelApiKey: async (id: string, key: string) => {
     try {
       const encrypted = key ? await encryptApiKey(key) : ''

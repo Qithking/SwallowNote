@@ -1,4 +1,5 @@
 pub mod ai_chat;
+pub mod ai_role_prompts;
 pub mod folder_history;
 pub mod session_state;
 

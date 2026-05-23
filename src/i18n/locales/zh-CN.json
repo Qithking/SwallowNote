@@ -189,15 +189,23 @@
     "complete": "补全",
     "rewrite": "改写",
     "explain": "解释",
-    "title": "AI 助手",
+    "title": "AI助手",
     "askAnything": "输入任意问题...",
     "placeholder": "输入任意问题...",
-    "placeholderResponse": "你好！我是 AI 助手，有什么可以帮你的？",
+    "placeholderResponse": "你好！我是小燕子，有什么可以帮你的？",
     "fetchUrl": "获取 URL 内容",
     "thinking": "思考中...",
     "notConfigured": "AI 尚未配置，请先在设置中配置 AI 服务商",
     "goToSettings": "前往设置",
-    "error": "AI 请求出错，请检查配置或网络连接"
+    "error": "AI 请求出错，请检查配置或网络连接",
+    "role": {
+      "continue_writing": "续写",
+      "polish": "润色",
+      "correct": "纠错",
+      "outline": "提纲",
+      "summary": "摘要",
+      "format": "格式整理"
+    }
   },
   "common": {
     "ok": "确定",

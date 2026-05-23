@@ -4,7 +4,7 @@
  * Note: This component is keyed by activeTab.id in Editor.tsx,
  * so it remounts on tab switch — no need to watch content changes.
  */
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { BlockNoteEditor, PartialBlock, createCodeBlockSpec } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote } from '@blocknote/react'
@@ -16,6 +16,7 @@ import { buildTableOfContents } from '@/utils/tableOfContents'
 import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile } from '@/lib/tauri'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
+import { EditorContextMenu } from './EditorContextMenu'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -500,19 +501,70 @@ function BlockNoteInner({
   }, [h1Size, h2Size, h3Size, h4Size, h5Size, bodySize, lineHeight, letterSpacing,
     normalPaddingVertical, normalPaddingHorizontal])
 
+  // Methods for the context menu
+  const getSelectedText = useCallback(() => {
+    if (!editor) return ''
+    try {
+      const tiptapEditor = (editor as any)._tiptapEditor
+      if (!tiptapEditor) return ''
+      const { from, to, empty } = tiptapEditor.state.selection
+      if (empty) return ''
+      return tiptapEditor.state.doc.textBetween(from, to, '\n')
+    } catch {
+      return ''
+    }
+  }, [editor])
+
+  const getSelectionLineRange = useCallback((): [number, number] | null => {
+    if (!editor) return null
+    try {
+      const tiptapEditor = (editor as any)._tiptapEditor
+      if (!tiptapEditor) return null
+      const { from, to, empty } = tiptapEditor.state.selection
+      if (empty) return null
+      const startLine = tiptapEditor.state.doc.resolve(from).depth > 0
+        ? 1
+        : 1
+      // Count newlines before `from` and `to` to get line numbers
+      const textBeforeFrom = tiptapEditor.state.doc.textBetween(0, from, '\n')
+      const textBeforeTo = tiptapEditor.state.doc.textBetween(0, to, '\n')
+      const startLineNumber = (textBeforeFrom.match(/\n/g) || []).length + 1
+      const endLineNumber = (textBeforeTo.match(/\n/g) || []).length + 1
+      return [startLineNumber, endLineNumber]
+    } catch {
+      return null
+    }
+  }, [editor])
+
+  const getFullContent = useCallback(async () => {
+    if (!editor) return ''
+    try {
+      const rawMd = await editor.blocksToMarkdownLossy(editor.document)
+      return compactMarkdown(rawMd)
+    } catch {
+      return ''
+    }
+  }, [editor])
+
   return (
-    <div ref={editorContainerRef} className="blocknote-editor-container flex flex-col h-full">
-      <ScrollArea className="flex-1 w-full">
-        <div className="w-full">
-          <BlockNoteView
-            key={containerWidth}
-            editor={editor}
-            theme={blocknoteTheme}
-            onChange={handleChange}
-          />
-        </div>
-      </ScrollArea>
-    </div>
+    <EditorContextMenu
+      getSelectedText={getSelectedText}
+      getSelectionLineRange={getSelectionLineRange}
+      getFullContent={getFullContent}
+    >
+      <div ref={editorContainerRef} className="blocknote-editor-container flex flex-col h-full">
+        <ScrollArea className="flex-1 w-full">
+          <div className="w-full">
+            <BlockNoteView
+              key={containerWidth}
+              editor={editor}
+              theme={blocknoteTheme}
+              onChange={handleChange}
+            />
+          </div>
+        </ScrollArea>
+      </div>
+    </EditorContextMenu>
   )
 }
 

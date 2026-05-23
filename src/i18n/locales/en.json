@@ -192,12 +192,20 @@
     "title": "AI Assistant",
     "askAnything": "Ask anything...",
     "placeholder": "Ask anything...",
-    "placeholderResponse": "Hello! I'm your AI assistant. How can I help you?",
+    "placeholderResponse": "Hello! I'm Swallow, your AI assistant. How can I help you?",
     "fetchUrl": "Fetch URL Content",
     "thinking": "Thinking...",
     "notConfigured": "AI is not configured. Please configure an AI provider in Settings first.",
     "goToSettings": "Go to Settings",
-    "error": "AI request failed. Please check your configuration or network connection."
+    "error": "AI request failed. Please check your configuration or network connection.",
+    "role": {
+      "continue_writing": "Continue Writing",
+      "polish": "Polish",
+      "correct": "Correct",
+      "outline": "Outline",
+      "summary": "Summary",
+      "format": "Format"
+    }
   },
   "common": {
     "ok": "OK",

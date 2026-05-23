@@ -652,3 +652,161 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .blocknote-editor-container:hover::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
 }
+
+/* ============================================================
+   AI Chat Markdown Rendering Styles
+   ============================================================ */
+
+/* Base markdown content container */
+.ai-markdown-content {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.ai-markdown-content > *:first-child {
+  margin-top: 0;
+}
+
+/* Prevent pre/code blocks from overflowing */
+.ai-markdown-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+
+.ai-markdown-content code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+.ai-markdown-content :not(pre) > code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  word-break: break-word;
+}
+
+.dark .ai-markdown-content :not(pre) > code {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Prevent tables from overflowing */
+.ai-markdown-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+
+.ai-markdown-content th,
+.ai-markdown-content td {
+  border: 1px solid var(--border-color);
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+
+.ai-markdown-content th {
+  background: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+.dark .ai-markdown-content th {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Prevent images from overflowing */
+.ai-markdown-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Lists styling */
+.ai-markdown-content ul,
+.ai-markdown-content ol {
+  padding-left: 1.5em;
+  margin: 0.3em 0;
+}
+
+.ai-markdown-content li {
+  margin: 0.15em 0;
+}
+
+/* Headings */
+.ai-markdown-content h1,
+.ai-markdown-content h2,
+.ai-markdown-content h3,
+.ai-markdown-content h4,
+.ai-markdown-content h5,
+.ai-markdown-content h6 {
+  margin: 0.6em 0 0.3em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ai-markdown-content h1 { font-size: 1.3em; }
+.ai-markdown-content h2 { font-size: 1.15em; }
+.ai-markdown-content h3 { font-size: 1.05em; }
+
+/* Paragraphs */
+.ai-markdown-content p {
+  margin: 0.3em 0;
+  line-height: 1.5;
+}
+
+/* Blockquotes */
+.ai-markdown-content blockquote {
+  border-left: 3px solid var(--theme-color);
+  padding-left: 0.8em;
+  margin: 0.5em 0;
+  color: var(--text-secondary);
+}
+
+/* Horizontal rule */
+.ai-markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 0.6em 0;
+}
+
+/* Links */
+.ai-markdown-content a {
+  color: var(--text-link);
+  text-decoration: none;
+}
+
+.ai-markdown-content a:hover {
+  text-decoration: underline;
+}
+
+/* Code block wrapper */
+.ai-code-block {
+  font-family: var(--font-mono);
+  border-radius: 4px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+/* Shiki code highlight: light/dark theme switching */
+.ai-code-block pre {
+  background: #f6f8fa !important;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.dark .ai-code-block pre {
+  background: #0d1117 !important;
+}
+
+/* Light theme code block header */
+.ai-code-block > div:first-child:not(.dark *) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Dark theme code block header */
+.dark .ai-code-block > div:first-child {
+  background: rgba(255, 255, 255, 0.05);
+}

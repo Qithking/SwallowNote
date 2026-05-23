@@ -33,6 +33,7 @@ pub async fn chat_handler(
 
     let messages_val = req.get("messages").cloned().unwrap_or(json!([]));
     let model_from_req = req.get("model").and_then(|m| m.as_str());
+    let system_prompt = req.get("systemPrompt").and_then(|s| s.as_str()).unwrap_or("").to_string();
 
     let model = model_from_req
         .map(|s| s.to_string())
@@ -52,7 +53,7 @@ pub async fn chat_handler(
                         .collect()
                 })
                 .unwrap_or_default();
-            let system_msg: Vec<Value> = messages_val
+            let mut system_msg: Vec<Value> = messages_val
                 .as_array()
                 .map(|arr| {
                     arr.iter()
@@ -61,6 +62,10 @@ pub async fn chat_handler(
                         .collect()
                 })
                 .unwrap_or_default();
+            // Inject systemPrompt from request body if present
+            if !system_prompt.is_empty() {
+                system_msg.insert(0, json!({"type": "text", "text": system_prompt}));
+            }
             let mut payload = json!({
                 "model": model,
                 "messages": messages,
@@ -106,7 +111,11 @@ pub async fn chat_handler(
                         .collect()
                 })
                 .unwrap_or_default();
-            let payload = json!({"contents": contents});
+            let mut payload = json!({"contents": contents});
+            // Inject systemPrompt from request body if present
+            if !system_prompt.is_empty() {
+                payload["systemInstruction"] = json!({"parts": [{"text": system_prompt}]});
+            }
             (
                 url,
                 payload,
@@ -115,7 +124,7 @@ pub async fn chat_handler(
         }
         _ => {
             let url = format!("{}/chat/completions", base_url);
-            let messages: Vec<Value> = messages_val
+            let mut messages: Vec<Value> = messages_val
                 .as_array()
                 .map(|arr| {
                     arr.iter()
@@ -136,6 +145,10 @@ pub async fn chat_handler(
                         .collect()
                 })
                 .unwrap_or_default();
+            // Inject systemPrompt from request body if present
+            if !system_prompt.is_empty() {
+                messages.insert(0, json!({"role": "system", "content": system_prompt}));
+            }
             let payload = json!({
                 "model": model,
                 "messages": messages,

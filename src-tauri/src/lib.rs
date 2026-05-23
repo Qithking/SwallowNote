@@ -133,6 +133,9 @@ pub fn run() {
             commands::ai_chat::save_ai_message,
             commands::ai_chat::load_ai_messages,
             commands::ai_chat::clear_ai_messages,
+            commands::ai_role_prompts::load_ai_role_prompts,
+            commands::ai_role_prompts::get_ai_role_prompt,
+            commands::ai_role_prompts::update_ai_role_prompt,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
@@ -150,12 +153,21 @@ pub fn run() {
                 }
             }
 
-            match db::ai_chat::init_ai_chat_db(app_data_dir) {
+            match db::ai_chat::init_ai_chat_db(app_data_dir.clone()) {
                 Ok(ai_chat_db) => {
                     app.handle().manage(ai_chat_db);
                 }
                 Err(e) => {
                     eprintln!("Failed to initialize AI chat database: {}", e);
+                }
+            }
+
+            match db::ai_role_prompts::init_ai_role_prompts_db(app_data_dir) {
+                Ok(ai_role_prompts_db) => {
+                    app.handle().manage(ai_role_prompts_db);
+                }
+                Err(e) => {
+                    eprintln!("Failed to initialize AI role prompts database: {}", e);
                 }
             }
 
