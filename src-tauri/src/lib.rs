@@ -130,6 +130,9 @@ pub fn run() {
             commands::ai::stop_ai_proxy,
             commands::ai::restart_ai_proxy_cmd,
             commands::ai::test_ai_model_cmd,
+            commands::ai_chat::save_ai_message,
+            commands::ai_chat::load_ai_messages,
+            commands::ai_chat::clear_ai_messages,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
@@ -138,12 +141,21 @@ pub fn run() {
             // Initialize backend i18n translations
             crate::i18n::init_translations();
 
-            match db::init_db(app_data_dir) {
+            match db::init_db(app_data_dir.clone()) {
                 Ok(db) => {
                     app.handle().manage(db);
                 }
                 Err(e) => {
                     eprintln!("Failed to initialize database: {}", e);
+                }
+            }
+
+            match db::ai_chat::init_ai_chat_db(app_data_dir) {
+                Ok(ai_chat_db) => {
+                    app.handle().manage(ai_chat_db);
+                }
+                Err(e) => {
+                    eprintln!("Failed to initialize AI chat database: {}", e);
                 }
             }
 

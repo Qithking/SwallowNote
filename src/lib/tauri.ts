@@ -506,3 +506,30 @@ export async function testAiModel(
 ): Promise<string> {
   return await invoke('test_ai_model_cmd', { provider, apiKey, baseUrl, model, port })
 }
+
+export interface AiChatMessage {
+  id: number
+  role: string
+  content: string
+  model_id: string
+  created_at: string
+}
+
+export async function saveAiMessage(
+  role: string,
+  content: string,
+  modelId: string,
+): Promise<number> {
+  return await invoke('save_ai_message', { role, content, modelId })
+}
+
+export async function loadAiMessages(
+  beforeId?: number,
+  limit?: number,
+): Promise<AiChatMessage[]> {
+  return await invoke('load_ai_messages', { beforeId, limit })
+}
+
+export async function clearAiMessages(): Promise<void> {
+  await invoke('clear_ai_messages')
+}

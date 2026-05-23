@@ -1,3 +1,4 @@
+pub mod ai_chat;
 pub mod folder_history;
 pub mod session_state;
 

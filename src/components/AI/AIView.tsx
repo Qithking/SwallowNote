@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import {
@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { useUIStore } from '@/stores'
 import { getAiProxyUrl } from '@/lib/ai'
-import { restartAiProxy } from '@/lib/tauri'
+import { restartAiProxy, saveAiMessage, loadAiMessages } from '@/lib/tauri'
 
 function getMessageText(message: { parts?: Array<{ type: string; text?: string }> }): string {
   if (!message.parts) return ''
@@ -30,11 +30,25 @@ function getMessageText(message: { parts?: Array<{ type: string; text?: string }
     .join('')
 }
 
+function formatTimeStr(timeStr: string): string {
+  if (!timeStr) return ''
+  const match = timeStr.match(/(\d{2}):(\d{2}):(\d{2})/)
+  if (match) return `${match[1]}:${match[2]}:${match[3]}`
+  return timeStr
+}
+
 function AIView() {
   const { t } = useTranslation()
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null)
+  const savedMessageIds = useRef<Set<string>>(new Set())
+  const messageTimestamps = useRef<Map<string, string>>(new Map())
+  const [oldestDbId, setOldestDbId] = useState<number | null>(null)
+  const [hasMoreHistory, setHasMoreHistory] = useState(false)
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const historyLoadedRef = useRef(false)
   const { aiModels, activeAiModelId, aiPort, setSettingsPanelVisible, setActiveAiModel, aiAttachedFiles, removeAiAttachedFile } = useUIStore()
 
   const activeModel = aiModels.find((m) => m.id === activeAiModelId)
@@ -70,6 +84,99 @@ function AIView() {
     }
   }, [])
 
+  useEffect(() => {
+    if (historyLoadedRef.current || !isConfigured) return
+    historyLoadedRef.current = true
+    const loadHistory = async () => {
+      try {
+        const dbMessages = await loadAiMessages(undefined, 30)
+        if (dbMessages.length > 0) {
+          const chatMessages = dbMessages.reverse().map((msg) => ({
+            id: `db-${msg.id}`,
+            role: msg.role as 'user' | 'assistant',
+            parts: [{ type: 'text' as const, text: msg.content }],
+          }))
+          setMessages(chatMessages)
+          dbMessages.forEach((msg) => {
+            savedMessageIds.current.add(`db-${msg.id}`)
+            messageTimestamps.current.set(`db-${msg.id}`, msg.created_at)
+          })
+          setOldestDbId(dbMessages[0].id)
+          setHasMoreHistory(dbMessages.length >= 30)
+        }
+      } catch (e) {
+        console.error('Failed to load AI chat history:', e)
+      }
+    }
+    loadHistory()
+  }, [isConfigured])
+
+  useEffect(() => {
+    if (status !== 'ready') return
+    if (messages.length === 0) return
+    const lastMsg = messages[messages.length - 1]
+    if (lastMsg?.role === 'assistant' && !savedMessageIds.current.has(lastMsg.id)) {
+      const text = getMessageText(lastMsg)
+      if (text) {
+        savedMessageIds.current.add(lastMsg.id)
+        const now = new Date()
+        const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+        messageTimestamps.current.set(lastMsg.id, timeStr)
+        saveAiMessage('assistant', text, activeAiModelId || '').catch(console.error)
+      }
+    }
+  }, [status])
+
+  const loadMoreHistory = useCallback(async () => {
+    if (isLoadingHistory || !hasMoreHistory || oldestDbId === null) return
+    setIsLoadingHistory(true)
+    try {
+      const viewport = scrollViewportRef.current
+      const prevScrollHeight = viewport?.scrollHeight || 0
+
+      const dbMessages = await loadAiMessages(oldestDbId, 30)
+      if (dbMessages.length > 0) {
+        const chatMessages = dbMessages.reverse().map((msg) => ({
+          id: `db-${msg.id}`,
+          role: msg.role as 'user' | 'assistant',
+          parts: [{ type: 'text' as const, text: msg.content }],
+        }))
+        setMessages((prev) => [...chatMessages, ...prev])
+        dbMessages.forEach((msg) => {
+          savedMessageIds.current.add(`db-${msg.id}`)
+          messageTimestamps.current.set(`db-${msg.id}`, msg.created_at)
+        })
+        setOldestDbId(dbMessages[0].id)
+        setHasMoreHistory(dbMessages.length >= 30)
+
+        requestAnimationFrame(() => {
+          if (viewport) {
+            const newScrollHeight = viewport.scrollHeight
+            viewport.scrollTop = newScrollHeight - prevScrollHeight
+          }
+        })
+      } else {
+        setHasMoreHistory(false)
+      }
+    } catch (e) {
+      console.error('Failed to load more history:', e)
+    } finally {
+      setIsLoadingHistory(false)
+    }
+  }, [isLoadingHistory, hasMoreHistory, oldestDbId])
+
+  useEffect(() => {
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    const handleScroll = () => {
+      if (viewport.scrollTop < 50 && hasMoreHistory && !isLoadingHistory) {
+        loadMoreHistory()
+      }
+    }
+    viewport.addEventListener('scroll', handleScroll)
+    return () => viewport.removeEventListener('scroll', handleScroll)
+  }, [hasMoreHistory, isLoadingHistory, loadMoreHistory])
+
   const handleModelChange = async (modelId: string) => {
     setActiveAiModel(modelId)
     const model = aiModels.find((m) => m.id === modelId)
@@ -89,13 +196,25 @@ function AIView() {
     setTimeout(() => setCopiedId(null), 2000)
   }
 
+  const persistAndSend = (text: string) => {
+    sendMessage({ text })
+    const now = new Date()
+    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+    saveAiMessage('user', text, activeAiModelId || '').then(() => {
+      const chatMsgId = chat.messages[chat.messages.length - 1]?.id
+      if (chatMsgId) {
+        savedMessageIds.current.add(chatMsgId)
+        messageTimestamps.current.set(chatMsgId, timeStr)
+      }
+    }).catch(console.error)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (isConfigured && inputValue.trim()) {
-        sendMessage({ text: inputValue.trim() })
+        persistAndSend(inputValue.trim())
         setInputValue('')
-        setMessages((prev) => prev.length > 100 ? prev.slice(-100) : prev)
       }
     }
   }
@@ -107,10 +226,18 @@ function AIView() {
     if (aiAttachedFiles.length > 0) {
       text += '\n\n--- attached files ---\n' + aiAttachedFiles.join('\n')
     }
-    sendMessage({ text })
+    persistAndSend(text)
     setInputValue('')
-    setMessages((prev) => prev.length > 100 ? prev.slice(-100) : prev)
   }
+
+  const scrollAreaRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      const viewport = node.querySelector('[data-radix-scroll-area-viewport]') as HTMLDivElement | null
+      if (viewport) {
+        scrollViewportRef.current = viewport
+      }
+    }
+  }, [])
 
   return (
     <div className="flex flex-col h-full">
@@ -134,7 +261,7 @@ function AIView() {
         </Tooltip>
       </div>
 
-      <ScrollArea className="flex-1 p-3 space-y-4">
+      <ScrollArea ref={scrollAreaRef} className="flex-1 p-3 space-y-4">
         {!isConfigured ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Sparkles size={32} className="mb-3 opacity-50" />
@@ -152,61 +279,73 @@ function AIView() {
           </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <Sparkles size={32} className="mb-3 opacity-50" />
-            <p className="text-sm text-center">
+            <Sparkles size={24} className="mb-3 opacity-50" />
+            <p className="text-xs text-center">
               {t('ai.askAnything')}
             </p>
           </div>
         ) : (
-          messages.map((message) => {
-            const text = getMessageText(message)
-            return (
-              <div
-                key={message.id}
-                className={cn(
-                  'flex gap-3 mt-4',
-                  message.role === 'user' && 'flex-row-reverse'
-                )}
-              >
-                <div
-                  className={cn(
-                    'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
-                    message.role === 'user' ? 'bg-primary/20 text-foreground' : 'bg-accent'
-                  )}
-                >
-                  {message.role === 'user' ? (
-                    <span className="text-xs text-foreground">You</span>
-                  ) : (
-                    <Bot size={14} />
-                  )}
-                </div>
-                <div
-                  className={cn(
-                    'flex-1 p-3 rounded-lg',
-                    message.role === 'user'
-                      ? 'bg-primary/15 text-foreground'
-                      : 'bg-accent'
-                  )}
-                >
-                  <p className="text-xs whitespace-pre-wrap">{text}</p>
-                  {message.role === 'assistant' && text && (
-                    <div className="flex items-center justify-end mt-2">
-                      <button
-                        onClick={() => handleCopy(text, message.id)}
-                        className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
-                      >
-                        {copiedId === message.id ? (
-                          <Check size={12} />
-                        ) : (
-                          <Copy size={12} />
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </div>
+          <>
+            {isLoadingHistory && (
+              <div className="flex items-center justify-center py-2">
+                <Loader2 size={14} className="animate-spin text-muted-foreground" />
               </div>
-            )
-          })
+            )}
+            {messages.map((message) => {
+              const text = getMessageText(message)
+              return (
+                <div
+                  key={message.id}
+                  className={cn(
+                    'flex gap-3 mt-4',
+                    message.role === 'user' && 'flex-row-reverse'
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
+                      message.role === 'user' ? 'bg-primary/20 text-foreground' : 'bg-accent'
+                    )}
+                  >
+                    {message.role === 'user' ? (
+                      <span className="text-xs text-foreground">You</span>
+                    ) : (
+                      <Bot size={14} />
+                    )}
+                  </div>
+                  <div
+                    className={cn(
+                      'flex-1 p-3 rounded-lg',
+                      message.role === 'user'
+                        ? 'bg-primary/15 text-foreground'
+                        : 'bg-accent'
+                    )}
+                  >
+                    <p className="text-xs whitespace-pre-wrap">{text}</p>
+                    {message.role === 'user' && messageTimestamps.current.get(message.id) && (
+                      <p className="text-[10px] text-muted-foreground mt-1 text-right">
+                        {formatTimeStr(messageTimestamps.current.get(message.id)!)}
+                      </p>
+                    )}
+                    {message.role === 'assistant' && text && (
+                      <div className="flex items-center justify-end mt-2">
+                        <button
+                          onClick={() => handleCopy(text, message.id)}
+                          className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
+                        >
+                          {copiedId === message.id ? (
+                            <Check size={12} />
+                          ) : (
+                            <Copy size={12} />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </>
         )}
         {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
           <div className="flex gap-3 mt-4">
@@ -268,9 +407,9 @@ function AIView() {
                 <SelectTrigger className="h-7 w-auto border-0 bg-transparent shadow-none px-1 text-xs text-muted-foreground hover:text-foreground focus:ring-0">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="min-w-[120px]">
                   {aiModels.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
+                    <SelectItem key={m.id} value={m.id} className="text-xs py-1 pl-7 pr-2">
                       {m.name || m.model}
                     </SelectItem>
                   ))}

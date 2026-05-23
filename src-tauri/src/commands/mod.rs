@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_chat;
 pub mod file;
 pub mod git;
 pub mod folder_history;
