@@ -1,3 +1,4 @@
+mod ai_proxy;
 mod commands;
 mod db;
 mod i18n;
@@ -123,6 +124,12 @@ pub fn run() {
             mac_rounded_corners::reposition_traffic_lights,
             set_dock_icon_visibility,
             i18n::set_app_locale,
+            commands::ai::encrypt_api_key,
+            commands::ai::decrypt_api_key,
+            commands::ai::start_ai_proxy_cmd,
+            commands::ai::stop_ai_proxy,
+            commands::ai::restart_ai_proxy_cmd,
+            commands::ai::test_ai_model_cmd,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
@@ -142,6 +149,51 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle.clone());
+
+            app.handle().manage(commands::ai::new_shared_ai_proxy_state());
+
+            let ai_holder = app.handle().state::<commands::ai::SharedAiProxyState>().inner().clone();
+            let db = app.handle().state::<db::Database>().inner().clone();
+            let ai_settings = {
+                let conn = db.conn.lock().unwrap();
+                let mut stmt = conn.prepare("SELECT key, value FROM session_state WHERE key LIKE 'settings.ai%'").unwrap();
+                let rows: std::collections::HashMap<String, String> = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                }).unwrap().filter_map(|r| r.ok()).collect();
+                drop(stmt);
+                drop(conn);
+
+                let get = |key: &str| rows.get(key).cloned().unwrap_or_default();
+                crate::ai_proxy::AiSettings {
+                    provider: get("settings.aiProvider"),
+                    api_key: {
+                        let encrypted = get("settings.aiApiKey");
+                        if !encrypted.is_empty() {
+                            crate::ai_proxy::crypto::decrypt_api_key(&encrypted).unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
+                    },
+                    base_url: get("settings.aiBaseUrl"),
+                    model: get("settings.aiModel"),
+                    port: get("settings.aiPort").parse::<u16>().unwrap_or(4017),
+                }
+            };
+
+            if !ai_settings.provider.is_empty() {
+                let holder = ai_holder.clone();
+                tauri::async_runtime::spawn(async move {
+                    match crate::ai_proxy::server::start_ai_proxy(ai_settings).await {
+                        Ok(server) => {
+                            let mut guard = holder.server.lock().unwrap();
+                            *guard = Some(server);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to start AI proxy: {}", e);
+                        }
+                    }
+                });
+            }
 
             let show_item = MenuItemBuilder::with_id("show", crate::i18n::t("tray.showWindow")).build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", crate::i18n::t("tray.quit")).build(app)?;

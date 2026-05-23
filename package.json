@@ -11,6 +11,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@ai-sdk/react": "^3.0.193",
     "@blocknote/code-block": "^0.51.2",
     "@blocknote/core": "^0.51.2",
     "@blocknote/mantine": "^0.51.2",
@@ -54,6 +55,7 @@
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-os": "^2.2.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
+    "ai": "^6.0.191",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

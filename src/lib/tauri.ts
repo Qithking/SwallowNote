@@ -331,6 +331,13 @@ export interface AppSettings {
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
   uploadPath: string
+  aiProvider: string
+  aiApiKey: string
+  aiBaseUrl: string
+  aiModel: string
+  aiPort: string
+  aiModels: string
+  activeAiModelId: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -350,6 +357,13 @@ export async function getAppSettings(): Promise<AppSettings> {
     activeLightCustomThemeId: get('activeLightCustomThemeId', 'builtin-light'),
     activeDarkCustomThemeId: get('activeDarkCustomThemeId', 'builtin-dark'),
     uploadPath: get('uploadPath', ''),
+    aiProvider: get('aiProvider', ''),
+    aiApiKey: get('aiApiKey', ''),
+    aiBaseUrl: get('aiBaseUrl', ''),
+    aiModel: get('aiModel', ''),
+    aiPort: get('aiPort', '4017'),
+    aiModels: get('aiModels', '[]'),
+    activeAiModelId: get('activeAiModelId', ''),
   }
 }
 
@@ -448,4 +462,47 @@ export function downloadLatestRelease(
 
 export async function openInstaller(path: string): Promise<void> {
   await invoke('open_installer', { path })
+}
+
+// AI APIs
+export async function encryptApiKey(plaintext: string): Promise<string> {
+  return await invoke('encrypt_api_key', { plaintext })
+}
+
+export async function decryptApiKey(encrypted: string): Promise<string> {
+  return await invoke('decrypt_api_key', { encrypted })
+}
+
+export async function startAiProxy(
+  provider: string,
+  apiKey: string,
+  baseUrl: string,
+  model: string,
+  port: number,
+): Promise<number> {
+  return await invoke('start_ai_proxy_cmd', { provider, apiKey, baseUrl, model, port })
+}
+
+export async function stopAiProxy(): Promise<void> {
+  await invoke('stop_ai_proxy')
+}
+
+export async function restartAiProxy(
+  provider: string,
+  apiKey: string,
+  baseUrl: string,
+  model: string,
+  port: number,
+): Promise<number> {
+  return await invoke('restart_ai_proxy_cmd', { provider, apiKey, baseUrl, model, port })
+}
+
+export async function testAiModel(
+  provider: string,
+  apiKey: string,
+  baseUrl: string,
+  model: string,
+  port: number,
+): Promise<string> {
+  return await invoke('test_ai_model_cmd', { provider, apiKey, baseUrl, model, port })
 }

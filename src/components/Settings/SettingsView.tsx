@@ -10,6 +10,7 @@ import {
   Pencil,
   Check,
   X,
+  Bot,
 } from 'lucide-react'
 import { useUIStore, Theme, NoteWidth, CustomThemeColors } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -28,7 +29,10 @@ import { setAppLocale } from '@/lib/tauri'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { toast } from 'sonner'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
+import { getProviderById, getProvidersByCategory, AiProviderCategory } from '@/lib/ai'
+import { testAiModel, restartAiProxy } from '@/lib/tauri'
 import { ShortcutRecorder } from './ShortcutRecorder'
 import {
   AlertDialog,
@@ -41,7 +45,7 @@ import {
   AlertDialogAction,
 } from '@/components/ui/alert-dialog'
 
-type SettingsSection = 'general' | 'sync' | 'appearance' | 'shortcuts'
+type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts'
 
 function SettingRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
   return (
@@ -68,6 +72,9 @@ function SettingsView() {
     markdownOnly, setMarkdownOnly,
     syncInterval, setSyncInterval,
     uploadPath, setUploadPath,
+    aiPort, setAiPort,
+    aiModels, activeAiModelId,
+    addAiModel, removeAiModel, setActiveAiModel, updateAiModelApiKey,
     customThemes, activeLightCustomThemeId, activeDarkCustomThemeId,
     setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
   } = useUIStore()
@@ -77,12 +84,20 @@ function SettingsView() {
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
+  const [aiCategoryTab, setAiCategoryTab] = useState<AiProviderCategory>('local')
+  const [aiFormProvider, setAiFormProvider] = useState('ollama')
+  const [aiFormApiKey, setAiFormApiKey] = useState('')
+  const [aiFormBaseUrl, setAiFormBaseUrl] = useState('')
+  const [aiFormModel, setAiFormModel] = useState('')
+  const [aiTesting, setAiTesting] = useState(false)
+
   const activeCustomThemeId = customThemeTab === 'light' ? activeLightCustomThemeId : activeDarkCustomThemeId
 
   const sections: { id: SettingsSection; icon: typeof SettingsIcon; labelKey: string }[] = [
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },
     { id: 'sync', icon: RefreshCw, labelKey: 'settings.sync' },
     { id: 'appearance', icon: Palette, labelKey: 'settings.appearance' },
+    { id: 'ai', icon: Bot, labelKey: 'settings.ai' },
     { id: 'shortcuts', icon: Keyboard, labelKey: 'settings.shortcuts' },
   ]
 
@@ -417,6 +432,205 @@ function SettingsView() {
                         )
                       })()}
                     </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+
+            {/* ===== AI ===== */}
+            <section id="section-ai" className="space-y-4">
+              <h2 className="text-base font-semibold">{t('settings.ai')}</h2>
+              
+              <Card>
+                <CardContent className="p-0">
+                  <div className="px-4 pt-4 pb-2">
+                    <Tabs value={aiCategoryTab} onValueChange={(v) => {
+                      setAiCategoryTab(v as AiProviderCategory)
+                      setAiFormProvider(v === 'local' ? 'ollama' : 'custom')
+                      const provider = getProviderById(v === 'local' ? 'ollama' : 'custom')
+                      if (provider?.defaultBaseUrl) setAiFormBaseUrl(provider.defaultBaseUrl)
+                    }}>
+                      <TabsList className="w-full">
+                        <TabsTrigger value="local" className="flex-1">{t('settings.ai.category.local')}</TabsTrigger>
+                        <TabsTrigger value="api" className="flex-1">{t('settings.ai.category.api')}</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+
+                  <div className="flex min-h-[200px]">
+                    <div className="w-44 border-r border-border py-2 px-2 flex flex-col">
+                      <div className="flex-1 overflow-y-auto space-y-0.5">
+                        {aiModels.filter((m) => m.category === aiCategoryTab).length === 0 && (
+                          <p className="text-xs text-muted-foreground py-4 text-center">{t('settings.ai.noModels')}</p>
+                        )}
+                        {aiModels
+                          .filter((m) => m.category === aiCategoryTab)
+                          .map((m) => (
+                            <div
+                              key={m.id}
+                              className={cn(
+                                'flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer group',
+                                m.id === activeAiModelId ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
+                              )}
+                              onClick={() => setActiveAiModel(m.id)}
+                            >
+                              <span className="truncate flex-1">{m.name || m.model}</span>
+                              <button
+                                className="p-0.5 hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  removeAiModel(m.id)
+                                }}
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+
+                    <div className="flex-1 p-4">
+                      <p className="text-xs font-medium text-muted-foreground mb-3">{t('settings.ai.addModel')}</p>
+
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="mr-2 min-w-0">
+                            <Label className="text-xs font-medium">{t('settings.ai.provider')}</Label>
+                            <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.provider.desc')}</p>
+                          </div>
+                          <Select value={aiFormProvider} onValueChange={(v) => {
+                            setAiFormProvider(v)
+                            const provider = getProviderById(v)
+                            if (provider?.defaultBaseUrl) setAiFormBaseUrl(provider.defaultBaseUrl)
+                          }}>
+                            <SelectTrigger className="w-[200px] h-7 text-xs">
+                              <SelectValue placeholder={t('settings.ai.provider.placeholder')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {getProvidersByCategory(aiCategoryTab).map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  {p.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {aiFormProvider && getProviderById(aiFormProvider)?.requiresApiKey && (
+                          <div className="flex items-center justify-between">
+                            <div className="mr-2 min-w-0">
+                              <Label className="text-xs font-medium">{t('settings.ai.apiKey')}</Label>
+                              <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.apiKey.desc')}</p>
+                            </div>
+                            <Input
+                              className="w-[200px] h-7 text-xs"
+                              type="password"
+                              placeholder={t('settings.ai.apiKey.placeholder')}
+                              value={aiFormApiKey}
+                              onChange={(e) => setAiFormApiKey(e.target.value)}
+                            />
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between">
+                          <div className="mr-2 min-w-0">
+                            <Label className="text-xs font-medium">{t('settings.ai.baseUrl')}</Label>
+                            <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.baseUrl.desc')}</p>
+                          </div>
+                          <Input
+                            className="w-[200px] h-7 text-xs"
+                            placeholder={aiFormProvider ? (getProviderById(aiFormProvider)?.defaultBaseUrl || '') : ''}
+                            value={aiFormBaseUrl}
+                            onChange={(e) => setAiFormBaseUrl(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <div className="mr-2 min-w-0">
+                            <Label className="text-xs font-medium">{t('settings.ai.modelId')}</Label>
+                            <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.model.desc')}</p>
+                          </div>
+                          <Input
+                            className="w-[200px] h-7 text-xs"
+                            placeholder={t('settings.ai.model.placeholder')}
+                            value={aiFormModel}
+                            onChange={(e) => setAiFormModel(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                            <Button
+                              size="sm"
+                              disabled={!aiFormProvider || !aiFormModel}
+                              onClick={() => {
+                                addAiModel({
+                                  name: aiFormModel,
+                                  category: aiCategoryTab,
+                                  provider: aiFormProvider,
+                                  apiKey: '',
+                                  baseUrl: aiFormBaseUrl,
+                                  model: aiFormModel,
+                                })
+                                if (aiFormApiKey) {
+                                  const models = useUIStore.getState().aiModels
+                                  const lastModel = models[models.length - 1]
+                                  if (lastModel) updateAiModelApiKey(lastModel.id, aiFormApiKey)
+                                }
+                                setAiFormProvider('')
+                                setAiFormApiKey('')
+                                setAiFormBaseUrl('')
+                                setAiFormModel('')
+                              }}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              {t('settings.ai.add')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={!activeAiModelId || aiTesting}
+                              onClick={async () => {
+                                setAiTesting(true)
+                                try {
+                                  const activeModel = aiModels.find((m) => m.id === activeAiModelId)
+                                  if (!activeModel) return
+                                  const apiKey = activeModel._decryptedApiKey || ''
+                                  await restartAiProxy(activeModel.provider, apiKey, activeModel.baseUrl, activeModel.model, aiPort)
+                                  await testAiModel(activeModel.provider, apiKey, activeModel.baseUrl, activeModel.model, aiPort)
+                                  toast.success(t('settings.ai.testSuccess'))
+                                } catch (e: any) {
+                                  toast.error(t('settings.ai.testFailed') + ': ' + (e?.message || e))
+                                } finally {
+                                  setAiTesting(false)
+                                }
+                              }}
+                            >
+                              {aiTesting ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Bot className="h-3.5 w-3.5 mr-1" />}
+                              {t('settings.ai.test')}
+                            </Button>
+                          </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-border" />
+
+                  <div className="px-4 py-3">
+                    <SettingRow label={t('settings.ai.port')} desc={t('settings.ai.port.desc')}>
+                      <Input
+                        className="w-[100px]"
+                        type="number"
+                        min={1024}
+                        max={65535}
+                        value={aiPort}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10)
+                          if (!isNaN(val) && val >= 1024 && val <= 65535) {
+                            setAiPort(val)
+                          }
+                        }}
+                      />
+                    </SettingRow>
                   </div>
                 </CardContent>
               </Card>

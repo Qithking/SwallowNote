@@ -3,8 +3,9 @@
  */
 import { create } from 'zustand'
 import { toast } from 'sonner'
-import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled } from '@/lib/tauri'
+import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
+import { AiModelConfig, generateModelId } from '@/lib/ai'
 import { useFileTreeStore } from './filetree'
 
 export type Theme = 'light' | 'dark' | 'system'
@@ -106,6 +107,14 @@ export interface UIState {
   customShortcuts: Record<string, string>
   syncInterval: number
   uploadPath: string
+  aiProvider: string
+  aiApiKey: string
+  aiApiKeyDecrypted: string
+  aiBaseUrl: string
+  aiModel: string
+  aiPort: number
+  aiModels: AiModelConfig[]
+  activeAiModelId: string
   customThemes: CustomTheme[]
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
@@ -135,6 +144,15 @@ export interface UIState {
   setMarkdownOnly: (value: boolean) => void
   setSyncInterval: (interval: number) => void
   setUploadPath: (path: string) => void
+  setAiProvider: (provider: string) => void
+  setAiApiKey: (key: string) => Promise<void>
+  setAiBaseUrl: (url: string) => void
+  setAiModel: (model: string) => void
+  setAiPort: (port: number) => void
+  addAiModel: (model: Omit<AiModelConfig, 'id'>) => void
+  removeAiModel: (id: string) => void
+  setActiveAiModel: (id: string) => void
+  updateAiModelApiKey: (id: string, key: string) => Promise<void>
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
   resetAllShortcuts: () => void
@@ -171,6 +189,14 @@ export const useUIStore = create<UIState>((set) => ({
   customShortcuts: {},
   syncInterval: 10,
   uploadPath: '',
+  aiProvider: '',
+  aiApiKey: '',
+  aiApiKeyDecrypted: '',
+  aiBaseUrl: '',
+  aiModel: '',
+  aiPort: 4017,
+  aiModels: [],
+  activeAiModelId: '',
   customThemes: [...BUILT_IN_THEMES],
   activeLightCustomThemeId: 'builtin-light',
   activeDarkCustomThemeId: 'builtin-dark',
@@ -268,6 +294,77 @@ export const useUIStore = create<UIState>((set) => ({
   setUploadPath: (path: string) => {
     set({ uploadPath: path })
     saveAppSettings({ uploadPath: path })
+  },
+  setAiProvider: (provider: string) => {
+    set({ aiProvider: provider })
+    saveAppSettings({ aiProvider: provider })
+  },
+  setAiApiKey: async (key: string) => {
+    try {
+      const encrypted = key ? await encryptApiKey(key) : ''
+      set({ aiApiKey: encrypted, aiApiKeyDecrypted: key })
+      saveAppSettings({ aiApiKey: encrypted })
+      const { aiProvider, aiBaseUrl, aiModel, aiPort } = useUIStore.getState()
+      if (aiProvider) {
+        restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch(() => {})
+      }
+    } catch {
+      set({ aiApiKeyDecrypted: key })
+    }
+  },
+  setAiBaseUrl: (url: string) => {
+    set({ aiBaseUrl: url })
+    saveAppSettings({ aiBaseUrl: url })
+  },
+  setAiModel: (model: string) => {
+    set({ aiModel: model })
+    saveAppSettings({ aiModel: model })
+  },
+  setAiPort: (port: number) => {
+    set({ aiPort: port })
+    saveAppSettings({ aiPort: String(port) })
+  },
+  addAiModel: (model) => {
+    const newModel: AiModelConfig = { ...model, id: generateModelId() }
+    set((state) => {
+      const aiModels = [...state.aiModels, newModel]
+      saveAppSettings({ aiModels: JSON.stringify(aiModels) })
+      const updates: Partial<UIState> = { aiModels }
+      if (!state.activeAiModelId) {
+        updates.activeAiModelId = newModel.id
+        saveAppSettings({ activeAiModelId: newModel.id })
+      }
+      return updates
+    })
+  },
+  removeAiModel: (id: string) => {
+    set((state) => {
+      const aiModels = state.aiModels.filter((m) => m.id !== id)
+      saveAppSettings({ aiModels: JSON.stringify(aiModels) })
+      const updates: Partial<UIState> = { aiModels }
+      if (state.activeAiModelId === id) {
+        const nextActive = aiModels.length > 0 ? aiModels[0].id : ''
+        updates.activeAiModelId = nextActive
+        saveAppSettings({ activeAiModelId: nextActive })
+      }
+      return updates
+    })
+  },
+  setActiveAiModel: (id: string) => {
+    set({ activeAiModelId: id })
+    saveAppSettings({ activeAiModelId: id })
+  },
+  updateAiModelApiKey: async (id: string, key: string) => {
+    try {
+      const encrypted = key ? await encryptApiKey(key) : ''
+      set((state) => {
+        const aiModels = state.aiModels.map((m) =>
+          m.id === id ? { ...m, apiKey: encrypted } : m
+        )
+        saveAppSettings({ aiModels: JSON.stringify(aiModels) })
+        return { aiModels }
+      })
+    } catch {}
   },
   setShortcut: (key, value) => {
     set((state) => ({
@@ -378,6 +475,25 @@ export const useUIStore = create<UIState>((set) => ({
           customThemes = [...BUILT_IN_THEMES, ...userThemes]
         } catch {}
       }
+      let aiModels: AiModelConfig[] = []
+      if (s.aiModels) {
+        try {
+          aiModels = JSON.parse(s.aiModels) as AiModelConfig[]
+        } catch {
+          aiModels = []
+        }
+      }
+      if (aiModels.length === 0 && s.aiProvider && s.aiModel) {
+        aiModels = [{
+          id: generateModelId(),
+          name: s.aiModel,
+          category: s.aiProvider === 'ollama' ? 'local' as const : 'api' as const,
+          provider: s.aiProvider,
+          apiKey: s.aiApiKey || '',
+          baseUrl: s.aiBaseUrl || '',
+          model: s.aiModel,
+        }]
+      }
       set({
         theme: s.theme as Theme,
         themeColor: s.themeColor,
@@ -389,10 +505,39 @@ export const useUIStore = create<UIState>((set) => ({
         customShortcuts,
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
         uploadPath: s.uploadPath || '',
+        aiProvider: s.aiProvider || '',
+        aiApiKey: s.aiApiKey || '',
+        aiApiKeyDecrypted: '',
+        aiBaseUrl: s.aiBaseUrl || '',
+        aiModel: s.aiModel || '',
+        aiPort: s.aiPort ? Number(s.aiPort) : 4017,
+        aiModels,
+        activeAiModelId: s.activeAiModelId || (aiModels.length > 0 ? aiModels[0].id : ''),
         customThemes,
         activeLightCustomThemeId: s.activeLightCustomThemeId || 'builtin-light',
         activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',
       })
+
+      if (s.aiApiKey && s.aiProvider) {
+        try {
+          const decrypted = await decryptApiKey(s.aiApiKey)
+          set({ aiApiKeyDecrypted: decrypted })
+        } catch {
+          set({ aiApiKeyDecrypted: '' })
+        }
+      }
+      for (const m of aiModels) {
+        if (m.apiKey) {
+          try {
+            const decrypted = await decryptApiKey(m.apiKey)
+            set((state) => ({
+              aiModels: state.aiModels.map((am) =>
+                am.id === m.id ? { ...am, _decryptedApiKey: decrypted } : am
+              ),
+            }))
+          } catch {}
+        }
+      }
     } catch {
       // DB not ready, use defaults
     }
