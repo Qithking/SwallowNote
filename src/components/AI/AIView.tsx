@@ -159,18 +159,18 @@ function AIView() {
               <div
                 key={message.id}
                 className={cn(
-                  'flex gap-3',
+                  'flex gap-3 mt-4',
                   message.role === 'user' && 'flex-row-reverse'
                 )}
               >
                 <div
                   className={cn(
                     'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
-                    message.role === 'user' ? 'bg-primary' : 'bg-accent'
+                    message.role === 'user' ? 'bg-primary/20 text-foreground' : 'bg-accent'
                   )}
                 >
                   {message.role === 'user' ? (
-                    <span className="text-xs text-primary-foreground">You</span>
+                    <span className="text-xs text-foreground">You</span>
                   ) : (
                     <Bot size={14} />
                   )}
@@ -179,11 +179,11 @@ function AIView() {
                   className={cn(
                     'flex-1 p-3 rounded-lg',
                     message.role === 'user'
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'bg-primary/15 text-foreground'
                       : 'bg-accent'
                   )}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{text}</p>
+                  <p className="text-xs whitespace-pre-wrap">{text}</p>
                   {message.role === 'assistant' && text && (
                     <div className="flex items-center justify-end mt-2">
                       <button
@@ -204,7 +204,7 @@ function AIView() {
           })
         )}
         {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
-          <div className="flex gap-3">
+          <div className="flex gap-3 mt-4">
             <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center">
               <Bot size={14} />
             </div>
@@ -227,7 +227,7 @@ function AIView() {
       <div className="p-3 ">
         <form onSubmit={onFormSubmit} className="relative">
           <textarea
-            className="w-full h-20 p-3 rounded-lg border border-border bg-background resize-none text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full h-24 p-3 rounded-lg border border-border bg-background resize-none text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             placeholder={isConfigured ? t('ai.placeholder') : t('ai.notConfigured')}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
