@@ -44,7 +44,7 @@ function AIView() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollViewportRef = useRef<HTMLDivElement | null>(null)
   const savedMessageIds = useRef<Set<string>>(new Set())
-  const messageTimestamps = useRef<Map<string, string>>(new Map())
+  const [messageTimestamps, setMessageTimestamps] = useState<Map<string, string>>(new Map())
   const [oldestDbId, setOldestDbId] = useState<number | null>(null)
   const [hasMoreHistory, setHasMoreHistory] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
@@ -97,10 +97,12 @@ function AIView() {
             parts: [{ type: 'text' as const, text: msg.content }],
           }))
           setMessages(chatMessages)
+          const timestamps = new Map<string, string>()
           dbMessages.forEach((msg) => {
             savedMessageIds.current.add(`db-${msg.id}`)
-            messageTimestamps.current.set(`db-${msg.id}`, msg.created_at)
+            timestamps.set(`db-${msg.id}`, msg.created_at)
           })
+          setMessageTimestamps((prev) => new Map([...prev, ...timestamps]))
           setOldestDbId(dbMessages[0].id)
           setHasMoreHistory(dbMessages.length >= 30)
         }
@@ -121,7 +123,7 @@ function AIView() {
         savedMessageIds.current.add(lastMsg.id)
         const now = new Date()
         const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-        messageTimestamps.current.set(lastMsg.id, timeStr)
+        setMessageTimestamps((prev) => new Map(prev).set(lastMsg.id, timeStr))
         saveAiMessage('assistant', text, activeAiModelId || '').catch(console.error)
       }
     }
@@ -142,10 +144,12 @@ function AIView() {
           parts: [{ type: 'text' as const, text: msg.content }],
         }))
         setMessages((prev) => [...chatMessages, ...prev])
+        const timestamps = new Map<string, string>()
         dbMessages.forEach((msg) => {
           savedMessageIds.current.add(`db-${msg.id}`)
-          messageTimestamps.current.set(`db-${msg.id}`, msg.created_at)
+          timestamps.set(`db-${msg.id}`, msg.created_at)
         })
+        setMessageTimestamps((prev) => new Map([...prev, ...timestamps]))
         setOldestDbId(dbMessages[0].id)
         setHasMoreHistory(dbMessages.length >= 30)
 
@@ -196,17 +200,37 @@ function AIView() {
     setTimeout(() => setCopiedId(null), 2000)
   }
 
+  // Track pending user timestamps: maps a snapshot of messages.length at send time to the timestamp
+  const pendingUserTimestampsByCount = useRef<Map<number, string>>(new Map())
+
+  // Effect: assign timestamps to new user messages once they appear in the messages array
+  useEffect(() => {
+    if (pendingUserTimestampsByCount.current.size === 0) return
+    let updated = false
+    const newTimestamps = new Map(messageTimestamps)
+    for (const [countAtSend, timeStr] of pendingUserTimestampsByCount.current) {
+      // The new user message should be at index `countAtSend` (the old length before adding)
+      const msg = messages[countAtSend]
+      if (msg && msg.role === 'user' && !newTimestamps.has(msg.id)) {
+        newTimestamps.set(msg.id, timeStr)
+        savedMessageIds.current.add(msg.id)
+        pendingUserTimestampsByCount.current.delete(countAtSend)
+        updated = true
+      }
+    }
+    if (updated) {
+      setMessageTimestamps(newTimestamps)
+    }
+  }, [messages])
+
   const persistAndSend = (text: string) => {
-    sendMessage({ text })
+    // Record the local timestamp and current message count before sending
     const now = new Date()
     const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-    saveAiMessage('user', text, activeAiModelId || '').then(() => {
-      const chatMsgId = chat.messages[chat.messages.length - 1]?.id
-      if (chatMsgId) {
-        savedMessageIds.current.add(chatMsgId)
-        messageTimestamps.current.set(chatMsgId, timeStr)
-      }
-    }).catch(console.error)
+    const countBeforeSend = messages.length
+    pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
+    sendMessage({ text })
+    saveAiMessage('user', text, activeAiModelId || '').catch(console.error)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -322,9 +346,9 @@ function AIView() {
                     )}
                   >
                     <p className="text-xs whitespace-pre-wrap">{text}</p>
-                    {message.role === 'user' && messageTimestamps.current.get(message.id) && (
+                    {message.role === 'user' && messageTimestamps.get(message.id) && (
                       <p className="text-[10px] text-muted-foreground mt-1 text-right">
-                        {formatTimeStr(messageTimestamps.current.get(message.id)!)}
+                        {formatTimeStr(messageTimestamps.get(message.id)!)}
                       </p>
                     )}
                     {message.role === 'assistant' && text && (
