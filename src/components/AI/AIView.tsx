@@ -42,6 +42,17 @@ function AIView() {
   const { t } = useTranslation()
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [isOverflow, setIsOverflow] = useState(false)
+  useEffect(() => {
+    const el = textareaRef.current
+    if (el) {
+      el.style.height = 'auto'
+      const height = Math.min(Math.max(el.scrollHeight, 50), 200)
+      el.style.height = height + 'px'
+      setIsOverflow(el.scrollHeight > 200)
+    }
+  }, [inputValue])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollViewportRef = useRef<HTMLDivElement | null>(null)
   const savedMessageIds = useRef<Set<string>>(new Set())
@@ -542,16 +553,19 @@ function AIView() {
             })}
           </div>
         )}
-        <form onSubmit={onFormSubmit} className="relative min-h-[120px] max-h-[250px] rounded-lg border border-border bg-background overflow-hidden">
-          <textarea
-            className="w-full  p-3 resize-y text-xs focus:outline-none focus:ring-1 focus:ring-ring overflow-y-auto"
-            placeholder={isConfigured ? t('ai.placeholder') : t('ai.notConfigured')}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={!isConfigured}
-          />
-          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 py-1.5 bg-background rounded-b-lg" >
+        <form onSubmit={onFormSubmit} className="relative  rounded-lg border border-border bg-background overflow-hidden">
+          <div className="w-full  pt-3">
+            <textarea
+              ref={textareaRef}
+              className={cn("w-full px-3 text-xs min-h-[50px] max-h-[200px] resize-none outline-none", isOverflow ? "overflow-y-auto" : "overflow-y-hidden")}  
+              placeholder={isConfigured ? t('ai.placeholder') : t('ai.notConfigured')}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={!isConfigured}
+            />
+          </div>
+          <div className="w-full flex items-center justify-between px-2 py-1.5 bg-background rounded-b-lg" >
             <div className="flex items-center gap-1">
               {isConfigured && (
                 <Select value={activeRoleKey} onValueChange={setActiveRoleKey}>
