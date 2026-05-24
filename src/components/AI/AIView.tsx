@@ -508,7 +508,10 @@ function AIView() {
             })}
           </>
         )}
-        {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
+        {isLoading && (() => {
+          const lastMsg = messages[messages.length - 1]
+          return !lastMsg || lastMsg.role !== 'assistant' || !getMessageText(lastMsg)
+        })() && (
           <div className="flex gap-3 mt-4">
             <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center">
               <Bot size={14} />
