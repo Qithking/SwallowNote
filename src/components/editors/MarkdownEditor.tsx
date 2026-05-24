@@ -522,10 +522,6 @@ function BlockNoteInner({
       if (!tiptapEditor) return null
       const { from, to, empty } = tiptapEditor.state.selection
       if (empty) return null
-      const startLine = tiptapEditor.state.doc.resolve(from).depth > 0
-        ? 1
-        : 1
-      // Count newlines before `from` and `to` to get line numbers
       const textBeforeFrom = tiptapEditor.state.doc.textBetween(0, from, '\n')
       const textBeforeTo = tiptapEditor.state.doc.textBetween(0, to, '\n')
       const startLineNumber = (textBeforeFrom.match(/\n/g) || []).length + 1
