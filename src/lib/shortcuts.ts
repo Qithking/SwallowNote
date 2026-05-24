@@ -10,6 +10,10 @@ export type ShortcutKey =
   | 'toggleTheme'
   | 'toggleLanguage'
   | 'openExplorer'
+  | 'commandPalette'
+  | 'searchPanel'
+  | 'toggleSidebar'
+  | 'settings'
 
 export interface ShortcutDefinition {
   key: ShortcutKey
@@ -28,6 +32,10 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { key: 'toggleTheme', defaultKey: 'Ctrl+Shift+T' },
   { key: 'toggleLanguage', defaultKey: 'Ctrl+Shift+L' },
   { key: 'openExplorer', defaultKey: 'Ctrl+Shift+R' },
+  { key: 'commandPalette', defaultKey: 'Ctrl+P' },
+  { key: 'searchPanel', defaultKey: 'Ctrl+F' },
+  { key: 'toggleSidebar', defaultKey: 'Ctrl+B' },
+  { key: 'settings', defaultKey: 'Ctrl+,' },
 ]
 
 export const DEFAULT_SHORTCUTS_MAP: Record<ShortcutKey, string> = Object.fromEntries(

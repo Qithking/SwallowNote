@@ -48,19 +48,6 @@ function SearchView() {
     inputRef.current?.focus()
   }, [])
 
-  // Keyboard shortcut to focus search
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-        e.preventDefault()
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
   const handleSearch = async () => {
     if (!query.trim()) {
       setResults([])

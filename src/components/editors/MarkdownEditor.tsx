@@ -269,10 +269,14 @@ function BlockNoteInner({
       return defaultPasteHandler()
     }
 
-    // No Files in WebView clipboard - try reading system clipboard file paths asynchronously
+    // Try reading system clipboard file paths asynchronously.
+    // This handles the case where user copies a file in Finder (Cmd+C) and pastes here (Cmd+V).
+    // The WebView clipboard won't contain Files type for cross-app file copy on macOS,
+    // so we need to ask the Tauri backend to read the system clipboard directly.
     readClipboardFilePaths()
       .then((filePaths) => {
         if (filePaths.length > 0) {
+          // System clipboard has file paths → insert as file blocks (suppress default text paste)
           filePaths.forEach((sourcePath) => {
             try {
               const fileBlockType = getFileBlockType(sourcePath)
@@ -311,10 +315,14 @@ function BlockNoteInner({
             }
           })
         }
+        // If no file paths found, do nothing — defaultPasteHandler was already called below
       })
       .catch(() => {})
 
-    return false
+    // Always delegate to defaultPasteHandler for normal text/HTML/markdown paste.
+    // The async file-path check above only inserts additional blocks when files are detected;
+    // it does not interfere with standard paste behavior.
+    return defaultPasteHandler()
   }
 
   const editor = useCreateBlockNote({

@@ -211,7 +211,10 @@ export function useKeyboardShortcuts() {
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
-      const isMod = e.ctrlKey || e.metaKey
+      // Only handle shortcuts explicitly registered in DEFAULT_SHORTCUTS.
+      // Never intercept system-native editing shortcuts (⌘C/⌘V/⌘A/⌘Z/⌘X etc.)
+      // or browser/editor built-in shortcuts. This ensures BlockNote, CodeMirror,
+      // and the system clipboard all work normally.
 
       if (matchShortcut(e, getShortcut('newFile'))) {
         e.preventDefault()
@@ -271,22 +274,35 @@ export function useKeyboardShortcuts() {
         return
       }
 
-      // Fixed shortcuts (not customizable)
-      if (isMod && e.key === 'p' && !e.shiftKey) {
+      // Customizable global shortcuts (user can rebind in Settings)
+
+      if (matchShortcut(e, getShortcut('commandPalette'))) {
         e.preventDefault()
         toggleCommandPalette()
+        return
       }
 
-      if (isMod && e.key === 'F') {
+      if (matchShortcut(e, getShortcut('searchPanel'))) {
         e.preventDefault()
         toggleSearchPanel()
+        return
       }
 
-      if (isMod && e.key === 'b') {
+      if (matchShortcut(e, getShortcut('toggleSidebar'))) {
         e.preventDefault()
         toggleSidebar()
+        return
       }
 
+      if (matchShortcut(e, getShortcut('settings'))) {
+        e.preventDefault()
+        setSidebarView('settings')
+        return
+      }
+
+      // ⌘1-9 — Tab switching (not in ShortcutKey because it's 9 separate keys,
+      // not a single rebindable shortcut. No standard editing shortcut uses mod+digit.)
+      const isMod = e.ctrlKey || e.metaKey
       if (isMod && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         const index = parseInt(e.key) - 1
@@ -297,20 +313,23 @@ export function useKeyboardShortcuts() {
           }
           useEditorStore.getState().setActiveTab(tab.id)
         }
+        return
       }
 
+      // Escape — dismiss open overlays (command palette, search panel, etc.)
+      // Only act when there's actually something to dismiss; never swallow Escape
+      // that the editor might need (e.g., exiting a special mode)
       if (e.key === 'Escape') {
         const { commandPaletteVisible, searchPanelVisible } = useUIStore.getState()
         if (commandPaletteVisible) {
           toggleCommandPalette()
-        } else if (searchPanelVisible) {
-          toggleSearchPanel()
+          return
         }
-      }
-
-      if (isMod && e.key === ',') {
-        e.preventDefault()
-        setSidebarView('settings')
+        if (searchPanelVisible) {
+          toggleSearchPanel()
+          return
+        }
+        // No overlay open — don't preventDefault, let editor/system handle it
       }
     }
 
