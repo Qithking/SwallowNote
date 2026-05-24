@@ -17,6 +17,7 @@ export interface AiModelConfig {
   apiKey: string
   baseUrl: string
   model: string
+  isBuiltIn?: boolean
   _decryptedApiKey?: string
 }
 
@@ -86,6 +87,17 @@ export const AI_PROVIDERS: ProviderConfig[] = [
     models: [
       { id: 'deepseek-chat', name: 'DeepSeek Chat' },
       { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' },
+    ],
+  },
+  {
+    id: 'siliconflow',
+    name: 'SiliconFlow',
+    defaultBaseUrl: 'https://api.siliconflow.cn/v1',
+    requiresApiKey: true,
+    category: 'api',
+    models: [
+      { id: 'Qwen/Qwen3-8B', name: 'Qwen3-8B' },
+      { id: 'THUDM/GLM-Z1-9B-0414', name: 'GLM-Z1-9B' },
     ],
   },
   {

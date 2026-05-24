@@ -555,3 +555,18 @@ export async function getAiRolePrompt(roleKey: string): Promise<AiRolePrompt | n
 export async function updateAiRolePrompt(roleKey: string, prompt: string): Promise<void> {
   await invoke('update_ai_role_prompt', { roleKey, prompt })
 }
+
+export interface BuiltinAiModel {
+  id: string
+  name: string
+  category: string
+  provider: string
+  api_key: string
+  base_url: string
+  model: string
+  is_built_in: boolean
+}
+
+export async function getBuiltinAiModels(): Promise<BuiltinAiModel[]> {
+  return await invoke('get_builtin_ai_models')
+}

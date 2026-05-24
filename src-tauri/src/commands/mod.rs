@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_builtin_models;
 pub mod ai_chat;
 pub mod ai_role_prompts;
 pub mod file;

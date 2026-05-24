@@ -198,6 +198,7 @@
     "notConfigured": "AI 尚未配置，请先在设置中配置 AI 服务商",
     "goToSettings": "前往设置",
     "error": "AI 请求出错，请检查配置或网络连接",
+    "builtIn": "内置",
     "role": {
       "continue_writing": "续写",
       "polish": "润色",

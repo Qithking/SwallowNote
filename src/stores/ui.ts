@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand'
 import { toast } from 'sonner'
-import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy } from '@/lib/tauri'
+import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
 import { AiModelConfig, generateModelId } from '@/lib/ai'
 import { useFileTreeStore } from './filetree'
@@ -362,6 +362,8 @@ export const useUIStore = create<UIState>((set) => ({
   },
   removeAiModel: (id: string) => {
     set((state) => {
+      const model = state.aiModels.find((m) => m.id === id)
+      if (model?.isBuiltIn) return state
       const aiModels = state.aiModels.filter((m) => m.id !== id)
       saveAppSettings({ aiModels: JSON.stringify(aiModels) })
       const updates: Partial<UIState> = { aiModels }
@@ -531,6 +533,23 @@ export const useUIStore = create<UIState>((set) => ({
           model: s.aiModel,
         }]
       }
+      try {
+        const builtinModels = await getBuiltinAiModels()
+        const existingIds = new Set(aiModels.map((m) => m.id))
+        const missing = builtinModels
+          .filter((bm) => !existingIds.has(bm.id))
+          .map((bm): AiModelConfig => ({
+            id: bm.id,
+            name: bm.name,
+            category: bm.category as AiModelConfig['category'],
+            provider: bm.provider as AiModelConfig['provider'],
+            apiKey: bm.api_key,
+            baseUrl: bm.base_url,
+            model: bm.model,
+            isBuiltIn: bm.is_built_in,
+          }))
+        aiModels = [...missing, ...aiModels]
+      } catch {}
       set({
         theme: s.theme as Theme,
         themeColor: s.themeColor,

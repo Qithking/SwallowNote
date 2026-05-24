@@ -198,6 +198,7 @@
     "notConfigured": "AI is not configured. Please configure an AI provider in Settings first.",
     "goToSettings": "Go to Settings",
     "error": "AI request failed. Please check your configuration or network connection.",
+    "builtIn": "Built-in",
     "role": {
       "continue_writing": "Continue Writing",
       "polish": "Polish",

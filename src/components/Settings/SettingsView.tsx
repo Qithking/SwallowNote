@@ -476,15 +476,17 @@ function SettingsView() {
                               onClick={() => setActiveAiModel(m.id)}
                             >
                               <span className="truncate flex-1">{m.name || m.model}</span>
-                              <button
-                                className="p-0.5 hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  removeAiModel(m.id)
-                                }}
-                              >
-                                <Trash2 size={11} />
-                              </button>
+                              {!m.isBuiltIn && (
+                                <button
+                                  className="p-0.5 hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    removeAiModel(m.id)
+                                  }}
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              )}
                             </div>
                           ))}
                       </div>

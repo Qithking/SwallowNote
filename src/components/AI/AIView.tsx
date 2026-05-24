@@ -62,8 +62,7 @@ function AIView() {
 
   const { aiModels, activeAiModelId, aiPort, setSettingsPanelVisible, setActiveAiModel, aiAttachedFiles, removeAiAttachedFile, aiContextMenuRequest, setAiContextMenuRequest, setRightPanelType } = useUIStore()
 
-  const activeModel = aiModels.find((m) => m.id === activeAiModelId)
-  const isConfigured = !!activeModel
+  const isConfigured = aiModels.length > 0
 
   const chat = useChat({
     transport: new DefaultChatTransport({
@@ -95,7 +94,7 @@ function AIView() {
   }, [messages])
 
   useEffect(() => {
-    if (!activeAiModelId && aiModels.length > 0) {
+    if ((!activeAiModelId || !aiModels.find((m) => m.id === activeAiModelId)) && aiModels.length > 0) {
       setActiveAiModel(aiModels[0].id)
     }
     if (activeAiModelId) {
@@ -379,7 +378,7 @@ function AIView() {
               <SelectContent className="min-w-[120px]">
                 {aiModels.map((m) => (
                   <SelectItem key={m.id} value={m.id} className="text-xs py-1 pl-7 pr-2">
-                    {m.name || m.model}
+                    {m.name || m.model}{m.isBuiltIn ? ` · ${t('ai.builtIn')}` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>

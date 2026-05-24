@@ -136,6 +136,7 @@ pub fn run() {
             commands::ai_role_prompts::load_ai_role_prompts,
             commands::ai_role_prompts::get_ai_role_prompt,
             commands::ai_role_prompts::update_ai_role_prompt,
+            commands::ai_builtin_models::get_builtin_ai_models,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
