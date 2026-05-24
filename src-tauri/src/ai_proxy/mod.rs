@@ -2,6 +2,7 @@ pub mod crypto;
 pub mod handlers;
 pub mod server;
 
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -56,15 +57,17 @@ pub struct ModelInfo {
 }
 
 pub struct AiProxyState {
-    pub settings: RwLock<AiSettings>,
+pub settings: RwLock<AiSettings>,
+pub client: Client,
 }
 
 impl AiProxyState {
-    pub fn new(settings: AiSettings) -> Self {
-        Self {
-            settings: RwLock::new(settings),
-        }
-    }
+pub fn new(settings: AiSettings) -> Self {
+Self {
+settings: RwLock::new(settings),
+client: Client::new(),
+}
+}
 }
 
 pub fn get_provider_base_url(provider: &str, custom_url: &str) -> String {

@@ -5,7 +5,7 @@
  * Code blocks get syntax highlighting via shiki (lazy loaded).
  */
 import { useState, useEffect, memo, useCallback } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Copy, Check } from 'lucide-react'
 
@@ -36,6 +36,9 @@ const LANG_ALIASES: Record<string, string> = {
 function normalizeLang(lang: string): string {
   return LANG_ALIASES[lang.toLowerCase()] || lang.toLowerCase()
 }
+
+/** Module-level constant to avoid re-creating the plugins array on every render */
+const REMARK_PLUGINS = [remarkGfm]
 
 const SHIKI_LANGS = new Set([
   'javascript', 'typescript', 'python', 'rust', 'css', 'html', 'json',
@@ -124,66 +127,69 @@ interface MarkdownRendererProps {
   content: string
 }
 
+/** Module-level constant to avoid re-creating the components map on every render */
+const MARKDOWN_COMPONENTS: Components = {
+  h1: ({ children }) => <h1 className="text-base font-bold mt-3 mb-1.5 first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-[13px] font-bold mt-3 mb-1 first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-xs font-bold mt-2 mb-1 first:mt-0">{children}</h3>,
+  h4: ({ children }) => <h4 className="text-xs font-bold mt-2 mb-1 first:mt-0">{children}</h4>,
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li className="mb-0.5">{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-primary/40 pl-3 my-2 italic text-muted-foreground">
+      {children}
+    </blockquote>
+  ),
+  code: ({ className, children }) => {
+    const match = /language-(\w+)/.exec(className || '')
+    const isInline = !match && !className?.includes('language-')
+    const codeStr = String(children).replace(/\n$/, '')
+
+    if (isInline) {
+      return <InlineCode>{children}</InlineCode>
+    }
+
+    return <CodeBlock code={codeStr} language={match ? match[1] : 'text'} />
+  },
+  pre: ({ children }) => <>{children}</>,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer"
+      className="text-primary underline underline-offset-2 hover:text-primary/80">
+      {children}
+    </a>
+  ),
+  table: ({ children }) => (
+    <div className="overflow-x-auto my-2 -mx-1 max-w-full">
+      <table className="w-full border-collapse text-xs min-w-[200px]">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => (
+    <thead className="bg-black/5 dark:bg-white/5">{children}</thead>
+  ),
+  th: ({ children }) => (
+    <th className="border border-border px-2 py-1 text-left font-semibold">{children}</th>
+  ),
+  td: ({ children }) => (
+    <td className="border border-border px-2 py-1">{children}</td>
+  ),
+  hr: () => <hr className="my-3 border-border" />,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+  img: ({ src, alt }) => (
+    <img src={src} alt={alt || ''} className="max-w-full rounded my-2" />
+  ),
+  // Strikethrough (GFM)
+  del: ({ children }) => <del className="line-through text-muted-foreground">{children}</del>,
+}
+
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: MarkdownRendererProps) {
   return (
     <div className="ai-markdown-content text-xs leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          h1: ({ children }) => <h1 className="text-base font-bold mt-3 mb-1.5 first:mt-0">{children}</h1>,
-          h2: ({ children }) => <h2 className="text-[13px] font-bold mt-3 mb-1 first:mt-0">{children}</h2>,
-          h3: ({ children }) => <h3 className="text-xs font-bold mt-2 mb-1 first:mt-0">{children}</h3>,
-          h4: ({ children }) => <h4 className="text-xs font-bold mt-2 mb-1 first:mt-0">{children}</h4>,
-          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-          ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
-          li: ({ children }) => <li className="mb-0.5">{children}</li>,
-          blockquote: ({ children }) => (
-            <blockquote className="border-l-2 border-primary/40 pl-3 my-2 italic text-muted-foreground">
-              {children}
-            </blockquote>
-          ),
-          code: ({ className, children }) => {
-            const match = /language-(\w+)/.exec(className || '')
-            const isInline = !match && !className?.includes('language-')
-            const codeStr = String(children).replace(/\n$/, '')
-
-            if (isInline) {
-              return <InlineCode>{children}</InlineCode>
-            }
-
-            return <CodeBlock code={codeStr} language={match ? match[1] : 'text'} />
-          },
-          pre: ({ children }) => <>{children}</>,
-          a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer"
-              className="text-primary underline underline-offset-2 hover:text-primary/80">
-              {children}
-            </a>
-          ),
-          table: ({ children }) => (
-            <div className="overflow-x-auto my-2 -mx-1 max-w-full">
-              <table className="w-full border-collapse text-xs min-w-[200px]">{children}</table>
-            </div>
-          ),
-          thead: ({ children }) => (
-            <thead className="bg-black/5 dark:bg-white/5">{children}</thead>
-          ),
-          th: ({ children }) => (
-            <th className="border border-border px-2 py-1 text-left font-semibold">{children}</th>
-          ),
-          td: ({ children }) => (
-            <td className="border border-border px-2 py-1">{children}</td>
-          ),
-          hr: () => <hr className="my-3 border-border" />,
-          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-          em: ({ children }) => <em className="italic">{children}</em>,
-          img: ({ src, alt }) => (
-            <img src={src} alt={alt || ''} className="max-w-full rounded my-2" />
-          ),
-          // Strikethrough (GFM)
-          del: ({ children }) => <del className="line-through text-muted-foreground">{children}</del>,
-        }}
+        remarkPlugins={REMARK_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
       >
         {content}
       </ReactMarkdown>

@@ -56,7 +56,7 @@ function AIView() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollViewportRef = useRef<HTMLDivElement | null>(null)
   const savedMessageIds = useRef<Set<string>>(new Set())
-  const [messageTimestamps, setMessageTimestamps] = useState<Map<string, string>>(new Map())
+  const [messageTimestamps, setMessageTimestamps] = useState<Record<string, string>>({})
   const [oldestDbId, setOldestDbId] = useState<number | null>(null)
   const [hasMoreHistory, setHasMoreHistory] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
@@ -71,7 +71,17 @@ function AIView() {
   // Once the new message appears in messages array, we map it by message.id instead
   const pendingDisplayTexts = useRef<Map<number, string>>(new Map())
 
-  const { aiModels, activeAiModelId, aiPort, setSettingsPanelVisible, setActiveAiModel, aiAttachedFiles, removeAiAttachedFile, aiContextMenuRequest, setAiContextMenuRequest, setRightPanelType } = useUIStore()
+  // Use Zustand selectors to avoid unnecessary re-renders from unrelated state changes
+  const aiModels = useUIStore((s) => s.aiModels)
+  const activeAiModelId = useUIStore((s) => s.activeAiModelId)
+  const aiPort = useUIStore((s) => s.aiPort)
+  const setSettingsPanelVisible = useUIStore((s) => s.setSettingsPanelVisible)
+  const setActiveAiModel = useUIStore((s) => s.setActiveAiModel)
+  const aiAttachedFiles = useUIStore((s) => s.aiAttachedFiles)
+  const removeAiAttachedFile = useUIStore((s) => s.removeAiAttachedFile)
+  const aiContextMenuRequest = useUIStore((s) => s.aiContextMenuRequest)
+  const setAiContextMenuRequest = useUIStore((s) => s.setAiContextMenuRequest)
+  const setRightPanelType = useUIStore((s) => s.setRightPanelType)
 
   const isConfigured = aiModels.length > 0
 
@@ -96,13 +106,25 @@ function AIView() {
     }
   }, [messages])
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  // Throttled scroll-to-bottom: avoids excessive scroll calls during streaming
+  const scrollToBottomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scrollToBottom = useCallback(() => {
+    if (scrollToBottomTimerRef.current) return
+    scrollToBottomTimerRef.current = setTimeout(() => {
+      scrollToBottomTimerRef.current = null
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }, 100)
+  }, [])
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+    return () => {
+      if (scrollToBottomTimerRef.current) {
+        clearTimeout(scrollToBottomTimerRef.current)
+        scrollToBottomTimerRef.current = null
+      }
+    }
+  }, [messages, scrollToBottom])
 
   useEffect(() => {
     if ((!activeAiModelId || !aiModels.find((m) => m.id === activeAiModelId)) && aiModels.length > 0) {
@@ -137,12 +159,12 @@ function AIView() {
             parts: [{ type: 'text' as const, text: msg.content }],
           }))
           setMessages(chatMessages)
-          const timestamps = new Map<string, string>()
+          const timestamps: Record<string, string> = {}
           dbMessages.forEach((msg) => {
             savedMessageIds.current.add(`db-${msg.id}`)
-            timestamps.set(`db-${msg.id}`, msg.created_at)
+            timestamps[`db-${msg.id}`] = msg.created_at
           })
-          setMessageTimestamps((prev) => new Map([...prev, ...timestamps]))
+          setMessageTimestamps((prev) => ({ ...prev, ...timestamps }))
           setOldestDbId(dbMessages[0].id)
           setHasMoreHistory(dbMessages.length >= 30)
         }
@@ -163,7 +185,7 @@ function AIView() {
         savedMessageIds.current.add(lastMsg.id)
         const now = new Date()
         const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-        setMessageTimestamps((prev) => new Map(prev).set(lastMsg.id, timeStr))
+        setMessageTimestamps((prev) => ({ ...prev, [lastMsg.id]: timeStr }))
         saveAiMessage('assistant', text, activeAiModelId || '').catch(console.error)
       }
     }
@@ -184,12 +206,12 @@ function AIView() {
           parts: [{ type: 'text' as const, text: msg.content }],
         }))
         setMessages((prev) => [...chatMessages, ...prev])
-        const timestamps = new Map<string, string>()
+        const timestamps: Record<string, string> = {}
         dbMessages.forEach((msg) => {
           savedMessageIds.current.add(`db-${msg.id}`)
-          timestamps.set(`db-${msg.id}`, msg.created_at)
+          timestamps[`db-${msg.id}`] = msg.created_at
         })
-        setMessageTimestamps((prev) => new Map([...prev, ...timestamps]))
+        setMessageTimestamps((prev) => ({ ...prev, ...timestamps }))
         setOldestDbId(dbMessages[0].id)
         setHasMoreHistory(dbMessages.length >= 30)
 
@@ -247,25 +269,27 @@ function AIView() {
   useEffect(() => {
     if (pendingUserTimestampsByCount.current.size === 0) return
     let updated = false
-    const newTimestamps = new Map(messageTimestamps)
+    const newEntries: Record<string, string> = {}
     for (const [countAtSend, timeStr] of pendingUserTimestampsByCount.current) {
       // The new user message should be at index `countAtSend` (the old length before adding)
       const msg = messages[countAtSend]
-      if (msg && msg.role === 'user' && !newTimestamps.has(msg.id)) {
-        newTimestamps.set(msg.id, timeStr)
+      if (msg && msg.role === 'user' && !messageTimestamps[msg.id]) {
+        newEntries[msg.id] = timeStr
         savedMessageIds.current.add(msg.id)
         pendingUserTimestampsByCount.current.delete(countAtSend)
         updated = true
       }
     }
     if (updated) {
-      setMessageTimestamps(newTimestamps)
+      setMessageTimestamps((prev) => ({ ...prev, ...newEntries }))
     }
   }, [messages])
 
   // Listen for context menu requests from the store — process once and clear
   // Uses a processed-ID set to prevent duplicate processing from React re-renders or Strict Mode
+  // Limited to 100 entries to prevent memory leaks
   const processedRequestIds = useRef<Set<string>>(new Set())
+  const MAX_PROCESSED_IDS = 100
 
   useEffect(() => {
     if (!aiContextMenuRequest || !isConfigured) return
@@ -276,6 +300,11 @@ function AIView() {
     // Skip if this request was already processed (prevents React Strict Mode double-fire)
     if (processedRequestIds.current.has(requestId)) return
     processedRequestIds.current.add(requestId)
+    // Evict oldest entries to prevent unbounded growth
+    if (processedRequestIds.current.size > MAX_PROCESSED_IDS) {
+      const iter = processedRequestIds.current.values()
+      processedRequestIds.current.delete(iter.next().value!)
+    }
 
     // Clear from store immediately to prevent re-trigger
     setAiContextMenuRequest(null)
@@ -483,9 +512,9 @@ function AIView() {
                     ) : (
                       <p className="text-xs whitespace-pre-wrap break-words">{displayText}</p>
                     )}
-                    {message.role === 'user' && messageTimestamps.get(message.id) && (
+                    {message.role === 'user' && messageTimestamps[message.id] && (
                       <p className="text-[10px] text-muted-foreground mt-1 text-right">
-                        {formatTimeStr(messageTimestamps.get(message.id)!)}
+                        {formatTimeStr(messageTimestamps[message.id])}
                       </p>
                     )}
                     {message.role === 'assistant' && text && (

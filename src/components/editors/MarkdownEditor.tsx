@@ -62,7 +62,8 @@ function BlockNoteInner({
   const noteWidth = useUIStore((state) => state.noteWidth)
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
-  const [containerWidth, setContainerWidth] = useState<number>(0)
+  // Cache the last onChange result so getFullContent can return it synchronously
+  const lastContentRef = useRef<string>('')
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -121,11 +122,14 @@ function BlockNoteInner({
 
     const arrayBuffer = await file.arrayBuffer()
     const uint8Array = new Uint8Array(arrayBuffer)
-    let binary = ''
-    for (let i = 0; i < uint8Array.length; i++) {
-      binary += String.fromCharCode(uint8Array[i])
+    // Chunked Base64 encoding to avoid O(n²) string concatenation
+    const CHUNK_SIZE = 8192
+    let base64 = ''
+    for (let i = 0; i < uint8Array.length; i += CHUNK_SIZE) {
+      const chunk = uint8Array.subarray(i, i + CHUNK_SIZE)
+      base64 += String.fromCharCode.apply(null, Array.from(chunk))
     }
-    const base64 = btoa(binary)
+    base64 = btoa(base64)
 
     await writeBinaryFile(fullPath, base64)
 
@@ -321,25 +325,6 @@ function BlockNoteInner({
     pasteHandler,
   })
 
-  // 监听容器宽度变化，触发重新渲染以适应宽度变化
-  useEffect(() => {
-    const container = editorContainerRef.current
-    if (!container) return
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const width = entry.contentRect.width
-        if (width !== containerWidth) {
-          setContainerWidth(width)
-        }
-      }
-    })
-
-    resizeObserver.observe(container)
-    return () => {
-      resizeObserver.disconnect()
-    }
-  }, [containerWidth])
 
   // 滚动到指定行
   const doScrollToLine = (lineNumber: number) => {
@@ -437,6 +422,7 @@ function BlockNoteInner({
     if (!onChange) return
     const rawMd = await editor.blocksToMarkdownLossy(editor.document)
     const md = compactMarkdown(rawMd)
+    lastContentRef.current = md
     onChange(md)
   }
 
@@ -532,14 +518,18 @@ function BlockNoteInner({
     }
   }, [editor])
 
-  const getFullContent = useCallback(async () => {
+  const getFullContent = useCallback(() => {
+    // Return cached content from the last onChange call to avoid expensive re-rendering
+    if (lastContentRef.current) return lastContentRef.current
+    // Fallback: only compute if we haven't cached yet
     if (!editor) return ''
     try {
-      const rawMd = await editor.blocksToMarkdownLossy(editor.document)
-      return compactMarkdown(rawMd)
-    } catch {
-      return ''
-    }
+      const tiptapEditor = (editor as any)._tiptapEditor
+      if (tiptapEditor) {
+        return tiptapEditor.state.doc.textContent || ''
+      }
+    } catch {}
+    return ''
   }, [editor])
 
   return (
@@ -552,7 +542,6 @@ function BlockNoteInner({
         <ScrollArea className="flex-1 w-full">
           <div className="w-full">
             <BlockNoteView
-              key={containerWidth}
               editor={editor}
               theme={blocknoteTheme}
               onChange={handleChange}

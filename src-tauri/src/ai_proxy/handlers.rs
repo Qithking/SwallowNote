@@ -7,7 +7,6 @@ use axum::{
     Json,
 };
 use futures::stream::{BoxStream, StreamExt};
-use reqwest::Client;
 use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -162,7 +161,7 @@ pub async fn chat_handler(
         }
     };
 
-    let client = Client::new();
+    let client = state.client.clone();
     let mut request_builder = client.post(&url).json(&payload);
 
     let parts: Vec<&str> = auth_header.splitn(2, ": ").collect();

@@ -582,17 +582,21 @@ export const useUIStore = create<UIState>((set) => ({
           set({ aiApiKeyDecrypted: '' })
         }
       }
-      for (const m of aiModels) {
-        if (m.apiKey) {
-          try {
-            const decrypted = await decryptApiKey(m.apiKey)
-            set((state) => ({
-              aiModels: state.aiModels.map((am) =>
-                am.id === m.id ? { ...am, _decryptedApiKey: decrypted } : am
-              ),
-            }))
-          } catch {}
-        }
+      // Batch decrypt all API keys concurrently to avoid N sequential re-renders
+      const decryptEntries = aiModels
+        .filter((m) => m.apiKey)
+        .map((m) => decryptApiKey(m.apiKey!).then((decrypted) => ({ id: m.id, decrypted })).catch(() => null))
+      const decryptResults = await Promise.all(decryptEntries)
+      const decryptedMap = new Map<string, string>()
+      for (const result of decryptResults) {
+        if (result) decryptedMap.set(result.id, result.decrypted)
+      }
+      if (decryptedMap.size > 0) {
+        set((state) => ({
+          aiModels: state.aiModels.map((am) =>
+            decryptedMap.has(am.id) ? { ...am, _decryptedApiKey: decryptedMap.get(am.id) } : am
+          ),
+        }))
       }
     } catch {
       // DB not ready, use defaults
