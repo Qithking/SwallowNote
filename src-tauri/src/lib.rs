@@ -154,23 +154,6 @@ pub fn run() {
                 }
             }
 
-            match db::ai_chat::init_ai_chat_db(app_data_dir.clone()) {
-                Ok(ai_chat_db) => {
-                    app.handle().manage(ai_chat_db);
-                }
-                Err(e) => {
-                    eprintln!("Failed to initialize AI chat database: {}", e);
-                }
-            }
-
-            match db::ai_role_prompts::init_ai_role_prompts_db(app_data_dir) {
-                Ok(ai_role_prompts_db) => {
-                    app.handle().manage(ai_role_prompts_db);
-                }
-                Err(e) => {
-                    eprintln!("Failed to initialize AI role prompts database: {}", e);
-                }
-            }
 
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle.clone());
@@ -178,7 +161,7 @@ pub fn run() {
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
 
             let ai_holder = app.handle().state::<commands::ai::SharedAiProxyState>().inner().clone();
-            let db = app.handle().state::<db::Database>().inner().clone();
+            let db = app.handle().state::<db::Database>().inner();
             let ai_settings = {
                 let conn = db.conn.lock().unwrap();
                 let mut stmt = conn.prepare("SELECT key, value FROM session_state WHERE key LIKE 'settings.ai%'").unwrap();

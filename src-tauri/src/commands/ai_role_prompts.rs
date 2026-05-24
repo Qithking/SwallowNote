@@ -1,10 +1,10 @@
 use crate::db::ai_role_prompts::AiRolePrompt;
-use crate::db::ai_role_prompts::AiRolePromptsDatabase;
+use crate::db::Database;
 use tauri::State;
 
 #[tauri::command]
 pub fn load_ai_role_prompts(
-    db: State<AiRolePromptsDatabase>,
+    db: State<Database>,
 ) -> Result<Vec<AiRolePrompt>, String> {
     crate::db::ai_role_prompts::load_role_prompts(&db)
         .map_err(|e| format!("Failed to load AI role prompts: {}", e))
@@ -12,7 +12,7 @@ pub fn load_ai_role_prompts(
 
 #[tauri::command]
 pub fn get_ai_role_prompt(
-    db: State<AiRolePromptsDatabase>,
+    db: State<Database>,
     role_key: String,
 ) -> Result<Option<AiRolePrompt>, String> {
     crate::db::ai_role_prompts::get_role_prompt(&db, &role_key)
@@ -21,7 +21,7 @@ pub fn get_ai_role_prompt(
 
 #[tauri::command]
 pub fn update_ai_role_prompt(
-    db: State<AiRolePromptsDatabase>,
+    db: State<Database>,
     role_key: String,
     prompt: String,
 ) -> Result<(), String> {

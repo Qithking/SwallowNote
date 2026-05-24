@@ -1,11 +1,6 @@
-use rusqlite::{Connection, OpenFlags, Result};
+use crate::db::Database;
+use rusqlite::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::Mutex;
-
-pub struct AiChatDatabase {
-    pub conn: Mutex<Connection>,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiMessage {
@@ -16,35 +11,7 @@ pub struct AiMessage {
     pub created_at: String,
 }
 
-pub fn init_ai_chat_db(app_data_dir: PathBuf) -> Result<AiChatDatabase> {
-    let db_path = app_data_dir.join("ai_chat.db");
-    let conn = Connection::open_with_flags(
-        &db_path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
-    )?;
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ai_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            model_id TEXT NOT NULL,
-            created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
-        )",
-        [],
-    )?;
-
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_ai_messages_created_at ON ai_messages(created_at DESC)",
-        [],
-    )?;
-
-    Ok(AiChatDatabase {
-        conn: Mutex::new(conn),
-    })
-}
-
-pub fn save_message(db: &AiChatDatabase, role: &str, content: &str, model_id: &str) -> Result<i64> {
+pub fn save_message(db: &Database, role: &str, content: &str, model_id: &str) -> Result<i64> {
     let conn = db.conn.lock().unwrap();
     conn.execute(
         "INSERT INTO ai_messages (role, content, model_id) VALUES (?1, ?2, ?3)",
@@ -63,7 +30,7 @@ pub fn save_message(db: &AiChatDatabase, role: &str, content: &str, model_id: &s
 }
 
 pub fn load_messages(
-    db: &AiChatDatabase,
+    db: &Database,
     before_id: Option<i64>,
     limit: i64,
 ) -> Result<Vec<AiMessage>> {
@@ -111,7 +78,7 @@ pub fn load_messages(
     Ok(messages)
 }
 
-pub fn clear_messages(db: &AiChatDatabase) -> Result<()> {
+pub fn clear_messages(db: &Database) -> Result<()> {
     let conn = db.conn.lock().unwrap();
     conn.execute("DELETE FROM ai_messages", [])?;
     Ok(())

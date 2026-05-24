@@ -1,10 +1,10 @@
-use crate::db::ai_chat::AiChatDatabase;
 use crate::db::ai_chat::AiMessage;
+use crate::db::Database;
 use tauri::State;
 
 #[tauri::command]
 pub fn save_ai_message(
-    db: State<AiChatDatabase>,
+    db: State<Database>,
     role: String,
     content: String,
     model_id: String,
@@ -15,7 +15,7 @@ pub fn save_ai_message(
 
 #[tauri::command]
 pub fn load_ai_messages(
-    db: State<AiChatDatabase>,
+    db: State<Database>,
     before_id: Option<i64>,
     limit: Option<i64>,
 ) -> Result<Vec<AiMessage>, String> {
@@ -25,7 +25,7 @@ pub fn load_ai_messages(
 }
 
 #[tauri::command]
-pub fn clear_ai_messages(db: State<AiChatDatabase>) -> Result<(), String> {
+pub fn clear_ai_messages(db: State<Database>) -> Result<(), String> {
     crate::db::ai_chat::clear_messages(&db)
         .map_err(|e| format!("Failed to clear AI messages: {}", e))
 }
