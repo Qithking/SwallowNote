@@ -109,6 +109,8 @@
     "ai.modelName.placeholder": "输入显示名称，留空使用模型 ID",
     "ai.modelId": "模型 ID",
     "ai.provider.placeholder": "选择服务商",
+    "ai.deleteModel": "删除模型",
+    "ai.deleteModelConfirm": "确定删除模型「{{name}}」吗？此操作不可撤销。",
     "appearance.themeColor": "主题颜色设置",
     "appearance.themeColor.desc": "自定义主题强调色，影响按钮、链接等高亮元素",
     "appearance.theme": "主题设置",

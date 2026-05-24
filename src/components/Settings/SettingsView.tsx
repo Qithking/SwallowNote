@@ -83,6 +83,7 @@ function SettingsView() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deleteAiModelTarget, setDeleteAiModelTarget] = useState<string | null>(null)
 
   const [aiCategoryTab, setAiCategoryTab] = useState<AiProviderCategory>('local')
   const [aiFormProvider, setAiFormProvider] = useState('ollama')
@@ -475,13 +476,13 @@ function SettingsView() {
                               )}
                               onClick={() => setActiveAiModel(m.id)}
                             >
-                              <span className="truncate flex-1">{m.name || m.model}</span>
+                              <span className="truncate flex-1">{m.name || m.model}{m.isBuiltIn ? ` · ${t('ai.builtIn')}` : ''}</span>
                               {!m.isBuiltIn && (
                                 <button
                                   className="p-0.5 hover:text-destructive opacity-0 group-hover:opacity-100 shrink-0"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    removeAiModel(m.id)
+                                    setDeleteAiModelTarget(m.id)
                                   }}
                                 >
                                   <Trash2 size={11} />
@@ -699,6 +700,26 @@ function SettingsView() {
             <AlertDialogAction onClick={() => {
               if (deleteTarget) deleteCustomTheme(deleteTarget)
               setDeleteTarget(null)
+            }}>
+              {t('common.confirm', 'Delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deleteAiModelTarget} onOpenChange={(open) => { if (!open) setDeleteAiModelTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.ai.deleteModel')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('settings.ai.deleteModelConfirm', { name: aiModels.find((m) => m.id === deleteAiModelTarget)?.name ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteAiModelTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (deleteAiModelTarget) removeAiModel(deleteAiModelTarget)
+              setDeleteAiModelTarget(null)
             }}>
               {t('common.confirm', 'Delete')}
             </AlertDialogAction>

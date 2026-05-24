@@ -372,7 +372,7 @@ function AIView() {
         <div className="ml-auto flex items-center gap-1">
           {isConfigured && (
             <Select value={activeAiModelId} onValueChange={handleModelChange}>
-              <SelectTrigger className="h-7 w-auto border-0 bg-transparent shadow-none px-1 text-xs text-muted-foreground hover:text-foreground focus:ring-0 max-w-[120px]">
+              <SelectTrigger className="h-7 w-auto border-0 bg-transparent shadow-none px-1 text-xs text-muted-foreground hover:text-foreground focus:ring-0 max-w-[200px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="min-w-[120px]">

@@ -109,6 +109,8 @@
     "ai.modelName.placeholder": "Enter display name, leave empty to use model ID",
     "ai.modelId": "Model ID",
     "ai.provider.placeholder": "Select provider",
+    "ai.deleteModel": "Delete Model",
+    "ai.deleteModelConfirm": "Are you sure you want to delete model \"{{name}}\"? This action cannot be undone.",
     "appearance.themeColor": "Theme Color",
     "appearance.themeColor.desc": "Customize theme accent color affecting buttons, links and highlights",
     "appearance.theme": "Theme",
