@@ -93,6 +93,14 @@ export function TitleBarRecentPopover() {
     if (isOpen) loadHistory()
   }, [isOpen, workspaceMode])
 
+  // Listen for clone dialog open requests from WelcomeScreen
+  useEffect(() => {
+    const handler = () => handleOpenCloneDialog()
+    window.addEventListener('open-clone-dialog', handler)
+    return () => window.removeEventListener('open-clone-dialog', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     if (!isOpen) return
     const handleClickOutside = (e: MouseEvent) => {

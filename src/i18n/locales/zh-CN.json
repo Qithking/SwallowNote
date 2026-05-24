@@ -318,6 +318,18 @@
     "welcome": "欢迎使用 SwallowNote",
     "welcomeHint": "打开文件或文件夹开始编辑"
   },
+  "welcome": {
+    "start": "快速开始",
+    "openFile": "打开文件",
+    "openFolder": "打开文件夹",
+    "cloneRepo": "克隆仓库",
+    "recent": "最近记录",
+    "noRecent": "暂无最近记录",
+    "quickOpen": "快速打开",
+    "newFile": "新建文件",
+    "save": "保存文件",
+    "settings": "设置"
+  },
   "editorSettings": {
     "title": "排版设置",
     "resetToDefault": "恢复默认",

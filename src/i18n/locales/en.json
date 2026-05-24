@@ -318,6 +318,18 @@
     "welcome": "Welcome to SwallowNote",
     "welcomeHint": "Open a file or folder to get started"
   },
+  "welcome": {
+    "start": "Start",
+    "openFile": "Open File",
+    "openFolder": "Open Folder",
+    "cloneRepo": "Clone Repository",
+    "recent": "Recent",
+    "noRecent": "No recent folders",
+    "quickOpen": "Quick Open",
+    "newFile": "New File",
+    "save": "Save File",
+    "settings": "Settings"
+  },
   "editorSettings": {
     "title": "Typography Settings",
     "resetToDefault": "Reset to Default",
