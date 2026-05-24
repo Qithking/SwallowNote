@@ -616,8 +616,9 @@ function SettingsView() {
                                   await restartAiProxy(activeModel.provider, apiKey, activeModel.baseUrl, activeModel.model, aiPort)
                                   await testAiModel(activeModel.provider, apiKey, activeModel.baseUrl, activeModel.model, aiPort)
                                   toast.success(t('settings.ai.testSuccess'))
-                                } catch (e: any) {
-                                  toast.error(t('settings.ai.testFailed') + ': ' + (e?.message || e))
+                                } catch (e) {
+                                  const message = e instanceof Error ? e.message : String(e)
+                                  toast.error(t('settings.ai.testFailed') + ': ' + message)
                                 } finally {
                                   setAiTesting(false)
                                 }

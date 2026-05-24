@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore } from '@/stores'
+import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type FileNode, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { openFolderDialog, openWorkspaceDialog, createFile } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
@@ -10,7 +10,7 @@ function getShortcut(key: ShortcutKey): string {
   return getShortcutKey(key, useUIStore.getState().customShortcuts)
 }
 
-function findNodeByPath(nodes: any[], path: string): any {
+function findNodeByPath(nodes: FileNode[], path: string): FileNode | null {
   for (const n of nodes) {
     if (n.path === path) return n
     if (n.children) {
@@ -21,10 +21,10 @@ function findNodeByPath(nodes: any[], path: string): any {
   return null
 }
 
-function generateUniqueName(baseName: string, siblings: any[]): string {
+function generateUniqueName(baseName: string, siblings: FileNode[]): string {
   let name = baseName
   let counter = 1
-  const existingNames = new Set(siblings.map((s: any) => s.name))
+  const existingNames = new Set(siblings.map((s) => s.name))
   while (existingNames.has(name)) {
     const dotIndex = baseName.lastIndexOf('.')
     if (dotIndex > 0) {
@@ -102,8 +102,8 @@ async function handleNewFolder() {
   }
 }
 
-function updateNodesWithChildrenInList(list: any[], path: string, children: any[]): any[] {
-  return list.map((n: any) => {
+function updateNodesWithChildrenInList(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
+  return list.map((n) => {
     if (n.path === path) return { ...n, children }
     if (n.children) return { ...n, children: updateNodesWithChildrenInList(n.children, path, children) }
     return n
@@ -184,7 +184,7 @@ function handleCloseAll() {
 function handleToggleTheme() {
   const { theme, setTheme } = useUIStore.getState()
   const order: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system']
-  const currentIndex = order.indexOf(theme as any)
+  const currentIndex = order.indexOf(theme as Theme)
   const nextIndex = (currentIndex + 1) % order.length
   setTheme(order[nextIndex])
 }

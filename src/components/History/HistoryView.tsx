@@ -42,9 +42,10 @@ function HistoryView({ visible }: { visible: boolean }) {
         setEntries((prev) => [...prev, ...result])
       }
       skipRef.current = skip + result.length
-    } catch (e: any) {
+    } catch (e) {
       console.error('gitFileLog error:', e)
-      if (e === 'NOT_IN_GIT_REPO' || (e && e.includes && e.includes('NOT_IN_GIT_REPO'))) {
+      const errorMsg = e instanceof Error ? e.message : String(e)
+      if (errorMsg === 'NOT_IN_GIT_REPO' || errorMsg.includes('NOT_IN_GIT_REPO')) {
         setNotInRepo(true)
         setEntries([])
       }

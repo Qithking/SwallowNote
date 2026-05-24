@@ -11,7 +11,7 @@ import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
 import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
 import { StatusBar } from '@/components/StatusBar'
-import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEditorSettingsStore } from '@/stores'
+import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEditorSettingsStore, type EditorTab, type EditorViewMode } from '@/stores'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
@@ -285,31 +285,31 @@ function App() {
   const restoreSessionState = async () => {
     try {
       const states = await getSessionState()
-      console.log('Restoring session state:', states)
       if (Object.keys(states).length === 0) {
-        console.log('No session state found')
         return
       }
 
       const { workspaceMode } = useUIStore.getState()
       const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
-      console.log('Workspace mode:', workspaceMode, 'rootPath:', rootPath, 'workspaceFolders:', workspaceFolders)
 
       if (states.tabs) {
-        const tabsData = JSON.parse(states.tabs)
-        console.log('Found tabs in session:', tabsData.length)
-        const validTabs = tabsData.filter((tab: { path: string }) => {
+        const tabsData = JSON.parse(states.tabs) as Partial<EditorTab>[]
+        const validTabs = tabsData.filter((tab): tab is Partial<EditorTab> => {
+          if (!tab.path) return false
           if (workspaceMode === 'workspace') {
-            return workspaceFolders.some((f: string) => tab.path.startsWith(f))
+            return workspaceFolders.some((f: string) => tab.path!.startsWith(f))
           }
-          return rootPath && tab.path.startsWith(rootPath)
+          return !!(rootPath && tab.path.startsWith(rootPath))
         })
         if (validTabs.length > 0) {
-          const restoredTabs = validTabs.map((tab: any) => ({
-            ...tab,
+          const restoredTabs: EditorTab[] = validTabs.map((tab) => ({
+            id: tab.id || '',
+            path: tab.path || '',
+            name: tab.name || '',
             content: '',
             isDirty: false,
             isEdited: false,
+            viewMode: tab.viewMode || 'preview',
             fileSize: tab.fileSize,
             modifiedTime: tab.modifiedTime,
             wordCount: tab.wordCount,
@@ -332,7 +332,7 @@ function App() {
       // This ensures the file tree scrolls to and loads nodes for the current tab
       if (states.activeTabId) {
         const editorState = useEditorStore.getState()
-        const activeTab = editorState.tabs.find((t: any) => t.id === states.activeTabId)
+        const activeTab = editorState.tabs.find((t) => t.id === states.activeTabId)
         if (activeTab?.path) {
           const fileTreeStore = useFileTreeStore.getState()
           if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
@@ -354,7 +354,7 @@ function App() {
         setRightPanelWidth(Number(states.rightPanelWidth))
       }
       if (states.editorViewMode) {
-        useUIStore.getState().setEditorViewMode(states.editorViewMode as any)
+        useUIStore.getState().setEditorViewMode(states.editorViewMode as EditorViewMode)
       }
 
       // Restore window size and position

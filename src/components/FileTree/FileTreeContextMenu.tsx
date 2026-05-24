@@ -141,7 +141,6 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
   }
 
   const handleOpenHistory = () => {
-    console.log('Open history for:', node.path)
   }
 
   const handleGitInit = async () => {

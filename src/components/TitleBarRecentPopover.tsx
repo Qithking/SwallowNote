@@ -227,9 +227,10 @@ export function TitleBarRecentPopover() {
       } else {
         await openFolder(clonedPath)
       }
-    } catch (e: any) {
+    } catch (e) {
       const { showToast } = useUIStore.getState()
-      showToast(t('recent.cloneFailed', { error: e }), 'error')
+      const message = e instanceof Error ? e.message : String(e)
+      showToast(t('recent.cloneFailed', { error: message }), 'error')
     } finally {
       setIsCloning(false)
     }
