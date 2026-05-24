@@ -235,34 +235,38 @@ export function FileTreeView() {
     setEditingType(null)
   }
 
-  const handleNewFile = () => {
-    if (!selectedPath || !rootPath) return
+  const handleNewFile = async () => {
+    if (!selectedPath) return
     const selected = findNodeByPath(selectedPath, nodes)
     if (!selected || !selected.isDirectory) return
 
-    const siblings = selected.children || []
+    // Ensure the directory is expanded and children are loaded before showing the input
+    if (!expanded.has(selected.path)) {
+      await toggleNode(selected.path)
+    }
+    // Re-read nodes after toggleNode may have loaded children
+    const currentNode = findNodeByPath(selected.path, useFileTreeStore.getState().nodes)
+    const siblings = currentNode?.children || []
     const name = generateUniqueName(t('fileTree.defaultFileName'), siblings)
     setNewItem({ parentPath: selected.path, name, type: 'file' })
     setIsNewItemFirstEdit(true)
-
-    if (!expanded.has(selected.path)) {
-      toggleNode(selected.path)
-    }
   }
 
-  const handleNewFolder = () => {
-    if (!selectedPath || !rootPath) return
+  const handleNewFolder = async () => {
+    if (!selectedPath) return
     const selected = findNodeByPath(selectedPath, nodes)
     if (!selected || !selected.isDirectory) return
 
-    const siblings = selected.children || []
+    // Ensure the directory is expanded and children are loaded before showing the input
+    if (!expanded.has(selected.path)) {
+      await toggleNode(selected.path)
+    }
+    // Re-read nodes after toggleNode may have loaded children
+    const currentNode = findNodeByPath(selected.path, useFileTreeStore.getState().nodes)
+    const siblings = currentNode?.children || []
     const name = generateUniqueName(t('fileTree.defaultFolderName'), siblings)
     setNewItem({ parentPath: selected.path, name, type: 'folder' })
     setIsNewItemFirstEdit(true)
-
-    if (!expanded.has(selected.path)) {
-      toggleNode(selected.path)
-    }
   }
 
   const handleFinishNewItem = async () => {
@@ -365,10 +369,10 @@ export function FileTreeView() {
         >
           {nodeContent}
         </TreeNodeContextMenu>
-        {node.children && expanded.has(node.path) && (
+        {expanded.has(node.path) && (
           <>
-            {node.children.map((child) => renderNode(child, depth + 1))}
-            {/* 在父节点下直接新增（当父节点没有直属子节点时） */}
+            {node.children?.map((child) => renderNode(child, depth + 1))}
+            {/* New item input - rendered whenever a new item is pending under this directory */}
             {isNewItemNode && (
               <div
                 className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
