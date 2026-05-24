@@ -263,6 +263,21 @@ function App() {
     setIsDraggingRight(false)
   }, [])
 
+  // Disable text selection while dragging to prevent content being selected
+  useEffect(() => {
+    if (isDraggingLeft || isDraggingRight) {
+      document.body.style.userSelect = 'none'
+      document.body.style.webkitUserSelect = 'none'
+    } else {
+      document.body.style.userSelect = ''
+      document.body.style.webkitUserSelect = ''
+    }
+    return () => {
+      document.body.style.userSelect = ''
+      document.body.style.webkitUserSelect = ''
+    }
+  }, [isDraggingLeft, isDraggingRight])
+
   useEffect(() => {
     if (isDraggingLeft) {
       document.addEventListener('mousemove', handleMouseMoveLeft)
