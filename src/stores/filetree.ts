@@ -19,9 +19,14 @@ export interface FileTreeState {
   nodes: FileNode[]
   expanded: Set<string>
   selectedPath: string | null
+  multiSelectedPaths: Set<string>
+  lastClickedPath: string | null
   isLoading: boolean
   setNodes: (nodes: FileNode[]) => void
   setSelectedPath: (path: string | null) => void
+  setMultiSelectedPaths: (paths: Set<string>) => void
+  setLastClickedPath: (path: string | null) => void
+  clearMultiSelection: () => void
   toggleNode: (path: string) => Promise<void>
   loadRoot: (rootPath: string) => Promise<void>
   addRoot: (rootPath: string) => Promise<void>
@@ -73,11 +78,19 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   nodes: [],
   expanded: new Set(),
   selectedPath: null,
+  multiSelectedPaths: new Set(),
+  lastClickedPath: null,
   isLoading: false,
 
   setNodes: (nodes) => set({ nodes }),
 
   setSelectedPath: (path) => set({ selectedPath: path }),
+
+  setMultiSelectedPaths: (paths) => set({ multiSelectedPaths: paths }),
+
+  setLastClickedPath: (path) => set({ lastClickedPath: path }),
+
+  clearMultiSelection: () => set({ multiSelectedPaths: new Set() }),
 
   toggleNode: async (path) => {
     const { expanded } = get()
@@ -348,7 +361,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     queueMicrotask(() => requestAnimationFrame(() => scrollToFileElement(filePath)))
   },
 
-  clearAll: () => set({ nodes: [], expanded: new Set(), selectedPath: null, isLoading: false }),
+  clearAll: () => set({ nodes: [], expanded: new Set(), selectedPath: null, multiSelectedPaths: new Set(), lastClickedPath: null, isLoading: false }),
   clearExpanded: () => set({ expanded: new Set() }),
   restoreTreeState: (expandedPaths, selectedPath) =>
     set({ expanded: new Set(expandedPaths), selectedPath }),

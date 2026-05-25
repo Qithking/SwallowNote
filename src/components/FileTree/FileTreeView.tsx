@@ -1,18 +1,18 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { FileText, FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
 import { useGitStore } from '@/stores/git'
 import { loadFileContent, loadDirectory } from '@/lib/api'
-import { openFolderDialog, createFile } from '@/lib/tauri'
-import { renameFile } from '@/lib/tauri'
+import { openFolderDialog, createFile, deleteFile as deleteFileTauri, renameFile } from '@/lib/tauri'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
 import { useTranslation } from 'react-i18next'
+import { matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -44,6 +44,18 @@ function findParentNode(node: FileNode, list: FileNode[]): FileNode | null {
   return null
 }
 
+/** Collect all visible node paths in depth-first order (matching render order) */
+function collectAllPaths(nodes: FileNode[]): string[] {
+  const paths: string[] = []
+  for (const n of nodes) {
+    paths.push(n.path)
+    if (n.children) {
+      paths.push(...collectAllPaths(n.children))
+    }
+  }
+  return paths
+}
+
 function generateUniqueName(baseName: string, siblings: FileNode[]): string {
   const ext = baseName.includes('.') ? '.' + baseName.split('.').pop() : ''
   const nameWithoutExt = ext ? baseName.slice(0, -ext.length) : baseName
@@ -67,8 +79,10 @@ export function FileTreeView() {
   const { rootPath, workspaceFolders, addWorkspaceFolder, saveWorkspaceFile } = useWorkspaceStore()
   const { workspaceMode, showAllFiles, markdownOnly, showToast } = useUIStore()
   const { addTab, updateTabPath } = useEditorStore()
-  const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, setNodes, refreshNode, refreshExpanded } = useFileTreeStore()
+  const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, setNodes, refreshNode, refreshExpanded,
+    multiSelectedPaths, setMultiSelectedPaths, lastClickedPath, setLastClickedPath, clearMultiSelection } = useFileTreeStore()
   const { cachedRepositories, isPulling, pullAllRepos } = useGitStore()
+  const { customShortcuts } = useUIStore()
   const inputRef = useRef<HTMLInputElement>(null)
   const editingCommitRef = useRef(false)
   const newItemCommitRef = useRef(false)
@@ -209,8 +223,28 @@ export function FileTreeView() {
     })
   }, [editingPath, newItem, editingName, nodes, isFirstEdit, isNewItemFirstEdit])
 
-  const handleSelect = (node: FileNode) => {
+  const handleSelect = useCallback((node: FileNode, shiftKey: boolean) => {
+    if (editingPath !== null) return // 正在重命名时不处理点击
+
+    if (shiftKey && lastClickedPath) {
+      // Shift+click: select range from last clicked to current
+      const allPaths = collectAllPaths(nodes)
+      const startIdx = allPaths.indexOf(lastClickedPath)
+      const endIdx = allPaths.indexOf(node.path)
+      if (startIdx >= 0 && endIdx >= 0) {
+        const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
+        const rangePaths = allPaths.slice(from, to + 1)
+        setMultiSelectedPaths(new Set(rangePaths))
+        setSelectedPath(node.path)
+        return
+      }
+    }
+
+    // Normal click: clear multi-selection, set as single selection
+    clearMultiSelection()
     setSelectedPath(node.path)
+    setLastClickedPath(node.path)
+
     if (node.isDirectory) {
       toggleNode(node.path)
       return
@@ -231,7 +265,7 @@ export function FileTreeView() {
         })
       })
       .catch(console.error)
-  }
+  }, [editingPath, lastClickedPath, nodes, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab])
 
   const handleOpenFolder = async () => {
     const path = await openFolderDialog()
@@ -379,6 +413,122 @@ export function FileTreeView() {
     setNewItem(null)
   }
 
+  // Delete selected file(s) - supports single and multi-selection
+  const handleDeleteSelected = useCallback(async () => {
+    if (editingPath !== null || newItem !== null) return // 正在编辑时不处理
+
+    // Collect paths to delete (multi-selection or single selection)
+    const pathsToDelete = multiSelectedPaths.size > 1
+      ? Array.from(multiSelectedPaths)
+      : (selectedPath ? [selectedPath] : [])
+
+    if (pathsToDelete.length === 0) return
+
+    // Confirm deletion
+    const confirmMsg = pathsToDelete.length === 1
+      ? t('dialog.confirmDelete', {
+          name: pathsToDelete[0].split('/').pop() || pathsToDelete[0],
+          extra: (() => {
+            const node = findNodeByPath(pathsToDelete[0], nodes)
+            return node?.isDirectory ? t('dialog.confirmDeleteDir') : ''
+          })(),
+        })
+      : t('dialog.confirmDeleteMulti', { count: pathsToDelete.length })
+
+    if (!confirm(confirmMsg)) return
+
+    let successCount = 0
+    let failCount = 0
+
+    for (const path of pathsToDelete) {
+      try {
+        await deleteFileTauri(path)
+
+        // Close any open tabs for the deleted file or files within the deleted directory
+        const editorStore = useEditorStore.getState()
+        const node = findNodeByPath(path, nodes)
+        const tabsToClose = editorStore.tabs.filter(tab => {
+          if (node?.isDirectory) {
+            return tab.path === path || tab.path.startsWith(path + '/')
+          }
+          return tab.path === path
+        })
+        for (const tab of tabsToClose) {
+          editorStore.removeTab(tab.id)
+        }
+        successCount++
+      } catch (e) {
+        console.error('Failed to delete:', path, e)
+        failCount++
+      }
+    }
+
+    // Clear selections
+    clearMultiSelection()
+    setSelectedPath(null)
+    setLastClickedPath(null)
+
+    // Refresh tree by refreshing all expanded parent directories
+    // Collect unique parent directories of deleted paths
+    const parentDirs = new Set<string>()
+    for (const path of pathsToDelete) {
+      const lastSlash = path.lastIndexOf('/')
+      if (lastSlash > 0) {
+        parentDirs.add(path.substring(0, lastSlash))
+      }
+    }
+    for (const dirPath of parentDirs) {
+      try {
+        const children = await loadDirectory(dirPath, showAllFiles, markdownOnly)
+        const currentNodes = useFileTreeStore.getState().nodes
+        setNodes(updateNodesWithChildren(currentNodes, dirPath, children))
+      } catch (e) {
+        console.error('Failed to refresh directory:', dirPath, e)
+      }
+    }
+
+    if (failCount === 0) {
+      showToast(t('fileTree.deleteSuccess', { count: successCount }), 'success')
+    } else {
+      showToast(t('fileTree.deletePartial', { success: successCount, fail: failCount }), 'error')
+    }
+  }, [editingPath, newItem, multiSelectedPaths, selectedPath, nodes, t, clearMultiSelection, setSelectedPath, setLastClickedPath, showAllFiles, markdownOnly, setNodes, showToast])
+
+  // File tree keyboard shortcuts (F2 rename, Delete delete)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle shortcuts when the file tree area has focus or no input is focused
+      const activeEl = document.activeElement
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+        return
+      }
+
+      // F2 - Rename
+      const renameShortcut = getShortcutKey('renameFile', customShortcuts)
+      if (matchShortcut(e, renameShortcut)) {
+        e.preventDefault()
+        if (selectedPath) {
+          const node = findNodeByPath(selectedPath, nodes)
+          if (node) {
+            handleStartEdit(node.path, node.name, node.isDirectory)
+          }
+        }
+        return
+      }
+
+      // Delete - Delete file(s)
+      const deleteShortcut = getShortcutKey('deleteFile', customShortcuts)
+      if (matchShortcut(e, deleteShortcut)) {
+        e.preventDefault()
+        handleDeleteSelected()
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedPath, nodes, customShortcuts, handleDeleteSelected])
+
   const handleNewItemKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault() // 防止触发 onBlur 重复提交
@@ -394,13 +544,14 @@ export function FileTreeView() {
     const isNewItemNode = newItem?.parentPath === node.path
     const isEditing = editingPath === node.path
     const isSelected = node.path === selectedPath
+    const isMultiSelected = multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1
 
     const nodeContent = (
       <div
         data-path={node.path}
-        className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+        className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : isMultiSelected ? 'bg-primary/5 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={() => !isEditing && handleSelect(node)}
+        onClick={(e) => !isEditing && handleSelect(node, e.shiftKey)}
       >
         {node.isDirectory ? (
           node.isLoading ? (
