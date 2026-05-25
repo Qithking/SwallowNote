@@ -28,7 +28,7 @@ function App() {
   useTheme()
   useKeyboardShortcuts()
   const { t } = useTranslation()
-  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, setSidebarWidth, setRightPanelWidth } = useUIStore()
+  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth } = useUIStore()
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
   const [isDraggingRight, setIsDraggingRight] = useState(false)
   const [isHoveringLeft, setIsHoveringLeft] = useState(false)
@@ -169,8 +169,15 @@ function App() {
     
     const unsubscribe = useEditorStore.subscribe(handleTabsChange)
     
+    // Listen for save-session-now events (e.g., before install & restart)
+    const handleSaveSessionNow = () => {
+      saveSessionStateNow().catch(console.error)
+    }
+    window.addEventListener('save-session-now', handleSaveSessionNow)
+    
     return () => {
       unsubscribe()
+      window.removeEventListener('save-session-now', handleSaveSessionNow)
       if (saveTimer) clearTimeout(saveTimer)
     }
   }, [])
@@ -395,7 +402,16 @@ function App() {
           if (states.windowX && states.windowY) {
             const x = Number(states.windowX)
             const y = Number(states.windowY)
-            if (!isNaN(x) && !isNaN(y)) {
+            // Validate that the position is within a reasonable screen range
+            // to prevent restoring the window to an off-screen location
+            // (e.g., after disconnecting an external monitor)
+            const screen = window.screen
+            const maxValidX = screen.availWidth
+            const maxValidY = screen.availHeight
+            const isValidPosition = !isNaN(x) && !isNaN(y) &&
+              x >= -200 && x < maxValidX &&
+              y >= -200 && y < maxValidY
+            if (isValidPosition) {
               await win.setPosition(new (await import('@tauri-apps/api/dpi')).LogicalPosition(x, y))
             }
           }
@@ -516,8 +532,8 @@ function App() {
           {/* Activity Bar */}
           <ActivityBar />
 
-          {/* Sidebar - hidden when settings panel is open */}
-          {!settingsPanelVisible && (
+          {/* Sidebar - hidden when settings panel is open or sidebar is collapsed */}
+          {!settingsPanelVisible && sidebarVisible && (
             <div 
               className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 
               style={{ width: sidebarWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))' }}
@@ -527,7 +543,7 @@ function App() {
           )}
 
           {/* Left Resize Handle */}
-          {!settingsPanelVisible && (
+          {!settingsPanelVisible && sidebarVisible && (
             <div
               className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
               onMouseDown={handleMouseDownLeft}

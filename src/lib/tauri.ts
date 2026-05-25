@@ -287,6 +287,10 @@ export async function gitShowDiff(filePath: string, commitHash: string): Promise
   return await invoke('git_show_diff', { filePath, commitHash })
 }
 
+export async function gitShowFileContent(filePath: string, commitHash: string): Promise<string> {
+  return await invoke('git_show_file_content', { filePath, commitHash })
+}
+
 export async function isGitRepository(path: string): Promise<boolean> {
   return await invoke('git_is_repo', { path })
 }

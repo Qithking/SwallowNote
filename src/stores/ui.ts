@@ -141,6 +141,7 @@ export interface UIState {
   setThemeColor: (color: string) => void
   setSidebarView: (view: SidebarView) => void
   setSidebarWidth: (width: number) => void
+  setSidebarVisible: (visible: boolean) => void
   toggleSidebar: () => void
   toggleStatusBar: () => void
   setEditorViewMode: (mode: EditorViewMode) => void
@@ -237,6 +238,7 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarView: (view) => set({ sidebarView: view }),
   setSidebarWidth: (width) => set({ sidebarWidth: Math.max(150, Math.min(500, width)) }),
   setRightPanelWidth: (width) => set({ rightPanelWidth: Math.max(150, Math.min(600, width)) }),
+  setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
   toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
   setEditorViewMode: (mode) => set({ editorViewMode: mode }),

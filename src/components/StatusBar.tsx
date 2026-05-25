@@ -202,6 +202,8 @@ function StatusBar() {
     setShowUpgradeDialog(false)
     if (downloadedPath) {
       try {
+        // Save session state before installing update
+        window.dispatchEvent(new CustomEvent('save-session-now'))
         // On macOS, use install_and_restart for seamless in-place upgrade
         // On other platforms, fall back to open_installer
         const isMac = navigator.platform.toLowerCase().includes('mac')
@@ -289,7 +291,14 @@ function StatusBar() {
         return (
           <span className="flex items-center gap-1">
             <span className="opacity-60">{baseVersion}</span>
-            <span className="text-green-500">({t('statusBar.downloadReady')})</span>
+            <Button
+              size="sm"
+              variant="default"
+              className="h-5 text-[10px] px-2 py-0"
+              onClick={handleVersionClick}
+            >
+              {t('statusBar.installAndRestart')}
+            </Button>
           </span>
         )
       case 'download-failed':
@@ -338,8 +347,8 @@ function StatusBar() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleUpgradeCancel}>{t('common.no')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleUpgradeConfirm}>{t('common.yes')}</AlertDialogAction>
+            <AlertDialogCancel onClick={handleUpgradeCancel}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleUpgradeConfirm}>{t('statusBar.installAndRestart')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

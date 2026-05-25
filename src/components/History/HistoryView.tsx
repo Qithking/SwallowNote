@@ -1,15 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { FileText, Loader2 } from 'lucide-react'
+import { FileText, Loader2, RotateCcw } from 'lucide-react'
 import { useEditorStore } from '@/stores'
-import { gitFileLog, GitFileLogEntry } from '@/lib/tauri'
+import { gitFileLog, gitShowFileContent, GitFileLogEntry, writeFile } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useTranslation } from 'react-i18next'
 
 const PAGE_SIZE = 50
 
 function HistoryView({ visible }: { visible: boolean }) {
-  const { tabs, activeTabId, openDiffTab } = useEditorStore()
+  const { tabs, activeTabId, openDiffTab, updateTabContent } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
 
@@ -18,6 +28,9 @@ function HistoryView({ visible }: { visible: boolean }) {
   const [hasMore, setHasMore] = useState(true)
   const [notInRepo, setNotInRepo] = useState(false)
   const [selectedHash, setSelectedHash] = useState<string | null>(null)
+  const [showRestoreDialog, setShowRestoreDialog] = useState(false)
+  const [restoreEntry, setRestoreEntry] = useState<GitFileLogEntry | null>(null)
+  const [restoring, setRestoring] = useState(false)
   const skipRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -29,7 +42,6 @@ function HistoryView({ visible }: { visible: boolean }) {
 
     try {
       const result = await gitFileLog(filePath, PAGE_SIZE, skip)
-      console.log('gitFileLog result:', result)
       if (result.length < PAGE_SIZE) {
         setHasMore(false)
       } else {
@@ -97,6 +109,36 @@ function HistoryView({ visible }: { visible: boolean }) {
     [hasMore, loading, activeTab?.path, loadHistory]
   )
 
+  const handleRestoreClick = useCallback((e: React.MouseEvent, entry: GitFileLogEntry) => {
+    e.stopPropagation()
+    setRestoreEntry(entry)
+    setShowRestoreDialog(true)
+  }, [])
+
+  const handleRestoreConfirm = useCallback(async () => {
+    if (!restoreEntry || !activeTab?.path) return
+    setShowRestoreDialog(false)
+    setRestoring(true)
+
+    try {
+      const content = await gitShowFileContent(activeTab.path, restoreEntry.hash)
+      // Write content to file
+      await writeFile(activeTab.path, content)
+      // Update the editor tab content
+      updateTabContent(activeTab.id, content)
+    } catch (e) {
+      console.error('Failed to restore file:', e)
+    } finally {
+      setRestoring(false)
+      setRestoreEntry(null)
+    }
+  }, [restoreEntry, activeTab, updateTabContent])
+
+  const handleRestoreCancel = useCallback(() => {
+    setShowRestoreDialog(false)
+    setRestoreEntry(null)
+  }, [])
+
   const formatDate = (dateStr: string) => {
     try {
       // Handle unix timestamp (milliseconds) from backend
@@ -129,11 +171,11 @@ function HistoryView({ visible }: { visible: boolean }) {
       <div className="flex flex-col h-full">
         <div className="flex items-center h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium uppercase tracking-wider">{t('history.title')}</span>
+            <span className="text-xs font-medium uppercase tracking-wider">{t('history.title')}</span>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-          <p className="text-sm">{t('history.noFileOpen')}</p>
+          <p className="text-xs">{t('history.noFileOpen')}</p>
         </div>
       </div>
     )
@@ -141,9 +183,24 @@ function HistoryView({ visible }: { visible: boolean }) {
 
   return (
     <div className="flex flex-col h-full">
+      <AlertDialog open={showRestoreDialog} onOpenChange={setShowRestoreDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('history.restoreConfirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('history.restoreConfirmDesc', { message: restoreEntry?.message || '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleRestoreCancel}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRestoreConfirm}>{t('history.restore')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium uppercase tracking-wider">{t('history.title')}</span>
+          <span className="text-xs font-medium uppercase tracking-wider">{t('history.title')}</span>
         </div>
       </div>
 
@@ -177,7 +234,7 @@ function HistoryView({ visible }: { visible: boolean }) {
                     <div className="flex-1 min-w-0 overflow-hidden">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <p className="text-sm truncate whitespace-nowrap cursor-default" style={{ color: 'var(--text-secondary)' }}>
+                          <p className="text-xs truncate whitespace-nowrap cursor-default" style={{ color: 'var(--text-secondary)' }}>
                             {entry.message}
                           </p>
                         </TooltipTrigger>
@@ -199,6 +256,23 @@ function HistoryView({ visible }: { visible: boolean }) {
                         </div>
                       </div>
                     </div>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          className="shrink-0 p-1 rounded hover:bg-[var(--bg-active)] cursor-pointer"
+                          style={{ color: 'var(--text-muted)' }}
+                          onClick={(e) => handleRestoreClick(e, entry)}
+                          disabled={restoring}
+                        >
+                          {restoring && restoreEntry?.hash === entry.hash ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <RotateCcw size={12} />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="left">{t('history.restore')}</TooltipContent>
+                    </Tooltip>
                     </li>
                   )
                 })}

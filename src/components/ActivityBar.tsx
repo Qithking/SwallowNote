@@ -21,21 +21,30 @@ const activityKeyMap: Record<string, string> = {
 }
 
 function ActivityBar() {
-  const { sidebarView, setSidebarView, settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
+  const { sidebarView, setSidebarView, sidebarVisible, toggleSidebar, settingsPanelVisible, setSettingsPanelVisible } = useUIStore()
   const { t } = useTranslation()
 
   return (
     <div className="w-[40px] flex flex-col items-center pt-1 shrink-0 mr-0.5" >
       {activityItems.map((item) => {
         const Icon = item.icon
-        const isActive = sidebarView === item.id
+        const isActive = sidebarView === item.id && sidebarVisible
         return (
           <Tooltip key={item.id}>
             <TooltipTrigger asChild>
               <button
                 onClick={() => {
                   if (settingsPanelVisible) setSettingsPanelVisible(false)
-                  setSidebarView(item.id)
+                  if (sidebarView === item.id && sidebarVisible) {
+                    // Clicking the already-active icon toggles sidebar visibility
+                    toggleSidebar()
+                  } else {
+                    // Switch to this view and ensure sidebar is visible
+                    if (!sidebarVisible) {
+                      useUIStore.getState().setSidebarVisible(true)
+                    }
+                    setSidebarView(item.id)
+                  }
                 }}
                 className={`w-[36px] h-[36px] flex items-center justify-center relative cursor-pointer rounded-lg ${isActive ? 'bg-primary/10' : ''}`}
                 style={{
@@ -53,7 +62,14 @@ function ActivityBar() {
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            onClick={() => {setSettingsPanelVisible(true);setSidebarView('settings')}}
+            onClick={() => {
+              if (settingsPanelVisible) {
+                setSettingsPanelVisible(false)
+              } else {
+                setSettingsPanelVisible(true)
+                setSidebarView('settings')
+              }
+            }}
             className={`w-[36px] h-[36px] flex items-center justify-center relative cursor-pointer rounded-lg ${settingsPanelVisible ? 'bg-primary/10' : ''}`}
             style={{
               color: settingsPanelVisible ? 'var(--activity-foreground)' : 'var(--activity-inactive)',

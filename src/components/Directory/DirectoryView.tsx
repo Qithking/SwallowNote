@@ -165,7 +165,7 @@ function DirectoryView() {
 
     return (
       <span
-        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-sm min-w-0 ${
+        className={`flex items-center h-[24px] cursor-pointer select-none gap-1 text-xs min-w-0 ${
           isSelected ? 'text-[var(--theme-color)]' : 'text-[var(--text-secondary)]'
         }`}
       >
@@ -188,13 +188,13 @@ function DirectoryView() {
           style={{ borderColor: 'var(--border-color)' }}
         >
           <div className="flex items-center gap-2">           
-            <span className="text-sm font-medium uppercase tracking-wider">
+            <span className="text-xs font-medium uppercase tracking-wider">
               {t('directory.title')}
             </span>
           </div>
         </div>
         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-          <p className="text-sm">{t('directory.noFileOpen')}</p>
+          <p className="text-xs">{t('directory.noFileOpen')}</p>
         </div>
       </div>
     )
@@ -217,7 +217,7 @@ function DirectoryView() {
       <ScrollArea className="flex-1 p-2">
         {treeData.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
-            <p className="text-sm">{t('directory.noToc')}</p>
+            <p className="text-xs">{t('directory.noToc')}</p>
           </div>
         ) : (
           <Tree

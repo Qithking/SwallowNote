@@ -440,7 +440,10 @@
     "allLoaded": "All history loaded",
     "noFileOpen": "No file opened",
     "initGitFirst": "Right-click on file root directory and select Sync Init",
-    "noHistory": "No history"
+    "noHistory": "No history",
+    "restore": "Restore",
+    "restoreConfirmTitle": "Confirm Restore",
+    "restoreConfirmDesc": "Restore file to this commit version. Current unsaved changes will be overwritten. Commit: {{message}}"
   },
   "directory": {
     "title": "Directory",
@@ -477,7 +480,8 @@
     "downloadFailedTooltip": "Click to retry",
     "download": "Download",
     "foundNewVersion": "New version available",
-    "downloadingTooltip": "Downloading..."
+    "downloadingTooltip": "Downloading...",
+    "installAndRestart": "Install & Restart"
   },
   "recent": {
     "workspaceName": "Workspace",
