@@ -42,22 +42,18 @@ fn get_machine_id() -> String {
     }
     #[cfg(target_os = "windows")]
     {
-        match std::process::Command::new("wmic")
-            .args(["csproduct", "get", "UUID"])
-            .output()
+        // Read MachineGuid from Windows Registry instead of spawning `wmic`.
+        // Spawning console processes like `wmic` creates visible console windows
+        // even with CREATE_NO_WINDOW on some Windows configurations.
+        match winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
+            .open_subkey(r"SOFTWARE\Microsoft\Cryptography")
         {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let trimmed = line.trim();
-                    if !trimmed.is_empty() && !trimmed.contains("UUID") {
-                        return trimmed.to_string();
-                    }
-                }
-            }
-            Err(_) => {}
+            Ok(key) => match key.get_value::<String, _>("MachineGuid") {
+                Ok(guid) => guid,
+                Err(_) => "swallownote-win-fallback".to_string(),
+            },
+            Err(_) => "swallownote-win-fallback".to_string(),
         }
-        "swallownote-win-fallback".to_string()
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {

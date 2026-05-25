@@ -8,6 +8,22 @@ pub mod folder_history;
 pub mod session_state;
 pub mod upgrade;
 
+/// Create a new `std::process::Command` with platform-specific configuration.
+///
+/// **On Windows**, this sets the `CREATE_NO_WINDOW` creation flag to prevent
+/// the child process from creating a visible console window. Without this flag,
+/// spawning any console-based executable (e.g., `git`, `cmd`, `powershell`)
+/// will briefly flash a black command prompt window, which is disruptive to
+/// the user experience.
+///
+/// **IMPORTANT**: Always use this function instead of `std::process::Command::new()`
+/// when spawning child processes that may run on Windows. The only exceptions are:
+/// - macOS-specific commands (`open`, `hdiutil`, `ditto`, `osascript`, `ioreg`)
+///   that are gated behind `#[cfg(target_os = "macos")]`
+/// - Linux-specific commands (`xdg-open`, `xclip`, `sh`) gated behind
+///   `#[cfg(target_os = "linux")]`
+///
+/// Any command that runs on Windows **must** use `create_command()`.
 pub fn create_command(program: &str) -> std::process::Command {
     #[cfg(not(target_os = "windows"))]
     let cmd = std::process::Command::new(program);
