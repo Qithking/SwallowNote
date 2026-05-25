@@ -412,8 +412,11 @@
     "passwordOrToken": "密码/访问令牌",
     "passwordPlaceholder": "请输入密码或 Personal Access Token",
     "pushWithCredential": "验证并推送",
+    "rememberCredential": "记住凭证",
     "scanning": "扫描中...",
-    "scanningPath": "扫描 {{path}}..."
+    "scanningPath": "扫描 {{path}}...",
+    "pullSuccess": "已拉取 {{count}} 个仓库",
+    "pullResult": "拉取完成：成功 {{success}} 个，失败 {{fail}} 个"
   },
   "history": {
     "title": "历史",

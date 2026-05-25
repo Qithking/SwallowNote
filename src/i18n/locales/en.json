@@ -412,8 +412,11 @@
     "passwordOrToken": "Password / Access Token",
     "passwordPlaceholder": "Enter password or Personal Access Token",
     "pushWithCredential": "Authenticate & Push",
+    "rememberCredential": "Remember credentials",
     "scanning": "Scanning...",
-    "scanningPath": "Scanning {{path}}..."
+    "scanningPath": "Scanning {{path}}...",
+    "pullSuccess": "Pulled {{count}} repo(s)",
+    "pullResult": "Pull completed: {{success}} succeeded, {{fail}} failed"
   },
   "history": {
     "title": "History",

@@ -13,7 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, mapRepoInfosToRepositories } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials } from '@/lib/tauri'
+import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitCredentialSave, gitCredentialGet, gitPullWithCredentials } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWorkspaceStore, useUIStore } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -34,28 +34,47 @@ function CredentialDialog({
   onClose,
   onSubmit,
   repoName,
+  repoPath,
   isLoading,
 }: {
   open: boolean
   onClose: () => void
   onSubmit: (username: string, password: string) => void
   repoName: string
+  repoPath: string
   isLoading: boolean
 }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [saveCredential, setSaveCredential] = useState(true)
   const { t } = useTranslation()
 
   useEffect(() => {
     if (open) {
-      setUsername('')
-      setPassword('')
+      // Try to load saved credentials from keyring
+      gitCredentialGet(repoPath).then(cred => {
+        if (cred) {
+          setUsername(cred.username)
+          setPassword(cred.password)
+        } else {
+          setUsername('')
+          setPassword('')
+        }
+      }).catch(() => {
+        setUsername('')
+        setPassword('')
+      })
+      setSaveCredential(true)
     }
-  }, [open])
+  }, [open, repoPath])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (username.trim() && password.trim()) {
+      // Save credentials to keyring if checkbox is checked
+      if (saveCredential) {
+        gitCredentialSave(repoPath, username.trim(), password.trim()).catch(console.error)
+      }
       onSubmit(username.trim(), password.trim())
     }
   }
@@ -99,6 +118,19 @@ function CredentialDialog({
               className="flex h-9 w-full rounded-md border px-3 py-2 text-sm bg-[var(--bg-primary)] border-[var(--border-color)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               disabled={isLoading}
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="saveCredential"
+              checked={saveCredential}
+              onChange={(e) => setSaveCredential(e.target.checked)}
+              className="rounded border-[var(--border-color)]"
+              disabled={isLoading}
+            />
+            <label htmlFor="saveCredential" className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {t('git.rememberCredential')}
+            </label>
           </div>
           <DialogFooter>
             <Button
@@ -192,7 +224,22 @@ function CommitSection({
         const errorMessage = String(e).trim()
         console.error('Failed to commit and push:', repo.path, errorMessage)
         if (errorMessage.startsWith('AUTH_REQUIRED:')) {
-          // Authentication failed - show credential dialog
+          // Try to use saved credentials from keyring first
+          try {
+            const savedCred = await gitCredentialGet(repo.path)
+            if (savedCred) {
+              try {
+                await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
+                successCount++
+                continue
+              } catch {
+                // Saved credentials failed, fall through to show dialog
+              }
+            }
+          } catch {
+            // Failed to get saved credentials, fall through
+          }
+          // Show credential dialog for manual input
           setCredentialDialog({
             open: true,
             repoPath: repo.path,
@@ -249,6 +296,7 @@ function CommitSection({
         onClose={() => setCredentialDialog({ open: false, repoPath: '', repoName: '' })}
         onSubmit={handlePushWithCredentials}
         repoName={credentialDialog.repoName}
+        repoPath={credentialDialog.repoPath}
         isLoading={isPushingWithCredentials}
       />
     </>

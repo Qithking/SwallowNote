@@ -2,7 +2,7 @@
  * File Tree Store - Manages file tree state including nodes, expansion, and selection
  */
 import { create } from 'zustand'
-import { loadDirectory } from '@/lib/api'
+import { loadDirectory, loadDirectoriesBatch } from '@/lib/api'
 import { useUIStore } from './ui'
 
 export interface FileNode {
@@ -12,6 +12,7 @@ export interface FileNode {
   isDirectory: boolean
   children?: FileNode[]
   isExpanded?: boolean
+  isLoading?: boolean
 }
 
 export interface FileTreeState {
@@ -48,8 +49,17 @@ function findNodeInList(list: FileNode[], path: string): FileNode | null {
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
-    if (n.path === path) return { ...n, children }
+    if (n.path === path) return { ...n, children, isLoading: false }
     if (n.children) return { ...n, children: updateNodesWithChildren(n.children, path, children) }
+    return n
+  })
+}
+
+/** Mark a specific node as loading (or not loading) without touching children */
+function setNodeLoading(list: FileNode[], path: string, loading: boolean): FileNode[] {
+  return list.map((n) => {
+    if (n.path === path) return { ...n, isLoading: loading }
+    if (n.children) return { ...n, children: setNodeLoading(n.children, path, loading) }
     return n
   })
 }
@@ -87,6 +97,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const { nodes } = get()
     const node = findNodeInList(nodes, path)
     if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
+      // Mark this node as loading for UI feedback
+      set({ nodes: setNodeLoading(nodes, path, true) })
       try {
         const children = await loadDirectory(path, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
         // Use get().nodes to get the latest state after async operation,
@@ -95,6 +107,9 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         set({ nodes: updateNodesWithChildren(currentNodes, path, children) })
       } catch (e) {
         console.error(e)
+        // Clear loading state on error
+        const currentNodes = get().nodes
+        set({ nodes: setNodeLoading(currentNodes, path, false) })
       }
     }
   },
@@ -149,26 +164,41 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (!rootPaths || rootPaths.length === 0) return
     const { nodes, expanded } = get()
     
+    // Filter out already-existing roots
+    const pathsToLoad = rootPaths.filter(p => !findNodeInList(nodes, p))
+    if (pathsToLoad.length === 0) return
+
+    const filterParams = getFilterParams()
+
+    // Load all new roots in parallel using individual loadDirectory calls
+    // (batch API is optimized for refreshing existing expanded directories)
+    const results = await Promise.all(
+      pathsToLoad.map(async (rootPath) => {
+        try {
+          const data = await loadDirectory(rootPath, filterParams.showAllFiles, filterParams.markdownOnly)
+          return {
+            node: {
+              id: `root-${rootPath}`,
+              name: rootPath.split(/[\\/]/).pop() || rootPath,
+              path: rootPath,
+              isDirectory: true,
+              children: data,
+            } as FileNode,
+            path: rootPath,
+          }
+        } catch (e) {
+          console.error(e)
+          return null
+        }
+      })
+    )
+
     const newNodes = [...nodes]
     const newExpanded = new Set(expanded)
-    
-    for (const rootPath of rootPaths) {
-      const existingNode = findNodeInList(newNodes, rootPath)
-      if (existingNode) continue
-
-      try {
-        const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
-        const newNode: FileNode = {
-          id: `root-${rootPath}`,
-          name: rootPath.split(/[\\/]/).pop() || rootPath,
-          path: rootPath,
-          isDirectory: true,
-          children: data,
-        }
-        newNodes.push(newNode)
-        newExpanded.add(rootPath)
-      } catch (e) {
-        console.error(e)
+    for (const result of results) {
+      if (result) {
+        newNodes.push(result.node)
+        newExpanded.add(result.path)
       }
     }
     
@@ -198,30 +228,63 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
     try {
       const children = await loadDirectory(path, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
-      set({ nodes: updateNodesWithChildren(nodes, path, children) })
+      const currentNodes = get().nodes
+      set({ nodes: updateNodesWithChildren(currentNodes, path, children) })
     } catch (e) {
       console.error(e)
     }
   },
 
   refreshExpanded: async () => {
-    const { nodes, expanded } = get()
+    const { expanded, nodes } = get()
     const filterParams = getFilterParams()
-    let currentNodes = nodes
 
+    // Collect paths of expanded directories that actually exist in the tree
+    const pathsToRefresh: string[] = []
     for (const path of expanded) {
-      const node = findNodeInList(currentNodes, path)
-      if (!node || !node.isDirectory) continue
-
-      try {
-        const children = await loadDirectory(path, filterParams.showAllFiles, filterParams.markdownOnly)
-        currentNodes = updateNodesWithChildren(currentNodes, path, children)
-      } catch (e) {
-        console.error(e)
+      const node = findNodeInList(nodes, path)
+      if (node && node.isDirectory) {
+        pathsToRefresh.push(path)
       }
     }
 
-    set({ nodes: currentNodes })
+    if (pathsToRefresh.length === 0) return
+
+    // Use batch API to load all directories in a single IPC call
+    // This is significantly faster than N separate IPC calls
+    try {
+      const results = await loadDirectoriesBatch(
+        pathsToRefresh,
+        filterParams.showAllFiles,
+        filterParams.markdownOnly,
+      )
+      let currentNodes = get().nodes
+      for (const result of results) {
+        currentNodes = updateNodesWithChildren(currentNodes, result.path, result.children)
+      }
+      set({ nodes: currentNodes })
+    } catch (e) {
+      console.error('Batch refresh failed, falling back to sequential:', e)
+      // Fallback: refresh directories individually in parallel
+      let currentNodes = get().nodes
+      const individualResults = await Promise.all(
+        pathsToRefresh.map(async (path) => {
+          try {
+            const children = await loadDirectory(path, filterParams.showAllFiles, filterParams.markdownOnly)
+            return { path, children }
+          } catch (err) {
+            console.error(err)
+            return null
+          }
+        })
+      )
+      for (const result of individualResults) {
+        if (result) {
+          currentNodes = updateNodesWithChildren(currentNodes, result.path, result.children)
+        }
+      }
+      set({ nodes: currentNodes })
+    }
   },
 
   revealPath: async (filePath, rootPath) => {
@@ -240,19 +303,41 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     let currentPath = rootPath
     let currentNodes = nodes
 
+    // Collect directories that need loading
+    const dirsToLoad: string[] = []
     for (let i = 0; i < parts.length - 1; i++) {
       currentPath = currentPath + '/' + parts[i]
       if (!newExpanded.has(currentPath)) {
         newExpanded.add(currentPath)
       }
-      // Load children if directory not yet loaded
+      // Check if directory needs loading
       const node = findNodeInList(currentNodes, currentPath)
       if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
-        try {
-          const children = await loadDirectory(currentPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
-          currentNodes = updateNodesWithChildren(currentNodes, currentPath, children)
-        } catch (e) {
-          console.error(e)
+        dirsToLoad.push(currentPath)
+      }
+    }
+
+    // Batch-load all directories that need children
+    if (dirsToLoad.length > 0) {
+      const filterParams = getFilterParams()
+      try {
+        const results = await loadDirectoriesBatch(dirsToLoad, filterParams.showAllFiles, filterParams.markdownOnly)
+        for (const result of results) {
+          currentNodes = updateNodesWithChildren(currentNodes, result.path, result.children)
+        }
+      } catch (e) {
+        console.error('Batch load in revealPath failed, falling back:', e)
+        // Fallback to sequential loading
+        for (const dirPath of dirsToLoad) {
+          const node = findNodeInList(currentNodes, dirPath)
+          if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
+            try {
+              const children = await loadDirectory(dirPath, filterParams.showAllFiles, filterParams.markdownOnly)
+              currentNodes = updateNodesWithChildren(currentNodes, dirPath, children)
+            } catch (err) {
+              console.error(err)
+            }
+          }
         }
       }
     }

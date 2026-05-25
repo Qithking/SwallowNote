@@ -11,7 +11,7 @@ export { useUIStore } from './ui'
 export type { Theme, NoteWidth, SidebarView, EditorViewMode, UIState, CustomThemeColors, CustomTheme, AiContextMenuRequest } from './ui'
 
 export { useGitStore } from './git'
-export type { GitBranch, GitState } from './git'
+export type { GitBranch, GitState, PullResult } from './git'
 
 export { useEditorSettingsStore } from './editorSettings'
 export type { EditorSettingsState } from './editorSettings'

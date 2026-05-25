@@ -1,7 +1,7 @@
 /**
  * API Adapter - Converts between frontend and backend types
  */
-import { listDirectory, readFile, writeFile, createFile, deleteFile, renameFile, FileNode as BackendFileNode } from './tauri'
+import { listDirectory, readFile, writeFile, createFile, deleteFile, renameFile, listDirectoriesBatch, FileNode as BackendFileNode, BatchDirResult as BackendBatchDirResult } from './tauri'
 
 // Convert backend snake_case to frontend camelCase
 export interface FileNode {
@@ -30,6 +30,23 @@ export async function loadDirectory(
 ): Promise<FileNode[]> {
   const nodes = await listDirectory(path, showAllFiles, markdownOnly)
   return nodes.map(convertFileNode)
+}
+
+export interface BatchDirResult {
+  path: string
+  children: FileNode[]
+}
+
+export async function loadDirectoriesBatch(
+  paths: string[],
+  showAllFiles?: boolean,
+  markdownOnly?: boolean,
+): Promise<BatchDirResult[]> {
+  const results = await listDirectoriesBatch(paths, showAllFiles, markdownOnly)
+  return results.map((r: BackendBatchDirResult) => ({
+    path: r.path,
+    children: r.children.map(convertFileNode),
+  }))
 }
 
 export async function loadFileContent(path: string): Promise<string> {

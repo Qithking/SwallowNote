@@ -144,6 +144,83 @@ fn is_auth_error(error: &str) -> bool {
         || lower.contains("fatal: unable to access")
 }
 
+/// Pull changes from remote
+#[tauri::command]
+pub async fn git_pull(path: String) -> Result<(), String> {
+    // Check if remote exists before pulling
+    let remote_url = get_remote_url(&path);
+    if remote_url.is_err() {
+        return Ok(()); // No remote, nothing to pull
+    }
+
+    let result = run_git(&path, &["pull"]);
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if is_auth_error(&e) {
+                Err(format!("AUTH_REQUIRED:{}", e))
+            } else {
+                Err(format!("Failed to pull: {}", e))
+            }
+        }
+    }
+}
+
+/// Pull changes from remote with provided credentials
+#[tauri::command]
+pub async fn git_pull_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
+    // Create a temporary askpass script with a unique name to avoid conflicts
+    let temp_dir = std::env::temp_dir();
+    let unique_id = uuid::Uuid::new_v4().to_string();
+    let askpass_script = temp_dir.join(format!("swallownote_pull_askpass_{}.sh", unique_id));
+
+    #[cfg(not(target_os = "windows"))]
+    let script_content = format!(
+        "#!/bin/sh\necho '{}'",
+        password.replace('\'', "'\\''")
+    );
+
+    #[cfg(target_os = "windows")]
+    let script_content = format!(
+        "@echo off\necho {}",
+        password.replace('"', "\"\"")
+    );
+
+    std::fs::write(&askpass_script, &script_content)
+        .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&askpass_script)
+            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(&askpass_script, perms)
+            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+    }
+
+    let askpass_path = askpass_script.to_string_lossy().to_string();
+
+    let result = run_git_with_env(
+        &path,
+        &["pull"],
+        &[
+            ("GIT_ASKPASS", askpass_path.as_str()),
+            ("GIT_TERMINAL_PROMPT", "0"),
+            ("GIT_USERNAME", &username),
+        ],
+    );
+
+    // Clean up the askpass script immediately
+    let _ = std::fs::remove_file(&askpass_script);
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to pull: {}", e)),
+    }
+}
+
 /// Push commits to remote
 #[tauri::command]
 pub async fn git_push(path: String) -> Result<(), String> {
@@ -821,5 +898,75 @@ async fn do_git_clone(
             "message": i18n::t("backend.git.cloneFailed")
         }));
         Err(i18n::t("backend.git.cloneFailed"))
+    }
+}
+
+// ===================== Keyring Credential Management =====================
+
+const KEYRING_SERVICE: &str = "SwallowNote";
+
+/// Save git credentials for a repository to the system keyring
+/// The credential key is based on the repository's remote URL for uniqueness
+#[tauri::command]
+pub fn git_credential_save(repo_path: String, username: String, password: String) -> Result<(), String> {
+    let key = build_credential_key(&repo_path)?;
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
+        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+    
+    // Store as JSON: {"username": "...", "password": "..."}
+    let credential = serde_json::json!({
+        "username": username,
+        "password": password,
+    });
+    
+    entry.set_password(&credential.to_string())
+        .map_err(|e| format!("Failed to save credential: {}", e))?;
+    
+    Ok(())
+}
+
+/// Get git credentials for a repository from the system keyring
+#[tauri::command]
+pub fn git_credential_get(repo_path: String) -> Result<Option<GitCredential>, String> {
+    let key = build_credential_key(&repo_path)?;
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
+        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+    
+    match entry.get_password() {
+        Ok(json_str) => {
+            let cred: GitCredential = serde_json::from_str(&json_str)
+                .map_err(|e| format!("Failed to parse credential: {}", e))?;
+            Ok(Some(cred))
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Failed to get credential: {}", e)),
+    }
+}
+
+/// Delete git credentials for a repository from the system keyring
+#[tauri::command]
+pub fn git_credential_delete(repo_path: String) -> Result<(), String> {
+    let key = build_credential_key(&repo_path)?;
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &key)
+        .map_err(|e| format!("Failed to create keyring entry: {}", e))?;
+    
+    entry.delete_credential()
+        .map_err(|e| format!("Failed to delete credential: {}", e))?;
+    
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct GitCredential {
+    pub username: String,
+    pub password: String,
+}
+
+/// Build a unique credential key based on the repository's remote URL
+fn build_credential_key(repo_path: &str) -> Result<String, String> {
+    // Use the remote URL as the key if available, otherwise use the repo path
+    match get_remote_url(repo_path) {
+        Ok(url) => Ok(format!("git:{}", url)),
+        Err(_) => Ok(format!("git:path:{}", repo_path.replace('\\', "/"))),
     }
 }

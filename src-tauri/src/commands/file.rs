@@ -109,20 +109,13 @@ fn is_hidden_windows(metadata: &std::fs::Metadata) -> bool {
     metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
 }
 
-#[tauri::command]
-pub async fn list_directory(
-    path: String,
-    show_all_files: Option<bool>,
-    markdown_only: Option<bool>,
-) -> Result<Vec<FileNode>, String> {
-    let path = PathBuf::from(&path);
-    let show_all_files = show_all_files.unwrap_or(false);
-    let markdown_only = markdown_only.unwrap_or(false);
-
+/// Core synchronous directory listing logic.
+/// Extracted as a standalone function so it can be called from `spawn_blocking`
+/// without blocking the Tokio async runtime.
+fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) -> Result<Vec<FileNode>, String> {
     if !path.exists() {
         return Err(format!("Path does not exist: {}", path.display()));
     }
-
     if !path.is_dir() {
         return Err(format!("Path is not a directory: {}", path.display()));
     }
@@ -134,7 +127,7 @@ pub async fn list_directory(
     // ordering and use max_depth(1) to avoid unnecessary recursion.
     let mut nodes: Vec<FileNode> = Vec::new();
 
-    for entry_result in jwalk::WalkDir::new(&path)
+    for entry_result in jwalk::WalkDir::new(path)
         .max_depth(1)
         .sort(true)
     {
@@ -213,6 +206,70 @@ pub async fn list_directory(
     });
 
     Ok(nodes)
+}
+
+#[tauri::command]
+pub async fn list_directory(
+    path: String,
+    show_all_files: Option<bool>,
+    markdown_only: Option<bool>,
+) -> Result<Vec<FileNode>, String> {
+    let path = PathBuf::from(&path);
+    let show_all_files = show_all_files.unwrap_or(false);
+    let markdown_only = markdown_only.unwrap_or(false);
+
+    // Offload synchronous filesystem I/O to a blocking thread so we don't
+    // stall the Tokio async runtime. This is critical when multiple directories
+    // are being listed concurrently (e.g. expanding several tree nodes at once).
+    tokio::task::spawn_blocking(move || list_directory_inner(&path, show_all_files, markdown_only))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+/// Batch-list multiple directories in a single IPC call.
+/// Each directory is scanned on the blocking thread pool in parallel,
+/// then all results are returned together. This dramatically reduces the
+/// overhead of repeated IPC round-trips when the frontend needs to load
+/// several expanded directories at once (e.g. during refresh or workspace restore).
+#[derive(Serialize)]
+pub struct BatchDirResult {
+    pub path: String,
+    pub children: Vec<FileNode>,
+}
+
+#[tauri::command]
+pub async fn list_directories_batch(
+    paths: Vec<String>,
+    show_all_files: Option<bool>,
+    markdown_only: Option<bool>,
+) -> Result<Vec<BatchDirResult>, String> {
+    let show_all_files = show_all_files.unwrap_or(false);
+    let markdown_only = markdown_only.unwrap_or(false);
+
+    // Create one spawn_blocking task per directory so they run in parallel
+    // on the blocking thread pool.
+    let handles: Vec<_> = paths
+        .into_iter()
+        .map(|p| {
+            let path = PathBuf::from(&p);
+            let show = show_all_files;
+            let md_only = markdown_only;
+            tokio::task::spawn_blocking(move || {
+                let children = list_directory_inner(&path, show, md_only)?;
+                Ok::<BatchDirResult, String>(BatchDirResult { path: p, children })
+            })
+        })
+        .collect();
+
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        let result = handle
+            .await
+            .map_err(|e| format!("Task join error: {}", e))??;
+        results.push(result);
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]

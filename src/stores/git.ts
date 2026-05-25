@@ -2,7 +2,7 @@
  * Git Store - Manages Git state
  */
 import { create } from 'zustand'
-import { GitRepositoryInfo } from '@/lib/tauri'
+import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials } from '@/lib/tauri'
 
 export interface GitBranch {
   name: string
@@ -46,11 +46,19 @@ export function mapRepoInfosToRepositories(infos: GitRepositoryInfo[]): GitRepos
     .map(mapRepoInfoToRepository)
 }
 
+export interface PullResult {
+  path: string
+  name: string
+  success: boolean
+  error?: string
+}
+
 export interface GitState {
   repositories: GitRepository[]
   cachedRepositories: GitRepository[]
   activeRepository: string | null  // 当前选中的仓库路径
   isGitLoading: boolean
+  isPulling: boolean
   scanProgress: { current: number; total: number; message: string } | null
   // Actions
   setRepositories: (repos: GitRepository[]) => void
@@ -58,15 +66,18 @@ export interface GitState {
   setActiveRepository: (path: string | null) => void
   updateRepository: (path: string, updates: Partial<GitRepository>) => void
   setLoading: (loading: boolean) => void
+  setPulling: (pulling: boolean) => void
   setScanProgress: (progress: { current: number; total: number; message: string } | null) => void
   clearScanProgress: () => void
+  pullAllRepos: (repos: GitRepository[]) => Promise<PullResult[]>
 }
 
-export const useGitStore = create<GitState>((set) => ({
+export const useGitStore = create<GitState>((set, get) => ({
   repositories: [],
   cachedRepositories: [],
   activeRepository: null,
   isGitLoading: false,
+  isPulling: false,
   scanProgress: null,
   setRepositories: (repos) => set({ repositories: repos }),
   setCachedRepositories: (repos) => set({ cachedRepositories: repos }),
@@ -77,6 +88,47 @@ export const useGitStore = create<GitState>((set) => ({
     )
   })),
   setLoading: (loading) => set({ isGitLoading: loading }),
+  setPulling: (pulling) => set({ isPulling: pulling }),
   setScanProgress: (progress) => set({ scanProgress: progress }),
   clearScanProgress: () => set({ scanProgress: null }),
+  pullAllRepos: async (repos: GitRepository[]) => {
+    // Filter repos that have a remote URL
+    const reposWithRemote = repos.filter(r => r.remoteUrl)
+    if (reposWithRemote.length === 0) return []
+
+    set({ isPulling: true })
+    try {
+      // Execute all pull operations in parallel
+      const pullPromises = reposWithRemote.map(async (repo) => {
+        try {
+          await gitPull(repo.path)
+          return { path: repo.path, name: repo.name, success: true }
+        } catch (e) {
+          const errorMessage = String(e).trim()
+          // If auth required, try saved credentials from keyring
+          if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+            try {
+              const savedCred = await gitCredentialGet(repo.path)
+              if (savedCred) {
+                try {
+                  await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
+                  return { path: repo.path, name: repo.name, success: true }
+                } catch {
+                  // Saved credentials failed
+                }
+              }
+            } catch {
+              // Failed to get saved credentials
+            }
+          }
+          return { path: repo.path, name: repo.name, success: false, error: errorMessage }
+        }
+      })
+
+      const results = await Promise.all(pullPromises)
+      return results
+    } finally {
+      set({ isPulling: false })
+    }
+  },
 }))

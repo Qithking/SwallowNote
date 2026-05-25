@@ -136,6 +136,23 @@ export async function listDirectory(
   })
 }
 
+export interface BatchDirResult {
+  path: string
+  children: FileNode[]
+}
+
+export async function listDirectoriesBatch(
+  paths: string[],
+  showAllFiles?: boolean,
+  markdownOnly?: boolean,
+): Promise<BatchDirResult[]> {
+  return await invoke('list_directories_batch', {
+    paths,
+    showAllFiles: showAllFiles ?? false,
+    markdownOnly: markdownOnly ?? false,
+  })
+}
+
 export async function readFile(path: string): Promise<string> {
   return await invoke('read_file', { path })
 }
@@ -198,6 +215,32 @@ export async function gitPushWithCredentials(path: string, username: string, pas
 
 export async function gitCommitAndPush(path: string, message: string): Promise<void> {
   await invoke('git_commit_and_push', { path, message })
+}
+
+export async function gitPull(path: string): Promise<void> {
+  await invoke('git_pull', { path })
+}
+
+export async function gitPullWithCredentials(path: string, username: string, password: string): Promise<void> {
+  await invoke('git_pull_with_credentials', { path, username, password })
+}
+
+// Git Keyring Credential APIs
+export interface GitCredential {
+  username: string
+  password: string
+}
+
+export async function gitCredentialSave(repoPath: string, username: string, password: string): Promise<void> {
+  await invoke('git_credential_save', { repoPath, username, password })
+}
+
+export async function gitCredentialGet(repoPath: string): Promise<GitCredential | null> {
+  return await invoke('git_credential_get', { repoPath })
+}
+
+export async function gitCredentialDelete(repoPath: string): Promise<void> {
+  await invoke('git_credential_delete', { repoPath })
 }
 
 export async function gitAutoCommit(filePath: string): Promise<void> {
