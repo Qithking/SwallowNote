@@ -322,6 +322,49 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
     }
 }
 
+/// Force push commits to remote (overwrites remote history)
+#[tauri::command]
+pub async fn git_force_push(path: String) -> Result<(), String> {
+    let result = run_git(&path, &["push", "--force"]);
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if is_auth_error(&e) {
+                Err(format!("AUTH_REQUIRED:{}", e))
+            } else {
+                Err(format!("Failed to force push: {}", e))
+            }
+        }
+    }
+}
+
+/// Force pull from remote (discard local changes and reset to remote)
+/// This performs: git fetch + git reset --hard origin/<branch> + git clean -fd
+#[tauri::command]
+pub async fn git_force_pull(path: String) -> Result<(), String> {
+    // Check if remote exists
+    let remote_url = get_remote_url(&path);
+    if remote_url.is_err() {
+        return Ok(()); // No remote, nothing to pull
+    }
+
+    // Get current branch
+    let branch = get_branch(&path)?;
+
+    // Fetch from remote
+    run_git(&path, &["fetch", "origin"]).map_err(|e| format!("Failed to fetch: {}", e))?;
+
+    // Reset to remote branch, discarding all local changes
+    let remote_ref = format!("origin/{}", branch);
+    run_git(&path, &["reset", "--hard", &remote_ref])
+        .map_err(|e| format!("Failed to reset: {}", e))?;
+
+    // Clean untracked files and directories
+    run_git(&path, &["clean", "-fd"]).map_err(|e| format!("Failed to clean: {}", e))?;
+
+    Ok(())
+}
+
 /// Commit and push in one command
 #[tauri::command]
 pub async fn git_commit_and_push(path: String, message: String) -> Result<(), String> {

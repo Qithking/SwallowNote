@@ -9,11 +9,21 @@ import {
   Check,
   Loader2,
   KeyRound,
+  MoreHorizontal,
+  ArrowUpFromLine,
+  ArrowDownToLine,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, mapRepoInfosToRepositories } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitCredentialSave, gitCredentialGet } from '@/lib/tauri'
+import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitCredentialSave, gitCredentialGet, gitForcePush, gitForcePull } from '@/lib/tauri'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWorkspaceStore, useUIStore } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -307,71 +317,193 @@ function CommitSection({
 function RepositoryItem({ 
   repo, 
   isSelected, 
-  onToggle 
+  onToggle,
+  onRefresh,
 }: { 
   repo: GitRepository
   isSelected: boolean
   onToggle: () => void
+  onRefresh: () => void
 }) {
   const { t } = useTranslation()
+  const { showToast } = useUIStore()
+  const [isForceAction, setIsForceAction] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'forcePush' | 'forcePull' | null>(null)
+
+  const handleForcePush = async () => {
+    setIsForceAction(true)
+    setConfirmAction(null)
+    try {
+      await gitForcePush(repo.path)
+      showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
+      onRefresh()
+    } catch (e) {
+      const errorMessage = String(e).trim()
+      if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+        // Try saved credentials
+        try {
+          const savedCred = await gitCredentialGet(repo.path)
+          if (savedCred) {
+            try {
+              // Force push with credentials requires using push --force with credentials
+              await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
+              showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
+              onRefresh()
+              return
+            } catch {
+              // Saved credentials failed
+            }
+          }
+        } catch {
+          // Failed to get credentials
+        }
+        showToast(t('git.forcePushFailed', { repo: repo.name, error: t('git.credentialTitle') }), 'error')
+      } else {
+        showToast(t('git.forcePushFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      }
+    } finally {
+      setIsForceAction(false)
+    }
+  }
+
+  const handleForcePull = async () => {
+    setIsForceAction(true)
+    setConfirmAction(null)
+    try {
+      await gitForcePull(repo.path)
+      showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
+      onRefresh()
+    } catch (e) {
+      const errorMessage = String(e).trim()
+      showToast(t('git.forcePullFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+    } finally {
+      setIsForceAction(false)
+    }
+  }
+
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div
-          className={cn(
-            'p-2 rounded cursor-pointer text-sm flex flex-col gap-1',
-            'hover:bg-[var(--bg-hover)]',
-            isSelected && 'bg-[var(--bg-hover)]',
-            repo.isSubmodule && 'pl-8 ml-4 border-l-2 border-[var(--border-color)]'
-          )}
-          onClick={onToggle}
-        >
-          {/* Repo name with status indicator and checkbox */}
-          <div className="flex items-center gap-2">
-            {/* Checkbox */}
-            <div 
-              className={cn(
-                'w-4 h-4 rounded border flex items-center justify-center shrink-0',
-                isSelected 
-                  ? 'bg-[var(--accent)] border-[var(--accent)]' 
-                  : 'border-[var(--border-color)]'
-              )}
+    <>
+      {/* Confirm Dialog for force actions */}
+      <Dialog open={confirmAction !== null} onOpenChange={(v) => !v && setConfirmAction(null)}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{confirmAction === 'forcePush' ? t('git.forcePush') : t('git.forcePull')}</DialogTitle>
+            <DialogDescription>
+              {confirmAction === 'forcePush'
+                ? t('git.forcePushConfirm', { repo: repo.name })
+                : t('git.forcePullConfirm', { repo: repo.name })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmAction(null)}
+              disabled={isForceAction}
             >
-              {isSelected && <Check size={10} className="text-[var(--text-primary)]" />}
-            </div>
-            {/* Status dot: red for uncommitted, green for clean */}
-            <div className="relative">
-              {repo.hasUncommittedChanges ? (
-                <Circle size={8} className="fill-red-500 text-red-500" />
-              ) : (
-                <Circle size={8} className="fill-green-500 text-green-500" />
-              )}
-            </div>
-            {/* Submodule indicator */}
-            {repo.isSubmodule && (
-              <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>{t('git.submodule')}</span>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={isForceAction}
+              onClick={confirmAction === 'forcePush' ? handleForcePush : handleForcePull}
+            >
+              {isForceAction && <Loader2 size={12} className="animate-spin mr-1" />}
+              {confirmAction === 'forcePush' ? t('git.forcePush') : t('git.forcePull')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <div
+        className={cn(
+          'group p-2 rounded cursor-pointer text-sm flex flex-col gap-1',
+          'hover:bg-[var(--bg-hover)]',
+          isSelected && 'bg-[var(--bg-hover)]',
+          repo.isSubmodule && 'pl-8 ml-4 border-l-2 border-[var(--border-color)]'
+        )}
+        onClick={onToggle}
+        title={[repo.path, repo.isSubmodule && repo.parentPath ? `${t('git.parentRepo')}: ${repo.parentPath}` : '', repo.hasUncommittedChanges ? `${t('git.pendingFiles')}: ${repo.uncommittedCount} ${t('git.files')}` : ''].filter(Boolean).join('\n')}
+      >
+        {/* Repo name with status indicator and checkbox */}
+        <div className="flex items-center gap-2">
+          {/* Checkbox */}
+          <div 
+            className={cn(
+              'w-4 h-4 rounded border flex items-center justify-center shrink-0',
+              isSelected 
+                ? 'bg-[var(--accent)] border-[var(--accent)]' 
+                : 'border-[var(--border-color)]'
             )}
-            <span style={{ color: 'var(--text-primary)' }}>{repo.name}</span>
+          >
+            {isSelected && <Check size={10} className="text-[var(--text-primary)]" />}
           </div>
-          
-          {/* Git remote URL */}
-          <div className="text-xs pl-7" style={{ color: 'var(--text-muted)' }}>
-            {repo.remoteUrl || t('git.noRemote')}
+          {/* Status dot: red for uncommitted, green for clean */}
+          <div className="relative">
+            {repo.hasUncommittedChanges ? (
+              <Circle size={8} className="fill-red-500 text-red-500" />
+            ) : (
+              <Circle size={8} className="fill-green-500 text-green-500" />
+            )}
           </div>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" align="start" className="max-w-[300px]">
-        <div className="space-y-1">
-          <div><span className="font-medium">{t('git.repoPath')}:</span> {repo.path}</div>
-          {repo.isSubmodule && repo.parentPath && (
-            <div><span className="font-medium">{t('git.parentRepo')}:</span> {repo.parentPath}</div>
+          {/* Submodule indicator */}
+          {repo.isSubmodule && (
+            <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>{t('git.submodule')}</span>
           )}
-          {repo.hasUncommittedChanges && (
-            <div><span className="font-medium">{t('git.pendingFiles')}:</span> {repo.uncommittedCount} {t('git.files')}</div>
-          )}
+          <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{repo.name}</span>
+          {/* Action menu - outside Tooltip to avoid portal conflicts */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity hover:bg-[var(--bg-hover)]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal size={12} style={{ color: 'var(--text-muted)' }} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+              <DropdownMenuItem
+                className="text-xs cursor-pointer gap-2"
+                style={{ color: 'var(--text-primary)' }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirmAction('forcePush')
+                }}
+                disabled={!repo.remoteUrl}
+              >
+                <ArrowUpFromLine size={12} style={{ color: 'var(--text-muted)' }} />
+                <div className="flex flex-col">
+                  <span>{t('git.forcePush')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{t('git.forcePushDesc')}</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-xs cursor-pointer gap-2"
+                style={{ color: 'var(--text-primary)' }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirmAction('forcePull')
+                }}
+                disabled={!repo.remoteUrl}
+              >
+                <ArrowDownToLine size={12} style={{ color: 'var(--text-muted)' }} />
+                <div className="flex flex-col">
+                  <span>{t('git.forcePull')}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{t('git.forcePullDesc')}</span>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </TooltipContent>
-    </Tooltip>
+        
+        {/* Git remote URL */}
+        <div className="text-xs pl-7" style={{ color: 'var(--text-muted)' }}>
+          {repo.remoteUrl || t('git.noRemote')}
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -518,6 +650,7 @@ function GitView() {
                 repo={repo}
                 isSelected={selectedRepos.includes(repo.path)}
                 onToggle={() => toggleRepo(repo.path)}
+                onRefresh={handleRefresh}
               />
             ))}
           </div>

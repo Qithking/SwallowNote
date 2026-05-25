@@ -419,7 +419,18 @@
     "scanningPath": "扫描 {{path}}...",
     "pullSuccess": "已拉取 {{count}} 个仓库",
     "pullResult": "拉取完成：成功 {{success}} 个，失败 {{fail}} 个",
-    "pullConflict": "仓库 {{repos}} 存在合并冲突，请手动解决冲突后再同步"
+    "pullConflict": "仓库 {{repos}} 存在合并冲突，请手动解决冲突后再同步",
+    "forcePush": "强制同步",
+    "forcePushDesc": "强制推送本地提交到远程仓库，覆盖远程历史",
+    "forcePull": "强制刷新",
+    "forcePullDesc": "强制拉取远程内容覆盖到本地，丢弃本地所有未提交的修改",
+    "forcePushConfirm": "确定要强制推送 {{repo}} 吗？这将覆盖远程仓库的历史记录。",
+    "forcePullConfirm": "确定要强制刷新 {{repo}} 吗？这将丢弃本地所有未提交的修改，以远程内容为准。",
+    "forcePushSuccess": "已强制推送 {{repo}}",
+    "forcePullSuccess": "已强制刷新 {{repo}}",
+    "forcePushFailed": "强制推送 {{repo}} 失败: {{error}}",
+    "forcePullFailed": "强制刷新 {{repo}} 失败: {{error}}",
+    "repoActions": "仓库操作"
   },
   "history": {
     "title": "历史",

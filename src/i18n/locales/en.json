@@ -419,7 +419,18 @@
     "scanningPath": "Scanning {{path}}...",
     "pullSuccess": "Pulled {{count}} repo(s)",
     "pullResult": "Pull completed: {{success}} succeeded, {{fail}} failed",
-    "pullConflict": "Repos {{repos}} have merge conflicts. Please resolve conflicts manually before syncing"
+    "pullConflict": "Repos {{repos}} have merge conflicts. Please resolve conflicts manually before syncing",
+    "forcePush": "Force Push",
+    "forcePushDesc": "Force push local commits to remote, overwriting remote history",
+    "forcePull": "Force Pull",
+    "forcePullDesc": "Force pull remote content, discarding all local uncommitted changes",
+    "forcePushConfirm": "Are you sure you want to force push {{repo}}? This will overwrite the remote repository history.",
+    "forcePullConfirm": "Are you sure you want to force pull {{repo}}? This will discard all local uncommitted changes.",
+    "forcePushSuccess": "Force pushed {{repo}}",
+    "forcePullSuccess": "Force pulled {{repo}}",
+    "forcePushFailed": "Force push {{repo}} failed: {{error}}",
+    "forcePullFailed": "Force pull {{repo}} failed: {{error}}",
+    "repoActions": "Repo Actions"
   },
   "history": {
     "title": "History",

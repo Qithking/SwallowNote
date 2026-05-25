@@ -101,6 +101,8 @@ pub fn run() {
             commands::git::git_pull_with_credentials,
             commands::git::git_push,
             commands::git::git_push_with_credentials,
+            commands::git::git_force_push,
+            commands::git::git_force_pull,
             commands::git::git_credential_save,
             commands::git::git_credential_get,
             commands::git::git_credential_delete,

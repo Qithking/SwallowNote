@@ -225,6 +225,14 @@ export async function gitPullWithCredentials(path: string, username: string, pas
   await invoke('git_pull_with_credentials', { path, username, password })
 }
 
+export async function gitForcePush(path: string): Promise<void> {
+  await invoke('git_force_push', { path })
+}
+
+export async function gitForcePull(path: string): Promise<void> {
+  await invoke('git_force_pull', { path })
+}
+
 // Git Keyring Credential APIs
 export interface GitCredential {
   username: string
