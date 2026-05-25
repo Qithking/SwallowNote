@@ -8,7 +8,7 @@ import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
 import DiffViewer from './DiffViewer/DiffViewer'
-import { FileCode, FolderOpen, FileText, Clock, GitFork, ArrowRight } from 'lucide-react'
+import { FileCode, FolderOpen, FileText, Clock, GitFork, ArrowRight, Layers } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { useTranslation } from 'react-i18next'
 import { openFolderDialog, openFileDialog, getFolderHistory } from '@/lib/tauri'
@@ -79,7 +79,10 @@ function WelcomeActionItem({
 }
 
 function RecentFileItem({ path, onClick }: { path: string; onClick: () => void }) {
-  const name = path.split('/').pop() || path
+  const isWorkspace = path.endsWith('.swallow-workspace')
+  const name = isWorkspace
+    ? (path.split('/').pop() || path).replace('.swallow-workspace', '')
+    : (path.split('/').pop() || path)
   const dir = path.substring(0, path.lastIndexOf('/'))
   const dirName = dir.split('/').pop() || dir
 
@@ -89,7 +92,11 @@ function RecentFileItem({ path, onClick }: { path: string; onClick: () => void }
       className="group flex items-center gap-2 w-full px-4 py-1.5 rounded-sm text-left transition-colors hover:bg-[var(--bg-hover)] cursor-pointer"
       style={{ color: 'var(--text-primary)' }}
     >
-      <FileText size={13} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+      {isWorkspace ? (
+        <Layers size={13} className="shrink-0" style={{ color: 'var(--theme-color)' }} />
+      ) : (
+        <FolderOpen size={13} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+      )}
       <span className="text-[13px] flex-1 truncate">{name}</span>
       <span className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>{dirName}</span>
     </button>
@@ -157,9 +164,19 @@ function WelcomeScreen() {
 
   const handleOpenRecent = useCallback(async (path: string) => {
     try {
-      if (workspaceMode === 'workspace' && path.endsWith('.swallow-workspace')) {
+      const isWorkspace = path.endsWith('.swallow-workspace')
+      const { switchMode } = useWorkspaceStore.getState()
+      if (isWorkspace) {
+        // Switch to workspace mode first if needed, then load the workspace file
+        if (workspaceMode !== 'workspace') {
+          await switchMode('workspace')
+        }
         await useWorkspaceStore.getState().loadWorkspaceFile(path)
       } else {
+        // Switch to folder mode first if needed, then open the folder
+        if (workspaceMode !== 'folder') {
+          await switchMode('folder')
+        }
         await useWorkspaceStore.getState().openFolder(path)
       }
     } catch (e) {
