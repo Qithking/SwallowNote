@@ -339,13 +339,6 @@ export function EditorView() {
           reason={t('editor.binaryFile')}
         />
       )}
-
-      {(fileType === 'unknown' || !fileType) && (
-        <UnsupportedEditor
-          filename={activeTab.name}
-          reason={t('editor.unsupportedType')}
-        />
-      )}
     </div>
   )
 }

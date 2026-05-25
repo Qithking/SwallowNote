@@ -46,8 +46,6 @@ function BlockNoteInner({
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
   const {
-    normalPaddingVertical,
-    normalPaddingHorizontal,
     widePaddingVertical,
     widePaddingHorizontal,
   } = useEditorSettingsStore()
