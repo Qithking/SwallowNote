@@ -70,7 +70,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   setSelectedPath: (path) => set({ selectedPath: path }),
 
   toggleNode: async (path) => {
-    const { nodes, expanded } = get()
+    const { expanded } = get()
     const newExpanded = new Set(expanded)
 
     if (newExpanded.has(path)) {
@@ -80,22 +80,22 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
 
     newExpanded.add(path)
+    // Set expanded immediately so the user sees visual feedback (arrow rotation)
+    set({ expanded: newExpanded })
 
-    // Load children if not loaded yet
+    // Load children if not loaded yet (use latest state after setting expanded)
+    const { nodes } = get()
     const node = findNodeInList(nodes, path)
     if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
       try {
         const children = await loadDirectory(path, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
-        set({
-          nodes: updateNodesWithChildren(nodes, path, children),
-          expanded: newExpanded,
-        })
+        // Use get().nodes to get the latest state after async operation,
+        // preventing stale state from overwriting concurrent changes
+        const currentNodes = get().nodes
+        set({ nodes: updateNodesWithChildren(currentNodes, path, children) })
       } catch (e) {
         console.error(e)
-        set({ expanded: newExpanded })
       }
-    } else {
-      set({ expanded: newExpanded })
     }
   },
 

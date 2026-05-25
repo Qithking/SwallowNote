@@ -94,41 +94,19 @@ pub async fn get_home_dir() -> Result<String, String> {
 }
 
 #[cfg(target_os = "macos")]
-fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let file_name = entry.file_name();
-    let bytes = file_name.as_os_str().as_bytes();
-    if !bytes.is_empty() && bytes[0] == b'.' {
-        return true;
-    }
+fn is_hidden_macos(metadata: &std::fs::Metadata) -> bool {
+    // Note: dot-prefix check is done by the caller before calling this function
     const UF_HIDDEN: u32 = 0x00008000;
-    if let Ok(metadata) = std::fs::metadata(entry.path()) {
-        use std::os::darwin::fs::MetadataExt;
-        if metadata.st_flags() & UF_HIDDEN != 0 {
-            return true;
-        }
-    }
-    false
-}
-
-#[cfg(target_os = "linux")]
-fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let file_name = entry.file_name();
-    let bytes = file_name.as_os_str().as_bytes();
-    !bytes.is_empty() && bytes[0] == b'.'
+    use std::os::darwin::fs::MetadataExt;
+    metadata.st_flags() & UF_HIDDEN != 0
 }
 
 #[cfg(target_os = "windows")]
-fn is_hidden(entry: &tokio::fs::DirEntry) -> bool {
+fn is_hidden_windows(metadata: &std::fs::Metadata) -> bool {
+    // Note: dot-prefix check is done by the caller before calling this function
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x00000002;
-    if let Ok(metadata) = std::fs::metadata(entry.path()) {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0 {
-            return true;
-        }
-    }
-    false
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
 }
 
 #[tauri::command]
@@ -149,30 +127,61 @@ pub async fn list_directory(
         return Err(format!("Path is not a directory: {}", path.display()));
     }
 
-    let mut entries = tokio::fs::read_dir(&path)
-        .await
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    // Use jwalk for high-performance parallel directory scanning.
+    // jwalk pre-fetches metadata in parallel, which is significantly faster than
+    // sequential tokio::fs::read_dir + metadata calls, especially on Windows and
+    // network drives. For single-level listing, we set sort to true for consistent
+    // ordering and use max_depth(1) to avoid unnecessary recursion.
+    let mut nodes: Vec<FileNode> = Vec::new();
 
-    let mut nodes = Vec::new();
-
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|e| format!("Failed to read entry: {}", e))?
+    for entry_result in jwalk::WalkDir::new(&path)
+        .max_depth(1)
+        .sort(true)
     {
+        let entry = match entry_result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        // Skip the root directory itself (jwalk yields the root as the first entry)
+        if entry.depth() == 0 {
+            continue;
+        }
+
         let file_name = entry.file_name().to_string_lossy().to_string();
 
+        // Filter hidden files and special directories
         if !show_all_files {
-            if is_hidden(&entry) {
+            // Check dot-prefix fast path (common across all platforms)
+            if file_name.starts_with('.') {
                 continue;
             }
             if file_name == "node_modules" || file_name == ".swallownote" {
                 continue;
             }
+            // Platform-specific hidden check using pre-fetched metadata
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(metadata) = entry.metadata() {
+                    if is_hidden_macos(&metadata) {
+                        continue;
+                    }
+                }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(metadata) = entry.metadata() {
+                    if is_hidden_windows(&metadata) {
+                        continue;
+                    }
+                }
+            }
+            // Linux: dot-prefix check above already handles hidden files
         }
 
-        let entry_path = entry.path();
-        let is_directory = entry_path.is_dir();
+        let is_directory = entry
+            .file_type()
+            .is_dir();
 
         if markdown_only && !is_directory {
             let lower_name = file_name.to_lowercase();
@@ -182,6 +191,7 @@ pub async fn list_directory(
         }
 
         // Normalize path separators to forward slashes for cross-platform consistency
+        let entry_path = entry.path();
         let path_str = entry_path.to_string_lossy().to_string().replace('\\', "/");
         nodes.push(FileNode {
             id: Uuid::new_v4().to_string(),
@@ -192,6 +202,8 @@ pub async fn list_directory(
         });
     }
 
+    // jwalk with sort(true) already sorts by file name, but we need
+    // directories-first ordering which jwalk doesn't provide directly
     nodes.sort_by(|a, b| {
         match (a.is_directory, b.is_directory) {
             (true, false) => std::cmp::Ordering::Less,
