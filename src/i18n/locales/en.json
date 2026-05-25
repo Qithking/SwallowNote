@@ -282,6 +282,8 @@
     "noFolderOpened": "No folder opened",
     "deleteSuccess": "Successfully deleted {{count}} item(s)",
     "deletePartial": "Deletion complete: {{success}} succeeded, {{fail}} failed",
+    "moveSuccess": "Successfully moved {{count}} item(s) to \"{{target}}\"",
+    "movePartial": "Move complete: {{success}} succeeded, {{fail}} failed",
     "explorerTitle": "Explorer",
     "addToWorkspace": "Add Folder to Workspace",
     "openFolder": "Open Folder",

@@ -13,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
 import { useTranslation } from 'react-i18next'
 import { matchShortcut, getShortcutKey } from '@/lib/shortcuts'
+import { invoke } from '@tauri-apps/api/core'
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
@@ -87,6 +88,8 @@ export function FileTreeView() {
   const editingCommitRef = useRef(false)
   const newItemCommitRef = useRef(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null)
+  const [dragSourcePaths, setDragSourcePaths] = useState<string[]>([])
   const { t } = useTranslation()
 
   const handleRefresh = async () => {
@@ -499,7 +502,7 @@ export function FileTreeView() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only handle shortcuts when the file tree area has focus or no input is focused
       const activeEl = document.activeElement
-      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || (activeEl as HTMLElement).isContentEditable)) {
         return
       }
 
@@ -540,16 +543,144 @@ export function FileTreeView() {
 
   const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath, nodes)?.isDirectory ?? false) : false
 
+  // === Drag & Drop handlers ===
+
+  /** Check if a target path is a valid drop target (must be a directory, and not a descendant of any source path) */
+  const isValidDropTarget = useCallback((targetPath: string, sourcePaths: string[]): boolean => {
+    const targetNode = findNodeByPath(targetPath, nodes)
+    if (!targetNode?.isDirectory) return false
+    // Cannot drop onto self or into a descendant of any source
+    for (const src of sourcePaths) {
+      if (targetPath === src || targetPath.startsWith(src + '/')) return false
+    }
+    return true
+  }, [nodes])
+
+  const handleDragStart = useCallback((e: React.DragEvent, node: FileNode) => {
+    e.stopPropagation()
+    // Determine what's being dragged: multi-selected nodes or just this node
+    const paths = multiSelectedPaths.size > 1 && multiSelectedPaths.has(node.path)
+      ? Array.from(multiSelectedPaths)
+      : [node.path]
+    setDragSourcePaths(paths)
+    e.dataTransfer.setData('application/json', JSON.stringify(paths))
+    e.dataTransfer.effectAllowed = 'move'
+  }, [multiSelectedPaths])
+
+  const handleDragOver = useCallback((e: React.DragEvent, node: FileNode) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Read from stored state since dataTransfer data isn't accessible in dragover
+    if (isValidDropTarget(node.path, dragSourcePaths)) {
+      e.dataTransfer.dropEffect = 'move'
+      setDragOverPath(node.path)
+    } else {
+      e.dataTransfer.dropEffect = 'none'
+    }
+  }, [dragSourcePaths, isValidDropTarget])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // Only clear if leaving the current element (not entering a child)
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    if (e.clientX <= rect.left || e.clientX >= rect.right || e.clientY <= rect.top || e.clientY >= rect.bottom) {
+      setDragOverPath(null)
+    }
+  }, [])
+
+  const handleDrop = useCallback(async (e: React.DragEvent, targetNode: FileNode) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOverPath(null)
+
+    if (!isValidDropTarget(targetNode.path, dragSourcePaths)) {
+      setDragSourcePaths([])
+      return
+    }
+
+    const sourcePaths = [...dragSourcePaths]
+    setDragSourcePaths([])
+
+    if (sourcePaths.length === 0) return
+
+    let successCount = 0
+    let failCount = 0
+
+    for (const srcPath of sourcePaths) {
+      const fileName = srcPath.split('/').pop() || srcPath
+      const destPath = `${targetNode.path}/${fileName}`
+
+      // Skip if source and destination are the same
+      if (srcPath === destPath) continue
+
+      try {
+        await invoke('rename_file', {
+          req: { old_path: srcPath, new_path: destPath }
+        })
+
+        // Update any open tabs with the new path
+        const editorStore = useEditorStore.getState()
+        editorStore.updateTabPath(srcPath, destPath, fileName)
+        successCount++
+      } catch (err) {
+        console.error('Failed to move:', srcPath, err)
+        failCount++
+      }
+    }
+
+    // Refresh source parent directories and target directory
+    const dirsToRefresh = new Set<string>()
+    dirsToRefresh.add(targetNode.path)
+    for (const srcPath of sourcePaths) {
+      const parentPath = srcPath.substring(0, srcPath.lastIndexOf('/'))
+      if (parentPath && parentPath !== targetNode.path) {
+        dirsToRefresh.add(parentPath)
+      }
+    }
+
+    // Ensure target directory is expanded
+    if (!expanded.has(targetNode.path)) {
+      await toggleNode(targetNode.path)
+    }
+
+    for (const dirPath of dirsToRefresh) {
+      try {
+        const children = await loadDirectory(dirPath, showAllFiles, markdownOnly)
+        const currentNodes = useFileTreeStore.getState().nodes
+        setNodes(updateNodesWithChildren(currentNodes, dirPath, children))
+      } catch (err) {
+        console.error('Failed to refresh directory:', dirPath, err)
+      }
+    }
+
+    // Update selection
+    clearMultiSelection()
+    setSelectedPath(targetNode.path)
+
+    if (failCount === 0) {
+      showToast(t('fileTree.moveSuccess', { count: successCount, target: targetNode.name }), 'success')
+    } else {
+      showToast(t('fileTree.movePartial', { success: successCount, fail: failCount }), 'error')
+    }
+  }, [dragSourcePaths, isValidDropTarget, expanded, toggleNode, showAllFiles, markdownOnly, setNodes, clearMultiSelection, setSelectedPath, showToast, t])
+
+  const handleDragEnd = useCallback(() => {
+    setDragOverPath(null)
+    setDragSourcePaths([])
+  }, [])
+
   const renderNode = (node: FileNode, depth: number): React.ReactNode => {
     const isNewItemNode = newItem?.parentPath === node.path
     const isEditing = editingPath === node.path
     const isSelected = node.path === selectedPath
     const isMultiSelected = multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1
 
+    const isDragOver = dragOverPath === node.path
+    const isDragging = dragSourcePaths.includes(node.path)
+
     const nodeContent = (
       <div
         data-path={node.path}
-        className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : isMultiSelected ? 'bg-primary/5 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+        className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : isDragOver ? 'bg-primary/15 text-[var(--text-primary)] border-t border-primary/30' : isMultiSelected ? 'bg-primary/5 text-[var(--text-primary)]' : isDragging ? 'opacity-50 text-[var(--text-secondary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={(e) => !isEditing && handleSelect(node, e.shiftKey)}
       >
@@ -599,7 +730,15 @@ export function FileTreeView() {
     )
 
     return (
-      <div key={node.path}>
+      <div
+        key={node.path}
+        draggable={!isEditing}
+        onDragStart={(e) => handleDragStart(e, node)}
+        onDragOver={(e) => handleDragOver(e, node)}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => handleDrop(e, node)}
+        onDragEnd={handleDragEnd}
+      >
         <TreeNodeContextMenu
           node={node}
           onRename={() => handleStartEdit(node.path, node.name, node.isDirectory)}

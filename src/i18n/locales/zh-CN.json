@@ -282,6 +282,8 @@
     "noFolderOpened": "未打开文件夹",
     "deleteSuccess": "成功删除 {{count}} 个项目",
     "deletePartial": "删除完成：成功 {{success}} 个，失败 {{fail}} 个",
+    "moveSuccess": "成功移动 {{count}} 个项目到「{{target}}」",
+    "movePartial": "移动完成：成功 {{success}} 个，失败 {{fail}} 个",
     "explorerTitle": "资源管理器",
     "addToWorkspace": "添加文件夹到工作区",
     "openFolder": "打开文件夹",
