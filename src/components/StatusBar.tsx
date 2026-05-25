@@ -24,8 +24,11 @@ import { useTranslation } from 'react-i18next'
 
 type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-failed' | 'downloading' | 'download-ready' | 'download-failed'
 
+const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000 // 1 hour in ms
+
 function StatusBar() {
   const { showToast } = useUIStore()
+  const { autoCheckUpdate } = useUIStore()
   const { t } = useTranslation()
   const [currentVersion] = useState(packageJson.version)
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
@@ -36,11 +39,62 @@ function StatusBar() {
   const cancelDownloadRef = useRef<(() => void) | null>(null)
   // Track last emitted progress to skip redundant setState calls
   const lastProgressRef = useRef<number>(-1)
+  // Ref to track if a check is already in progress (prevents concurrent checks)
+  const isCheckingRef = useRef(false)
 
   useEffect(() => {
     checkDownloadedInstaller()
     return () => {
       cancelDownloadRef.current?.()
+    }
+  }, [])
+
+  // Auto-check on first launch + periodic silent check every hour
+  useEffect(() => {
+    if (!autoCheckUpdate) return
+
+    // Initial check after a short delay (so the app UI is ready first)
+    const initialTimer = setTimeout(() => {
+      silentCheckForUpdate()
+    }, 3000)
+
+    // Set up hourly interval
+    const intervalId = setInterval(() => {
+      silentCheckForUpdate()
+    }, UPDATE_CHECK_INTERVAL)
+
+    return () => {
+      clearTimeout(initialTimer)
+      clearInterval(intervalId)
+    }
+  }, [autoCheckUpdate])
+
+  /**
+   * Silent version check: only updates the status bar when a new version is found.
+   * If no update or check fails, does not change the current versionStatus at all
+   * (so it won't disrupt any ongoing download or other state).
+   */
+  const silentCheckForUpdate = useCallback(async () => {
+    // Prevent concurrent checks
+    if (isCheckingRef.current) return
+    isCheckingRef.current = true
+
+    try {
+      const result = await checkLatestVersion()
+      if (result?.hasUpdate) {
+        setLatestVersion(result.latest)
+        // Only transition to has-update if we're in a state that makes sense
+        setVersionStatus(prev => {
+          // Don't interrupt downloading or download-ready states
+          if (prev === 'downloading' || prev === 'download-ready') return prev
+          return 'has-update'
+        })
+      }
+      // If no update, or check failed: do nothing (silent)
+    } catch {
+      // Silent: ignore errors
+    } finally {
+      isCheckingRef.current = false
     }
   }, [])
 

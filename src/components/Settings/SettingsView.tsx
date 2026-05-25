@@ -66,6 +66,7 @@ function SettingsView() {
   const {
     theme, setTheme,
     autoStart, setAutoStart,
+    autoCheckUpdate, setAutoCheckUpdate,
     closeWithoutExit, setCloseWithoutExit,
     noteWidth, setNoteWidth,
     showAllFiles, setShowAllFiles,
@@ -174,6 +175,11 @@ function SettingsView() {
                   <div className="px-4">
                     <SettingRow label={t('settings.general.autoStart')} desc={t('settings.general.autoStart.desc')}>
                       <Switch checked={autoStart} onCheckedChange={setAutoStart} />
+                    </SettingRow>
+                  </div>
+                  <div className="px-4">
+                    <SettingRow label={t('settings.general.autoCheckUpdate')} desc={t('settings.general.autoCheckUpdate.desc')}>
+                      <Switch checked={autoCheckUpdate} onCheckedChange={setAutoCheckUpdate} />
                     </SettingRow>
                   </div>                  
                   <div className="px-4">

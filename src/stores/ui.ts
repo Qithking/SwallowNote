@@ -116,6 +116,7 @@ export interface UIState {
   clipboardIsCut: boolean
   workspaceMode: WorkspaceMode
   autoStart: boolean
+  autoCheckUpdate: boolean
   closeWithoutExit: boolean
   noteWidth: NoteWidth
   showAllFiles: boolean
@@ -156,6 +157,7 @@ export interface UIState {
   setWorkspaceMode: (mode: WorkspaceMode) => void
   initWorkspaceMode: () => Promise<void>
   setAutoStart: (value: boolean) => void
+  setAutoCheckUpdate: (value: boolean) => void
   setCloseWithoutExit: (value: boolean) => void
   setNoteWidth: (width: NoteWidth) => void
   setShowAllFiles: (value: boolean) => void
@@ -203,6 +205,7 @@ export const useUIStore = create<UIState>((set) => ({
   clipboardIsCut: false,
   workspaceMode: 'folder',
   autoStart: false,
+  autoCheckUpdate: true,
   closeWithoutExit: false,
   noteWidth: 'normal',
   showAllFiles: false,
@@ -279,6 +282,10 @@ export const useUIStore = create<UIState>((set) => ({
     set({ autoStart: value })
     saveAppSettings({ autoStart: String(value) })
     setAutoStartEnabled(value).catch(() => {})
+  },
+  setAutoCheckUpdate: (value) => {
+    set({ autoCheckUpdate: value })
+    saveAppSettings({ autoCheckUpdate: String(value) })
   },
   setCloseWithoutExit: (value) => {
     set({ closeWithoutExit: value })
@@ -554,6 +561,7 @@ export const useUIStore = create<UIState>((set) => ({
         theme: s.theme as Theme,
         themeColor: s.themeColor,
         autoStart: s.autoStart === 'true',
+        autoCheckUpdate: s.autoCheckUpdate !== 'false', // default true
         closeWithoutExit: s.closeWithoutExit === 'true',
         noteWidth: s.noteWidth as NoteWidth,
         showAllFiles: s.showAllFiles === 'true',

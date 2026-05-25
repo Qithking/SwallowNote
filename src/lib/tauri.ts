@@ -364,6 +364,7 @@ export interface AppSettings {
   theme: string
   themeColor: string
   autoStart: string
+  autoCheckUpdate: string
   closeWithoutExit: string
   noteWidth: string
   showAllFiles: string
@@ -390,6 +391,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     theme: get('theme', 'light'),
     themeColor: get('themeColor', '#005fb8'),
     autoStart: get('autoStart', 'false'),
+    autoCheckUpdate: get('autoCheckUpdate', 'true'),
     closeWithoutExit: get('closeWithoutExit', 'false'),
     noteWidth: get('noteWidth', 'normal'),
     showAllFiles: get('showAllFiles', 'false'),
