@@ -41,6 +41,11 @@ function StatusBar() {
   const lastProgressRef = useRef<number>(-1)
   // Ref to track if a check is already in progress (prevents concurrent checks)
   const isCheckingRef = useRef(false)
+  // Mirror versionStatus into a ref so callbacks always read the latest value
+  // without needing it as a dependency (avoids stale-closure bugs)
+  const versionStatusRef = useRef<VersionStatus>(versionStatus)
+  // Keep the ref in sync with the state
+  versionStatusRef.current = versionStatus
 
   useEffect(() => {
     checkDownloadedInstaller()
@@ -87,6 +92,7 @@ function StatusBar() {
         setVersionStatus(prev => {
           // Don't interrupt downloading or download-ready states
           if (prev === 'downloading' || prev === 'download-ready') return prev
+          versionStatusRef.current = 'has-update'
           return 'has-update'
         })
       }
@@ -109,43 +115,58 @@ function StatusBar() {
         setDownloadedPath(filePath)
         setLatestVersion(currentVersion)
         setVersionStatus('download-ready')
+        versionStatusRef.current = 'download-ready'
       }
     } catch {
     }
   }
 
   const handleVersionClick = useCallback(async () => {
-    if (versionStatus === 'downloading') {
+    const status = versionStatusRef.current
+
+    if (status === 'downloading') {
       return
     }
 
-    if (versionStatus === 'idle' || versionStatus === 'check-failed' || versionStatus === 'up-to-date') {
+    if (status === 'idle' || status === 'check-failed' || status === 'up-to-date') {
       setVersionStatus('checking')
+      versionStatusRef.current = 'checking'
       try {
         const result = await checkLatestVersion()
         if (result) {
           setLatestVersion(result.latest)
           if (result.hasUpdate) {
             setVersionStatus('has-update')
+            versionStatusRef.current = 'has-update'
           } else {
             setVersionStatus('up-to-date')
+            versionStatusRef.current = 'up-to-date'
           }
         } else {
           setVersionStatus('check-failed')
+          versionStatusRef.current = 'check-failed'
         }
       } catch {
         setVersionStatus('check-failed')
+        versionStatusRef.current = 'check-failed'
       }
       return
     }
 
-    if (versionStatus === 'has-update' || versionStatus === 'download-failed') {
+    if (status === 'has-update' || status === 'download-failed') {
+      // Cancel any previous download listeners first
+      cancelDownloadRef.current?.()
+      cancelDownloadRef.current = null
+
       setVersionStatus('downloading')
+      versionStatusRef.current = 'downloading'
       setDownloadProgress(0)
       lastProgressRef.current = -1
-      cancelDownloadRef.current?.()
+
       const cancel = downloadLatestRelease(
         (progress: DownloadProgress) => {
+          // Only accept progress if we are still in downloading state
+          if (versionStatusRef.current !== 'downloading') return
           const rounded = Math.round(progress.progress)
           // Skip setState if the integer progress hasn't changed
           if (rounded !== lastProgressRef.current) {
@@ -154,13 +175,17 @@ function StatusBar() {
           }
         },
         (path: string) => {
+          if (versionStatusRef.current !== 'downloading') return
           setDownloadedPath(path)
           setVersionStatus('download-ready')
+          versionStatusRef.current = 'download-ready'
           setShowUpgradeDialog(true)
           cancelDownloadRef.current = null
         },
         (error: string) => {
+          if (versionStatusRef.current !== 'downloading') return
           setVersionStatus('download-failed')
+          versionStatusRef.current = 'download-failed'
           showToast(t('statusBar.downloadFailed', { error }))
           cancelDownloadRef.current = null
         }
@@ -168,10 +193,10 @@ function StatusBar() {
       cancelDownloadRef.current = cancel
     }
 
-    if (versionStatus === 'download-ready') {
+    if (status === 'download-ready') {
       setShowUpgradeDialog(true)
     }
-  }, [versionStatus, showToast])
+  }, [showToast])
 
   const handleUpgradeConfirm = useCallback(async () => {
     setShowUpgradeDialog(false)
@@ -205,6 +230,7 @@ function StatusBar() {
   const handleUpgradeCancel = useCallback(() => {
     setShowUpgradeDialog(false)
     setVersionStatus('download-ready')
+    versionStatusRef.current = 'download-ready'
   }, [])
 
   const handleRepoLinkClick = async () => {

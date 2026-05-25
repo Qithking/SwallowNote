@@ -1,9 +1,15 @@
 use futures::StreamExt;
+use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
+
+/// Global lock to prevent concurrent downloads.
+/// If a download is already in progress, subsequent calls are rejected.
+static IS_DOWNLOADING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReleaseAsset {
@@ -51,6 +57,20 @@ fn get_default_download_dir() -> PathBuf {
 
 #[tauri::command]
 pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
+    // Acquire the download lock – reject if a download is already in progress
+    if IS_DOWNLOADING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return Err("A download is already in progress".to_string());
+    }
+
+    let result = download_latest_release_inner(&app).await;
+
+    // Always release the lock when done (success or failure)
+    IS_DOWNLOADING.store(false, Ordering::SeqCst);
+    result
+}
+
+/// Inner implementation that performs the actual download.
+async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
     let client = Client::builder()
         .user_agent("SwallowNote/0.1.0")
         .build()
@@ -137,6 +157,14 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         path: file_path.to_string_lossy().to_string().replace('\\', "/"),
     });
 
+    Ok(())
+}
+
+/// Cancel the current download by resetting the lock.
+/// This is a safety valve – the main protection is on the frontend side.
+#[tauri::command]
+pub fn cancel_download() -> Result<(), String> {
+    IS_DOWNLOADING.store(false, Ordering::SeqCst);
     Ok(())
 }
 

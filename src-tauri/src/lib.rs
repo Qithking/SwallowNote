@@ -124,6 +124,7 @@ pub fn run() {
             commands::upgrade::install_and_restart,
             commands::upgrade::get_platform_extension,
             commands::upgrade::get_download_dir,
+            commands::upgrade::cancel_download,
             services::file_watcher::watch_directory,
             services::file_watcher::unwatch_directory,
             mac_rounded_corners::enable_rounded_corners,
