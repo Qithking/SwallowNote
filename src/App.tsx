@@ -54,6 +54,12 @@ function App() {
       // Sync current i18n language to the Rust backend
       const { default: i18n } = await import('i18next')
       setAppLocale(i18n.language).catch(() => {})
+
+      // Window was created hidden (visible:false) to prevent white→black flash.
+      // Now that theme and settings are loaded, show the window.
+      try {
+        await getCurrentWindow().show()
+      } catch {}
     }
     init()
   }, [])

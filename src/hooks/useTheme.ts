@@ -44,6 +44,69 @@ function hexToHSLString(hex: string): string {
   return `${h} ${s}% ${l}%`
 }
 
+/**
+ * Build CSS variable overrides for a given mode (dark or light).
+ * Returns an object like { '--bg-primary': '#1e1e1e', ... } with only non-empty values.
+ */
+function buildCssVars(
+  isDark: boolean,
+  themeColor: string,
+  customThemes: { id: string; dark: { themeColor: string; appBg: string; contentBg: string; appBgGradient?: string; contentBgGradient?: string; textColor: string; borderColor: string; tooltipColor: string }; light: { themeColor: string; appBg: string; contentBg: string; appBgGradient?: string; contentBgGradient?: string; textColor: string; borderColor: string; tooltipColor: string } }[],
+  activeLightCustomThemeId: string,
+  activeDarkCustomThemeId: string,
+): Record<string, string> {
+  const activeCustomThemeId = isDark ? activeDarkCustomThemeId : activeLightCustomThemeId
+  const activeTheme = customThemes.find((t) => t.id === activeCustomThemeId)
+  const vars: Record<string, string> = {}
+  const add = (name: string, value: string) => { if (value) vars[name] = value }
+
+  if (activeTheme) {
+    const colors = isDark ? activeTheme.dark : activeTheme.light
+    const { h, s, l } = hexToHSL(colors.themeColor)
+    const primaryL = isDark ? Math.min(l + 6, 80) : l
+    const hoverL = Math.min(primaryL + 7, 90)
+    add('--theme-color', colors.themeColor)
+    add('--theme-color-hover', `hsl(${h}, ${s}%, ${hoverL}%)`)
+    add('--primary', `${h} ${s}% ${primaryL}%`)
+    add('--ring', `${h} ${s}% ${primaryL}%`)
+    add('--tab-activeBorderTop', colors.themeColor)
+    add('--status-bg', colors.themeColor)
+    add('--bg-primary', colors.appBg)
+    add('--bg-secondary', colors.contentBg)
+    add('--bg-primary-gradient', colors.appBgGradient || '')
+    add('--bg-secondary-gradient', colors.contentBgGradient || '')
+    add('--text-primary', colors.textColor)
+    add('--border-color', colors.borderColor)
+    add('--popover', hexToHSLString(colors.tooltipColor))
+  } else {
+    const { h, s, l } = hexToHSL(themeColor)
+    const primaryL = isDark ? Math.min(l + 6, 80) : l
+    const hoverL = Math.min(primaryL + 7, 90)
+    add('--theme-color', themeColor)
+    add('--theme-color-hover', `hsl(${h}, ${s}%, ${hoverL}%)`)
+    add('--primary', `${h} ${s}% ${primaryL}%`)
+    add('--ring', `${h} ${s}% ${primaryL}%`)
+    add('--tab-activeBorderTop', themeColor)
+    add('--status-bg', themeColor)
+  }
+  return vars
+}
+
+/** Persist theme preference + both dark/light CSS vars to localStorage for the inline script in index.html */
+function persistTheme(theme: string, darkCssVars: Record<string, string>, lightCssVars: Record<string, string>) {
+  try {
+    localStorage.setItem('sn-theme', JSON.stringify({ theme, darkCssVars, lightCssVars }))
+  } catch {}
+}
+
+/** Clear custom theme CSS variables so CSS defaults take over */
+function clearCustomVars() {
+  const root = document.documentElement
+  for (const name of ['--bg-primary', '--bg-secondary', '--bg-primary-gradient', '--bg-secondary-gradient', '--text-primary', '--border-color', '--popover']) {
+    root.style.setProperty(name, '')
+  }
+}
+
 export function useTheme() {
   const { theme, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId } = useUIStore()
 
@@ -76,7 +139,7 @@ export function useTheme() {
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [theme])
 
-  // Effect 2: Apply custom theme CSS variables
+  // Effect 2: Apply custom theme CSS variables and persist to localStorage
   // systemIsDark is a dependency so this re-runs when system preference changes
   useEffect(() => {
     const root = document.documentElement
@@ -84,6 +147,7 @@ export function useTheme() {
 
     const activeCustomThemeId = isDark ? activeDarkCustomThemeId : activeLightCustomThemeId
     const activeTheme = customThemes.find((t) => t.id === activeCustomThemeId)
+
     if (activeTheme) {
       const colors = isDark ? activeTheme.dark : activeTheme.light
       const { h, s, l } = hexToHSL(colors.themeColor)
@@ -102,28 +166,25 @@ export function useTheme() {
       root.style.setProperty('--bg-secondary-gradient', colors.contentBgGradient || '')
       root.style.setProperty('--text-primary', colors.textColor)
       root.style.setProperty('--border-color', colors.borderColor)
-      // Convert tooltipColor hex to HSL string format for --popover
-      // Tailwind's bg-popover expects HSL values like "0 0% 100%"
       root.style.setProperty('--popover', hexToHSLString(colors.tooltipColor))
-      return
+    } else {
+      const { h, s, l } = hexToHSL(themeColor)
+      const primaryL = isDark ? Math.min(l + 6, 80) : l
+      const hoverL = Math.min(primaryL + 7, 90)
+
+      root.style.setProperty('--theme-color', themeColor)
+      root.style.setProperty('--theme-color-hover', `hsl(${h}, ${s}%, ${hoverL}%)`)
+      root.style.setProperty('--primary', `${h} ${s}% ${primaryL}%`)
+      root.style.setProperty('--ring', `${h} ${s}% ${primaryL}%`)
+      root.style.setProperty('--tab-activeBorderTop', themeColor)
+      root.style.setProperty('--status-bg', themeColor)
+      clearCustomVars()
     }
 
-    const { h, s, l } = hexToHSL(themeColor)
-    const primaryL = isDark ? Math.min(l + 6, 80) : l
-    const hoverL = Math.min(primaryL + 7, 90)
-
-    root.style.setProperty('--theme-color', themeColor)
-    root.style.setProperty('--theme-color-hover', `hsl(${h}, ${s}%, ${hoverL}%)`)
-    root.style.setProperty('--primary', `${h} ${s}% ${primaryL}%`)
-    root.style.setProperty('--ring', `${h} ${s}% ${primaryL}%`)
-    root.style.setProperty('--tab-activeBorderTop', themeColor)
-    root.style.setProperty('--status-bg', themeColor)
-    root.style.setProperty('--bg-primary', '')
-    root.style.setProperty('--bg-secondary', '')
-    root.style.setProperty('--bg-primary-gradient', '')
-    root.style.setProperty('--bg-secondary-gradient', '')
-    root.style.setProperty('--text-primary', '')
-    root.style.setProperty('--border-color', '')
-    root.style.setProperty('--popover', '')
+    // Cache both dark and light CSS var sets so the inline script picks
+    // the right one based on LIVE matchMedia at boot time
+    const darkCssVars = buildCssVars(true, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId)
+    const lightCssVars = buildCssVars(false, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId)
+    persistTheme(theme, darkCssVars, lightCssVars)
   }, [themeColor, theme, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId, systemIsDark])
 }

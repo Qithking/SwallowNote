@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SwallowNote</title>
+    <script>
+      // Apply theme BEFORE first paint to prevent white→black flash.
+      // Cache stores: { theme, darkCssVars, lightCssVars }
+      // dark/light decision is made LIVE via matchMedia so 'system' mode always works.
+      try {
+        var s = localStorage.getItem('sn-theme')
+        if (s) {
+          var d = JSON.parse(s)
+          var dark = d.theme === 'dark' || (d.theme === 'system' && matchMedia('(prefers-color-scheme:dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+          var v = dark ? d.darkCssVars : d.lightCssVars
+          if (v) { var r = document.documentElement, k = Object.keys(v); for (var i = 0; i < k.length; i++) r.style.setProperty(k[i], v[k[i]]) }
+        }
+      } catch(e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
