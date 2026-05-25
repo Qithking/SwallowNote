@@ -137,10 +137,19 @@ export function FileTreeView() {
   const showPullToast = (pullResults: import('@/stores/git').PullResult[]) => {
     if (!Array.isArray(pullResults) || pullResults.length === 0) return
     const successCount = pullResults.filter(r => r.success).length
-    const failCount = pullResults.filter(r => !r.success).length
+    const conflictRepos = pullResults.filter(r => r.isConflict)
+    const failCount = pullResults.filter(r => !r.success && !r.isConflict).length
+
+    // Show conflict-specific toast for repos with merge conflicts
+    if (conflictRepos.length > 0) {
+      const repoNames = conflictRepos.map(r => r.name).join(', ')
+      showToast(t('git.pullConflict', { repos: repoNames }), 'error')
+    }
+
+    // Show other failures
     if (failCount > 0) {
       showToast(t('git.pullResult', { success: successCount, fail: failCount }), 'error')
-    } else if (successCount > 0) {
+    } else if (successCount > 0 && conflictRepos.length === 0) {
       showToast(t('git.pullSuccess', { count: successCount }), 'success')
     }
   }

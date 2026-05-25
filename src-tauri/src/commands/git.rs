@@ -124,6 +124,20 @@ pub async fn git_commit(path: String, message: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Check if a git error is a rebase/merge conflict
+fn is_conflict_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("conflict")
+        || lower.contains("could not apply")
+        || lower.contains("merge conflict")
+        || lower.contains("resolve them")
+        || lower.contains("fix conflicts")
+        || lower.contains("after resolving the conflicts")
+        || lower.contains("failed to merge in the changes")
+        || lower.contains("pull is not possible because you have unmerged files")
+        || lower.contains("cannot rebase") && lower.contains("uncommitted changes")
+}
+
 /// Check if a git error is an authentication failure
 fn is_auth_error(error: &str) -> bool {
     let lower = error.to_lowercase();
@@ -144,7 +158,7 @@ fn is_auth_error(error: &str) -> bool {
         || lower.contains("fatal: unable to access")
 }
 
-/// Pull changes from remote
+/// Pull changes from remote with rebase by default
 #[tauri::command]
 pub async fn git_pull(path: String) -> Result<(), String> {
     // Check if remote exists before pulling
@@ -153,12 +167,16 @@ pub async fn git_pull(path: String) -> Result<(), String> {
         return Ok(()); // No remote, nothing to pull
     }
 
-    let result = run_git(&path, &["pull"]);
+    let result = run_git(&path, &["pull", "--rebase"]);
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
             if is_auth_error(&e) {
                 Err(format!("AUTH_REQUIRED:{}", e))
+            } else if is_conflict_error(&e) {
+                // Abort the rebase to restore the working tree to a clean state
+                let _ = run_git(&path, &["rebase", "--abort"]);
+                Err(format!("REBASE_CONFLICT:{}", e))
             } else {
                 Err(format!("Failed to pull: {}", e))
             }
@@ -204,7 +222,7 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
 
     let result = run_git_with_env(
         &path,
-        &["pull"],
+        &["pull", "--rebase"],
         &[
             ("GIT_ASKPASS", askpass_path.as_str()),
             ("GIT_TERMINAL_PROMPT", "0"),
@@ -217,7 +235,15 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
 
     match result {
         Ok(_) => Ok(()),
-        Err(e) => Err(format!("Failed to pull: {}", e)),
+        Err(e) => {
+            if is_conflict_error(&e) {
+                // Abort the rebase to restore the working tree to a clean state
+                let _ = run_git(&path, &["rebase", "--abort"]);
+                Err(format!("REBASE_CONFLICT:{}", e))
+            } else {
+                Err(format!("Failed to pull: {}", e))
+            }
+        }
     }
 }
 

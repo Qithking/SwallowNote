@@ -416,7 +416,8 @@
     "scanning": "Scanning...",
     "scanningPath": "Scanning {{path}}...",
     "pullSuccess": "Pulled {{count}} repo(s)",
-    "pullResult": "Pull completed: {{success}} succeeded, {{fail}} failed"
+    "pullResult": "Pull completed: {{success}} succeeded, {{fail}} failed",
+    "pullConflict": "Repos {{repos}} have merge conflicts. Please resolve conflicts manually before syncing"
   },
   "history": {
     "title": "History",

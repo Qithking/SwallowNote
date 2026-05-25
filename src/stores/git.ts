@@ -51,6 +51,7 @@ export interface PullResult {
   name: string
   success: boolean
   error?: string
+  isConflict?: boolean
 }
 
 export interface GitState {
@@ -72,7 +73,7 @@ export interface GitState {
   pullAllRepos: (repos: GitRepository[]) => Promise<PullResult[]>
 }
 
-export const useGitStore = create<GitState>((set, get) => ({
+export const useGitStore = create<GitState>((set) => ({
   repositories: [],
   cachedRepositories: [],
   activeRepository: null,
@@ -113,13 +114,22 @@ export const useGitStore = create<GitState>((set, get) => ({
                 try {
                   await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
                   return { path: repo.path, name: repo.name, success: true }
-                } catch {
-                  // Saved credentials failed
+                } catch (credPullError) {
+                  // Check if conflict occurred with credentials pull
+                  const credErrorMessage = String(credPullError).trim()
+                  if (credErrorMessage.startsWith('REBASE_CONFLICT:')) {
+                    return { path: repo.path, name: repo.name, success: false, error: credErrorMessage, isConflict: true }
+                  }
+                  // Saved credentials failed, fall through to return auth error
                 }
               }
             } catch {
               // Failed to get saved credentials
             }
+          }
+          // Check for rebase conflict
+          if (errorMessage.startsWith('REBASE_CONFLICT:')) {
+            return { path: repo.path, name: repo.name, success: false, error: errorMessage, isConflict: true }
           }
           return { path: repo.path, name: repo.name, success: false, error: errorMessage }
         }
