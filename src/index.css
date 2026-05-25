@@ -231,38 +231,44 @@ body, #root {
   padding:30px 100px;
 }
 
-/* BlockNote Editor Typography Styles */
-.blocknote-editor-container .bn-heading-1 {
+/* BlockNote Editor Typography Styles (v0.51.x selectors) */
+.blocknote-editor-container .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"] {
   font-size: var(--h1-size) !important;
   line-height: calc(var(--h1-size) * 1.4) !important;
   letter-spacing: var(--letter-spacing) !important;
 }
 
-.blocknote-editor-container .bn-heading-2 {
+.blocknote-editor-container .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="2"] {
   font-size: var(--h2-size) !important;
   line-height: calc(var(--h2-size) * 1.4) !important;
   letter-spacing: var(--letter-spacing) !important;
 }
 
-.blocknote-editor-container .bn-heading-3 {
+.blocknote-editor-container .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="3"] {
   font-size: var(--h3-size) !important;
   line-height: calc(var(--h3-size) * 1.4) !important;
   letter-spacing: var(--letter-spacing) !important;
 }
 
-.blocknote-editor-container .bn-heading-4 {
+.blocknote-editor-container .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="4"] {
   font-size: var(--h4-size) !important;
   line-height: calc(var(--h4-size) * 1.4) !important;
   letter-spacing: var(--letter-spacing) !important;
 }
 
-.blocknote-editor-container .bn-heading-5 {
+.blocknote-editor-container .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="5"] {
   font-size: var(--h5-size) !important;
   line-height: calc(var(--h5-size) * 1.4) !important;
   letter-spacing: var(--letter-spacing) !important;
 }
 
-.blocknote-editor-container .bn-paragraph {
+.blocknote-editor-container .bn-default-styles {
+  font-size: var(--body-size) !important;
+  line-height: var(--line-height) !important;
+  letter-spacing: var(--letter-spacing) !important;
+}
+
+.blocknote-editor-container .bn-block-content[data-content-type="paragraph"] {
   font-size: var(--body-size) !important;
   line-height: var(--line-height) !important;
   letter-spacing: var(--letter-spacing) !important;

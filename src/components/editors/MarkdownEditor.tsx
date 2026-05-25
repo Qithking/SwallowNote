@@ -46,14 +46,6 @@ function BlockNoteInner({
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
   const {
-    h1Size,
-    h2Size,
-    h3Size,
-    h4Size,
-    h5Size,
-    bodySize,
-    lineHeight,
-    letterSpacing,
     normalPaddingVertical,
     normalPaddingHorizontal,
     widePaddingVertical,
@@ -436,64 +428,6 @@ function BlockNoteInner({
 
   const blocknoteTheme = theme === 'dark' || (theme === 'system' && systemDark) ? 'dark' : 'light'
 
-  // Apply typography settings by injecting a style element into the container
-  useEffect(() => {
-    if (!editorContainerRef.current) return
-
-    const container = editorContainerRef.current
-
-    // Remove existing style element if present
-    const existingStyle = container.querySelector('[data-typography-style]')
-    if (existingStyle) {
-      existingStyle.remove()
-    }
-
-    // Create new style element with typography settings
-    const styleElement = document.createElement('style')
-    styleElement.setAttribute('data-typography-style', 'true')
-    styleElement.textContent = `
-      /* 标题样式 - 使用正确的选择器 */
-      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"] {
-        font-size: ${h1Size}px !important;
-        line-height: ${h1Size * 1.4}px !important;
-        letter-spacing: ${letterSpacing}px !important;
-      }
-      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="2"] {
-        font-size: ${h2Size}px !important;
-        line-height: ${h2Size * 1.4}px !important;
-        letter-spacing: ${letterSpacing}px !important;
-      }
-      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="3"] {
-        font-size: ${h3Size}px !important;
-        line-height: ${h3Size * 1.4}px !important;
-        letter-spacing: ${letterSpacing}px !important;
-      }
-      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="4"] {
-        font-size: ${h4Size}px !important;
-        line-height: ${h4Size * 1.4}px !important;
-        letter-spacing: ${letterSpacing}px !important;
-      }
-      .bn-block-outer:not([data-prev-type]) > .bn-block > .bn-block-content[data-content-type="heading"][data-level="5"] {
-        font-size: ${h5Size}px !important;
-        line-height: ${h5Size * 1.4}px !important;
-        letter-spacing: ${letterSpacing}px !important;
-      }
-      /* 段落样式 */
-      .bn-default-styles {
-        font-size: ${bodySize}px !important;
-        line-height: ${lineHeight} !important;
-        letter-spacing: ${letterSpacing}px !important;
-      }      
-    `
-
-    container.appendChild(styleElement)
-
-    // Cleanup
-    return () => {
-      styleElement.remove()
-    }
-  }, [h1Size, h2Size, h3Size, h4Size, h5Size, bodySize, lineHeight, letterSpacing,
-    normalPaddingVertical, normalPaddingHorizontal])
 
   // Methods for the context menu
   const getSelectedText = useCallback(() => {

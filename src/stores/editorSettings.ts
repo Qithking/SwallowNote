@@ -7,6 +7,23 @@ import { saveSessionState, getSessionState } from '@/lib/tauri'
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * Sync typography values from the store to CSS custom properties on <html>.
+ * This ensures the editor renders with correct font sizes immediately on mount,
+ * avoiding the "font-size flicker" caused by async settings loading.
+ */
+function applyToCSS(state: Partial<EditorSettingsState>) {
+  const root = document.documentElement
+  if (state.h1Size !== undefined) root.style.setProperty('--h1-size', `${state.h1Size}px`)
+  if (state.h2Size !== undefined) root.style.setProperty('--h2-size', `${state.h2Size}px`)
+  if (state.h3Size !== undefined) root.style.setProperty('--h3-size', `${state.h3Size}px`)
+  if (state.h4Size !== undefined) root.style.setProperty('--h4-size', `${state.h4Size}px`)
+  if (state.h5Size !== undefined) root.style.setProperty('--h5-size', `${state.h5Size}px`)
+  if (state.bodySize !== undefined) root.style.setProperty('--body-size', `${state.bodySize}px`)
+  if (state.lineHeight !== undefined) root.style.setProperty('--line-height', String(state.lineHeight))
+  if (state.letterSpacing !== undefined) root.style.setProperty('--letter-spacing', `${state.letterSpacing}px`)
+}
+
 export interface EditorSettingsState {
   // Font sizes in px (VSCode defaults)
   h1Size: number
@@ -98,41 +115,49 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
   
   setH1Size: (size) => {
     set({ h1Size: size })
+    applyToCSS({ h1Size: size })
     scheduleSave()
   },
   
   setH2Size: (size) => {
     set({ h2Size: size })
+    applyToCSS({ h2Size: size })
     scheduleSave()
   },
   
   setH3Size: (size) => {
     set({ h3Size: size })
+    applyToCSS({ h3Size: size })
     scheduleSave()
   },
   
   setH4Size: (size) => {
     set({ h4Size: size })
+    applyToCSS({ h4Size: size })
     scheduleSave()
   },
   
   setH5Size: (size) => {
     set({ h5Size: size })
+    applyToCSS({ h5Size: size })
     scheduleSave()
   },
   
   setBodySize: (size) => {
     set({ bodySize: size })
+    applyToCSS({ bodySize: size })
     scheduleSave()
   },
   
   setLineHeight: (height) => {
     set({ lineHeight: height })
+    applyToCSS({ lineHeight: height })
     scheduleSave()
   },
   
   setLetterSpacing: (spacing) => {
     set({ letterSpacing: spacing })
+    applyToCSS({ letterSpacing: spacing })
     scheduleSave()
   },
   
@@ -158,6 +183,7 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
   
   resetToDefault: () => {
     set(DEFAULT_SETTINGS)
+    applyToCSS(DEFAULT_SETTINGS)
     scheduleSave()
   },
   
@@ -181,6 +207,7 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
       if (saved.editor_widePaddingHorizontal) partial.widePaddingHorizontal = Number(saved.editor_widePaddingHorizontal)
       
       set(partial)
+      applyToCSS(partial)
     } catch (err) {
       console.error('Failed to load editor settings:', err)
     }
