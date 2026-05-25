@@ -135,6 +135,12 @@ async function handleSaveFile() {
   if (!activeTab || !activeTab.isDirty) return
 
   try {
+    // Mark path as saving to prevent file-watcher from closing the tab
+    useEditorStore.setState((state) => {
+      const newSet = new Set(state.savingPaths)
+      newSet.add(activeTab.path)
+      return { savingPaths: newSet }
+    })
     const { writeFile } = await import('@/lib/tauri')
     await writeFile(activeTab.path, activeTab.content)
     useEditorStore.setState((state) => ({
@@ -149,6 +155,16 @@ async function handleSaveFile() {
     window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
   } catch (e) {
     console.error('Failed to save file:', e)
+  } finally {
+    // Delay removing from savingPaths to allow file-watcher events to settle
+    const savedPath = activeTab.path
+    setTimeout(() => {
+      useEditorStore.setState((state) => {
+        const newSet = new Set(state.savingPaths)
+        newSet.delete(savedPath)
+        return { savingPaths: newSet }
+      })
+    }, 1000)
   }
 }
 

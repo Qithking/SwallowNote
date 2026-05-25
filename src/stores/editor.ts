@@ -52,6 +52,8 @@ export interface EditorTab {
 export interface EditorState {
   tabs: EditorTab[]
   activeTabId: string | null
+  /** Set of file paths currently being saved (to ignore file-watcher remove events during atomic writes) */
+  savingPaths: Set<string>
   addTab: (tab: EditorTab) => void
   openDiffTab: (filePath: string, commitHash: string, commitMessage: string) => Promise<void>
   removeTab: (id: string) => void
@@ -74,11 +76,13 @@ export interface EditorState {
   resetDirtyTabs: () => Promise<void>
   getDirtyTabsCount: () => number
   restoreTabsState: () => Promise<void>
+  isPathSaving: (path: string) => boolean
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   tabs: [],
   activeTabId: null,
+  savingPaths: new Set<string>(),
   addTab: (tab) => {
     set((state) => {
       const existing = state.tabs.find((t) => t.path === tab.path)
@@ -302,6 +306,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const dirtyTabs = get().tabs.filter((t) => t.isDirty)
     for (const tab of dirtyTabs) {
       try {
+        // Mark path as saving to prevent file-watcher from closing the tab
+        set((state) => {
+          const newSet = new Set(state.savingPaths)
+          newSet.add(tab.path)
+          return { savingPaths: newSet }
+        })
         await writeFile(tab.path, tab.content)
         set((state) => ({
           tabs: state.tabs.map((t) =>
@@ -316,6 +326,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       } catch (e) {
         console.error('Failed to save tab:', tab.path, e)
         window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))
+      } finally {
+        // Delay removing from savingPaths to allow file-watcher events to settle
+        const savedPath = tab.path
+        setTimeout(() => {
+          set((state) => {
+            const newSet = new Set(state.savingPaths)
+            newSet.delete(savedPath)
+            return { savingPaths: newSet }
+          })
+        }, 1000)
       }
     }
   },
@@ -342,6 +362,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   getDirtyTabsCount: () => {
     return get().tabs.filter((t) => t.isDirty).length
+  },
+  isPathSaving: (path: string) => {
+    return get().savingPaths.has(path)
   },
   restoreTabsState: async () => {
     const { getSessionState, pathExists } = await import('@/lib/tauri')

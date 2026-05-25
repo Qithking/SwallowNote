@@ -108,6 +108,8 @@ function App() {
       
       if (type === 'modified') {
         const editorStore = useEditorStore.getState()
+        // Skip if this path is currently being saved (atomic write may trigger modified event)
+        if (editorStore.isPathSaving(path)) return
         const tab = editorStore.tabs.find(t => t.path === path)
         if (tab) {
           if (tab.isDirty) {
@@ -120,6 +122,9 @@ function App() {
         // Close tabs for removed files
         if (type === 'removed') {
           const editorStore = useEditorStore.getState()
+          // Skip if this path is currently being saved
+          // (atomic write: write to .tmp then rename can trigger a remove event on the original file)
+          if (editorStore.isPathSaving(path)) return
           // Check if the removed path matches any open tab (file) or is a parent of any tab (directory)
           const tabsToClose = editorStore.tabs.filter(tab =>
             tab.path === path || tab.path.startsWith(path + '/')

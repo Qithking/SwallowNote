@@ -231,15 +231,28 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to create parent directory: {}", e))?;
     }
 
-    // Atomic write: write to temp file first, then rename
-    let temp_path = path.with_extension("tmp");
-    tokio::fs::write(&temp_path, &content)
-        .await
-        .map_err(|e| format!("Failed to write temporary file: {}", e))?;
+    // On Windows, renaming over an existing file triggers a Remove event in file watchers,
+    // which causes the editor tab to close unexpectedly. Use direct write on Windows to avoid this.
+    // On macOS/Linux, atomic write (write to temp + rename) is preferred for data safety.
+    #[cfg(target_os = "windows")]
+    {
+        tokio::fs::write(&path, &content)
+            .await
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+    }
 
-    tokio::fs::rename(&temp_path, &path)
-        .await
-        .map_err(|e| format!("Failed to rename temporary file: {}", e))?;
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Atomic write: write to temp file first, then rename
+        let temp_path = path.with_extension("tmp");
+        tokio::fs::write(&temp_path, &content)
+            .await
+            .map_err(|e| format!("Failed to write temporary file: {}", e))?;
+
+        tokio::fs::rename(&temp_path, &path)
+            .await
+            .map_err(|e| format!("Failed to rename temporary file: {}", e))?;
+    }
 
     Ok(())
 }
