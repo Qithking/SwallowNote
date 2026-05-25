@@ -495,11 +495,18 @@ function App() {
     }
   }
 
+  // Disable the system default context menu across the entire app
+  // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+  }, [])
+
   return (
     <TooltipProvider>
       <div
         className="h-screen w-screen flex flex-col overflow-hidden p-1"
         style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
+        onContextMenu={handleContextMenu}
       >
         {/* Title Bar */}
         <TitleBar />
