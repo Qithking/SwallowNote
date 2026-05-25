@@ -4,7 +4,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link, User } from 'lucide-react'
 import { useUIStore } from '@/stores'
-import { checkLatestVersion, downloadLatestRelease, openInstaller, DownloadProgress } from '@/lib/tauri'
+import { checkLatestVersion, downloadLatestRelease, openInstaller, installAndRestart, DownloadProgress } from '@/lib/tauri'
 import { open } from '@tauri-apps/plugin-shell'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Button } from '@/components/ui/button'
@@ -177,9 +177,27 @@ function StatusBar() {
     setShowUpgradeDialog(false)
     if (downloadedPath) {
       try {
-        await openInstaller(downloadedPath)
-      } catch {
-        showToast(t('statusBar.openInstallerFailed'))
+        // On macOS, use install_and_restart for seamless in-place upgrade
+        // On other platforms, fall back to open_installer
+        const isMac = navigator.platform.toLowerCase().includes('mac')
+        if (isMac && downloadedPath.endsWith('.dmg')) {
+          setVersionStatus('idle') // Will exit soon anyway
+          await installAndRestart(downloadedPath)
+        } else {
+          await openInstaller(downloadedPath)
+        }
+      } catch (e) {
+        const errorMsg = String(e)
+        // If install_and_restart failed, fall back to open_installer
+        if (downloadedPath.endsWith('.dmg')) {
+          try {
+            await openInstaller(downloadedPath)
+            return
+          } catch {
+            // Both methods failed
+          }
+        }
+        showToast(t('statusBar.installFailed', { error: errorMsg }))
       }
     }
   }, [downloadedPath, showToast])

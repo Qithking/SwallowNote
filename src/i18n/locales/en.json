@@ -447,6 +447,8 @@
     "openGitHub": "Open GitHub Repository",
     "downloadFailed": "Download failed: {{error}}",
     "openInstallerFailed": "Failed to open installer",
+"installFailed": "Failed to install update: {{error}}",
+"installing": "Installing update...",
     "openLinkFailed": "Failed to open link",
     "upToDate": "Up to date",
     "checking": "Checking...",

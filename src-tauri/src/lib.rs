@@ -121,6 +121,7 @@ pub fn run() {
             commands::session_state::get_session_state,
             commands::upgrade::download_latest_release,
             commands::upgrade::open_installer,
+            commands::upgrade::install_and_restart,
             commands::upgrade::get_platform_extension,
             commands::upgrade::get_download_dir,
             services::file_watcher::watch_directory,

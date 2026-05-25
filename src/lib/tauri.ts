@@ -509,6 +509,10 @@ export async function openInstaller(path: string): Promise<void> {
   await invoke('open_installer', { path })
 }
 
+export async function installAndRestart(dmgPath: string): Promise<void> {
+  await invoke('install_and_restart', { dmgPath })
+}
+
 // AI APIs
 export async function encryptApiKey(plaintext: string): Promise<string> {
   return await invoke('encrypt_api_key', { plaintext })

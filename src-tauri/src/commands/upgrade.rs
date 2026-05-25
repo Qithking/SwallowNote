@@ -186,3 +186,120 @@ pub fn get_download_dir() -> String {
         .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
         .unwrap_or_else(|| ".".to_string())
 }
+
+/// Install the downloaded update and restart the application.
+///
+/// On macOS:
+/// 1. Attach the DMG using hdiutil
+/// 2. Find the .app bundle inside the mounted volume
+/// 3. Copy it to /Applications, replacing the old version
+/// 4. Detach the DMG
+/// 5. Launch the new version and exit the current process
+///
+/// On Windows:
+/// Falls back to opening the installer (user handles the rest)
+#[tauri::command]
+pub async fn install_and_restart(app: AppHandle, dmg_path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let dmg = PathBuf::from(&dmg_path);
+        if !dmg.exists() {
+            return Err(format!("DMG file not found: {}", dmg_path));
+        }
+
+        // Step 1: Attach the DMG
+        let attach_output = std::process::Command::new("hdiutil")
+            .args(["attach", "-nobrowse", "-noverify", "-noautoopen", &dmg_path])
+            .output()
+            .map_err(|e| format!("Failed to attach DMG: {}", e))?;
+
+        if !attach_output.status.success() {
+            let stderr = String::from_utf8_lossy(&attach_output.stderr);
+            return Err(format!("Failed to attach DMG: {}", stderr));
+        }
+
+        // Parse the mount point from hdiutil output
+        // Output format: "/dev/diskN  Apple_HFS  /Volumes/SwallowNote"
+        let attach_str = String::from_utf8_lossy(&attach_output.stdout);
+        let mount_point = attach_str
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    // The last part(s) form the mount point path
+                    // hdiutil output: tab-separated, last field is mount point
+                    let mount = line.split('\t').last().unwrap_or("").trim();
+                    if mount.starts_with("/Volumes/") {
+                        return Some(mount.to_string());
+                    }
+                }
+                None
+            })
+            .last()
+            .ok_or_else(|| "Could not determine DMG mount point".to_string())?;
+
+        // Step 2: Find the .app bundle in the mounted volume
+        let mount_dir = std::path::Path::new(&mount_point);
+        let app_bundle = std::fs::read_dir(mount_dir)
+            .map_err(|e| format!("Failed to read mounted volume: {}", e))?
+            .filter_map(|entry| entry.ok())
+            .find(|entry| {
+                entry.path().extension().is_some_and(|ext| ext == "app")
+            })
+            .ok_or_else(|| "No .app bundle found in DMG".to_string())?;
+
+        let app_name = app_bundle.file_name();
+        let app_name_str = app_name.to_string_lossy().to_string();
+        let source_app = app_bundle.path();
+        let dest_app = PathBuf::from("/Applications").join(&app_name_str);
+
+        // Step 3: Remove old app and copy new one
+        // Remove the old version if it exists
+        if dest_app.exists() {
+            std::fs::remove_dir_all(&dest_app)
+                .map_err(|e| format!("Failed to remove old app: {}", e))?;
+        }
+
+        // Copy the new version using ditto (preserves macOS metadata, resource forks, etc.)
+        let copy_output = std::process::Command::new("ditto")
+            .args(["--noqtn", source_app.to_str().unwrap_or(""), dest_app.to_str().unwrap_or("")])
+            .output()
+            .map_err(|e| format!("Failed to copy app: {}", e))?;
+
+        if !copy_output.status.success() {
+            let stderr = String::from_utf8_lossy(&copy_output.stderr);
+            // Try to detach the DMG even if copy failed
+            let _ = std::process::Command::new("hdiutil")
+                .args(["detach", &mount_point, "-force"])
+                .output();
+            return Err(format!("Failed to copy app bundle: {}", stderr));
+        }
+
+        // Step 4: Detach the DMG
+        let _ = std::process::Command::new("hdiutil")
+            .args(["detach", &mount_point, "-force"])
+            .output();
+
+        // Step 5: Launch the new version and exit the current process
+        let new_app_path = dest_app.to_string_lossy().to_string();
+        std::process::Command::new("open")
+            .arg(&new_app_path)
+            .spawn()
+            .map_err(|e| format!("Failed to launch new version: {}", e))?;
+
+        // Give the new process a moment to start, then exit the current app
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            app.exit(0);
+        });
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On non-macOS platforms, fall back to just opening the installer
+        let _ = app;
+        open_installer(dmg_path).await
+    }
+}
