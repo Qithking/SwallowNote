@@ -292,6 +292,8 @@
     "defaultFolderName": "新文件夹"
   },
   "contextMenu": {
+    "newFile": "新建文件",
+    "newFolder": "新建文件夹",
     "paste": "粘贴",
     "open": "打开",
     "showInExplorer": "在文件资源管理器中显示",

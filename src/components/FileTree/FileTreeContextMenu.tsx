@@ -11,6 +11,8 @@ import {
 } from '@/components/ui/context-menu'
 import {
   FileText,
+  FilePlus,
+  FolderPlus,
   FolderOpen,
   Copy,
   Scissors,
@@ -82,9 +84,11 @@ interface TreeNodeContextMenuProps {
   node: FileNode
   children: React.ReactNode
   onRename?: () => void
+  onNewFile?: () => void
+  onNewFolder?: () => void
 }
 
-export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContextMenuProps) {
+export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNewFolder }: TreeNodeContextMenuProps) {
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode, showAllFiles, markdownOnly } = useUIStore()
   const { addTab } = useEditorStore()
@@ -295,6 +299,29 @@ export function TreeNodeContextMenu({ node, children, onRename }: TreeNodeContex
           boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
         }}
       >
+        {/* 新建文件/文件夹 - 仅目录显示 */}
+        {node.isDirectory && (
+          <>
+            <ContextMenuItem
+              onClick={onNewFile}
+              style={{ color: 'var(--text-secondary)' }}
+              className="cursor-pointer"
+            >
+              <FilePlus size={12} />
+              <span>{t('contextMenu.newFile')}</span>
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={onNewFolder}
+              style={{ color: 'var(--text-secondary)' }}
+              className="cursor-pointer"
+            >
+              <FolderPlus size={12} />
+              <span>{t('contextMenu.newFolder')}</span>
+            </ContextMenuItem>
+            <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
+          </>
+        )}
+
         {/* 粘贴菜单 - 在复制/剪切之前 */}
         {canPaste && (
           <>

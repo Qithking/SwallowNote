@@ -292,6 +292,8 @@
     "defaultFolderName": "New Folder"
   },
   "contextMenu": {
+    "newFile": "New File",
+    "newFolder": "New Folder",
     "paste": "Paste",
     "open": "Open",
     "showInExplorer": "Show in File Explorer",

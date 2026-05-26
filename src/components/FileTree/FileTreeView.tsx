@@ -354,9 +354,10 @@ export function FileTreeView() {
     setEditingType(null)
   }
 
-  const handleNewFile = async () => {
-    if (!selectedPath) return
-    const selected = findNodeByPath(selectedPath, nodes)
+  const handleNewFile = async (dirPath?: string) => {
+    const targetPath = dirPath || selectedPath
+    if (!targetPath) return
+    const selected = findNodeByPath(targetPath, nodes)
     if (!selected || !selected.isDirectory) return
 
     // Ensure the directory is expanded and children are loaded before showing the input
@@ -367,13 +368,15 @@ export function FileTreeView() {
     const currentNode = findNodeByPath(selected.path, useFileTreeStore.getState().nodes)
     const siblings = currentNode?.children || []
     const name = generateUniqueName(t('fileTree.defaultFileName'), siblings)
+    setSelectedPath(selected.path)
     setNewItem({ parentPath: selected.path, name, type: 'file' })
     setIsNewItemFirstEdit(true)
   }
 
-  const handleNewFolder = async () => {
-    if (!selectedPath) return
-    const selected = findNodeByPath(selectedPath, nodes)
+  const handleNewFolder = async (dirPath?: string) => {
+    const targetPath = dirPath || selectedPath
+    if (!targetPath) return
+    const selected = findNodeByPath(targetPath, nodes)
     if (!selected || !selected.isDirectory) return
 
     // Ensure the directory is expanded and children are loaded before showing the input
@@ -384,6 +387,7 @@ export function FileTreeView() {
     const currentNode = findNodeByPath(selected.path, useFileTreeStore.getState().nodes)
     const siblings = currentNode?.children || []
     const name = generateUniqueName(t('fileTree.defaultFolderName'), siblings)
+    setSelectedPath(selected.path)
     setNewItem({ parentPath: selected.path, name, type: 'folder' })
     setIsNewItemFirstEdit(true)
   }
@@ -742,6 +746,8 @@ export function FileTreeView() {
         <TreeNodeContextMenu
           node={node}
           onRename={() => handleStartEdit(node.path, node.name, node.isDirectory)}
+          onNewFile={() => handleNewFile(node.path)}
+          onNewFolder={() => handleNewFolder(node.path)}
         >
           {nodeContent}
         </TreeNodeContextMenu>
@@ -792,7 +798,7 @@ export function FileTreeView() {
           </Tooltip>
           <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFile} disabled={!isSelectedDirectory}>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleNewFile()} disabled={!isSelectedDirectory}>
                     <FilePlus size={12} />
                   </Button>
                 </TooltipTrigger>
@@ -800,7 +806,7 @@ export function FileTreeView() {
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleNewFolder} disabled={!isSelectedDirectory}>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleNewFolder()} disabled={!isSelectedDirectory}>
                     <FolderPlus size={12} />
                   </Button>
                 </TooltipTrigger>
