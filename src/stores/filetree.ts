@@ -37,7 +37,7 @@ export interface FileTreeState {
   revealPath: (filePath: string, rootPath: string) => Promise<void>
   clearAll: () => void
   clearExpanded: () => void
-  restoreTreeState: (expandedPaths: string[], selectedPath: string | null) => void
+  restoreTreeState: (expandedPaths: string[], selectedPath: string | null) => Promise<void>
   collapseAllExceptPath: (filePath: string, rootPath?: string) => void
 }
 
@@ -363,8 +363,83 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
   clearAll: () => set({ nodes: [], expanded: new Set(), selectedPath: null, multiSelectedPaths: new Set(), lastClickedPath: null, isLoading: false }),
   clearExpanded: () => set({ expanded: new Set() }),
-  restoreTreeState: (expandedPaths, selectedPath) =>
-    set({ expanded: new Set(expandedPaths), selectedPath }),
+  restoreTreeState: async (expandedPaths, selectedPath) => {
+    set({ expanded: new Set(expandedPaths), selectedPath })
+
+    if (expandedPaths.length === 0) return
+
+    // Sort expanded paths by depth so we expand shallow directories first.
+    // This is critical because a deeper path like /a/b/c can only be found
+    // in the tree *after* its parent /a/b has been loaded.  By processing
+    // level-by-level we guarantee that every directory node is discoverable
+    // when we need to load its children.
+    const sortedPaths = [...expandedPaths].sort(
+      (a, b) => a.split('/').length - b.split('/').length,
+    )
+
+    const filterParams = getFilterParams()
+    let currentNodes = get().nodes
+
+    // Group paths by depth so we can batch-load all directories at the same
+    // depth in a single IPC call, parallelising across directories.
+    const depthGroups = new Map<number, string[]>()
+    for (const dirPath of sortedPaths) {
+      const depth = dirPath.split('/').length
+      if (!depthGroups.has(depth)) depthGroups.set(depth, [])
+      depthGroups.get(depth)!.push(dirPath)
+    }
+
+    // Process each depth level sequentially; within a level all directories
+    // are loaded in parallel via loadDirectoriesBatch.
+    for (const [, dirPaths] of [...depthGroups.entries()].sort(
+      ([a], [b]) => a - b,
+    )) {
+      // Filter to only directories that exist in the tree AND don't have
+      // children loaded yet.  After each depth level is processed, the nodes
+      // for the next level will be discoverable.
+      const dirsToLoad: string[] = []
+      for (const dirPath of dirPaths) {
+        const node = findNodeInList(currentNodes, dirPath)
+        if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
+          dirsToLoad.push(dirPath)
+        }
+      }
+
+      if (dirsToLoad.length === 0) continue
+
+      try {
+        const results = await loadDirectoriesBatch(
+          dirsToLoad,
+          filterParams.showAllFiles,
+          filterParams.markdownOnly,
+        )
+        for (const result of results) {
+          currentNodes = updateNodesWithChildren(currentNodes, result.path, result.children)
+        }
+      } catch (e) {
+        console.error('Batch load in restoreTreeState failed, falling back:', e)
+        for (const dirPath of dirsToLoad) {
+          const node = findNodeInList(currentNodes, dirPath)
+          if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
+            try {
+              const children = await loadDirectory(
+                dirPath,
+                filterParams.showAllFiles,
+                filterParams.markdownOnly,
+              )
+              currentNodes = updateNodesWithChildren(currentNodes, dirPath, children)
+            } catch (err) {
+              console.error(err)
+            }
+          }
+        }
+      }
+
+      // Update the store after each depth level so that the next level can
+      // discover newly-loaded child nodes, and the UI renders progressively.
+      set({ nodes: currentNodes })
+    }
+  },
   collapseAllExceptPath: (filePath, rootPath) => {
     if (!filePath) {
       set({ expanded: new Set() })

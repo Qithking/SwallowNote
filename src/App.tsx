@@ -358,7 +358,7 @@ function App() {
       if (states.expanded) {
         const expandedPaths = JSON.parse(states.expanded)
         const selectedPath = states.selectedPath || null
-        useFileTreeStore.getState().restoreTreeState(expandedPaths, selectedPath)
+        await useFileTreeStore.getState().restoreTreeState(expandedPaths, selectedPath)
       }
 
       // After restoring tree state, reveal the active tab's path in the file tree
