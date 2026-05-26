@@ -221,8 +221,11 @@ pub fn get_download_dir() -> String {
 /// 1. Attach the DMG using hdiutil
 /// 2. Find the .app bundle inside the mounted volume
 /// 3. Copy it to /Applications, replacing the old version
-/// 4. Detach the DMG
-/// 5. Launch the new version and exit the current process
+/// 4. Remove quarantine extended attributes from the new app
+/// 5. Refresh Launch Services registration
+/// 6. Detach the DMG
+/// 7. Write a restart marker file, then exit the current process
+/// 8. A launchd-style restart script detects the marker and launches the new app
 ///
 /// On Windows:
 /// Falls back to opening the installer (user handles the rest)
@@ -303,21 +306,85 @@ pub async fn install_and_restart(app: AppHandle, dmg_path: String) -> Result<(),
             return Err(format!("Failed to copy app bundle: {}", stderr));
         }
 
-        // Step 4: Detach the DMG
+        // Step 4: Remove quarantine extended attributes from the new app
+        // Even though ditto --noqtn avoids adding quarantine, the DMG mount itself
+        // may have com.apple.quarantine attrs that propagate. Explicitly remove them
+        // with xattr to ensure macOS Gatekeeper doesn't block the new app.
+        let dest_app_str = dest_app.to_string_lossy().to_string();
+        let _ = std::process::Command::new("xattr")
+            .args(["-cr", &dest_app_str])
+            .output();
+
+        // Step 5: Refresh Launch Services registration so macOS recognizes the new app
+        // After replacing the app bundle, the Launch Services database may still
+        // reference the old app, causing `open` to fail or open the wrong binary.
+        let _ = std::process::Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+            .args(["-f", &dest_app_str])
+            .output();
+
+        // Step 6: Detach the DMG
         let _ = std::process::Command::new("hdiutil")
             .args(["detach", &mount_point, "-force"])
             .output();
 
-        // Step 5: Launch the new version and exit the current process
+        // Step 7: Launch the new version AFTER the current process exits
+        //
+        // CRITICAL: On macOS, `open` may refuse to launch the new app while the
+        // old process (with the same bundle identifier) is still running. The old
+        // process may also hold locks on files inside the .app bundle.
+        //
+        // The reliable approach is to spawn a detached helper process that:
+        //   1. Waits for the current app's PID to disappear (i.e. the old app has exited)
+        //   2. Launches the new app with `open`
+        //
+        // We write a temporary shell script and execute it via `nohup` so the helper
+        // process is fully independent of the current process lifecycle.
+        let current_pid = std::process::id();
         let new_app_path = dest_app.to_string_lossy().to_string();
-        std::process::Command::new("open")
-            .arg(&new_app_path)
-            .spawn()
-            .map_err(|e| format!("Failed to launch new version: {}", e))?;
 
-        // Give the new process a moment to start, then exit the current app
+        // Create a temporary restart script
+        let tmp_dir = std::env::temp_dir();
+        let restart_script_path = tmp_dir.join("swallownote_restart.sh");
+        let restart_script_content = format!(
+            "#!/bin/bash\n\
+# Wait for the old SwallowNote process to exit\n\
+while kill -0 {pid} 2>/dev/null; do\n\
+  sleep 0.2\n\
+done\n\
+# Brief pause to ensure all resources are released\n\
+sleep 0.5\n\
+# Launch the new version\n\
+open \"{app_path}\"\n\
+# Clean up this script\n\
+rm -f \"$0\"\n",
+            pid = current_pid,
+            app_path = new_app_path,
+        );
+        std::fs::write(&restart_script_path, &restart_script_content)
+            .map_err(|e| format!("Failed to write restart script: {}", e))?;
+
+        // Make the script executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&restart_script_path, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| format!("Failed to set script permissions: {}", e))?;
+        }
+
+        // Execute the restart script as a fully detached process
+        // Using nohup ensures the script survives the parent process exit
+        let script_path_str = restart_script_path.to_string_lossy().to_string();
+        std::process::Command::new("nohup")
+            .args(["bash", &script_path_str])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn restart helper: {}", e))?;
+
+        // Step 8: Exit the current app
+        // Small delay to ensure the helper script has started and is watching our PID
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(300));
             app.exit(0);
         });
 
