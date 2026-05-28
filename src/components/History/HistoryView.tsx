@@ -154,10 +154,29 @@ function HistoryView({ visible }: { visible: boolean }) {
 
     try {
       const content = await gitPullFileLatest(activeTab.path)
+      // Mark path as saving to prevent file-watcher from closing the tab
+      // (atomic write on macOS/Linux triggers a "removed" event during rename)
+      useEditorStore.setState((state) => {
+        const newSet = new Set(state.savingPaths)
+        newSet.add(activeTab.path)
+        return { savingPaths: newSet }
+      })
       // Write content to file
       await writeFile(activeTab.path, content)
-      // Update the editor tab content
-      updateTabContent(activeTab.id, content)
+      // Update the editor tab content and mark as not dirty
+      useEditorStore.setState((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === activeTab.id ? { ...t, content, isDirty: false, isEdited: false } : t
+        ),
+      }))
+      // Delay removing from savingPaths to allow file-watcher events to settle
+      setTimeout(() => {
+        useEditorStore.setState((state) => {
+          const newSet = new Set(state.savingPaths)
+          newSet.delete(activeTab.path)
+          return { savingPaths: newSet }
+        })
+      }, 1000)
       // Refresh history list
       setEntries([])
       setHasMore(true)
@@ -174,7 +193,7 @@ function HistoryView({ visible }: { visible: boolean }) {
     } finally {
       setPullingLatest(false)
     }
-  }, [activeTab, updateTabContent, loadHistory, t])
+  }, [activeTab, loadHistory, t])
 
   const handlePullLatestCancel = useCallback(() => {
     setShowPullLatestDialog(false)
