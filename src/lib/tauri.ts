@@ -291,6 +291,10 @@ export async function gitShowFileContent(filePath: string, commitHash: string): 
   return await invoke('git_show_file_content', { filePath, commitHash })
 }
 
+export async function gitPullFileLatest(filePath: string): Promise<string> {
+  return await invoke('git_pull_file_latest', { filePath })
+}
+
 export async function isGitRepository(path: string): Promise<boolean> {
   return await invoke('git_is_repo', { path })
 }

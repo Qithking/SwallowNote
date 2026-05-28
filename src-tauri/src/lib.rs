@@ -112,6 +112,7 @@ pub fn run() {
             commands::git::git_file_log,
             commands::git::git_show_diff,
             commands::git::git_show_file_content,
+            commands::git::git_pull_file_latest,
             commands::git::git_clone,
             commands::git::git_clone_with_credentials,
             commands::git::scan_git_repos,

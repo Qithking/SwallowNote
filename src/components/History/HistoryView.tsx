@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { FileText, Loader2, RotateCcw } from 'lucide-react'
+import { FileText, Loader2, RotateCcw, Download } from 'lucide-react'
 import { useEditorStore } from '@/stores'
-import { gitFileLog, gitShowFileContent, GitFileLogEntry, writeFile } from '@/lib/tauri'
+import { gitFileLog, gitShowFileContent, gitPullFileLatest, GitFileLogEntry, writeFile } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -31,6 +31,8 @@ function HistoryView({ visible }: { visible: boolean }) {
   const [showRestoreDialog, setShowRestoreDialog] = useState(false)
   const [restoreEntry, setRestoreEntry] = useState<GitFileLogEntry | null>(null)
   const [restoring, setRestoring] = useState(false)
+  const [showPullLatestDialog, setShowPullLatestDialog] = useState(false)
+  const [pullingLatest, setPullingLatest] = useState(false)
   const skipRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -139,6 +141,43 @@ function HistoryView({ visible }: { visible: boolean }) {
     setRestoreEntry(null)
   }, [])
 
+  const handlePullLatestClick = useCallback(() => {
+    setShowPullLatestDialog(true)
+  }, [])
+
+  const handlePullLatestConfirm = useCallback(async () => {
+    if (!activeTab?.path) return
+    setShowPullLatestDialog(false)
+    setPullingLatest(true)
+
+    try {
+      const content = await gitPullFileLatest(activeTab.path)
+      // Write content to file
+      await writeFile(activeTab.path, content)
+      // Update the editor tab content
+      updateTabContent(activeTab.id, content)
+      // Refresh history list
+      setEntries([])
+      setHasMore(true)
+      skipRef.current = 0
+      loadHistory(activeTab.path, 0)
+    } catch (e) {
+      console.error('Failed to pull latest:', e)
+      const errorMsg = e instanceof Error ? e.message : String(e)
+      if (errorMsg === 'NO_REMOTE') {
+        alert(t('history.noRemote'))
+      } else {
+        alert(t('history.pullLatestFailed', { error: errorMsg }))
+      }
+    } finally {
+      setPullingLatest(false)
+    }
+  }, [activeTab, updateTabContent, loadHistory, t])
+
+  const handlePullLatestCancel = useCallback(() => {
+    setShowPullLatestDialog(false)
+  }, [])
+
   const formatDate = (dateStr: string) => {
     try {
       // Handle unix timestamp (milliseconds) from backend
@@ -198,10 +237,44 @@ function HistoryView({ visible }: { visible: boolean }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="flex items-center h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
+      <AlertDialog open={showPullLatestDialog} onOpenChange={setShowPullLatestDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('history.pullLatestConfirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('history.pullLatestConfirmDesc')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handlePullLatestCancel}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePullLatestConfirm}>{t('common.confirm')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <div className="flex items-center justify-between h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wider">{t('history.title')}</span>
         </div>
+        {!notInRepo && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="shrink-0 p-1 rounded hover:bg-[var(--bg-active)] cursor-pointer"
+                style={{ color: 'var(--text-muted)' }}
+                onClick={handlePullLatestClick}
+                disabled={pullingLatest}
+              >
+                {pullingLatest ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Download size={14} />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">{t('history.pullLatest')}</TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
       {notInRepo ? (

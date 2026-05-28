@@ -454,7 +454,13 @@
     "noHistory": "No history",
     "restore": "Restore",
     "restoreConfirmTitle": "Confirm Restore",
-    "restoreConfirmDesc": "Restore file to this commit version. Current unsaved changes will be overwritten. Commit: {{message}}"
+    "restoreConfirmDesc": "Restore file to this commit version. Current unsaved changes will be overwritten. Commit: {{message}}",
+    "pullLatest": "Pull Latest",
+    "pullLatestConfirmTitle": "Pull Latest from Remote",
+    "pullLatestConfirmDesc": "This will overwrite the current file content with the latest version from the remote repository. Are you sure?",
+    "pullLatestSuccess": "File synced to latest remote version",
+    "pullLatestFailed": "Failed to pull latest: {{error}}",
+    "noRemote": "No remote repository configured"
   },
   "directory": {
     "title": "Directory",
