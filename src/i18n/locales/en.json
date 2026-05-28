@@ -498,7 +498,10 @@
     "download": "Download",
     "foundNewVersion": "New version available",
     "downloadingTooltip": "Downloading...",
-    "installAndRestart": "Install & Restart"
+    "installAndRestart": "Install & Restart",
+    "syncing": "Syncing...",
+    "syncResult": "Synced: {{succeeded}} ok, {{failed}} failed",
+    "syncConflicted": "{{count}} conflict(s)"
   },
   "recent": {
     "workspaceName": "Workspace",

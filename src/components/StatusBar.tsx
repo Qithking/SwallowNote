@@ -2,8 +2,8 @@
  * StatusBar Component - Bottom status bar
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Link, User } from 'lucide-react'
-import { useUIStore } from '@/stores'
+import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
+import { useUIStore, useGitStore } from '@/stores'
 import { checkLatestVersion, downloadLatestRelease, openInstaller, installAndRestart, DownloadProgress } from '@/lib/tauri'
 import { open } from '@tauri-apps/plugin-shell'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -29,6 +29,7 @@ const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000 // 1 hour in ms
 function StatusBar() {
   const { showToast } = useUIStore()
   const { autoCheckUpdate } = useUIStore()
+  const { syncStatus } = useGitStore()
   const { t } = useTranslation()
   const [currentVersion] = useState(packageJson.version)
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
@@ -358,7 +359,38 @@ function StatusBar() {
       >
         {/* Left Section */}
         <div className="flex items-center gap-2">
-
+          {syncStatus.lastSyncTime != null && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex items-center gap-1 opacity-60 hover:opacity-100">
+                  {syncStatus.isSyncing ? (
+                    <RefreshCw size={12} className="animate-spin" />
+                  ) : syncStatus.failed > 0 || syncStatus.conflicted > 0 ? (
+                    syncStatus.conflicted > 0 ? (
+                      <AlertTriangle size={12} className="text-yellow-500" />
+                    ) : (
+                      <XCircle size={12} className="text-red-500" />
+                    )
+                  ) : (
+                    <CheckCircle2 size={12} className="text-green-500" />
+                  )}
+                  <span className="text-[11px]">
+                    {syncStatus.isSyncing
+                      ? t('statusBar.syncing')
+                      : t('statusBar.syncResult', {
+                          succeeded: syncStatus.succeeded,
+                          failed: syncStatus.failed + syncStatus.conflicted,
+                        })}
+                  </span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {syncStatus.isSyncing
+                  ? t('statusBar.syncing')
+                  : `${t('statusBar.syncResult', { succeeded: syncStatus.succeeded, failed: syncStatus.failed + syncStatus.conflicted })}${syncStatus.conflicted > 0 ? ` (${t('statusBar.syncConflicted', { count: syncStatus.conflicted })})` : ''}`}
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         {/* Right Section */}

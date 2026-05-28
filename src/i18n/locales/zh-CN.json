@@ -498,7 +498,10 @@
     "downloadFailedText": "下载失败",
     "checkFailed": "检测失败",
     "downloadFailedTooltip": "点击重试",
-    "installAndRestart": "安装并重启"
+    "installAndRestart": "安装并重启",
+    "syncing": "同步中...",
+    "syncResult": "同步：成功 {{succeeded}} 个，失败 {{failed}} 个",
+    "syncConflicted": "{{count}} 个冲突"
   },
   "recent": {
     "workspaceName": "工作区",

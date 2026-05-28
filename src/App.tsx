@@ -11,7 +11,7 @@ import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
 import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
 import { StatusBar } from '@/components/StatusBar'
-import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEditorSettingsStore, type EditorTab, type EditorViewMode } from '@/stores'
+import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEditorSettingsStore, useGitStore, type EditorTab, type EditorViewMode } from '@/stores'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
@@ -28,7 +28,8 @@ function App() {
   useTheme()
   useKeyboardShortcuts()
   const { t } = useTranslation()
-  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth } = useUIStore()
+  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth, syncInterval } = useUIStore()
+  const { cachedRepositories, pullAllRepos } = useGitStore()
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
   const [isDraggingRight, setIsDraggingRight] = useState(false)
   const [isHoveringLeft, setIsHoveringLeft] = useState(false)
@@ -187,6 +188,64 @@ function App() {
       if (saveTimer) clearTimeout(saveTimer)
     }
   }, [])
+
+  // Auto sync: periodically pull all git repositories based on syncInterval setting
+  const syncIntervalRef = useRef(syncInterval)
+  syncIntervalRef.current = syncInterval
+  const cachedReposRef = useRef(cachedRepositories)
+  cachedReposRef.current = cachedRepositories
+  const pullAllReposRef = useRef(pullAllRepos)
+  pullAllReposRef.current = pullAllRepos
+
+  useEffect(() => {
+    const doSync = async () => {
+      const repos = cachedReposRef.current
+      if (repos.length === 0) return
+      const gitStore = useGitStore.getState()
+      gitStore.setSyncStatus({ isSyncing: true })
+      try {
+        const results = await pullAllReposRef.current(repos)
+        const succeeded = results.filter(r => r.success).length
+        const failed = results.filter(r => !r.success && !r.isConflict).length
+        const conflicted = results.filter(r => r.isConflict).length
+        gitStore.setSyncStatus({
+          isSyncing: false,
+          lastSyncTime: Date.now(),
+          succeeded,
+          failed,
+          conflicted,
+        })
+        if (succeeded > 0 || conflicted > 0) {
+          // Refresh file tree to reflect any pulled changes
+          const fileTreeStore = useFileTreeStore.getState()
+          fileTreeStore.refreshExpanded()
+        }
+        if (conflicted > 0) {
+          const repoNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
+          toast.warning(t('git.pullConflict', { repos: repoNames }))
+        }
+      } catch (e) {
+        console.error('Auto sync failed:', e)
+        gitStore.setSyncStatus({ isSyncing: false })
+      }
+    }
+
+    // Initial sync after a short delay
+    const initialTimer = setTimeout(() => {
+      doSync()
+    }, 5000)
+
+    // Set up periodic sync
+    const intervalMs = syncIntervalRef.current * 60 * 1000
+    const intervalId = setInterval(() => {
+      doSync()
+    }, intervalMs)
+
+    return () => {
+      clearTimeout(initialTimer)
+      clearInterval(intervalId)
+    }
+  }, [syncInterval, t])
 
   const handleSaveAndClose = async () => {
     setShowSaveDialog(false)

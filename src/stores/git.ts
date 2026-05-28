@@ -54,6 +54,14 @@ export interface PullResult {
   isConflict?: boolean
 }
 
+export interface SyncStatus {
+  isSyncing: boolean
+  lastSyncTime: number | null  // timestamp
+  succeeded: number
+  failed: number
+  conflicted: number
+}
+
 export interface GitState {
   repositories: GitRepository[]
   cachedRepositories: GitRepository[]
@@ -61,6 +69,7 @@ export interface GitState {
   isGitLoading: boolean
   isPulling: boolean
   scanProgress: { current: number; total: number; message: string } | null
+  syncStatus: SyncStatus
   // Actions
   setRepositories: (repos: GitRepository[]) => void
   setCachedRepositories: (repos: GitRepository[]) => void
@@ -70,6 +79,7 @@ export interface GitState {
   setPulling: (pulling: boolean) => void
   setScanProgress: (progress: { current: number; total: number; message: string } | null) => void
   clearScanProgress: () => void
+  setSyncStatus: (status: Partial<SyncStatus>) => void
   pullAllRepos: (repos: GitRepository[]) => Promise<PullResult[]>
 }
 
@@ -80,6 +90,7 @@ export const useGitStore = create<GitState>((set) => ({
   isGitLoading: false,
   isPulling: false,
   scanProgress: null,
+  syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 },
   setRepositories: (repos) => set({ repositories: repos }),
   setCachedRepositories: (repos) => set({ cachedRepositories: repos }),
   setActiveRepository: (path) => set({ activeRepository: path }),
@@ -92,6 +103,9 @@ export const useGitStore = create<GitState>((set) => ({
   setPulling: (pulling) => set({ isPulling: pulling }),
   setScanProgress: (progress) => set({ scanProgress: progress }),
   clearScanProgress: () => set({ scanProgress: null }),
+  setSyncStatus: (status) => set((state) => ({
+    syncStatus: { ...state.syncStatus, ...status }
+  })),
   pullAllRepos: async (repos: GitRepository[]) => {
     // Filter repos that have a remote URL
     const reposWithRemote = repos.filter(r => r.remoteUrl)
