@@ -646,11 +646,11 @@ function AIView() {
             })}
           </div>
         )}
-        <form onSubmit={onFormSubmit} className="relative  rounded-lg border border-border bg-background overflow-hidden">
+        <form onSubmit={onFormSubmit} className="relative rounded-lg border border-border overflow-hidden" style={{ background: 'var(--bg-secondary)' }}>
           <div className="w-full  pt-3">
             <textarea
               ref={textareaRef}
-              className={cn("w-full px-3 text-xs min-h-[50px] max-h-[200px] resize-none outline-none", isOverflow ? "overflow-y-auto" : "overflow-y-hidden")}  
+              className={cn("w-full px-3 text-xs min-h-[50px] max-h-[200px] resize-none outline-none bg-transparent", isOverflow ? "overflow-y-auto" : "overflow-y-hidden")}
               placeholder={isConfigured ? t('ai.placeholder') : t('ai.notConfigured')}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
@@ -658,7 +658,7 @@ function AIView() {
               disabled={!isConfigured}
             />
           </div>
-          <div className="w-full flex items-center justify-between px-2 py-1.5 bg-background rounded-b-lg" >
+          <div className="w-full flex items-center justify-between px-2 py-1.5 rounded-b-lg" style={{ background: 'var(--bg-secondary)' }}>
             <div className="flex items-center gap-1">
               {isConfigured && (
                 <Select value={activeRoleKey} onValueChange={setActiveRoleKey}>
