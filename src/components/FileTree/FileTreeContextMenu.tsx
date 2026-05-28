@@ -355,10 +355,6 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           </>
         )}
 
-        {(isInGitRepo || canShowGitInit) && (
-          <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
-        )}
-
         <ContextMenuItem onClick={() => handleCopyPath(false)} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
           <FileText size={12} />
           <span>{t('contextMenu.copyPath')}</span>
