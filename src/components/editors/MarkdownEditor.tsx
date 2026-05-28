@@ -400,6 +400,127 @@ function BlockNoteInner({
     }
   }, [editor])
 
+  // Insert text at cursor position in BlockNote
+  // AI results are Markdown, so we need to parse them into BlockNote blocks
+  // rather than inserting raw Markdown source code.
+  useEffect(() => {
+    let cancelled = false
+    const handler = async (e: Event) => {
+      if (cancelled || !editor) return
+      const { text } = (e as CustomEvent).detail
+      try {
+        const blocks = await editor.tryParseMarkdownToBlocks(text)
+        if (blocks.length > 0) {
+          const currentBlock = editor.getTextCursorPosition().block
+          if (Array.isArray(currentBlock.content) && currentBlock.content.length === 0) {
+            // Current block is empty, replace it with the first new block and insert the rest after
+            editor.replaceBlocks([currentBlock.id], [blocks[0]])
+            if (blocks.length > 1) {
+              const firstInserted = editor.getTextCursorPosition().block
+              editor.insertBlocks(blocks.slice(1), firstInserted.id, 'after')
+            }
+          } else {
+            // Insert all blocks after the current block
+            editor.insertBlocks(blocks, currentBlock.id, 'after')
+          }
+        }
+      } catch (err) {
+        console.error('Failed to insert at cursor in BlockNote:', err)
+      }
+    }
+    window.addEventListener('insert-at-cursor', handler)
+    return () => {
+      cancelled = true
+      window.removeEventListener('insert-at-cursor', handler)
+    }
+  }, [editor])
+
+  // Handle Cmd+A / Ctrl+A select all in BlockNote
+  // In Tauri WebView, the browser's native selectAll intercepts Cmd+A before
+  // ProseMirror's keymap can handle it, so BlockNote's built-in selectAll never fires.
+  // We intercept it in the capture phase and delegate to TipTap's selectAll command.
+  useEffect(() => {
+    const container = editorContainerRef.current
+    if (!container) return
+
+    const handleSelectAll = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey
+      if (isMod && e.key.toLowerCase() === 'a' && !e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        try {
+          const tiptapEditor = (editor as any)?._tiptapEditor
+          if (tiptapEditor) {
+            tiptapEditor.chain().focus().selectAll().run()
+          }
+        } catch (err) {
+          console.error('Failed to select all in BlockNote:', err)
+        }
+      }
+    }
+
+    container.addEventListener('keydown', handleSelectAll, true) // capture phase
+    return () => container.removeEventListener('keydown', handleSelectAll, true)
+  }, [editor])
+
+  // Replace selected text or entire content in BlockNote
+  // AI results are Markdown, so we need to parse them into BlockNote blocks
+  // rather than inserting raw Markdown source code.
+  useEffect(() => {
+    let cancelled = false
+    const handler = async (e: Event) => {
+      if (cancelled || !editor) return
+      const { text } = (e as CustomEvent).detail
+      try {
+        const blocks = await editor.tryParseMarkdownToBlocks(text)
+        if (blocks.length === 0) return
+
+        const tiptapEditor = (editor as any)._tiptapEditor
+        if (tiptapEditor) {
+          const { empty } = tiptapEditor.state.selection
+          if (!empty) {
+            // Replace the blocks that overlap with the current selection
+            // Find which blocks are covered by the selection
+            const { from, to } = tiptapEditor.state.selection
+            const doc = tiptapEditor.state.doc
+
+            // Collect block IDs that are within the selection range
+            const blockIdsToRemove: string[] = []
+            doc.descendants((node: any, pos: number) => {
+              if (node.type.name === 'blockContainer' && node.attrs?.id) {
+                const blockStart = pos
+                const blockEnd = pos + node.nodeSize
+                // Check if this block overlaps with the selection
+                if (blockStart < to && blockEnd > from) {
+                  blockIdsToRemove.push(node.attrs.id)
+                }
+              }
+            })
+
+            if (blockIdsToRemove.length > 0) {
+              editor.replaceBlocks(blockIdsToRemove, blocks)
+            } else {
+              // Fallback: insert after current block
+              const currentBlock = editor.getTextCursorPosition().block
+              editor.insertBlocks(blocks, currentBlock.id, 'after')
+            }
+          } else {
+            // Replace entire content
+            const allBlockIds = editor.document.map((b: any) => b.id)
+            editor.replaceBlocks(allBlockIds, blocks)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to replace content in BlockNote:', err)
+      }
+    }
+    window.addEventListener('replace-content', handler)
+    return () => {
+      cancelled = true
+      window.removeEventListener('replace-content', handler)
+    }
+  }, [editor])
+
   // 编辑器就绪后发送目录数据
   useEffect(() => {
     if (!editor || !editor.document) return

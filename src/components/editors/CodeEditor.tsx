@@ -166,6 +166,49 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
     return () => window.removeEventListener('scroll-to-line', handler)
   }, [])
 
+  // Insert text at cursor position
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { text } = (e as CustomEvent).detail
+      const view = viewRef.current
+      if (!view) return
+      const cursor = view.state.selection.main.head
+      view.dispatch({
+        changes: { from: cursor, insert: text },
+        selection: { anchor: cursor + text.length },
+      })
+      view.focus()
+    }
+    window.addEventListener('insert-at-cursor', handler)
+    return () => window.removeEventListener('insert-at-cursor', handler)
+  }, [])
+
+  // Replace selected text or entire content
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { text } = (e as CustomEvent).detail
+      const view = viewRef.current
+      if (!view) return
+      const { from, to } = view.state.selection.main
+      if (from !== to) {
+        // Replace selection
+        view.dispatch({
+          changes: { from, to, insert: text },
+          selection: { anchor: from + text.length },
+        })
+      } else {
+        // Replace entire content
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: text },
+          selection: { anchor: text.length },
+        })
+      }
+      view.focus()
+    }
+    window.addEventListener('replace-content', handler)
+    return () => window.removeEventListener('replace-content', handler)
+  }, [])
+
   useEffect(() => {
     if (!editorRef.current) return
 

@@ -295,6 +295,10 @@ export async function gitPullFileLatest(filePath: string): Promise<string> {
   return await invoke('git_pull_file_latest', { filePath })
 }
 
+export async function gitForceUploadFile(filePath: string): Promise<void> {
+  await invoke('git_force_upload_file', { filePath })
+}
+
 export async function isGitRepository(path: string): Promise<boolean> {
   return await invoke('git_is_repo', { path })
 }

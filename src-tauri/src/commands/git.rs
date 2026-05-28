@@ -729,6 +729,64 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
     Ok(output)
 }
 
+/// Force upload a single file to remote: stage, commit, and force push.
+/// This overwrites the remote version with the local version.
+#[tauri::command]
+pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
+    // Find the git root by walking up directories
+    let mut current = Path::new(&file_path);
+    loop {
+        if current.join(".git").exists() {
+            break;
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => return Err("NOT_IN_GIT_REPO".to_string()),
+        }
+    }
+
+    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let file_name = Path::new(&file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    // Check if remote exists
+    let remote_url = get_remote_url(repo_path);
+    if remote_url.is_err() {
+        return Err("NO_REMOTE".to_string());
+    }
+
+    // Stage the file
+    run_git(repo_path, &["add", &file_path])
+        .map_err(|e| format!("Failed to stage file: {}", e))?;
+
+    // Commit
+    let commit_message = format!("Force upload: {}", file_name);
+    match run_git(repo_path, &["commit", "-m", &commit_message]) {
+        Ok(_) => {}
+        Err(e) => {
+            // If nothing to commit, we still want to force push existing commits
+            if !e.contains("nothing to commit") && !e.contains("working tree clean") && !e.contains("no changes added to commit") {
+                return Err(format!("Failed to commit: {}", e));
+            }
+        }
+    }
+
+    // Force push
+    let result = run_git(repo_path, &["push", "--force"]);
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if is_auth_error(&e) {
+                Err(format!("AUTH_REQUIRED:{}", e))
+            } else {
+                Err(format!("Failed to force push: {}", e))
+            }
+        }
+    }
+}
+
 fn get_branch(path: &str) -> Result<String, String> {
     run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
 }

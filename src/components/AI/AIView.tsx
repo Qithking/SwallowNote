@@ -6,11 +6,13 @@ import {
   Send,
   Loader2,
   Sparkles,
-  Copy,
   Check,
   Settings,
   Square,
   X,
+  ClipboardPaste,
+  PenLine,
+  Replace,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Button } from '@/components/ui/button'
@@ -18,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
-import { useUIStore } from '@/stores'
+import { useUIStore, useEditorStore, useWorkspaceStore } from '@/stores'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { getAiProxyUrl } from '@/lib/ai'
 import { restartAiProxy, saveAiMessage, loadAiMessages, loadAiRolePrompts, type AiRolePrompt } from '@/lib/tauri'
@@ -82,6 +84,10 @@ function AIView() {
   const aiContextMenuRequest = useUIStore((s) => s.aiContextMenuRequest)
   const setAiContextMenuRequest = useUIStore((s) => s.setAiContextMenuRequest)
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
+  const { insertAtCursor, replaceContent } = useEditorStore()
+  const editorTabs = useEditorStore((s) => s.tabs)
+  const editorActiveTabId = useEditorStore((s) => s.activeTabId)
+  const { rootPath } = useWorkspaceStore()
 
   const isConfigured = aiModels.length > 0
 
@@ -362,14 +368,36 @@ function AIView() {
     const activePrompt = aiRolePrompts.find((p) => p.role_key === activeRoleKey)
     const systemPrompt = activePrompt?.prompt || ''
 
-    // Pass systemPrompt via body option; the proxy handler will inject it as a system message
-    if (systemPrompt) {
-      sendMessage({ text }, { body: { systemPrompt } })
-    } else {
-      sendMessage({ text })
+    // For non-chat roles (e.g. polish, format, summary), automatically attach
+    // the active tab's file content so the AI can operate on it.
+    // The user's input (e.g. "整理格式") is treated as an instruction for that file.
+    let aiContent = text
+    let displayText = text
+    if (activeRoleKey !== 'chat') {
+      const activeTab = editorTabs.find((t) => t.id === editorActiveTabId)
+      if (activeTab?.content) {
+        // Compute relative file path for display
+        let filePath = activeTab.path || ''
+        if (rootPath && filePath.startsWith(rootPath)) {
+          filePath = filePath.slice(rootPath.length)
+          if (filePath.startsWith('/')) filePath = filePath.slice(1)
+        }
+        displayText = `[${activePrompt?.name || activeRoleKey}] ${filePath}`
+        aiContent = `${displayText}\n\n${activeTab.content}`
+        // Map the display text for this message
+        pendingDisplayTexts.current.set(countBeforeSend, displayText)
+      }
     }
 
-    saveAiMessage('user', text, activeAiModelId || '').catch(console.error)
+    // Pass systemPrompt via body option; the proxy handler will inject it as a system message
+    if (systemPrompt) {
+      sendMessage({ text: aiContent }, { body: { systemPrompt } })
+    } else {
+      sendMessage({ text: aiContent })
+    }
+
+    // Save the display text (not the full file content) to DB
+    saveAiMessage('user', displayText, activeAiModelId || '').catch(console.error)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -518,17 +546,44 @@ function AIView() {
                       </p>
                     )}
                     {message.role === 'assistant' && text && (
-                      <div className="flex items-center justify-end mt-2">
-                        <button
-                          onClick={() => handleCopy(text, message.id)}
-                          className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
-                        >
-                          {copiedId === message.id ? (
-                            <Check size={12} />
-                          ) : (
-                            <Copy size={12} />
-                          )}
-                        </button>
+                      <div className="flex items-center justify-end gap-1 mt-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => insertAtCursor(text)}
+                              className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
+                            >
+                              <PenLine size={12} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('ai.insertAtCursor')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => replaceContent(text)}
+                              className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
+                            >
+                              <Replace size={12} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('ai.replaceContent')}</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => handleCopy(text, message.id)}
+                              className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
+                            >
+                              {copiedId === message.id ? (
+                                <Check size={12} />
+                              ) : (
+                                <ClipboardPaste size={12} />
+                              )}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('ai.copyContent')}</TooltipContent>
+                        </Tooltip>
                       </div>
                     )}
                   </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { FileText, Loader2, RotateCcw, Download } from 'lucide-react'
+import { FileText, Loader2, RotateCcw, Download, Upload } from 'lucide-react'
 import { useEditorStore } from '@/stores'
-import { gitFileLog, gitShowFileContent, gitPullFileLatest, GitFileLogEntry, writeFile } from '@/lib/tauri'
+import { gitFileLog, gitShowFileContent, gitPullFileLatest, gitForceUploadFile, GitFileLogEntry, writeFile } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -33,6 +33,8 @@ function HistoryView({ visible }: { visible: boolean }) {
   const [restoring, setRestoring] = useState(false)
   const [showPullLatestDialog, setShowPullLatestDialog] = useState(false)
   const [pullingLatest, setPullingLatest] = useState(false)
+  const [showForceUploadDialog, setShowForceUploadDialog] = useState(false)
+  const [forceUploading, setForceUploading] = useState(false)
   const skipRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -178,6 +180,39 @@ function HistoryView({ visible }: { visible: boolean }) {
     setShowPullLatestDialog(false)
   }, [])
 
+  const handleForceUploadClick = useCallback(() => {
+    setShowForceUploadDialog(true)
+  }, [])
+
+  const handleForceUploadConfirm = useCallback(async () => {
+    if (!activeTab?.path) return
+    setShowForceUploadDialog(false)
+    setForceUploading(true)
+
+    try {
+      await gitForceUploadFile(activeTab.path)
+      // Refresh history list after upload
+      setEntries([])
+      setHasMore(true)
+      skipRef.current = 0
+      loadHistory(activeTab.path, 0)
+    } catch (e) {
+      console.error('Failed to force upload:', e)
+      const errorMsg = e instanceof Error ? e.message : String(e)
+      if (errorMsg === 'NO_REMOTE') {
+        alert(t('history.noRemote'))
+      } else {
+        alert(t('history.forceUploadFailed', { error: errorMsg }))
+      }
+    } finally {
+      setForceUploading(false)
+    }
+  }, [activeTab, loadHistory, t])
+
+  const handleForceUploadCancel = useCallback(() => {
+    setShowForceUploadDialog(false)
+  }, [])
+
   const formatDate = (dateStr: string) => {
     try {
       // Handle unix timestamp (milliseconds) from backend
@@ -252,28 +287,62 @@ function HistoryView({ visible }: { visible: boolean }) {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={showForceUploadDialog} onOpenChange={setShowForceUploadDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('history.forceUploadConfirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('history.forceUploadConfirmDesc')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleForceUploadCancel}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleForceUploadConfirm}>{t('common.confirm')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wider">{t('history.title')}</span>
         </div>
         {!notInRepo && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="shrink-0 p-1 rounded hover:bg-[var(--bg-active)] cursor-pointer"
-                style={{ color: 'var(--text-muted)' }}
-                onClick={handlePullLatestClick}
-                disabled={pullingLatest}
-              >
-                {pullingLatest ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Download size={14} />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="left">{t('history.pullLatest')}</TooltipContent>
-          </Tooltip>
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="shrink-0 p-1 rounded hover:bg-[var(--bg-active)] cursor-pointer"
+                  style={{ color: 'var(--text-muted)' }}
+                  onClick={handleForceUploadClick}
+                  disabled={forceUploading}
+                >
+                  {forceUploading ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Upload size={14} />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left">{t('history.forceUpload')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="shrink-0 p-1 rounded hover:bg-[var(--bg-active)] cursor-pointer"
+                  style={{ color: 'var(--text-muted)' }}
+                  onClick={handlePullLatestClick}
+                  disabled={pullingLatest}
+                >
+                  {pullingLatest ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left">{t('history.pullLatest')}</TooltipContent>
+            </Tooltip>
+          </div>
         )}
       </div>
 

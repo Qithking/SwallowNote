@@ -70,6 +70,8 @@ export interface EditorState {
   toggleViewMode: () => void
   getActiveTab: () => EditorTab | undefined
   scrollToLine: (line: number) => void
+  insertAtCursor: (text: string) => void
+  replaceContent: (text: string) => void
   restoreTabs: (tabsData: EditorTab[], activeTabId: string | null) => void
   filterTabs: (predicate: (tab: EditorTab) => boolean) => void
   saveAllDirtyTabs: () => Promise<void>
@@ -273,6 +275,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   scrollToLine: (line: number) => {
     // 触发窗口事件让编辑器滚动
     window.dispatchEvent(new CustomEvent('scroll-to-line', { detail: { line } }))
+  },
+  insertAtCursor: (text: string) => {
+    // 触发窗口事件让编辑器在光标位置插入文本
+    window.dispatchEvent(new CustomEvent('insert-at-cursor', { detail: { text } }))
+  },
+  replaceContent: (text: string) => {
+    // 触发窗口事件让编辑器替换选中内容或整个文件内容
+    window.dispatchEvent(new CustomEvent('replace-content', { detail: { text } }))
   },
   toggleViewMode: () =>
     set((state) => {
