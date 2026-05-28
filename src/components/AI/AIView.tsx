@@ -145,12 +145,18 @@ function AIView() {
     }
   }, [])
 
-  // Load role prompts on mount
-  useEffect(() => {
+  // Load role prompts on mount and listen for changes from settings panel
+  const reloadRolePrompts = useCallback(() => {
     loadAiRolePrompts()
       .then((prompts) => setAiRolePrompts(prompts))
       .catch((e) => console.error('Failed to load AI role prompts:', e))
   }, [])
+
+  useEffect(() => {
+    reloadRolePrompts()
+    window.addEventListener('ai-role-prompts-changed', reloadRolePrompts)
+    return () => window.removeEventListener('ai-role-prompts-changed', reloadRolePrompts)
+  }, [reloadRolePrompts])
 
   useEffect(() => {
     if (historyLoadedRef.current || !isConfigured) return

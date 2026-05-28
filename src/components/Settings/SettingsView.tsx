@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Settings as SettingsIcon,
@@ -29,10 +29,11 @@ import { setAppLocale } from '@/lib/tauri'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { getProviderById, getProvidersByCategory, AiProviderCategory } from '@/lib/ai'
-import { testAiModel, restartAiProxy } from '@/lib/tauri'
+import { testAiModel, restartAiProxy, loadAiRolePrompts, addAiRolePrompt, deleteAiRolePrompt, updateAiRolePrompt, updateAiRolePromptName, type AiRolePrompt } from '@/lib/tauri'
 import { ShortcutRecorder } from './ShortcutRecorder'
 import {
   AlertDialog,
@@ -93,6 +94,35 @@ function SettingsView() {
   const [aiFormName, setAiFormName] = useState('')
   const [aiFormModel, setAiFormModel] = useState('')
   const [aiTesting, setAiTesting] = useState(false)
+
+  // Role prompt management state
+  const [rolePrompts, setRolePrompts] = useState<AiRolePrompt[]>([])
+  const [selectedRoleKey, setSelectedRoleKey] = useState<string | null>(null)
+  const [editingRoleName, setEditingRoleName] = useState<string | null>(null)
+  const [editingRoleNameValue, setEditingRoleNameValue] = useState('')
+  const [deleteRoleTarget, setDeleteRoleTarget] = useState<string | null>(null)
+  const [addingRole, setAddingRole] = useState(false)
+  const [newRoleKey, setNewRoleKey] = useState('')
+  const [newRoleName, setNewRoleName] = useState('')
+
+  // Load role prompts on mount
+  useEffect(() => {
+    loadAiRolePrompts()
+      .then((prompts) => {
+        setRolePrompts(prompts)
+        if (prompts.length > 0) {
+          setSelectedRoleKey(prompts[0].role_key)
+        }
+      })
+      .catch(console.error)
+  }, [])
+
+  // Notify AI panel to reload role prompts after any change
+  const notifyRolePromptsChanged = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('ai-role-prompts-changed'))
+  }, [])
+
+  const selectedRolePrompt = rolePrompts.find((p) => p.role_key === selectedRoleKey)
 
   const activeCustomThemeId = customThemeTab === 'light' ? activeLightCustomThemeId : activeDarkCustomThemeId
 
@@ -659,6 +689,179 @@ function SettingsView() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* ===== 提示词管理 ===== */}
+              <Card>
+                <CardContent className="p-0">
+                  <div className="px-4 pt-3 pb-2">
+                    <Label className="text-sm font-medium">{t('settings.ai.rolePrompts')}</Label>
+                    <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.rolePrompts.desc')}</p>
+                  </div>
+                  <div className="flex min-h-[280px]">
+                    {/* Left: role list */}
+                    <div className="w-44 border-r border-border py-2 px-2 flex flex-col">
+                      <div className="flex-1 overflow-y-auto space-y-0.5">
+                        {rolePrompts.map((rp) => (
+                          <div
+                            key={rp.role_key}
+                            className={cn(
+                              'flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer group',
+                              selectedRoleKey === rp.role_key ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
+                            )}
+                            onClick={() => setSelectedRoleKey(rp.role_key)}
+                          >
+                            {editingRoleName === rp.role_key ? (
+                              <div className="flex items-center gap-1 flex-1 min-w-0">
+                                <input
+                                  className="flex-1 min-w-0 bg-background border border-border rounded px-1 py-0.5 text-xs"
+                                  value={editingRoleNameValue}
+                                  onChange={(e) => setEditingRoleNameValue(e.target.value)}
+                                  onKeyDown={async (e) => {
+                                    if (e.key === 'Enter') {
+                                      await updateAiRolePromptName(rp.role_key, editingRoleNameValue)
+                                      setRolePrompts((prev) => prev.map((p) => p.role_key === rp.role_key ? { ...p, name: editingRoleNameValue } : p))
+                                      setEditingRoleName(null)
+                                      notifyRolePromptsChanged()
+                                    } else if (e.key === 'Escape') {
+                                      setEditingRoleName(null)
+                                    }
+                                  }}
+                                  autoFocus
+                                />
+                                <button onClick={async () => {
+                                  await updateAiRolePromptName(rp.role_key, editingRoleNameValue)
+                                  setRolePrompts((prev) => prev.map((p) => p.role_key === rp.role_key ? { ...p, name: editingRoleNameValue } : p))
+                                  setEditingRoleName(null)
+                                  notifyRolePromptsChanged()
+                                }}><Check size={12} /></button>
+                                <button onClick={() => setEditingRoleName(null)}><X size={12} /></button>
+                              </div>
+                            ) : (
+                              <span className="truncate flex-1">{rp.name}</span>
+                            )}
+                            {rp.role_key !== 'chat' && editingRoleName !== rp.role_key && (
+                              <div className="hidden group-hover:flex items-center gap-0.5">
+                                <button
+                                  className="p-0.5 hover:text-primary"
+                                  onClick={(e) => { e.stopPropagation(); setEditingRoleName(rp.role_key); setEditingRoleNameValue(rp.name) }}
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                                <button
+                                  className="p-0.5 hover:text-destructive"
+                                  onClick={(e) => { e.stopPropagation(); setDeleteRoleTarget(rp.role_key) }}
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Add new role */}
+                      {addingRole ? (
+                        <div className="mt-2 space-y-1.5 px-1">
+                          <Input
+                            className="h-6 text-xs"
+                            placeholder={t('settings.ai.rolePrompts.keyPlaceholder')}
+                            value={newRoleKey}
+                            onChange={(e) => setNewRoleKey(e.target.value)}
+                          />
+                          <Input
+                            className="h-6 text-xs"
+                            placeholder={t('settings.ai.rolePrompts.namePlaceholder')}
+                            value={newRoleName}
+                            onChange={(e) => setNewRoleName(e.target.value)}
+                          />
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              className="h-6 text-[10px] px-2"
+                              disabled={!newRoleKey.trim() || !newRoleName.trim()}
+                              onClick={async () => {
+                                try {
+                                  const newPrompt = await addAiRolePrompt(newRoleKey.trim(), newRoleName.trim(), '')
+                                  setRolePrompts((prev) => [...prev, newPrompt])
+                                  setSelectedRoleKey(newPrompt.role_key)
+                                  setAddingRole(false)
+                                  setNewRoleKey('')
+                                  setNewRoleName('')
+                                  notifyRolePromptsChanged()
+                                } catch (e) {
+                                  toast.error(t('settings.ai.rolePrompts.addFailed') + ': ' + String(e))
+                                }
+                              }}
+                            >
+                              <Check size={10} className="mr-0.5" />
+                              {t('common.ok')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 text-[10px] px-2"
+                              onClick={() => { setAddingRole(false); setNewRoleKey(''); setNewRoleName('') }}
+                            >
+                              <X size={10} />
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-2 w-full justify-start gap-1.5 text-xs"
+                          onClick={() => setAddingRole(true)}
+                        >
+                          <Plus size={12} />
+                          {t('settings.ai.rolePrompts.add')}
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Right: prompt editor */}
+                    <div className="flex-1 p-4">
+                      {selectedRolePrompt ? (
+                        <div className="space-y-3">
+                          <div>
+                            <Label className="text-xs font-medium">{t('settings.ai.rolePrompts.roleName')}</Label>
+                            <p className="text-[10px] text-muted-foreground">{selectedRolePrompt.is_builtin ? t('settings.ai.rolePrompts.roleName.builtin') : t('settings.ai.rolePrompts.roleName.custom')}</p>
+                            <p className="text-sm mt-1">{selectedRolePrompt.name}</p>
+                          </div>
+                          <div>
+                            <Label className="text-xs font-medium">{t('settings.ai.rolePrompts.roleKey')}</Label>
+                            <p className="text-[10px] text-muted-foreground">{t('settings.ai.rolePrompts.roleKey.desc')}</p>
+                            <p className="text-sm mt-1 font-mono text-muted-foreground">{selectedRolePrompt.role_key}</p>
+                          </div>
+                          <div>
+                            <Label className="text-xs font-medium">{t('settings.ai.rolePrompts.promptContent')}</Label>
+                            <p className="text-[10px] text-muted-foreground">{t('settings.ai.rolePrompts.promptContent.desc')}</p>
+                          </div>
+                          <Textarea
+                            className="min-h-[120px] text-xs"
+                            placeholder={t('settings.ai.rolePrompts.promptContent.placeholder')}
+                            value={selectedRolePrompt.prompt}
+                            onChange={(e) => {
+                              const newPromptText = e.target.value
+                              setRolePrompts((prev) => prev.map((p) => p.role_key === selectedRoleKey ? { ...p, prompt: newPromptText } : p))
+                            }}
+                            onBlur={async () => {
+                              try {
+                                await updateAiRolePrompt(selectedRolePrompt.role_key, selectedRolePrompt.prompt)
+                                notifyRolePromptsChanged()
+                              } catch (e) {
+                                toast.error(t('settings.ai.rolePrompts.saveFailed') + ': ' + String(e))
+                              }
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">{t('settings.ai.rolePrompts.selectRole')}</p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </section>
 
             {/* ===== 快捷键 ===== */}
@@ -727,6 +930,38 @@ function SettingsView() {
             <AlertDialogAction onClick={() => {
               if (deleteAiModelTarget) removeAiModel(deleteAiModelTarget)
               setDeleteAiModelTarget(null)
+            }}>
+              {t('common.confirm', 'Delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deleteRoleTarget} onOpenChange={(open) => { if (!open) setDeleteRoleTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.ai.rolePrompts.delete')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('settings.ai.rolePrompts.deleteConfirm', { name: rolePrompts.find((p) => p.role_key === deleteRoleTarget)?.name ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteRoleTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={async () => {
+              if (deleteRoleTarget) {
+                try {
+                  await deleteAiRolePrompt(deleteRoleTarget)
+                  setRolePrompts((prev) => prev.filter((p) => p.role_key !== deleteRoleTarget))
+                  if (selectedRoleKey === deleteRoleTarget) {
+                    const remaining = rolePrompts.filter((p) => p.role_key !== deleteRoleTarget)
+                    setSelectedRoleKey(remaining.length > 0 ? remaining[0].role_key : null)
+                  }
+                  notifyRolePromptsChanged()
+                } catch (e) {
+                  toast.error(t('settings.ai.rolePrompts.deleteFailed') + ': ' + String(e))
+                }
+              }
+              setDeleteRoleTarget(null)
             }}>
               {t('common.confirm', 'Delete')}
             </AlertDialogAction>

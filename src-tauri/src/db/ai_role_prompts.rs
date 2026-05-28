@@ -68,3 +68,40 @@ pub fn update_role_prompt(db: &Database, role_key: &str, prompt: &str) -> Result
     )?;
     Ok(())
 }
+
+pub fn add_role_prompt(db: &Database, role_key: &str, name: &str, prompt: &str) -> Result<AiRolePrompt> {
+    let conn = db.conn.lock().unwrap();
+    conn.execute(
+        "INSERT INTO ai_role_prompts (role_key, name, prompt, is_builtin) VALUES (?1, ?2, ?3, 0)",
+        [role_key, name, prompt],
+    )?;
+    let id = conn.last_insert_rowid();
+    Ok(AiRolePrompt {
+        id,
+        role_key: role_key.to_string(),
+        name: name.to_string(),
+        prompt: prompt.to_string(),
+        is_builtin: false,
+        created_at: String::new(),
+        updated_at: String::new(),
+    })
+}
+
+pub fn delete_role_prompt(db: &Database, role_key: &str) -> Result<()> {
+    let conn = db.conn.lock().unwrap();
+    // Only allow deleting non-builtin prompts
+    conn.execute(
+        "DELETE FROM ai_role_prompts WHERE role_key = ?1 AND is_builtin = 0",
+        [role_key],
+    )?;
+    Ok(())
+}
+
+pub fn update_role_prompt_name(db: &Database, role_key: &str, name: &str) -> Result<()> {
+    let conn = db.conn.lock().unwrap();
+    conn.execute(
+        "UPDATE ai_role_prompts SET name = ?1, updated_at = datetime('now','localtime') WHERE role_key = ?2",
+        [name, role_key],
+    )?;
+    Ok(())
+}

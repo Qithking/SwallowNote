@@ -625,6 +625,18 @@ export async function updateAiRolePrompt(roleKey: string, prompt: string): Promi
   await invoke('update_ai_role_prompt', { roleKey, prompt })
 }
 
+export async function addAiRolePrompt(roleKey: string, name: string, prompt: string): Promise<AiRolePrompt> {
+  return await invoke('add_ai_role_prompt', { roleKey, name, prompt })
+}
+
+export async function deleteAiRolePrompt(roleKey: string): Promise<void> {
+  await invoke('delete_ai_role_prompt', { roleKey })
+}
+
+export async function updateAiRolePromptName(roleKey: string, name: string): Promise<void> {
+  await invoke('update_ai_role_prompt_name', { roleKey, name })
+}
+
 export interface BuiltinAiModel {
   id: string
   name: string
