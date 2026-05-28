@@ -246,7 +246,7 @@ function HistoryView({ visible }: { visible: boolean }) {
                         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                           {formatDate(entry.date)}
                         </p>
-                        <div className="flex items-center gap-2 text-xs shrink-0">
+                        <div className="flex items-center gap-1.5 text-xs shrink-0">
                           {entry.insertions > 0 && (
                             <span className="text-green-500">+{entry.insertions}</span>
                           )}

@@ -19,7 +19,6 @@ import {
   ClipboardPaste,
   Edit3,
   Trash2,
-  History,
   GitBranch,
   MessageSquare,
 } from 'lucide-react'
@@ -142,9 +141,6 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
     } catch (e) {
       console.error('Failed to open in finder:', e)
     }
-  }
-
-  const handleOpenHistory = () => {
   }
 
   const handleGitInit = async () => {
@@ -348,14 +344,6 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
         </ContextMenuItem>
 
         <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
-
-        {/* 打开历史记录 - 只在 git 项目中显示 */}
-        {isInGitRepo && (
-          <ContextMenuItem onClick={handleOpenHistory} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
-            <History size={12} />
-            <span>{t('contextMenu.openHistory')}</span>
-          </ContextMenuItem>
-        )}
 
         {/* 同步初始化 - 只在不在 git 项目中的文件夹显示 */}
         {canShowGitInit && (

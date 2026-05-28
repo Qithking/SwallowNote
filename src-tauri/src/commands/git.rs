@@ -584,11 +584,9 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
 
         let numstat_parts: Vec<&str> = line.split_whitespace().collect();
         if numstat_parts.len() >= 3 {
-            if numstat_parts[2] == relative_path_str || numstat_parts[2].ends_with(&format!("/{}", relative_path_str)) {
-                if let (Ok(ins), Ok(del)) = (numstat_parts[0].parse::<usize>(), numstat_parts[1].parse::<usize>()) {
-                    current_insertions += ins;
-                    current_deletions += del;
-                }
+            if let (Ok(ins), Ok(del)) = (numstat_parts[0].parse::<usize>(), numstat_parts[1].parse::<usize>()) {
+                current_insertions += ins;
+                current_deletions += del;
             }
         }
     }
@@ -631,9 +629,10 @@ pub async fn git_show_diff(file_path: String, commit_hash: String) -> Result<Str
     let output = run_git(
         repo_path,
         &[
-            "show",
+            "diff",
+            "-M",
+            &format!("{}^", commit_hash),
             &commit_hash,
-            "--format=",  // Empty format to skip commit info
             "--no-color",
             "--",
             relative_path_str,
