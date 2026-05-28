@@ -15,6 +15,8 @@ export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' |
 
 /** Request from editor context menu to trigger an AI action */
 export interface AiContextMenuRequest {
+  /** Unique ID for this request (timestamp-based) to prevent duplicate processing */
+  id: string
   /** The AI role key (e.g. 'continue_writing', 'polish') */
   roleKey: string
   /** The role display name */

@@ -52,6 +52,7 @@ export function EditorContextMenu({
 }: EditorContextMenuProps) {
   const { t } = useTranslation()
   const setAiContextMenuRequest = useUIStore((s) => s.setAiContextMenuRequest)
+  const setRightPanelType = useUIStore((s) => s.setRightPanelType)
   const { tabs, activeTabId } = useEditorStore()
   const { rootPath } = useWorkspaceStore()
 
@@ -75,6 +76,7 @@ export function EditorContextMenu({
       }
 
       const request: AiContextMenuRequest = {
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
         roleKey,
         roleName,
         hasSelection,
@@ -82,9 +84,13 @@ export function EditorContextMenu({
         lineRange: lineRange || undefined,
         filePath,
       }
+      // Open the AI panel first so that AIView mounts and can process the request.
+      // Without this, if the AI panel is not already open, AIView won't be
+      // rendered and its useEffect that handles aiContextMenuRequest won't fire.
+      setRightPanelType('ai')
       setAiContextMenuRequest(request)
     },
-    [getSelectedText, getSelectionLineRange, getFullContent, activeTab?.path, rootPath, setAiContextMenuRequest],
+    [getSelectedText, getSelectionLineRange, getFullContent, activeTab?.path, rootPath, setAiContextMenuRequest, setRightPanelType],
   )
 
   return (

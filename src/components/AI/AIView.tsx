@@ -63,6 +63,10 @@ function AIView() {
   const [hasMoreHistory, setHasMoreHistory] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const historyLoadedRef = useRef(false)
+  // Tracks whether chat history has finished loading.
+  // Context-menu requests must wait for history to load before sending,
+  // otherwise setMessages(historyMessages) will overwrite the newly sent message.
+  const historyReadyRef = useRef(false)
   const [aiRolePrompts, setAiRolePrompts] = useState<AiRolePrompt[]>([])
   const [activeRoleKey, setActiveRoleKey] = useState('chat')
   // Map from message ID to display text for context-menu-triggered messages
@@ -182,6 +186,9 @@ function AIView() {
         }
       } catch (e) {
         console.error('Failed to load AI chat history:', e)
+      } finally {
+        // Mark history as ready even if loading failed, so pending requests can proceed
+        historyReadyRef.current = true
       }
     }
     loadHistory()
@@ -306,8 +313,8 @@ function AIView() {
   useEffect(() => {
     if (!aiContextMenuRequest || !isConfigured) return
 
-    // Build a unique ID for this request to detect duplicates
-    const requestId = `${aiContextMenuRequest.roleKey}:${aiContextMenuRequest.filePath}:${aiContextMenuRequest.hasSelection}:${aiContextMenuRequest.lineRange?.join('-')}:${aiContextMenuRequest.content.length}`
+    // Use the request's unique ID to detect duplicates (React Strict Mode double-fire)
+    const requestId = aiContextMenuRequest.id
 
     // Skip if this request was already processed (prevents React Strict Mode double-fire)
     if (processedRequestIds.current.has(requestId)) return
@@ -340,27 +347,52 @@ function AIView() {
     // Set the role key
     setActiveRoleKey(roleKey)
 
-    // Record the local timestamp
-    const now = new Date()
-    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-    const countBeforeSend = messages.length
-    pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
+    // Helper: actually send the message (called once history is ready)
+    const doSend = () => {
+      // Record the local timestamp
+      const now = new Date()
+      const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+      const countBeforeSend = messages.length
+      pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
 
-    // Store the display text as pending; it will be mapped to message.id once the message appears
-    pendingDisplayTexts.current.set(countBeforeSend, displayMessage)
+      // Store the display text as pending; it will be mapped to message.id once the message appears
+      pendingDisplayTexts.current.set(countBeforeSend, displayMessage)
 
-    const rolePrompt = aiRolePrompts.find((p) => p.role_key === roleKey)
-    const systemPrompt = rolePrompt?.prompt || ''
+      const rolePrompt = aiRolePrompts.find((p) => p.role_key === roleKey)
+      const systemPrompt = rolePrompt?.prompt || ''
 
-    // Send to AI with full content
-    if (systemPrompt) {
-      sendMessage({ text: aiContent }, { body: { systemPrompt } })
-    } else {
-      sendMessage({ text: aiContent })
+      // Send to AI with full content
+      if (systemPrompt) {
+        sendMessage({ text: aiContent }, { body: { systemPrompt } })
+      } else {
+        sendMessage({ text: aiContent })
+      }
+
+      // Save display message to DB (not the full content)
+      saveAiMessage('user', displayMessage, activeAiModelId || '').catch(console.error)
     }
 
-    // Save display message to DB (not the full content)
-    saveAiMessage('user', displayMessage, activeAiModelId || '').catch(console.error)
+    // If chat history hasn't finished loading yet, wait for it.
+    // Otherwise setMessages(history) will overwrite the newly sent user message.
+    if (historyReadyRef.current) {
+      doSend()
+    } else {
+      // Poll until history is ready (simple approach; the load is fast)
+      const checkReady = setInterval(() => {
+        if (historyReadyRef.current) {
+          clearInterval(checkReady)
+          doSend()
+        }
+      }, 50)
+      // Safety timeout: don't wait more than 3 seconds
+      setTimeout(() => {
+        clearInterval(checkReady)
+        if (!historyReadyRef.current) {
+          historyReadyRef.current = true
+          doSend()
+        }
+      }, 3000)
+    }
   }, [aiContextMenuRequest]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const persistAndSend = (text: string) => {
