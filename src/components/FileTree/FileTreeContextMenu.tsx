@@ -171,6 +171,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
 
   const handleAddToChat = () => {
     addAiAttachedFile(node.path)
+    useUIStore.getState().setRightPanelType('ai')
     showToast(t('contextMenu.addedToChat', { name: node.name }))
   }
 

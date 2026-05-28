@@ -177,6 +177,7 @@ export interface UIState {
   setActiveAiModel: (id: string) => void
   addAiAttachedFile: (filePath: string) => void
   removeAiAttachedFile: (index: number) => void
+  clearAiAttachedFiles: () => void
   setAiContextMenuRequest: (request: AiContextMenuRequest | null) => void
   updateAiModelApiKey: (id: string, key: string) => Promise<void>
   setShortcut: (key: ShortcutKey, value: string) => void
@@ -403,6 +404,7 @@ export const useUIStore = create<UIState>((set) => ({
       return { aiAttachedFiles: files }
     })
   },
+  clearAiAttachedFiles: () => set({ aiAttachedFiles: [] }),
   setAiContextMenuRequest: (request) => set({ aiContextMenuRequest: request }),
   updateAiModelApiKey: async (id: string, key: string) => {
     try {

@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { useUIStore, useEditorStore, useWorkspaceStore } from '@/stores'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { getAiProxyUrl } from '@/lib/ai'
+import { loadFileContent } from '@/lib/api'
 import { restartAiProxy, saveAiMessage, loadAiMessages, loadAiRolePrompts, type AiRolePrompt } from '@/lib/tauri'
 
 function getMessageText(message: { parts?: Array<{ type: string; text?: string }> }): string {
@@ -85,6 +86,7 @@ function AIView() {
   const setActiveAiModel = useUIStore((s) => s.setActiveAiModel)
   const aiAttachedFiles = useUIStore((s) => s.aiAttachedFiles)
   const removeAiAttachedFile = useUIStore((s) => s.removeAiAttachedFile)
+  const clearAiAttachedFiles = useUIStore((s) => s.clearAiAttachedFiles)
   const aiContextMenuRequest = useUIStore((s) => s.aiContextMenuRequest)
   const setAiContextMenuRequest = useUIStore((s) => s.setAiContextMenuRequest)
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
@@ -395,7 +397,7 @@ function AIView() {
     }
   }, [aiContextMenuRequest]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const persistAndSend = (text: string) => {
+  const persistAndSend = async (text: string) => {
     // Record the local timestamp and current message count before sending
     const now = new Date()
     const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
@@ -406,12 +408,39 @@ function AIView() {
     const activePrompt = aiRolePrompts.find((p) => p.role_key === activeRoleKey)
     const systemPrompt = activePrompt?.prompt || ''
 
-    // For non-chat roles (e.g. polish, format, summary), automatically attach
-    // the active tab's file content so the AI can operate on it.
-    // The user's input (e.g. "整理格式") is treated as an instruction for that file.
     let aiContent = text
     let displayText = text
-    if (activeRoleKey !== 'chat') {
+
+    // When there are attached files from the file tree, read their content and append
+    if (aiAttachedFiles.length > 0) {
+      const fileParts: string[] = []
+      const displayNames: string[] = []
+      for (const filePath of aiAttachedFiles) {
+        try {
+          const content = await loadFileContent(filePath)
+          // Compute relative path for display
+          let relPath = filePath
+          if (rootPath && relPath.startsWith(rootPath)) {
+            relPath = relPath.slice(rootPath.length)
+            if (relPath.startsWith('/')) relPath = relPath.slice(1)
+          }
+          displayNames.push(relPath)
+          fileParts.push(`--- ${relPath} ---\n${content}`)
+        } catch (e) {
+          console.error('Failed to read attached file:', filePath, e)
+        }
+      }
+      if (fileParts.length > 0) {
+        displayText = text + '\n\n[' + displayNames.join(', ') + ']'
+        aiContent = text + '\n\n' + fileParts.join('\n\n')
+        pendingDisplayTexts.current.set(countBeforeSend, displayText)
+      }
+      // Clear attached files after sending
+      clearAiAttachedFiles()
+    } else if (activeRoleKey !== 'chat') {
+      // For non-chat roles (e.g. polish, format, summary), automatically attach
+      // the active tab's file content so the AI can operate on it.
+      // The user's input (e.g. "整理格式") is treated as an instruction for that file.
       const activeTab = editorTabs.find((t) => t.id === editorActiveTabId)
       if (activeTab?.content) {
         // Compute relative file path for display
@@ -451,11 +480,7 @@ function AIView() {
   const onFormSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!isConfigured || !inputValue.trim()) return
-    let text = inputValue.trim()
-    if (aiAttachedFiles.length > 0) {
-      text += '\n\n--- attached files ---\n' + aiAttachedFiles.join('\n')
-    }
-    persistAndSend(text)
+    persistAndSend(inputValue.trim())
     setInputValue('')
   }
 
