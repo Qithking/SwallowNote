@@ -12,6 +12,7 @@ import {
   MoreHorizontal,
   ArrowUpFromLine,
   ArrowDownToLine,
+  Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -25,7 +26,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useWorkspaceStore, useUIStore } from '@/stores'
+import { useWorkspaceStore, useUIStore, useFileTreeStore } from '@/stores'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
@@ -508,10 +509,11 @@ function RepositoryItem({
 }
 
 function GitView() {
-  const { repositories, setRepositories, setCachedRepositories, scanProgress } = useGitStore()
+  const { repositories, setRepositories, setCachedRepositories, scanProgress, pullAllRepos } = useGitStore()
   const { rootPath, workspaceFolders } = useWorkspaceStore()
-  const { workspaceMode } = useUIStore()
+  const { workspaceMode, showToast } = useUIStore()
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
+  const [isPullingRepos, setIsPullingRepos] = useState(false)
   const { t } = useTranslation()
 
   useEffect(() => {
@@ -568,6 +570,58 @@ function GitView() {
     )
   }
 
+  const handlePull = async () => {
+    if (repositories.length === 0) return
+
+    const reposToPull = selectedRepos.length > 0
+      ? repositories.filter(r => selectedRepos.includes(r.path))
+      : repositories
+
+    const reposWithRemote = reposToPull.filter(r => r.remoteUrl)
+    if (reposWithRemote.length === 0) {
+      showToast(t('git.noReposToSync'), 'info')
+      return
+    }
+
+    setIsPullingRepos(true)
+    const gitStore = useGitStore.getState()
+    gitStore.setSyncStatus({ isSyncing: true })
+
+    try {
+      const results = await pullAllRepos(reposWithRemote)
+      const succeeded = results.filter(r => r.success).length
+      const failed = results.filter(r => !r.success && !r.isConflict).length
+      const conflicted = results.filter(r => r.isConflict).length
+
+      gitStore.setSyncStatus({
+        isSyncing: false,
+        lastSyncTime: Date.now(),
+        succeeded,
+        failed,
+        conflicted,
+      })
+
+      if (succeeded > 0 || conflicted > 0) {
+        const fileTreeStore = useFileTreeStore.getState()
+        fileTreeStore.refreshExpanded()
+      }
+
+      if (conflicted > 0) {
+        const repoNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
+        showToast(t('git.pullConflict', { repos: repoNames }), 'error')
+      } else if (failed > 0) {
+        showToast(t('git.pullResult', { success: succeeded, fail: failed }), 'error')
+      } else if (succeeded > 0) {
+        showToast(t('git.pullSuccess', { count: succeeded }), 'success')
+      }
+    } catch (e) {
+      console.error('Pull failed:', e)
+      gitStore.setSyncStatus({ isSyncing: false })
+    } finally {
+      setIsPullingRepos(false)
+    }
+  }
+
   const handleRefresh = async () => {
     const scanPaths = workspaceMode === 'workspace'
       ? (workspaceFolders || [])
@@ -607,6 +661,14 @@ function GitView() {
           <span className="text-sm font-medium uppercase tracking-wider">{t('git.title')}</span>
         </div>
         <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handlePull} disabled={isPullingRepos || repositories.length === 0}>
+                {isPullingRepos ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{selectedRepos.length > 0 ? t('git.pullSelected') : t('git.pull')}</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh}>

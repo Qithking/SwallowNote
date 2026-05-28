@@ -390,6 +390,7 @@
     "commit": "提交",
     "push": "推送",
     "pull": "拉取",
+    "pullSelected": "拉取选中仓库",
     "branch": "分支",
     "merge": "合并",
     "diff": "差异",

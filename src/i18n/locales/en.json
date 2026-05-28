@@ -390,6 +390,7 @@
     "commit": "Commit",
     "push": "Push",
     "pull": "Pull",
+    "pullSelected": "Pull Selected",
     "branch": "Branch",
     "merge": "Merge",
     "diff": "Diff",
