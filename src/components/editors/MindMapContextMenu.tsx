@@ -112,7 +112,6 @@ export function MindMapContextMenu({ mindMap, children }: MindMapContextMenuProp
   const hasActiveNode = activeNodes.length > 0
   const node = getNode()
   const isRootNode = node?.isRoot === true
-  const canExpand = node && node.children && node.children.length > 0
 
   const activateContextNode = () => {
     if (!mindMap || !contextNode) return false
@@ -308,8 +307,7 @@ export function MindMapContextMenu({ mindMap, children }: MindMapContextMenuProp
         {/* Expand/Collapse */}
         <ContextMenuItem
           onClick={handleCollapseAll}
-          disabled={!canExpand}
-          style={{ color: !canExpand ? 'var(--text-muted)' : 'var(--text-secondary)' }}
+          style={{ color: 'var(--text-secondary)' }}
           className="cursor-pointer"
         >
           <ChevronDown size={12} />
@@ -317,8 +315,7 @@ export function MindMapContextMenu({ mindMap, children }: MindMapContextMenuProp
         </ContextMenuItem>
         <ContextMenuItem
           onClick={handleExpandAll}
-          disabled={!canExpand}
-          style={{ color: !canExpand ? 'var(--text-muted)' : 'var(--text-secondary)' }}
+          style={{ color: 'var(--text-secondary)' }}
           className="cursor-pointer"
         >
           <ChevronUp size={12} />
