@@ -1,30 +1,31 @@
-/**
- * Base Style Plugin for MindMap
- *
- * Controls canvas background, line styles, rainbow lines, generalization lines, associative lines
- * Similar to the "基础样式" panel in simple-mind-map official example
- */
 import { useState, useEffect, useCallback } from 'react'
-import { X, ChevronDown } from 'lucide-react'
-import { ColorPicker, ColorButton } from './ColorPicker'
+import { X, Palette, Minus, Plus, Spline, GitBranch, Link, BoxSelect } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { ColorSwatch, ColorButton } from './ColorPicker'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 interface BaseStylePluginProps {
-  mindMap: any // simple-mind-map instance
+  mindMap: any
   onClose: () => void
-}
-
-interface LineStyleConfig {
-  color: string
-  width: number
-  style: 'straight' | 'curve' | 'direct'
-  radius: number
-  showArrow: boolean
 }
 
 interface BaseStyleConfig {
   backgroundColor: string
   backgroundImage: string
-  line: LineStyleConfig
+  line: {
+    color: string
+    width: number
+    style: 'straight' | 'curve' | 'direct'
+    radius: number
+    showArrow: boolean
+  }
   rainbowLines: boolean
   generalizationLine: {
     color: string
@@ -37,6 +38,10 @@ interface BaseStyleConfig {
     activeWidth: number
     dasharray: string
   }
+  padding: {
+    horizontal: number
+    vertical: number
+  }
 }
 
 const LINE_STYLES = [
@@ -47,10 +52,77 @@ const LINE_STYLES = [
 
 const DASHARRAY_OPTIONS = [
   { value: 'none', label: '实线' },
-  { value: '5,5', label: '虚线5' },
-  { value: '10,10', label: '虚线10' },
-  { value: '5,10', label: '虚线5-10' },
+  { value: '5,5', label: '虚线' },
+  { value: '10,10', label: '长虚线' },
+  { value: '5,10', label: '点线' },
 ]
+
+function Stepper({
+  value,
+  onChange,
+  min = 0,
+  max = 20,
+  step = 1,
+}: {
+  value: number
+  onChange: (v: number) => void
+  min?: number
+  max?: number
+  step?: number
+}) {
+  return (
+    <div
+      className="flex items-center h-[22px] rounded-[3px] overflow-hidden"
+      style={{ border: '1px solid var(--border-color)' }}
+    >
+      <button
+        onClick={() => onChange(Math.max(min, value - step))}
+        disabled={value <= min}
+        className="w-[18px] h-full flex items-center justify-center transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+        style={{ color: 'var(--text-tertiary)', borderRight: '1px solid var(--border-color)' }}
+      >
+        <Minus size={10} strokeWidth={2.5} />
+      </button>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => {
+          const v = parseInt(e.target.value)
+          if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v)))
+        }}
+        className="w-[26px] h-full text-center text-[10px] bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        style={{ color: 'var(--text-primary)' }}
+      />
+      <button
+        onClick={() => onChange(Math.min(max, value + step))}
+        disabled={value >= max}
+        className="w-[18px] h-full flex items-center justify-center transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+        style={{ color: 'var(--text-tertiary)', borderLeft: '1px solid var(--border-color)' }}
+      >
+        <Plus size={10} strokeWidth={2.5} />
+      </button>
+    </div>
+  )
+}
+
+function SectionLabel({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+  return (
+    <div className="flex items-center gap-1 select-none shrink-0">
+      <Icon size={11} style={{ color: 'var(--text-tertiary)' }} strokeWidth={1.8} />
+      <span className="text-[10px] font-medium tracking-wide" style={{ color: 'var(--text-tertiary)' }}>
+        {label}
+      </span>
+    </div>
+  )
+}
+
+function Divider() {
+  return (
+    <div className="w-px self-stretch mx-2 opacity-30" style={{ backgroundColor: 'var(--border-color)' }} />
+  )
+}
 
 export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
   const [config, setConfig] = useState<BaseStyleConfig>({
@@ -73,11 +145,14 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
       width: 2,
       activeColor: 'rgba(2, 167, 240, 1)',
       activeWidth: 8,
-      dasharray: '6,4',
+      dasharray: 'none',
+    },
+    padding: {
+      horizontal: 15,
+      vertical: 5,
     },
   })
 
-  // Get current theme config from mindMap
   useEffect(() => {
     if (!mindMap) return
     const themeConfig = mindMap.getThemeConfig()
@@ -101,12 +176,15 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
         width: themeConfig.associativeLineWidth || 2,
         activeColor: themeConfig.associativeLineActiveColor || 'rgba(2, 167, 240, 1)',
         activeWidth: themeConfig.associativeLineActiveWidth || 8,
-        dasharray: themeConfig.associativeLineDasharray || '6,4',
+        dasharray: themeConfig.associativeLineDasharray || 'none',
+      },
+      padding: {
+        horizontal: themeConfig.paddingX || 15,
+        vertical: themeConfig.paddingY || 5,
       },
     })
   }, [mindMap])
 
-  // Apply config to mindMap
   const applyConfig = useCallback((newConfig: BaseStyleConfig) => {
     if (!mindMap) return
     mindMap.setThemeConfig({
@@ -125,6 +203,8 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
       associativeLineActiveColor: newConfig.associativeLine.activeColor,
       associativeLineActiveWidth: newConfig.associativeLine.activeWidth,
       associativeLineDasharray: newConfig.associativeLine.dasharray,
+      paddingX: newConfig.padding.horizontal,
+      paddingY: newConfig.padding.vertical,
     })
   }, [mindMap])
 
@@ -140,224 +220,159 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
     applyConfig(newConfig)
   }
 
-  const [activeTab, setActiveTab] = useState<'color' | 'image'>('color')
+  const sectionCls = "flex flex-col gap-1"
+
+  const BG_PRESETS = [
+    '#fff8e1', '#fff3e0', '#fce4ec', '#e8f5e9', '#e3f2fd',
+    '#ede7f6', '#ffe0b2', '#d7ccc8', '#cfd8dc', '#b2dfdb',
+  ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-[400px] max-h-[80vh] overflow-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)]">
-          <h3 className="text-sm font-medium text-[var(--text-primary)]">基础样式</h3>
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]"
-          >
-            <X size={16} />
-          </button>
+    <div
+      className="border-b bg-[var(--bg-primary)]"
+      style={{ borderColor: 'var(--border-color)' }}
+    >
+      <ScrollArea className="w-full">
+        <div className="flex items-stretch px-3 py-1.5 gap-0 min-w-max">
+        {/* 背景 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={Palette} label="背景" />
+          <div className="flex items-center gap-2">
+            <ColorSwatch
+              value={config.backgroundColor}
+              onChange={(c) => updateConfig('backgroundColor', c)}
+              size={22}
+              showHex
+            />
+          </div>
+          <div className="grid grid-cols-5 gap-[3px] mt-0.5">
+            {BG_PRESETS.map((color) => (
+              <button
+                key={color}
+                onClick={() => updateConfig('backgroundColor', color)}
+                className="w-[15px] h-[15px] rounded-[2px] transition-all duration-100 hover:scale-110 hover:shadow-sm"
+                style={{
+                  backgroundColor: color,
+                  border: config.backgroundColor === color ? '1.5px solid var(--theme-color)' : '1px solid rgba(0,0,0,0.12)',
+                  boxShadow: config.backgroundColor === color ? '0 0 0 1px var(--theme-color), inset 0 0 0 1px rgba(0,0,0,0.06)' : 'inset 0 0 0 1px rgba(0,0,0,0.06)',
+                }}
+              />
+            ))}
+          </div>
         </div>
 
-        <div className="p-4 space-y-6">
-          {/* Background Section */}
-          <section>
-            <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">背景</h4>
-            <div className="flex gap-4 mb-3">
-              <button
-                onClick={() => setActiveTab('color')}
-                className={`text-xs pb-1 border-b-2 transition-colors ${
-                  activeTab === 'color'
-                    ? 'text-[var(--theme-color)] border-[var(--theme-color)]'
-                    : 'text-[var(--text-secondary)] border-transparent'
-                }`}
+        <Divider />
+
+        {/* 基础连线 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={Spline} label="基础连线" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <div className="scale-[0.82] origin-left"><ColorButton value={config.line.color} onChange={(c) => updateConfig('line.color', c)} /></div>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <Stepper value={config.line.width} onChange={(v) => updateConfig('line.width', v)} min={1} max={10} />
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>箭头</span>
+            <Switch
+              checked={config.line.showArrow}
+              onCheckedChange={(v) => updateConfig('line.showArrow', v)}
+              className="scale-[0.55] origin-center"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>风格</span>
+            <Select value={config.line.style} onValueChange={(v) => updateConfig('line.style', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[64px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
               >
-                颜色
-              </button>
-              <button
-                onClick={() => setActiveTab('image')}
-                className={`text-xs pb-1 border-b-2 transition-colors ${
-                  activeTab === 'image'
-                    ? 'text-[var(--theme-color)] border-[var(--theme-color)]'
-                    : 'text-[var(--text-secondary)] border-transparent'
-                }`}
-              >
-                图片
-              </button>
-            </div>
-            {activeTab === 'color' && (
-              <ColorPicker
-                value={config.backgroundColor}
-                onChange={(color) => updateConfig('backgroundColor', color)}
-                size="sm"
-              />
-            )}
-            {activeTab === 'image' && (
-              <div className="text-xs text-[var(--text-secondary)] py-2">
-                图片背景功能暂未实现
-              </div>
-            )}
-          </section>
-
-          {/* Line Section */}
-          <section>
-            <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">连线</h4>
-            <div className="space-y-3">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">颜色</span>
-                  <ColorButton
-                    value={config.line.color}
-                    onChange={(color) => updateConfig('line.color', color)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">粗细</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={config.line.width}
-                    onChange={(e) => updateConfig('line.width', parseInt(e.target.value) || 1)}
-                    className="w-16 px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">风格</span>
-                  <select
-                    value={config.line.style}
-                    onChange={(e) => updateConfig('line.style', e.target.value)}
-                    className="px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                  >
-                    {LINE_STYLES.map((s) => (
-                      <option key={s.value} value={s.value}>{s.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">圆角大小</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={config.line.radius}
-                    onChange={(e) => updateConfig('line.radius', parseInt(e.target.value) || 0)}
-                    className="w-16 px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                  />
-                </div>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={config.line.showArrow}
-                  onChange={(e) => updateConfig('line.showArrow', e.target.checked)}
-                  className="w-4 h-4 rounded border-[var(--border-color)]"
-                />
-                <span className="text-xs text-[var(--text-secondary)]">是否显示箭头</span>
-              </label>
-            </div>
-          </section>
-
-          {/* Rainbow Lines Section */}
-          <section>
-            <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">彩虹线条</h4>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={config.rainbowLines}
-                onChange={(e) => updateConfig('rainbowLines', e.target.checked)}
-                className="w-4 h-4 rounded border-[var(--border-color)]"
-              />
-              <span className="text-xs text-[var(--text-secondary)]">
-                {config.rainbowLines ? '使用彩虹线条' : '不使用彩虹线条'}
-              </span>
-            </label>
-          </section>
-
-          {/* Generalization Line Section */}
-          <section>
-            <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">概要的连线</h4>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">颜色</span>
-                <ColorButton
-                  value={config.generalizationLine.color}
-                  onChange={(color) => updateConfig('generalizationLine.color', color)}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">粗细</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={config.generalizationLine.width}
-                  onChange={(e) => updateConfig('generalizationLine.width', parseInt(e.target.value) || 1)}
-                  className="w-16 px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* Associative Line Section */}
-          <section>
-            <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">关联线</h4>
-            <div className="space-y-3">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">颜色</span>
-                  <ColorButton
-                    value={config.associativeLine.color}
-                    onChange={(color) => updateConfig('associativeLine.color', color)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">粗细</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={config.associativeLine.width}
-                    onChange={(e) => updateConfig('associativeLine.width', parseInt(e.target.value) || 1)}
-                    className="w-16 px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">激活颜色</span>
-                  <ColorButton
-                    value={config.associativeLine.activeColor}
-                    onChange={(color) => updateConfig('associativeLine.activeColor', color)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">激活粗细</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={config.associativeLine.activeWidth}
-                    onChange={(e) => updateConfig('associativeLine.activeWidth', parseInt(e.target.value) || 1)}
-                    className="w-16 px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">样式</span>
-                <select
-                  value={config.associativeLine.dasharray}
-                  onChange={(e) => updateConfig('associativeLine.dasharray', e.target.value)}
-                  className="px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                >
-                  {DASHARRAY_OPTIONS.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </section>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LINE_STYLES.map((s) => (
+                  <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>圆角</span>
+            <Stepper value={config.line.radius} onChange={(v) => updateConfig('line.radius', v)} min={0} max={20} />
+          </div>
         </div>
-      </div>
+
+        <Divider />
+
+        {/* 概要连线 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={GitBranch} label="概要连线" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <div className="scale-[0.82] origin-left">
+              <ColorButton value={config.generalizationLine.color} onChange={(c) => updateConfig('generalizationLine.color', c)} />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <Stepper value={config.generalizationLine.width} onChange={(v) => updateConfig('generalizationLine.width', v)} min={1} max={10} />
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* 关联线 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={Link} label="关联线" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <div className="scale-[0.82] origin-left"><ColorButton value={config.associativeLine.color} onChange={(c) => updateConfig('associativeLine.color', c)} /></div>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <Stepper value={config.associativeLine.width} onChange={(v) => updateConfig('associativeLine.width', v)} min={1} max={10} />
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>样式</span>
+            <Select value={config.associativeLine.dasharray} onValueChange={(v) => updateConfig('associativeLine.dasharray', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[64px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DASHARRAY_OPTIONS.map((s) => (
+                  <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>激活颜色</span>
+            <div className="scale-[0.82] origin-left"><ColorButton value={config.associativeLine.activeColor} onChange={(c) => updateConfig('associativeLine.activeColor', c)} /></div>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>激活粗细</span>
+            <Stepper value={config.associativeLine.activeWidth} onChange={(v) => updateConfig('associativeLine.activeWidth', v)} min={1} max={20} />
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* 节点内边距 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={BoxSelect} label="节点内边距" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>水平</span>
+            <Stepper value={config.padding.horizontal} onChange={(v) => updateConfig('padding.horizontal', v)} min={0} max={50} />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>垂直</span>
+            <Stepper value={config.padding.vertical} onChange={(v) => updateConfig('padding.vertical', v)} min={0} max={50} />
+          </div>
+        </div>
+
+        {/* 关闭 */}
+        <button
+          onClick={onClose}
+          className="ml-auto self-start p-1 rounded-[3px] transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+          style={{ color: 'var(--text-tertiary)' }}
+        >
+          <X size={14} />
+        </button>
+        </div>
+      </ScrollArea>
     </div>
   )
 }

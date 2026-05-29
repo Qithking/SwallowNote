@@ -212,7 +212,8 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const isExpanded = hasActiveNode && activeNodes[0].getData('expand') !== false
 
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+    <>
+      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
       {/* Node Operations */}
       <div className="flex items-center gap-0.5">
         <ToolbarButton
@@ -349,8 +350,9 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       {/* Style Plugins */}
       <div className="flex items-center gap-0.5">
         <ToolbarButton
-          onClick={() => setShowBaseStylePlugin(true)}
+          onClick={() => setShowBaseStylePlugin(!showBaseStylePlugin)}
           title="基础样式"
+          style={showBaseStylePlugin ? { background: 'var(--bg-hover)' } : undefined}
         >
           <Settings size={14} />
           <span className="text-[10px]">基础</span>
@@ -382,8 +384,8 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           <Maximize size={14} />
         </ToolbarButton>
       </div>
+      </div>
 
-      {/* Style Plugin Modals */}
       {showBaseStylePlugin && (
         <BaseStylePlugin
           mindMap={mindMap}
@@ -396,7 +398,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           onClose={() => setShowNodeStylePlugin(false)}
         />
       )}
-    </div>
+    </>
   )
 }
 
