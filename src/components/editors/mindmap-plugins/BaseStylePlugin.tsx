@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, Palette, Minus, Plus, Spline, GitBranch, Link, BoxSelect } from 'lucide-react'
+import { X, Palette, Minus, Plus, Spline, GitBranch, Link, BoxSelect, Square } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import {
   Select,
@@ -39,6 +39,10 @@ interface BaseStyleConfig {
     dasharray: string
   }
   padding: {
+    horizontal: number
+    vertical: number
+  }
+  outerFramePadding: {
     horizontal: number
     vertical: number
   }
@@ -151,6 +155,10 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
       horizontal: 15,
       vertical: 5,
     },
+    outerFramePadding: {
+      horizontal: 10,
+      vertical: 10,
+    },
   })
 
   useEffect(() => {
@@ -182,6 +190,10 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
         horizontal: themeConfig.paddingX || 15,
         vertical: themeConfig.paddingY || 5,
       },
+      outerFramePadding: {
+        horizontal: mindMap.opt?.outerFramePaddingX ?? 10,
+        vertical: mindMap.opt?.outerFramePaddingY ?? 10,
+      },
     })
   }, [mindMap])
 
@@ -206,6 +218,10 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
       paddingX: newConfig.padding.horizontal,
       paddingY: newConfig.padding.vertical,
     })
+    if (mindMap.opt) {
+      mindMap.opt.outerFramePaddingX = newConfig.outerFramePadding.horizontal
+      mindMap.opt.outerFramePaddingY = newConfig.outerFramePadding.vertical
+    }
   }, [mindMap])
 
   const updateConfig = (path: string, value: any) => {
@@ -368,6 +384,21 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
           <div className="flex items-center gap-2">
             <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>垂直</span>
             <Stepper value={config.padding.vertical} onChange={(v) => updateConfig('padding.vertical', v)} min={0} max={50} />
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* 外框内边距 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={Square} label="外框内边距" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>水平</span>
+            <Stepper value={config.outerFramePadding.horizontal} onChange={(v) => updateConfig('outerFramePadding.horizontal', v)} min={0} max={50} />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>垂直</span>
+            <Stepper value={config.outerFramePadding.vertical} onChange={(v) => updateConfig('outerFramePadding.vertical', v)} min={0} max={50} />
           </div>
         </div>
 
