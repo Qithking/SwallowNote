@@ -66,19 +66,17 @@ export function TitleBarRecentPopover() {
   const loadHistory = async () => {
     try {
       const paths = await getFolderHistory()
-      const filtered = paths.filter(p => {
-        const isWorkspace = p.endsWith('.swallow-workspace')
-        return workspaceMode === 'workspace' ? isWorkspace : !isWorkspace
-      })
       // Deduplicate by normalized path (handle case where same path stored with different separators)
       const seen = new Set<string>()
-      const deduped = filtered.filter(p => {
+      const deduped = paths.filter(p => {
         const normalized = p.replace(/\\/g, '/').toLowerCase()
         if (seen.has(normalized)) return false
         seen.add(normalized)
         return true
       })
-      const items: RecentItem[] = deduped.map(path => ({
+      // Limit to recent 10 items
+      const limited = deduped.slice(0, 10)
+      const items: RecentItem[] = limited.map(path => ({
         path,
         name: path.split(/[\\/]/).pop() || path,
         isWorkspace: path.endsWith('.swallow-workspace'),
@@ -91,7 +89,7 @@ export function TitleBarRecentPopover() {
 
   useEffect(() => {
     if (isOpen) loadHistory()
-  }, [isOpen, workspaceMode])
+  }, [isOpen])
 
   // Listen for clone dialog open requests from WelcomeScreen
   useEffect(() => {
