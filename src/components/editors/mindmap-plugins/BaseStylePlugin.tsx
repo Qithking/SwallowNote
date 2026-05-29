@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ColorSwatch, ColorButton } from './ColorPicker'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 
 interface BaseStylePluginProps {
   mindMap: any
@@ -232,7 +232,15 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
       className="border-b bg-[var(--bg-primary)]"
       style={{ borderColor: 'var(--border-color)' }}
     >
-      <ScrollArea className="w-full">
+      <ScrollArea className="w-full" onWheel={(e) => {
+        if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
+          const viewport = (e.currentTarget as HTMLElement).querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
+          if (viewport) {
+            e.preventDefault()
+            viewport.scrollLeft += e.deltaY
+          }
+        }
+      }}>
         <div className="flex items-stretch px-3 py-1.5 gap-0 min-w-max">
         {/* 背景 */}
         <div className={sectionCls}>
@@ -372,6 +380,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
           <X size={14} />
         </button>
         </div>
+        <ScrollBar orientation="horizontal" />
       </ScrollArea>
     </div>
   )
