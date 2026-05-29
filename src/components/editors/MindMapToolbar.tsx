@@ -4,19 +4,23 @@
  * Provides basic operations for the mind map editor.
  * This is a simplified toolbar inspired by the official simple-mind-map Vue2 example.
  */
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Plus,
-  Trash2,
-  ChevronDown,
-  ChevronRight,
+  Undo2,
+  Redo2,
+  Paintbrush,
+  SmilePlus,
+  Link,
+  FileText,
+  Tag,
+  Type,
+  Square,
   Layout,
   Palette,
   ZoomIn,
   ZoomOut,
   Maximize,
   Settings,
-  Paintbrush,
   Check,
 } from 'lucide-react'
 import {
@@ -28,6 +32,15 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { BaseStylePlugin, NodeStylePlugin } from './mindmap-plugins'
 
 interface MindMapToolbarProps {
@@ -83,12 +96,56 @@ const THEME_OPTIONS = [
   { value: 'dark', label: '深色' },
 ]
 
+const ICON_LIST = [
+  { name: 'smile', emoji: '😊', label: '微笑' },
+  { name: 'cry', emoji: '😢', label: '哭泣' },
+  { name: 'laugh', emoji: '😄', label: '大笑' },
+  { name: 'angry', emoji: '😠', label: '愤怒' },
+  { name: 'surprise', emoji: '😲', label: '惊讶' },
+  { name: 'love', emoji: '❤️', label: '爱心' },
+  { name: 'star', emoji: '⭐', label: '星星' },
+  { name: 'fire', emoji: '🔥', label: '火焰' },
+  { name: 'check', emoji: '✅', label: '完成' },
+  { name: 'cross', emoji: '❌', label: '错误' },
+  { name: 'warn', emoji: '⚠️', label: '警告' },
+  { name: 'question', emoji: '❓', label: '疑问' },
+  { name: 'idea', emoji: '💡', label: '想法' },
+  { name: 'rocket', emoji: '🚀', label: '火箭' },
+  { name: 'target', emoji: '🎯', label: '目标' },
+  { name: 'flag', emoji: '🚩', label: '旗帜' },
+  { name: 'lock', emoji: '🔒', label: '锁定' },
+  { name: 'key', emoji: '🔑', label: '钥匙' },
+  { name: 'clock', emoji: '⏰', label: '时钟' },
+  { name: 'calendar', emoji: '📅', label: '日历' },
+  { name: 'phone', emoji: '📞', label: '电话' },
+  { name: 'email', emoji: '📧', label: '邮件' },
+  { name: 'home', emoji: '🏠', label: '首页' },
+  { name: 'link', emoji: '🔗', label: '链接' },
+  { name: 'up', emoji: '👆', label: '向上' },
+  { name: 'down', emoji: '👇', label: '向下' },
+  { name: 'left', emoji: '👈', label: '向左' },
+  { name: 'right', emoji: '👉', label: '向右' },
+  { name: 'plus', emoji: '➕', label: '加' },
+  { name: 'minus', emoji: '➖', label: '减' },
+  { name: 'chart', emoji: '📊', label: '图表' },
+  { name: 'file', emoji: '📄', label: '文件' },
+]
+
 export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const [activeNodes, setActiveNodes] = useState<any[]>([])
   const [currentLayout, setCurrentLayout] = useState('logicalStructure')
   const [currentTheme, setCurrentTheme] = useState('default')
   const [showBaseStylePlugin, setShowBaseStylePlugin] = useState(false)
   const [showNodeStylePlugin, setShowNodeStylePlugin] = useState(false)
+  const [isPainterActive, setIsPainterActive] = useState(false)
+  const [hyperlinkDialogOpen, setHyperlinkDialogOpen] = useState(false)
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false)
+  const [iconDialogOpen, setIconDialogOpen] = useState(false)
+  const [tagDialogOpen, setTagDialogOpen] = useState(false)
+  const [hyperlinkUrl, setHyperlinkUrl] = useState('')
+  const [hyperlinkTitle, setHyperlinkTitle] = useState('')
+  const [noteText, setNoteText] = useState('')
+  const [tagInput, setTagInput] = useState('')
 
   useEffect(() => {
     if (!mindMap) return
@@ -99,9 +156,6 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
 
     mindMap.on('node_active', handleNodeActive)
 
-    // Get currently active nodes on mount / when mindMap instance changes
-    // simple-mind-map only fires 'node_active' on selection CHANGE,
-    // so we need to read the initial state explicitly
     const currentActiveNodes = mindMap.renderer?.activeNodeList || []
     if (currentActiveNodes.length > 0) {
       setActiveNodes(currentActiveNodes)
@@ -112,31 +166,113 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
     }
   }, [mindMap])
 
-  const handleInsertChild = () => {
+  useEffect(() => {
     if (!mindMap) return
-    mindMap.execCommand('INSERT_CHILD_NODE')
+
+    const handlePainterStart = () => setIsPainterActive(true)
+    const handlePainterEnd = () => setIsPainterActive(false)
+
+    mindMap.on('painter_start', handlePainterStart)
+    mindMap.on('painter_end', handlePainterEnd)
+
+    return () => {
+      mindMap.off('painter_start', handlePainterStart)
+      mindMap.off('painter_end', handlePainterEnd)
+    }
+  }, [mindMap])
+
+  const hasActiveNode = activeNodes.length > 0
+
+  const handleUndo = () => {
+    if (!mindMap) return
+    mindMap.execCommand('BACK')
   }
 
-  const handleInsertSibling = () => {
+  const handleRedo = () => {
     if (!mindMap) return
-    mindMap.execCommand('INSERT_NODE')
+    mindMap.execCommand('FORWARD')
   }
 
-  const handleInsertParent = () => {
-    if (!mindMap) return
-    mindMap.execCommand('INSERT_PARENT_NODE')
+  const handleFormatPainter = () => {
+    if (!mindMap || !hasActiveNode) return
+    mindMap.painter?.startPainter()
   }
 
-  const handleRemoveNode = () => {
-    if (!mindMap) return
-    mindMap.execCommand('REMOVE_NODE')
+  const handleOpenIconDialog = () => {
+    if (!mindMap || !hasActiveNode) return
+    setIconDialogOpen(true)
   }
 
-  const handleToggleExpand = () => {
-    if (!mindMap || activeNodes.length === 0) return
+  const handleOpenHyperlinkDialog = () => {
+    if (!mindMap || !hasActiveNode) return
     const node = activeNodes[0]
-    const isExpand = node.getData('expand') !== false
-    mindMap.execCommand('SET_NODE_EXPAND', node, !isExpand)
+    setHyperlinkUrl(node.getData('hyperlink') || '')
+    setHyperlinkTitle(node.getData('hyperlinkTitle') || '')
+    setHyperlinkDialogOpen(true)
+  }
+
+  const handleOpenNoteDialog = () => {
+    if (!mindMap || !hasActiveNode) return
+    const node = activeNodes[0]
+    setNoteText(node.getData('note') || '')
+    setNoteDialogOpen(true)
+  }
+
+  const handleOpenTagDialog = () => {
+    if (!mindMap || !hasActiveNode) return
+    const node = activeNodes[0]
+    const existingTags = node.getData('tag') || []
+    setTagInput(existingTags.join(', '))
+    setTagDialogOpen(true)
+  }
+
+  const handleSetHyperlink = useCallback(() => {
+    if (!mindMap || !hasActiveNode) return
+    const node = activeNodes[0]
+    mindMap.execCommand('SET_NODE_HYPERLINK', node, hyperlinkUrl, hyperlinkTitle)
+    setHyperlinkDialogOpen(false)
+  }, [mindMap, activeNodes, hyperlinkUrl, hyperlinkTitle])
+
+  const handleSetNote = useCallback(() => {
+    if (!mindMap || !hasActiveNode) return
+    const node = activeNodes[0]
+    mindMap.execCommand('SET_NODE_NOTE', node, noteText)
+    setNoteDialogOpen(false)
+  }, [mindMap, activeNodes, noteText])
+
+  const handleSetIcon = useCallback((iconName: string) => {
+    if (!mindMap || !hasActiveNode) return
+    const node = activeNodes[0]
+    const currentIcons = node.getData('icon') || []
+    const exists = currentIcons.some((i: any) => i.name === iconName)
+    let newIcons: any[]
+    if (exists) {
+      newIcons = currentIcons.filter((i: any) => i.name !== iconName)
+    } else {
+      newIcons = [...currentIcons, { name: iconName }]
+    }
+    mindMap.execCommand('SET_NODE_ICON', node, newIcons)
+  }, [mindMap, activeNodes])
+
+  const handleSetTag = useCallback(() => {
+    if (!mindMap || !hasActiveNode) return
+    const node = activeNodes[0]
+    const tags = tagInput
+      .split(',')
+      .map(t => t.trim())
+      .filter(t => t.length > 0)
+    mindMap.execCommand('SET_NODE_TAG', node, tags)
+    setTagDialogOpen(false)
+  }, [mindMap, activeNodes, tagInput])
+
+  const handleAddSummary = () => {
+    if (!mindMap || !hasActiveNode) return
+    mindMap.execCommand('ADD_GENERALIZATION')
+  }
+
+  const handleAddOuterFrame = () => {
+    if (!mindMap || !hasActiveNode) return
+    mindMap.execCommand('ADD_OUTER_FRAME')
   }
 
   const handleZoomIn = () => {
@@ -163,7 +299,6 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const handleThemeChange = (theme: string) => {
     if (!mindMap) return
     if (theme === 'dark') {
-      // 使用 setThemeConfig 自定义暗色主题
       mindMap.setThemeConfig({
         backgroundColor: '#1a1a1a',
         lineColor: '#4a9eff',
@@ -183,7 +318,6 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
         },
       })
     } else {
-      // 恢复默认主题配置
       mindMap.setThemeConfig({
         backgroundColor: '#fafafa',
         lineColor: '#549688',
@@ -206,57 +340,97 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
     setCurrentTheme(theme)
   }
 
-  const hasActiveNode = activeNodes.length > 0
-  const isRootNode = hasActiveNode && activeNodes[0].isRoot
-  const canExpand = hasActiveNode && activeNodes[0].children && activeNodes[0].children.length > 0
-  const isExpanded = hasActiveNode && activeNodes[0].getData('expand') !== false
-
   return (
     <>
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-      {/* Node Operations */}
+      {/* Undo / Redo */}
       <div className="flex items-center gap-0.5">
         <ToolbarButton
-          onClick={handleInsertChild}
+          onClick={handleUndo}
+          title="回退 (Ctrl+Z)"
+        >
+          <Undo2 size={14} />
+          <span className="text-[10px]">回退</span>
+        </ToolbarButton>
+
+        <ToolbarButton
+          onClick={handleRedo}
+          title="前进 (Ctrl+Y)"
+        >
+          <Redo2 size={14} />
+          <span className="text-[10px]">前进</span>
+        </ToolbarButton>
+      </div>
+
+      <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
+
+      {/* Format Painter */}
+      <ToolbarButton
+        onClick={handleFormatPainter}
+        disabled={!hasActiveNode}
+        title="格式刷"
+        style={isPainterActive ? { background: 'var(--bg-hover)' } : undefined}
+      >
+        <Paintbrush size={14} />
+        <span className="text-[10px]">格式刷</span>
+      </ToolbarButton>
+
+      <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
+
+      {/* Node Enhancement */}
+      <div className="flex items-center gap-0.5">
+        <ToolbarButton
+          onClick={handleOpenIconDialog}
           disabled={!hasActiveNode}
-          title="插入子节点 (Tab)"
+          title="图标"
         >
-          <Plus size={14} />
-          <span className="text-[10px]">子</span>
+          <SmilePlus size={14} />
+          <span className="text-[10px]">图标</span>
         </ToolbarButton>
 
         <ToolbarButton
-          onClick={handleInsertSibling}
-          disabled={!hasActiveNode || isRootNode}
-          title="插入同级节点 (Enter)"
+          onClick={handleOpenHyperlinkDialog}
+          disabled={!hasActiveNode}
+          title="超链接"
         >
-          <Plus size={14} />
-          <span className="text-[10px]">同级</span>
+          <Link size={14} />
+          <span className="text-[10px]">超链接</span>
         </ToolbarButton>
 
         <ToolbarButton
-          onClick={handleInsertParent}
-          disabled={!hasActiveNode || isRootNode}
-          title="插入父节点"
+          onClick={handleOpenNoteDialog}
+          disabled={!hasActiveNode}
+          title="备注"
         >
-          <Plus size={14} />
-          <span className="text-[10px]">父</span>
+          <FileText size={14} />
+          <span className="text-[10px]">备注</span>
         </ToolbarButton>
 
         <ToolbarButton
-          onClick={handleRemoveNode}
-          disabled={!hasActiveNode || isRootNode}
-          title="删除节点 (Delete)"
+          onClick={handleOpenTagDialog}
+          disabled={!hasActiveNode}
+          title="标签"
         >
-          <Trash2 size={14} className="text-red-500" />
+          <Tag size={14} />
+          <span className="text-[10px]">标签</span>
         </ToolbarButton>
 
         <ToolbarButton
-          onClick={handleToggleExpand}
-          disabled={!canExpand}
-          title={isExpanded ? '折叠' : '展开'}
+          onClick={handleAddSummary}
+          disabled={!hasActiveNode}
+          title="概要 (Ctrl+G)"
         >
-          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <Type size={14} />
+          <span className="text-[10px]">概要</span>
+        </ToolbarButton>
+
+        <ToolbarButton
+          onClick={handleAddOuterFrame}
+          disabled={!hasActiveNode}
+          title="外框"
+        >
+          <Square size={14} />
+          <span className="text-[10px]">外框</span>
         </ToolbarButton>
       </div>
 
@@ -405,6 +579,193 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           onClose={() => setShowNodeStylePlugin(false)}
         />
       )}
+
+      {/* Hyperlink Dialog */}
+      <Dialog open={hyperlinkDialogOpen} onOpenChange={setHyperlinkDialogOpen}>
+        <DialogContent
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>设置超链接</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>链接地址</label>
+              <Input
+                value={hyperlinkUrl}
+                onChange={(e) => setHyperlinkUrl(e.target.value)}
+                placeholder="https://"
+                style={{
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  borderColor: 'var(--border-color)',
+                }}
+              />
+            </div>
+            <div>
+              <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>链接标题</label>
+              <Input
+                value={hyperlinkTitle}
+                onChange={(e) => setHyperlinkTitle(e.target.value)}
+                placeholder="链接标题（可选）"
+                style={{
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  borderColor: 'var(--border-color)',
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setHyperlinkDialogOpen(false)}
+              className="px-3 py-1.5 rounded text-xs"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSetHyperlink}
+              className="px-3 py-1.5 rounded text-xs text-white"
+              style={{ background: 'var(--theme-color)' }}
+            >
+              确定
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Note Dialog */}
+      <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
+        <DialogContent
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>设置备注</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            placeholder="输入备注内容..."
+            rows={5}
+            style={{
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-primary)',
+              borderColor: 'var(--border-color)',
+            }}
+          />
+          <DialogFooter>
+            <button
+              onClick={() => setNoteDialogOpen(false)}
+              className="px-3 py-1.5 rounded text-xs"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSetNote}
+              className="px-3 py-1.5 rounded text-xs text-white"
+              style={{ background: 'var(--theme-color)' }}
+            >
+              确定
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Icon Dialog */}
+      <Dialog open={iconDialogOpen} onOpenChange={setIconDialogOpen}>
+        <DialogContent
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>设置图标</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-8 gap-1">
+            {ICON_LIST.map((icon) => {
+              const currentIcons = activeNodes[0]?.getData('icon') || []
+              const isActive = currentIcons.some((i: any) => i.name === icon.name)
+              return (
+                <button
+                  key={icon.name}
+                  onClick={() => handleSetIcon(icon.name)}
+                  className="flex items-center justify-center w-8 h-8 rounded text-lg hover:bg-[var(--bg-hover)] transition-colors"
+                  style={{
+                    border: isActive ? '2px solid var(--theme-color)' : '1px solid var(--border-color)',
+                    background: isActive ? 'var(--bg-hover)' : 'transparent',
+                  }}
+                  title={icon.label}
+                >
+                  {icon.emoji}
+                </button>
+              )
+            })}
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setIconDialogOpen(false)}
+              className="px-3 py-1.5 rounded text-xs"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              关闭
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Tag Dialog */}
+      <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
+        <DialogContent
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>设置标签</DialogTitle>
+          </DialogHeader>
+          <div>
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+              输入标签，多个标签用逗号分隔
+            </label>
+            <Input
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              placeholder="标签1, 标签2, 标签3"
+              style={{
+                background: 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+                borderColor: 'var(--border-color)',
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setTagDialogOpen(false)}
+              className="px-3 py-1.5 rounded text-xs"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSetTag}
+              className="px-3 py-1.5 rounded text-xs text-white"
+              style={{ background: 'var(--theme-color)' }}
+            >
+              确定
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
