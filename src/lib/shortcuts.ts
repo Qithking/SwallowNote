@@ -39,7 +39,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { key: 'toggleSidebar', defaultKey: 'Ctrl+B' },
   { key: 'settings', defaultKey: 'Ctrl+,' },
   { key: 'renameFile', defaultKey: 'F2' },
-  { key: 'deleteFile', defaultKey: 'Backspace' },
+  { key: 'deleteFile', defaultKey: 'Ctrl+Delete' },
 ]
 
 export const DEFAULT_SHORTCUTS_MAP: Record<ShortcutKey, string> = Object.fromEntries(
