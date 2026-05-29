@@ -4,7 +4,7 @@
  * Provides basic operations for the mind map editor.
  * This is a simplified toolbar inspired by the official simple-mind-map Vue2 example.
  */
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Plus,
   Trash2,
@@ -17,20 +17,63 @@ import {
   Maximize,
   Settings,
   Paintbrush,
+  Check,
 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from '@/components/ui/dropdown-menu'
 import { BaseStylePlugin, NodeStylePlugin } from './mindmap-plugins'
 
 interface MindMapToolbarProps {
   mindMap: any // simple-mind-map instance
 }
 
-const LAYOUT_OPTIONS = [
-  { value: 'logicalStructure', label: '逻辑结构图' },
-  { value: 'mindMap', label: '思维导图' },
-  { value: 'organizationStructure', label: '组织结构图' },
-  { value: 'catalogOrganization', label: '目录组织图' },
-  { value: 'timeline', label: '时间轴' },
-  { value: 'fishbone', label: '鱼骨图' },
+const LAYOUT_GROUPS = [
+  {
+    label: '逻辑结构',
+    children: [
+      { value: 'logicalStructure', label: '逻辑结构图' },
+      { value: 'logicalStructureLeft', label: '向左逻辑结构图' },
+    ],
+  },
+  {
+    label: '思维导图',
+    children: [
+      { value: 'mindMap', label: '思维导图' },
+    ],
+  },
+  {
+    label: '组织结构',
+    children: [
+      { value: 'organizationStructure', label: '组织结构图' },
+      { value: 'catalogOrganization', label: '目录组织图' },
+    ],
+  },
+  {
+    label: '时间轴',
+    children: [
+      { value: 'timeline', label: '时间轴' },
+      { value: 'timeline2', label: '时间轴2' },
+      { value: 'verticalTimeline', label: '竖向时间轴' },
+      { value: 'verticalTimeline2', label: '竖向时间轴2' },
+      { value: 'verticalTimeline3', label: '竖向时间轴3' },
+    ],
+  },
+  {
+    label: '鱼骨图',
+    children: [
+      { value: 'fishbone', label: '鱼骨图' },
+      { value: 'fishbone2', label: '鱼骨图2' },
+      { value: 'rightFishbone', label: '向右鱼骨图' },
+      { value: 'rightFishbone2', label: '向右鱼骨图2' },
+    ],
+  },
 ]
 
 // simple-mind-map 的 dist 文件只包含 default 主题
@@ -44,8 +87,6 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const [activeNodes, setActiveNodes] = useState<any[]>([])
   const [currentLayout, setCurrentLayout] = useState('logicalStructure')
   const [currentTheme, setCurrentTheme] = useState('default')
-  const [showLayoutMenu, setShowLayoutMenu] = useState(false)
-  const [showThemeMenu, setShowThemeMenu] = useState(false)
   const [showBaseStylePlugin, setShowBaseStylePlugin] = useState(false)
   const [showNodeStylePlugin, setShowNodeStylePlugin] = useState(false)
 
@@ -117,7 +158,6 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
     if (!mindMap) return
     mindMap.setLayout(layout)
     setCurrentLayout(layout)
-    setShowLayoutMenu(false)
   }
 
   const handleThemeChange = (theme: string) => {
@@ -164,7 +204,6 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       })
     }
     setCurrentTheme(theme)
-    setShowThemeMenu(false)
   }
 
   const hasActiveNode = activeNodes.length > 0
@@ -223,36 +262,87 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
 
       {/* Layout */}
-      <div className="relative">
-        <ToolbarButton onClick={() => setShowLayoutMenu(!showLayoutMenu)} title="布局">
+      <DropdownMenu>
+        <DropdownMenuTrigger className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-[var(--bg-hover)] transition-colors outline-none">
           <Layout size={14} />
           <span className="text-[10px] ml-0.5">布局</span>
-        </ToolbarButton>
-        {showLayoutMenu && (
-          <DropdownMenu
-            options={LAYOUT_OPTIONS}
-            value={currentLayout}
-            onChange={handleLayoutChange}
-            onClose={() => setShowLayoutMenu(false)}
-          />
-        )}
-      </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          className="min-w-[140px]"
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          {LAYOUT_GROUPS.map((group) => (
+            group.children.length === 1 ? (
+              <DropdownMenuItem
+                key={group.children[0].value}
+                onSelect={() => handleLayoutChange(group.children[0].value)}
+                className="text-xs cursor-pointer"
+                style={{ color: currentLayout === group.children[0].value ? 'var(--theme-color)' : 'var(--text-secondary)' }}
+              >
+                {group.children[0].label}
+                {currentLayout === group.children[0].value && <Check size={14} className="ml-auto" />}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuSub key={group.label}>
+                <DropdownMenuSubTrigger
+                  className="text-xs"
+                  style={{ color: group.children.some(c => c.value === currentLayout) ? 'var(--theme-color)' : 'var(--text-secondary)' }}
+                >
+                  {group.label}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent
+                  style={{
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  {group.children.map((child) => (
+                    <DropdownMenuItem
+                      key={child.value}
+                      onSelect={() => handleLayoutChange(child.value)}
+                      className="text-xs cursor-pointer"
+                      style={{ color: currentLayout === child.value ? 'var(--theme-color)' : 'var(--text-secondary)' }}
+                    >
+                      {child.label}
+                      {currentLayout === child.value && <Check size={14} className="ml-auto" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {/* Theme */}
-      <div className="relative">
-        <ToolbarButton onClick={() => setShowThemeMenu(!showThemeMenu)} title="主题">
+      <DropdownMenu>
+        <DropdownMenuTrigger className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-[var(--bg-hover)] transition-colors outline-none">
           <Palette size={14} />
           <span className="text-[10px] ml-0.5">主题</span>
-        </ToolbarButton>
-        {showThemeMenu && (
-          <DropdownMenu
-            options={THEME_OPTIONS}
-            value={currentTheme}
-            onChange={handleThemeChange}
-            onClose={() => setShowThemeMenu(false)}
-          />
-        )}
-      </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          className="min-w-[100px]"
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          {THEME_OPTIONS.map((option) => (
+            <DropdownMenuItem
+              key={option.value}
+              onSelect={() => handleThemeChange(option.value)}
+              className="text-xs cursor-pointer"
+              style={{ color: currentTheme === option.value ? 'var(--theme-color)' : 'var(--text-secondary)' }}
+            >
+              {option.label}
+              {currentTheme === option.value && <Check size={14} className="ml-auto" />}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
 
@@ -310,65 +400,28 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   )
 }
 
-interface ToolbarButtonProps {
+interface ToolbarButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode
-  onClick: () => void
-  disabled?: boolean
-  title?: string
 }
 
-function ToolbarButton({ children, onClick, disabled, title }: ToolbarButtonProps) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`
-        flex items-center gap-0.5 px-1.5 py-1 rounded
-        text-[var(--text-secondary)] text-xs
-        hover:bg-[var(--bg-hover)]
-        disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent
-        transition-colors
-      `}
-    >
-      {children}
-    </button>
-  )
-}
-
-interface DropdownMenuProps {
-  options: { value: string; label: string }[]
-  value: string
-  onChange: (value: string) => void
-  onClose: () => void
-}
-
-function DropdownMenu({ options, value, onChange, onClose }: DropdownMenuProps) {
-  useEffect(() => {
-    const handleClickOutside = () => onClose()
-    setTimeout(() => {
-      document.addEventListener('click', handleClickOutside, { once: true })
-    }, 0)
-    return () => {
-      document.removeEventListener('click', handleClickOutside)
-    }
-  }, [onClose])
-
-  return (
-    <div className="absolute top-full left-0 mt-1 py-1 min-w-[120px] rounded-md shadow-lg border border-[var(--border-color)] bg-[var(--bg-primary)] z-50">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          onClick={() => onChange(option.value)}
-          className={`
-            w-full px-3 py-1.5 text-left text-xs
-            hover:bg-[var(--bg-hover)]
-            ${value === option.value ? 'text-[var(--theme-color)]' : 'text-[var(--text-secondary)]'}
-          `}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  )
-}
+const ToolbarButton = React.forwardRef<HTMLButtonElement, ToolbarButtonProps>(
+  ({ children, className, ...props }, ref) => {
+    return (
+      <button
+        ref={ref}
+        className={`
+          flex items-center gap-0.5 px-1.5 py-1 rounded
+          text-[var(--text-secondary)] text-xs
+          hover:bg-[var(--bg-hover)]
+          disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent
+          transition-colors
+          ${className || ''}
+        `}
+        {...props}
+      >
+        {children}
+      </button>
+    )
+  }
+)
+ToolbarButton.displayName = 'ToolbarButton'
