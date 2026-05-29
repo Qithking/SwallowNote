@@ -333,25 +333,31 @@ pub async fn install_and_restart(app: AppHandle, dmg_path: String) -> Result<(),
         // old process (with the same bundle identifier) is still running. The old
         // process may also hold locks on files inside the .app bundle.
         //
-        // The reliable approach is to spawn a detached helper process that:
-        //   1. Waits for the current app's PID to disappear (i.e. the old app has exited)
+        // The reliable approach is to spawn a fully detached helper process that:
+        //   1. Waits for the current app's PID to disappear (with a timeout)
         //   2. Launches the new app with `open`
         //
-        // We write a temporary shell script and execute it via `nohup` so the helper
-        // process is fully independent of the current process lifecycle.
+        // We use `setsid` to create a new session, ensuring the helper is completely
+        // independent of the parent's process group and terminal.
         let current_pid = std::process::id();
         let new_app_path = dest_app.to_string_lossy().to_string();
 
-        // Create a temporary restart script
+        // Create a temporary restart script with timeout protection
         let tmp_dir = std::env::temp_dir();
-        let restart_script_path = tmp_dir.join("swallownote_restart.sh");
+        let restart_script_path = tmp_dir.join(format!("swallownote_restart_{}.sh", current_pid));
         let restart_script_content = format!(
             "#!/bin/bash\n\
-# Wait for the old SwallowNote process to exit\n\
+# Wait for the old SwallowNote process to exit (with 30s timeout)\n\
+wait_count=0\n\
 while kill -0 {pid} 2>/dev/null; do\n\
   sleep 0.2\n\
+  wait_count=$((wait_count + 1))\n\
+  if [ $wait_count -ge 150 ]; then\n\
+    echo \"Timeout waiting for old process to exit\" >&2\n\
+    break\n\
+  fi\n\
 done\n\
-# Brief pause to ensure all resources are released\n\
+# Additional pause to ensure all resources are released\n\
 sleep 0.5\n\
 # Launch the new version\n\
 open \"{app_path}\"\n\
@@ -372,9 +378,10 @@ rm -f \"$0\"\n",
         }
 
         // Execute the restart script as a fully detached process
-        // Using nohup ensures the script survives the parent process exit
+        // Using setsid ensures the script runs in a new session, completely
+        // independent of the parent process lifecycle
         let script_path_str = restart_script_path.to_string_lossy().to_string();
-        std::process::Command::new("nohup")
+        std::process::Command::new("setsid")
             .args(["bash", &script_path_str])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -384,8 +391,9 @@ rm -f \"$0\"\n",
         // Step 8: Exit the current app
         // Small delay to ensure the helper script has started and is watching our PID
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            app.exit(0);
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            // Use std::process::exit for a clean exit
+            std::process::exit(0);
         });
 
         Ok(())
