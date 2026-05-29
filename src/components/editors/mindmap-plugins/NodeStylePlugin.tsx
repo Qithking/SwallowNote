@@ -4,7 +4,7 @@
  * Controls selected node styles: border, background, shape, line, padding, image layout, tag layout
  * Similar to the "节点样式" panel in simple-mind-map official example
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { X } from 'lucide-react'
 import { ColorButton } from './ColorPicker'
 
@@ -86,6 +86,12 @@ const TAG_LAYOUTS = [
 
 export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
   const [activeNodes, setActiveNodes] = useState<any[]>([])
+  const activeNodesRef = useRef<any[]>([])
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    activeNodesRef.current = activeNodes
+  }, [activeNodes])
   const [config, setConfig] = useState<NodeStyleConfig>({
     border: {
       color: '#549688',
@@ -118,14 +124,16 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
 
   // Listen for active node changes
   useEffect(() => {
+    console.log('NodeStylePlugin useEffect - mindMap:', mindMap)
     if (!mindMap) return
 
-    const handleNodeActive = (nodes: any[]) => {
-      setActiveNodes(nodes || [])
+    const handleNodeActive = (_node: any, activeNodeList: any[]) => {
+      console.log('NodeStylePlugin - node_active fired:', activeNodeList)
+      setActiveNodes(activeNodeList || [])
       // Load node style if single node selected
-      if (nodes && nodes.length === 1) {
-        const node = nodes[0]
-        const nodeData = node.getData() || {}
+      if (activeNodeList && activeNodeList.length === 1) {
+        const selectedNode = activeNodeList[0]
+        const nodeData = selectedNode.getData() || {}
         const style = nodeData.style || {}
         
         setConfig({
@@ -161,6 +169,14 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
     }
 
     mindMap.on('node_active', handleNodeActive)
+
+    // Get currently active nodes on mount
+    const currentActiveNodes = mindMap.renderer?.activeNodeList || []
+    console.log('NodeStylePlugin - initial active nodes:', currentActiveNodes)
+    if (currentActiveNodes.length > 0) {
+      setActiveNodes(currentActiveNodes)
+    }
+
     return () => {
       mindMap.off('node_active', handleNodeActive)
     }
@@ -168,10 +184,11 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
 
   // Apply style to selected nodes
   const applyStyle = useCallback((newConfig: NodeStyleConfig) => {
-    if (!mindMap || activeNodes.length === 0) return
+    if (!mindMap || activeNodesRef.current.length === 0) return
     
-    activeNodes.forEach((node) => {
-      mindMap.execCommand('SET_NODE_STYLE', node, {
+    activeNodesRef.current.forEach((node) => {
+      // Use SET_NODE_STYLES (with S) to batch set styles
+      mindMap.execCommand('SET_NODE_STYLES', node, {
         borderColor: newConfig.border.color,
         borderStyle: newConfig.border.style,
         borderWidth: newConfig.border.width,
@@ -189,7 +206,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
         tagLayout: newConfig.tag.layout,
       })
     })
-  }, [mindMap, activeNodes])
+  }, [mindMap])
 
   const updateConfig = (path: string, value: any) => {
     const newConfig = { ...config }

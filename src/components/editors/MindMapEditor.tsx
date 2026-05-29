@@ -106,6 +106,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [mindMapInstance, setMindMapInstance] = useState<any>(null)
 
   const isDark = theme === 'dark' || (theme === 'system' && systemDark)
 
@@ -195,6 +196,8 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         }
 
         mindMapInstanceRef.current = mindMap
+        console.log('MindMapEditor - setting mindMapInstance:', mindMap)
+        setMindMapInstance(mindMap)
         setLoading(false)
         setError(null)
 
@@ -244,6 +247,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
           console.error('Failed to destroy MindMap:', e)
         }
         mindMapInstanceRef.current = null
+      setMindMapInstance(null)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -325,7 +329,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       }}
     >
       {!loading && !error && (
-        <MindMapToolbar mindMap={mindMapInstanceRef.current} />
+        <MindMapToolbar mindMap={mindMapInstance} />
       )}
       {loading && (
         <div

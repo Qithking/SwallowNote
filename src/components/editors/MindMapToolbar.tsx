@@ -50,14 +50,28 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const [showNodeStylePlugin, setShowNodeStylePlugin] = useState(false)
 
   useEffect(() => {
+    console.log('Toolbar useEffect - mindMap:', mindMap)
     if (!mindMap) return
 
-    const handleNodeActive = (nodes: any[]) => {
-      setActiveNodes(nodes || [])
+    console.log('Toolbar - registering node_active listener')
+    const handleNodeActive = (node: any, activeNodeList: any[]) => {
+      console.log('Toolbar - node_active fired:', node, activeNodeList)
+      setActiveNodes(activeNodeList || [])
     }
 
     mindMap.on('node_active', handleNodeActive)
+
+    // Get currently active nodes on mount / when mindMap instance changes
+    // simple-mind-map only fires 'node_active' on selection CHANGE,
+    // so we need to read the initial state explicitly
+    const currentActiveNodes = mindMap.renderer?.activeNodeList || []
+    console.log('Toolbar - initial active nodes:', currentActiveNodes)
+    if (currentActiveNodes.length > 0) {
+      setActiveNodes(currentActiveNodes)
+    }
+
     return () => {
+      console.log('Toolbar - unregistering node_active listener')
       mindMap.off('node_active', handleNodeActive)
     }
   }, [mindMap])
