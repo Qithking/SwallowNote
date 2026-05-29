@@ -637,6 +637,10 @@ export async function updateAiRolePromptName(roleKey: string, name: string): Pro
   await invoke('update_ai_role_prompt_name', { roleKey, name })
 }
 
+export async function resetAiRolePrompt(roleKey: string): Promise<AiRolePrompt> {
+  return await invoke('reset_ai_role_prompt', { roleKey })
+}
+
 export interface BuiltinAiModel {
   id: string
   name: string

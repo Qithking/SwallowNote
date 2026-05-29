@@ -33,7 +33,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { getProviderById, getProvidersByCategory, AiProviderCategory } from '@/lib/ai'
-import { testAiModel, restartAiProxy, loadAiRolePrompts, addAiRolePrompt, deleteAiRolePrompt, updateAiRolePrompt, updateAiRolePromptName, type AiRolePrompt } from '@/lib/tauri'
+import { testAiModel, restartAiProxy, loadAiRolePrompts, addAiRolePrompt, deleteAiRolePrompt, updateAiRolePrompt, updateAiRolePromptName, resetAiRolePrompt, type AiRolePrompt } from '@/lib/tauri'
 import { ShortcutRecorder } from './ShortcutRecorder'
 import {
   AlertDialog,
@@ -693,9 +693,34 @@ function SettingsView() {
               {/* ===== 提示词管理 ===== */}
               <Card>
                 <CardContent className="p-0">
-                  <div className="px-4 pt-3 pb-2">
-                    <Label className="text-sm font-medium">{t('settings.ai.rolePrompts')}</Label>
-                    <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.rolePrompts.desc')}</p>
+                  <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm font-medium">{t('settings.ai.rolePrompts')}</Label>
+                      <p className="text-[10px] text-muted-foreground leading-tight">{t('settings.ai.rolePrompts.desc')}</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={async () => {
+                        try {
+                          // Reset all builtin prompts
+                          const builtinPrompts = rolePrompts.filter((p) => p.is_builtin)
+                          for (const prompt of builtinPrompts) {
+                            await resetAiRolePrompt(prompt.role_key)
+                          }
+                          // Reload all prompts
+                          const updatedPrompts = await loadAiRolePrompts()
+                          setRolePrompts(updatedPrompts)
+                          notifyRolePromptsChanged()
+                          toast.success(t('settings.ai.rolePrompts.resetAllSuccess'))
+                        } catch (e) {
+                          toast.error(t('settings.ai.rolePrompts.resetAllFailed') + ': ' + String(e))
+                        }
+                      }}
+                    >
+                      {t('settings.ai.rolePrompts.resetAll')}
+                    </Button>
                   </div>
                   <div className="flex min-h-[280px]">
                     {/* Left: role list */}
@@ -833,9 +858,30 @@ function SettingsView() {
                             <p className="text-[10px] text-muted-foreground">{t('settings.ai.rolePrompts.roleKey.desc')}</p>
                             <p className="text-sm mt-1 font-mono text-muted-foreground">{selectedRolePrompt.role_key}</p>
                           </div>
-                          <div>
-                            <Label className="text-xs font-medium">{t('settings.ai.rolePrompts.promptContent')}</Label>
-                            <p className="text-[10px] text-muted-foreground">{t('settings.ai.rolePrompts.promptContent.desc')}</p>
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <Label className="text-xs font-medium">{t('settings.ai.rolePrompts.promptContent')}</Label>
+                              <p className="text-[10px] text-muted-foreground">{t('settings.ai.rolePrompts.promptContent.desc')}</p>
+                            </div>
+                            {selectedRolePrompt.is_builtin && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 text-[10px] px-2"
+                                onClick={async () => {
+                                  try {
+                                    const resetPrompt = await resetAiRolePrompt(selectedRolePrompt.role_key)
+                                    setRolePrompts((prev) => prev.map((p) => p.role_key === selectedRoleKey ? { ...p, prompt: resetPrompt.prompt } : p))
+                                    notifyRolePromptsChanged()
+                                    toast.success(t('settings.ai.rolePrompts.resetSuccess'))
+                                  } catch (e) {
+                                    toast.error(t('settings.ai.rolePrompts.resetFailed') + ': ' + String(e))
+                                  }
+                                }}
+                              >
+                                {t('settings.ai.rolePrompts.reset')}
+                              </Button>
+                            )}
                           </div>
                           <Textarea
                             className="min-h-[120px] text-xs"
