@@ -171,7 +171,9 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
           return
         }
 
+        console.log('MindMapEditor init - content:', content?.substring(0, 100))
         const mindMapData = parseMindMapData(content)
+        console.log('MindMapEditor init - mindMapData:', mindMapData)
         lastSavedContent.current = content
 
         const mindMap = new MindMap({
@@ -257,18 +259,19 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   // Skip if the change was triggered by our own editor
   useEffect(() => {
     if (isInternalUpdate.current) return
-    if (!mindMapInstanceRef.current) return
+    if (!mindMapInstance) return
     // Don't re-set if content hasn't actually changed
     if (content === lastSavedContent.current) return
 
     const mindMapData = parseMindMapData(content)
     lastSavedContent.current = content
     try {
-      mindMapInstanceRef.current.setData(mindMapData)
+      // setData expects the node tree (root), not the full data object
+      mindMapInstance.setData(mindMapData.root || mindMapData)
     } catch (e) {
       console.error('Failed to set mind map data:', e)
     }
-  }, [content])
+  }, [content, mindMapInstance])
 
   // Update theme when it changes
   useEffect(() => {
