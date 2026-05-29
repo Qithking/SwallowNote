@@ -311,11 +311,14 @@
     "openFolder": "打开文件夹",
     "saveWorkspace": "保存工作区",
     "defaultFileName": "新文件.md",
-    "defaultFolderName": "新文件夹"
+    "defaultFolderName": "新文件夹",
+    "defaultMindMapName": "新思维导图.smm",
+    "newMindMap": "新建思维导图"
   },
   "contextMenu": {
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
+    "newMindMap": "新建思维导图",
     "paste": "粘贴",
     "open": "打开",
     "showInExplorer": "在文件资源管理器中显示",

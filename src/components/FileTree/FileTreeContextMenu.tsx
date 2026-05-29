@@ -21,6 +21,7 @@ import {
   Trash2,
   GitBranch,
   MessageSquare,
+  GitFork,
 } from 'lucide-react'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGitStore } from '@/stores'
 import { loadFileContent, loadDirectory } from '@/lib/api'
@@ -85,9 +86,10 @@ interface TreeNodeContextMenuProps {
   onRename?: () => void
   onNewFile?: () => void
   onNewFolder?: () => void
+  onNewMindMap?: () => void
 }
 
-export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNewFolder }: TreeNodeContextMenuProps) {
+export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNewFolder, onNewMindMap }: TreeNodeContextMenuProps) {
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode, showAllFiles, markdownOnly } = useUIStore()
   const { addTab } = useEditorStore()
@@ -314,6 +316,14 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
             >
               <FolderPlus size={12} />
               <span>{t('contextMenu.newFolder')}</span>
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={onNewMindMap}
+              style={{ color: 'var(--text-secondary)' }}
+              className="cursor-pointer"
+            >
+              <GitFork size={12} />
+              <span>{t('contextMenu.newMindMap')}</span>
             </ContextMenuItem>
             <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
           </>

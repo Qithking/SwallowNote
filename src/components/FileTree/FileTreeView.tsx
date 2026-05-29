@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { FileText, FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2 } from 'lucide-react'
+import { FileText, FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, GitFork } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
@@ -73,7 +73,7 @@ function generateUniqueName(baseName: string, siblings: FileNode[]): string {
 interface NewItemState {
   parentPath: string
   name: string
-  type: 'file' | 'folder'
+  type: 'file' | 'folder' | 'mindmap'
 }
 
 export function FileTreeView() {
@@ -373,6 +373,25 @@ export function FileTreeView() {
     setIsNewItemFirstEdit(true)
   }
 
+  const handleNewMindMap = async (dirPath?: string) => {
+    const targetPath = dirPath || selectedPath
+    if (!targetPath) return
+    const selected = findNodeByPath(targetPath, nodes)
+    if (!selected || !selected.isDirectory) return
+
+    // Ensure the directory is expanded and children are loaded before showing the input
+    if (!expanded.has(selected.path)) {
+      await toggleNode(selected.path)
+    }
+    // Re-read nodes after toggleNode may have loaded children
+    const currentNode = findNodeByPath(selected.path, useFileTreeStore.getState().nodes)
+    const siblings = currentNode?.children || []
+    const name = generateUniqueName(t('fileTree.defaultMindMapName'), siblings)
+    setSelectedPath(selected.path)
+    setNewItem({ parentPath: selected.path, name, type: 'mindmap' })
+    setIsNewItemFirstEdit(true)
+  }
+
   const handleNewFolder = async (dirPath?: string) => {
     const targetPath = dirPath || selectedPath
     if (!targetPath) return
@@ -404,7 +423,23 @@ export function FileTreeView() {
 
     try {
       const fullPath = newItem.parentPath + '/' + newItem.name.trim()
-      await createFile(fullPath, newItem.type === 'folder')
+      if (newItem.type === 'mindmap') {
+        // 创建思维导图文件，带有默认的 JSON 内容
+        const defaultMindMapData = {
+          root: {
+            data: { text: newItem.name.replace(/\.smm$/i, '') },
+            children: []
+          },
+          theme: 'default',
+          layout: 'logicalStructure',
+        }
+        await createFile(fullPath, false)
+        // 写入默认内容
+        const { writeFile } = await import('@/lib/tauri')
+        await writeFile(fullPath, JSON.stringify(defaultMindMapData, null, 2))
+      } else {
+        await createFile(fullPath, newItem.type === 'folder')
+      }
       const children = await loadDirectory(newItem.parentPath, showAllFiles, markdownOnly)
       const updatedNodes = updateNodesWithChildren(nodes, newItem.parentPath, children)
       setNodes(updatedNodes)
@@ -748,6 +783,7 @@ export function FileTreeView() {
           onRename={() => handleStartEdit(node.path, node.name, node.isDirectory)}
           onNewFile={() => handleNewFile(node.path)}
           onNewFolder={() => handleNewFolder(node.path)}
+          onNewMindMap={() => handleNewMindMap(node.path)}
         >
           {nodeContent}
         </TreeNodeContextMenu>
@@ -763,6 +799,8 @@ export function FileTreeView() {
                 <span className="w-[14px]" />
                 {newItem.type === 'folder' ? (
                   <Folder size={12} className="text-[#666666]" />
+                ) : newItem.type === 'mindmap' ? (
+                  getFileIcon(newItem.name || 'newfile.smm')
                 ) : (
                   getFileIcon(newItem.name || 'newfile')
                 )}
@@ -849,6 +887,8 @@ export function FileTreeView() {
                 <span className="w-[14px]" />
                 {newItem.type === 'folder' ? (
                   <Folder size={12} className="text-[#666666]" />
+                ) : newItem.type === 'mindmap' ? (
+                  <GitFork size={12} style={{ color: '#a97bff' }} />
                 ) : (
                   <FileText size={12} style={{ color: '#569cd6' }} />
                 )}

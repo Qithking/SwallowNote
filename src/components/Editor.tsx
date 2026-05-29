@@ -7,6 +7,7 @@ import { useEditorStore, useUIStore, useWorkspaceStore } from '@/stores'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
+import { MindMapEditor } from './editors/MindMapEditor'
 import DiffViewer from './DiffViewer/DiffViewer'
 import { FileCode, FolderOpen, FileText, Clock, GitFork, ArrowRight, Layers } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
@@ -355,6 +356,16 @@ export function EditorView() {
           filename={activeTab.name}
           reason={t('editor.binaryFile')}
         />
+      )}
+
+      {fileType === 'mindmap' && (
+        <div className="flex-1 flex overflow-hidden">
+          <MindMapEditor
+            key={activeTab.id}
+            content={activeTab.content}
+            onChange={handleContentChange}
+          />
+        </div>
       )}
     </div>
   )

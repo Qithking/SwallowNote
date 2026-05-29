@@ -2,10 +2,13 @@
  * File type detection utilities
  */
 
-export type FileType = 'markdown' | 'code' | 'binary'
+export type FileType = 'markdown' | 'code' | 'binary' | 'mindmap'
 
 // Markdown files
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown', '.mdown', '.mkd', '.mkdn']
+
+// Mind map files
+const MINDMAP_EXTENSIONS = ['.smm']
 
 // CodeMirror supported languages — covers both native packages and legacy StreamLanguage modes
 const CODEMIRROR_EXTENSIONS: Record<string, string> = {
@@ -265,6 +268,11 @@ export function isBinaryContent(content: string): boolean {
  */
 export function detectFileType(filename: string, content?: string): FileType {
   const ext = getFileExtension(filename)
+
+  // Check for mind map files
+  if (MINDMAP_EXTENSIONS.includes(ext)) {
+    return 'mindmap'
+  }
 
   // Check for markdown first
   if (MARKDOWN_EXTENSIONS.includes(ext)) {

@@ -111,6 +111,7 @@ export function getFileIcon(name: string, size: number = 12): React.ReactNode {
     ml: { icon: FileCode, color: '#519aba' },
     diff: { icon: FileText, color: '#519aba' },
     patch: { icon: FileText, color: '#519aba' },
+    smm: { icon: GitBranch, color: '#a97bff' },
   }
 
   const specialFiles: Record<string, { icon: React.ElementType; color: string }> = {

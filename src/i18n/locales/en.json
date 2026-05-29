@@ -311,11 +311,14 @@
     "openFolder": "Open Folder",
     "saveWorkspace": "Save Workspace",
     "defaultFileName": "Untitled.md",
-    "defaultFolderName": "New Folder"
+    "defaultFolderName": "New Folder",
+    "defaultMindMapName": "Untitled.smm",
+    "newMindMap": "New Mind Map"
   },
   "contextMenu": {
     "newFile": "New File",
     "newFolder": "New Folder",
+    "newMindMap": "New Mind Map",
     "paste": "Paste",
     "open": "Open",
     "showInExplorer": "Show in File Explorer",
