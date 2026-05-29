@@ -150,72 +150,69 @@ function EditorToolbar() {
               </button>
             </TooltipTrigger>
             <TooltipContent>{t('editorToolbar.toggleSourceView')}</TooltipContent>
-          </Tooltip>        
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setRightPanelType(rightPanelType === 'history' ? null : 'history')}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: rightPanelType === 'history' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-              >
-                <History size={14} style={{ color: 'inherit' }} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('editorToolbar.openHistory')}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={handleOpenFolder}
+                onClick={handleToggleWidth}
                 className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: 'var(--text-primary)' }}
+                style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
               >
-                <FolderOpen size={14} />
+                {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('editorToolbar.openLocation')}</TooltipContent>
+            <TooltipContent>{t('editorToolbar.toggleWidth')}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={handleCopyPath}
+                onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
                 className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: copied ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
               >
-                <Copy size={14} style={{ color: 'inherit' }} />
+                <Settings size={14} style={{ color: 'inherit' }} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('editorToolbar.copyFullPath')}</TooltipContent>
+            <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
           </Tooltip>
-          {isMarkdown && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={handleToggleWidth}
-                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                  style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
-                >
-                  {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t('editorToolbar.toggleWidth')}</TooltipContent>
-            </Tooltip>
-          )}
-          {isMarkdown && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
-                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                  style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-                >
-                  <Settings size={14} style={{ color: 'inherit' }} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
-            </Tooltip>
-          )}
         </>)}
+        {/* History, Open Folder, Copy - available for all file types */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setRightPanelType(rightPanelType === 'history' ? null : 'history')}
+              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+              style={{ color: rightPanelType === 'history' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+            >
+              <History size={14} style={{ color: 'inherit' }} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t('editorToolbar.openHistory')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={handleOpenFolder}
+              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              <FolderOpen size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t('editorToolbar.openLocation')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={handleCopyPath}
+              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+              style={{ color: copied ? 'var(--theme-color)' : 'var(--text-primary)' }}
+            >
+              <Copy size={14} style={{ color: 'inherit' }} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{t('editorToolbar.copyFullPath')}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   )

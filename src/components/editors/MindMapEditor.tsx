@@ -102,6 +102,10 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   const lastSavedContent = useRef<string>(content)
   // Track if we're in initial load phase to prevent false dirty state
   const isInitialLoad = useRef(true)
+  // Track if initial data has been loaded to prevent double loading
+  const initialDataLoaded = useRef(false)
+  // Track mount time to prevent content changes shortly after mount
+  const mountTimeRef = useRef<number>(0)
   const theme = useUIStore((state) => state.theme)
   const [systemDark, setSystemDark] = useState(
     window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -163,6 +167,12 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   // We dynamically import the pre-bundled ESM dist file to avoid blocking
   // the main thread and to prevent Vite from processing source modules.
   useEffect(() => {
+    // Record mount time to prevent content changes shortly after mount
+    mountTimeRef.current = Date.now()
+    // Reset flags for new component instance
+    initialDataLoaded.current = false
+    isInitialLoad.current = true
+    
     const el = containerRef.current
     if (!el) return
 
@@ -217,6 +227,9 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         setMindMapInstance(mindMap)
         setLoading(false)
         setError(null)
+
+        // Mark that initial data has been loaded
+        initialDataLoaded.current = true
 
         // Update lastSavedContent to match the format mindMap uses
         // to avoid false positive dirty state on initial load
@@ -284,6 +297,20 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   useEffect(() => {
     if (isInternalUpdate.current) return
     if (!mindMapInstance) return
+    
+    // Skip if initial data hasn't been loaded yet
+    // This prevents double-loading during initial mount
+    if (!initialDataLoaded.current) return
+    
+    // Skip if we're within 500ms of mount (prevents double-load on tab switch)
+    if (Date.now() - mountTimeRef.current < 500) return
+    
+    // Skip if content is the same as what we already loaded
+    // Compare normalized versions to handle format differences
+    const currentData = mindMapInstance.getData(true)
+    const currentContent = JSON.stringify(currentData)
+    const normalizedContent = content?.trim() || JSON.stringify(DEFAULT_DATA)
+    if (normalizedContent === currentContent) return
     
     // Mark as initial load so setData won't trigger dirty state
     isInitialLoad.current = true
