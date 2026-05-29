@@ -191,8 +191,8 @@ function WelcomeScreen() {
   }, [])
 
   return (
-    <div className="flex-1 overflow-auto">
-      <div className="max-w-[720px] mx-auto px-8 py-10 flex flex-col items-center">
+    <div className="flex-1 overflow-auto flex items-center justify-center">
+      <div className="max-w-[720px] w-full px-8 py-10 flex flex-col items-center">
         {/* Logo / Title */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 overflow-hidden" style={{

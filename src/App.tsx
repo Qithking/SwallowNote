@@ -29,6 +29,7 @@ function App() {
   useKeyboardShortcuts()
   const { t } = useTranslation()
   const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth, syncInterval } = useUIStore()
+  const { tabs } = useEditorStore()
   const { cachedRepositories, pullAllRepos } = useGitStore()
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
   const [isDraggingRight, setIsDraggingRight] = useState(false)
@@ -631,8 +632,12 @@ function App() {
               <SettingsView />
             ) : (
               <div className="flex-1 flex flex-col overflow-hidden">
-                <TabBar />
-                <EditorToolbar />
+                {tabs.length > 0 && (
+                  <>
+                    <TabBar />
+                    <EditorToolbar />
+                  </>
+                )}
                 <EditorView />
               </div>
             )}
