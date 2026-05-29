@@ -350,7 +350,10 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       {/* Style Plugins */}
       <div className="flex items-center gap-0.5">
         <ToolbarButton
-          onClick={() => setShowBaseStylePlugin(!showBaseStylePlugin)}
+          onClick={() => {
+            if (showNodeStylePlugin) setShowNodeStylePlugin(false)
+            setShowBaseStylePlugin(!showBaseStylePlugin)
+          }}
           title="基础样式"
           style={showBaseStylePlugin ? { background: 'var(--bg-hover)' } : undefined}
         >
@@ -359,9 +362,13 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
         </ToolbarButton>
 
         <ToolbarButton
-          onClick={() => setShowNodeStylePlugin(true)}
+          onClick={() => {
+            if (showBaseStylePlugin) setShowBaseStylePlugin(false)
+            setShowNodeStylePlugin(!showNodeStylePlugin)
+          }}
           disabled={!hasActiveNode}
           title="节点样式"
+          style={showNodeStylePlugin ? { background: 'var(--bg-hover)' } : undefined}
         >
           <Paintbrush size={14} />
           <span className="text-[10px]">节点</span>
