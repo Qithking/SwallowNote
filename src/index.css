@@ -165,6 +165,10 @@ body, #root {
   display: none !important;
 }
 
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+}
+
 /* Directory tree custom styles - remove default selected background and border */
 .my-tree .rc-tree-node-content-wrapper {
   background: transparent !important;

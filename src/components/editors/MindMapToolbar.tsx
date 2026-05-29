@@ -4,7 +4,7 @@
  * Provides basic operations for the mind map editor.
  * This is a simplified toolbar inspired by the official simple-mind-map Vue2 example.
  */
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Undo2,
   Redo2,
@@ -132,6 +132,7 @@ const ICON_LIST = [
 ]
 
 export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
+  const toolbarRef = useRef<HTMLDivElement>(null)
   const [activeNodes, setActiveNodes] = useState<any[]>([])
   const [currentLayout, setCurrentLayout] = useState('logicalStructure')
   const [currentTheme, setCurrentTheme] = useState('default')
@@ -146,6 +147,15 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const [hyperlinkTitle, setHyperlinkTitle] = useState('')
   const [noteText, setNoteText] = useState('')
   const [tagInput, setTagInput] = useState('')
+
+  const handleToolbarWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    const el = toolbarRef.current
+    if (!el) return
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      e.preventDefault()
+      el.scrollLeft += e.deltaY
+    }
+  }, [])
 
   useEffect(() => {
     if (!mindMap) return
@@ -342,9 +352,14 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
 
   return (
     <>
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+      <div
+        ref={toolbarRef}
+        onWheel={handleToolbarWheel}
+        className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-x-auto overflow-y-hidden scrollbar-none"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', minHeight: '37px', maxHeight: '37px' }}
+      >
       {/* Undo / Redo */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <ToolbarButton
           onClick={handleUndo}
           title="回退 (Ctrl+Z)"
@@ -362,23 +377,24 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
         </ToolbarButton>
       </div>
 
-      <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
+      <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
 
       {/* Format Painter */}
       <ToolbarButton
         onClick={handleFormatPainter}
         disabled={!hasActiveNode}
         title="格式刷"
+        className="shrink-0"
         style={isPainterActive ? { background: 'var(--bg-hover)' } : undefined}
       >
         <Paintbrush size={14} />
         <span className="text-[10px]">格式刷</span>
       </ToolbarButton>
 
-      <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
+      <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
 
       {/* Node Enhancement */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <ToolbarButton
           onClick={handleOpenIconDialog}
           disabled={!hasActiveNode}
@@ -434,11 +450,11 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
         </ToolbarButton>
       </div>
 
-      <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
+      <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
 
       {/* Layout */}
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-[var(--bg-hover)] transition-colors outline-none">
+        <DropdownMenuTrigger className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-[var(--bg-hover)] transition-colors outline-none shrink-0">
           <Layout size={14} />
           <span className="text-[10px] ml-0.5">布局</span>
         </DropdownMenuTrigger>
@@ -494,7 +510,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
 
       {/* Theme */}
       <DropdownMenu>
-        <DropdownMenuTrigger className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-[var(--bg-hover)] transition-colors outline-none">
+        <DropdownMenuTrigger className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-[var(--bg-hover)] transition-colors outline-none shrink-0">
           <Palette size={14} />
           <span className="text-[10px] ml-0.5">主题</span>
         </DropdownMenuTrigger>
@@ -519,10 +535,10 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
+      <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
 
       {/* Style Plugins */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <ToolbarButton
           onClick={() => {
             if (showNodeStylePlugin) setShowNodeStylePlugin(false)
@@ -549,10 +565,10 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
         </ToolbarButton>
       </div>
 
-      <div className="w-px h-4 bg-[var(--border-color)] mx-1" />
+      <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
 
       {/* View Operations */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <ToolbarButton onClick={handleZoomIn} title="放大">
           <ZoomIn size={14} />
         </ToolbarButton>
