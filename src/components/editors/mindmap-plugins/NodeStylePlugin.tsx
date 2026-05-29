@@ -20,7 +20,7 @@ interface NodeStylePluginProps {
 interface NodeStyleConfig {
   border: {
     color: string
-    style: 'solid' | 'dashed' | 'dotted' | 'none'
+    dasharray: string
     width: number
     radius: number
   }
@@ -31,30 +31,30 @@ interface NodeStyleConfig {
     gradientEnd?: string
     gradientDirection?: 'to right' | 'to left' | 'to bottom' | 'to top' | 'to bottom right' | 'to bottom left'
   }
-  shape: 'rectangle' | 'diamond' | 'parallelogram' | 'roundedRectangle' | 'circle' | 'ellipse'
+  shape: string
   line: {
     color: string
-    style: 'solid' | 'dashed' | 'dotted'
+    dasharray: string
     width: number
-    arrowPosition: 'start' | 'end' | 'both' | 'none'
+    markerDir: 'start' | 'end' | 'none'
   }
   padding: {
     horizontal: number
     vertical: number
   }
   image: {
-    layout: 'top' | 'bottom' | 'left' | 'right'
+    placement: 'top' | 'bottom' | 'left' | 'right'
   }
   tag: {
-    layout: 'right' | 'bottom'
+    placement: 'right' | 'bottom'
   }
 }
 
 const BORDER_STYLES = [
-  { value: 'solid', label: '实线' },
-  { value: 'dashed', label: '虚线' },
-  { value: 'dotted', label: '点线' },
-  { value: 'none', label: '无' },
+  { value: 'none', label: '实线' },
+  { value: '5,5', label: '虚线' },
+  { value: '2,2', label: '点线' },
+  { value: 'none_border', label: '无' },
 ]
 
 const SHAPES = [
@@ -67,16 +67,27 @@ const SHAPES = [
 ]
 
 const LINE_STYLES = [
-  { value: 'solid', label: '实线' },
-  { value: 'dashed', label: '虚线' },
-  { value: 'dotted', label: '点线' },
+  { value: 'none', label: '实线' },
+  { value: '5,5', label: '虚线' },
+  { value: '2,2', label: '点线' },
 ]
 
 const ARROW_POSITIONS = [
   { value: 'none', label: '无' },
   { value: 'start', label: '头部' },
   { value: 'end', label: '尾部' },
-  { value: 'both', label: '两端' },
+]
+
+const IMAGE_LAYOUTS = [
+  { value: 'top', label: '上' },
+  { value: 'bottom', label: '下' },
+  { value: 'left', label: '左' },
+  { value: 'right', label: '右' },
+]
+
+const TAG_LAYOUTS = [
+  { value: 'right', label: '右' },
+  { value: 'bottom', label: '下' },
 ]
 
 const GRADIENT_DIRECTIONS = [
@@ -99,6 +110,16 @@ const DIRECTION_MAP: Record<string, { startDir: [number, number]; endDir: [numbe
   'to bottom left': { startDir: [1, 0], endDir: [0, 1] },
   'to top right': { startDir: [0, 1], endDir: [1, 0] },
   'to top left': { startDir: [1, 1], endDir: [0, 0] },
+}
+
+function coordsToDirection(startDir: number[], endDir: number[]): NodeStyleConfig['background']['gradientDirection'] {
+  for (const [dir, coords] of Object.entries(DIRECTION_MAP)) {
+    if (coords.startDir[0] === startDir[0] && coords.startDir[1] === startDir[1] &&
+        coords.endDir[0] === endDir[0] && coords.endDir[1] === endDir[1]) {
+      return dir as NodeStyleConfig['background']['gradientDirection']
+    }
+  }
+  return 'to right'
 }
 
 function Stepper({
@@ -281,7 +302,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
   const [config, setConfig] = useState<NodeStyleConfig>({
     border: {
       color: '#549688',
-      style: 'solid',
+      dasharray: 'none',
       width: 1,
       radius: 5,
     },
@@ -295,62 +316,68 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
     shape: 'rectangle',
     line: {
       color: '#549688',
-      style: 'solid',
+      dasharray: 'none',
       width: 1,
-      arrowPosition: 'none',
+      markerDir: 'none',
     },
     padding: {
       horizontal: 15,
       vertical: 5,
     },
     image: {
-      layout: 'top',
+      placement: 'top',
     },
     tag: {
-      layout: 'right',
+      placement: 'right',
     },
   })
+
+  const readNodeConfig = useCallback((activeNodeList: any[]) => {
+    if (activeNodeList && activeNodeList.length === 1) {
+      const selectedNode = activeNodeList[0]
+      const data = selectedNode.getData() || {}
+
+      setConfig({
+        border: {
+          color: data.borderColor || '#549688',
+          dasharray: data.borderDasharray || 'none',
+          width: data.borderWidth || 1,
+          radius: data.borderRadius || 5,
+        },
+        background: {
+          color: data.fillColor || '#fff',
+          gradient: !!data.gradientStyle,
+          gradientStart: data.startColor || '#549688',
+          gradientEnd: data.endColor || '#e8a87c',
+          gradientDirection: coordsToDirection(data.startDir, data.endDir),
+        },
+        shape: data.shape || 'rectangle',
+        line: {
+          color: data.lineColor || '#549688',
+          dasharray: data.lineDasharray || 'none',
+          width: data.lineWidth || 1,
+          markerDir: data.lineMarkerDir || 'none',
+        },
+        padding: {
+          horizontal: data.paddingX || 15,
+          vertical: data.paddingY || 5,
+        },
+        image: {
+          placement: data.imgPlacement || 'top',
+        },
+        tag: {
+          placement: data.tagPlacement || 'right',
+        },
+      })
+    }
+  }, [])
 
   useEffect(() => {
     if (!mindMap) return
 
     const handleNodeActive = (_node: any, activeNodeList: any[]) => {
       setActiveNodes(activeNodeList || [])
-      if (activeNodeList && activeNodeList.length === 1) {
-        const selectedNode = activeNodeList[0]
-        const nodeData = selectedNode.getData() || {}
-        const style = nodeData.style || {}
-
-        setConfig({
-          border: {
-            color: style.borderColor || '#549688',
-            style: style.borderStyle || 'solid',
-            width: style.borderWidth || 1,
-            radius: style.borderRadius || 5,
-          },
-          background: {
-            color: style.fillColor || '#fff',
-            gradient: style.gradient || false,
-          },
-          shape: style.shape || 'rectangle',
-          line: {
-            color: style.lineColor || '#549688',
-            style: style.lineStyle || 'solid',
-            width: style.lineWidth || 1,
-            arrowPosition: style.arrowPosition || 'none',
-          },
-          padding: {
-            horizontal: style.paddingX || 15,
-            vertical: style.paddingY || 5,
-          },
-          image: {
-            layout: style.imageLayout || 'top',
-          },
-          tag: {
-            layout: style.tagLayout || 'right',
-          },
-        })
-      }
+      readNodeConfig(activeNodeList || [])
     }
 
     mindMap.on('node_active', handleNodeActive)
@@ -358,12 +385,13 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
     const currentActiveNodes = mindMap.renderer?.activeNodeList || []
     if (currentActiveNodes.length > 0) {
       setActiveNodes(currentActiveNodes)
+      readNodeConfig(currentActiveNodes)
     }
 
     return () => {
       mindMap.off('node_active', handleNodeActive)
     }
-  }, [mindMap])
+  }, [mindMap, readNodeConfig])
 
   const applyStyle = useCallback((newConfig: NodeStyleConfig) => {
     if (!mindMap || activeNodesRef.current.length === 0) return
@@ -374,7 +402,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
     activeNodesRef.current.forEach((node) => {
       mindMap.execCommand('SET_NODE_STYLES', node, {
         borderColor: newConfig.border.color,
-        borderStyle: newConfig.border.style,
+        borderDasharray: newConfig.border.dasharray,
         borderWidth: newConfig.border.width,
         borderRadius: newConfig.border.radius,
         fillColor: newConfig.background.color,
@@ -385,13 +413,13 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
         endDir: dirCoords.endDir,
         shape: newConfig.shape,
         lineColor: newConfig.line.color,
-        lineStyle: newConfig.line.style,
+        lineDasharray: newConfig.line.dasharray,
         lineWidth: newConfig.line.width,
-        arrowPosition: newConfig.line.arrowPosition,
+        lineMarkerDir: newConfig.line.markerDir,
         paddingX: newConfig.padding.horizontal,
         paddingY: newConfig.padding.vertical,
-        imageLayout: newConfig.image.layout,
-        tagLayout: newConfig.tag.layout,
+        imgPlacement: newConfig.image.placement,
+        tagPlacement: newConfig.tag.placement,
       })
     })
   }, [mindMap])
@@ -451,7 +479,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
               <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
               <div className="scale-[0.82] origin-left"><ColorButton value={config.border.color} onChange={(c) => updateConfig('border.color', c)} /></div>
               <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>样式</span>
-              <Select value={config.border.style} onValueChange={(v) => updateConfig('border.style', v)}>
+              <Select value={config.border.dasharray} onValueChange={(v) => updateConfig('border.dasharray', v)}>
                 <SelectTrigger className="h-[22px] w-[64px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
                   <SelectValue />
                 </SelectTrigger>
@@ -525,7 +553,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
               <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
               <div className="scale-[0.82] origin-left"><ColorButton value={config.line.color} onChange={(c) => updateConfig('line.color', c)} /></div>
               <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>样式</span>
-              <Select value={config.line.style} onValueChange={(v) => updateConfig('line.style', v)}>
+              <Select value={config.line.dasharray} onValueChange={(v) => updateConfig('line.dasharray', v)}>
                 <SelectTrigger className="h-[22px] w-[64px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
                   <SelectValue />
                 </SelectTrigger>
@@ -540,7 +568,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
               <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>宽度</span>
               <Stepper value={config.line.width} onChange={(v) => updateConfig('line.width', v)} min={1} max={10} />
               <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>箭头</span>
-              <Select value={config.line.arrowPosition} onValueChange={(v) => updateConfig('line.arrowPosition', v)}>
+              <Select value={config.line.markerDir} onValueChange={(v) => updateConfig('line.markerDir', v)}>
                 <SelectTrigger className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
                   <SelectValue />
                 </SelectTrigger>
@@ -575,15 +603,14 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
             <SectionLabel icon={Image} label="图片" />
             <div className="flex items-center gap-2">
               <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>布局</span>
-              <Select value={config.image.layout} onValueChange={(v) => updateConfig('image.layout', v)}>
+              <Select value={config.image.placement} onValueChange={(v) => updateConfig('image.placement', v)}>
                 <SelectTrigger className="h-[22px] w-[48px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="top" className="text-xs">上</SelectItem>
-                  <SelectItem value="bottom" className="text-xs">下</SelectItem>
-                  <SelectItem value="left" className="text-xs">左</SelectItem>
-                  <SelectItem value="right" className="text-xs">右</SelectItem>
+                  {IMAGE_LAYOUTS.map((s) => (
+                    <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -596,13 +623,14 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
             <SectionLabel icon={Tag} label="标签" />
             <div className="flex items-center gap-2">
               <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>布局</span>
-              <Select value={config.tag.layout} onValueChange={(v) => updateConfig('tag.layout', v)}>
+              <Select value={config.tag.placement} onValueChange={(v) => updateConfig('tag.placement', v)}>
                 <SelectTrigger className="h-[22px] w-[48px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="right" className="text-xs">右</SelectItem>
-                  <SelectItem value="bottom" className="text-xs">下</SelectItem>
+                  {TAG_LAYOUTS.map((s) => (
+                    <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
