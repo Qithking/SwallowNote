@@ -221,7 +221,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
   }
 
   const hasSelection = activeNodes.length > 0
-  const isRootNode = hasSelection && activeNodes[0]?.isRoot
+  // const isRootNode = hasSelection && activeNodes[0]?.isRoot
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">

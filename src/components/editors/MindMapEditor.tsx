@@ -197,9 +197,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
           return
         }
 
-        console.log('MindMapEditor init - content:', content?.substring(0, 100))
         const mindMapData = parseMindMapData(content)
-        console.log('MindMapEditor init - mindMapData:', mindMapData)
         lastSavedContent.current = content
 
         const mindMap = new MindMap({
@@ -286,7 +284,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
           console.error('Failed to destroy MindMap:', e)
         }
         mindMapInstanceRef.current = null
-      setMindMapInstance(null)
+        setMindMapInstance(null)
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
