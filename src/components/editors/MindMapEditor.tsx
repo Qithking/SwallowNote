@@ -100,6 +100,8 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Track the last saved content to avoid unnecessary saves
   const lastSavedContent = useRef<string>(content)
+  // Track if we're in initial load phase to prevent false dirty state
+  const isInitialLoad = useRef(true)
   const theme = useUIStore((state) => state.theme)
   const [systemDark, setSystemDark] = useState(
     window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -120,6 +122,20 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
 
   // Debounced save function
   const scheduleSave = useCallback(() => {
+    // Skip if we're in initial load phase (setData triggers data_change)
+    if (isInitialLoad.current) {
+      // Just update the lastSavedContent without triggering onChange
+      if (mindMapInstanceRef.current) {
+        try {
+          const data = mindMapInstanceRef.current.getData(true)
+          lastSavedContent.current = JSON.stringify(data)
+        } catch (e) {
+          console.error('Failed to get initial mind map data:', e)
+        }
+      }
+      isInitialLoad.current = false
+      return
+    }
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
     }
@@ -198,10 +214,18 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         }
 
         mindMapInstanceRef.current = mindMap
-        console.log('MindMapEditor - setting mindMapInstance:', mindMap)
         setMindMapInstance(mindMap)
         setLoading(false)
         setError(null)
+
+        // Update lastSavedContent to match the format mindMap uses
+        // to avoid false positive dirty state on initial load
+        try {
+          const initialData = mindMap.getData(true)
+          lastSavedContent.current = JSON.stringify(initialData)
+        } catch (e) {
+          console.error('Failed to get initial mind map data:', e)
+        }
 
         // Listen for data changes with debounced save
         mindMap.on('data_change', scheduleSave)
@@ -260,14 +284,18 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   useEffect(() => {
     if (isInternalUpdate.current) return
     if (!mindMapInstance) return
-    // Don't re-set if content hasn't actually changed
-    if (content === lastSavedContent.current) return
-
+    
+    // Mark as initial load so setData won't trigger dirty state
+    isInitialLoad.current = true
+    
     const mindMapData = parseMindMapData(content)
-    lastSavedContent.current = content
     try {
       // setData expects the node tree (root), not the full data object
       mindMapInstance.setData(mindMapData.root || mindMapData)
+      // Note: Don't update lastSavedContent here.
+      // setData will trigger 'data_change' event, and scheduleSave will
+      // update lastSavedContent with the mindMap format data.
+      // This ensures the format is consistent for future comparisons.
     } catch (e) {
       console.error('Failed to set mind map data:', e)
     }
