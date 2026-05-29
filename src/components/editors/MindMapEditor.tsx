@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useUIStore } from '@/stores'
 import { MindMapToolbar } from './MindMapToolbar'
+import { MindMapContextMenu } from './MindMapContextMenu'
 
 interface MindMapEditorProps {
   content: string
@@ -290,7 +291,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Handle external content changes (e.g., file reload from disk)
+  // Handle external content changes (e.g., file reload from disk, session restore)
   // Skip if the change was triggered by our own editor
   useEffect(() => {
     if (isInternalUpdate.current) return
@@ -299,9 +300,6 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
     // Skip if initial data hasn't been loaded yet
     // This prevents double-loading during initial mount
     if (!initialDataLoaded.current) return
-    
-    // Skip if we're within 500ms of mount (prevents double-load on tab switch)
-    if (Date.now() - mountTimeRef.current < 500) return
     
     // Skip if content is the same as what we already loaded
     // Compare normalized versions to handle format differences
@@ -400,16 +398,18 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
           </div>
         </div>
       )}
-      <div
-        ref={containerRef}
-        className="flex-1"
-        style={{
-          width: '100%',
-          height: '100%',
-          // Ensure the container has a minimum size so simple-mind-map can initialize
-          minHeight: '200px',
-        }}
-      />
+      <MindMapContextMenu mindMap={mindMapInstance}>
+        <div
+          ref={containerRef}
+          className="flex-1"
+          style={{
+            width: '100%',
+            height: '100%',
+            // Ensure the container has a minimum size so simple-mind-map can initialize
+            minHeight: '200px',
+          }}
+        />
+      </MindMapContextMenu>
     </div>
   )
 }

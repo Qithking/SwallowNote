@@ -382,6 +382,21 @@
     "save": "Save File",
     "settings": "Settings"
   },
+  "mindMap": {
+    "insertSibling": "Insert Sibling Node",
+    "insertChild": "Insert Child Node",
+    "insertParent": "Insert Parent Node",
+    "addSummary": "Add Summary",
+    "moveUp": "Move Node Up",
+    "moveDown": "Move Node Down",
+    "collapseAll": "Collapse All Children",
+    "expandAll": "Expand All Children",
+    "deleteNode": "Delete Node",
+    "deleteOnlyCurrent": "Delete Only Current Node",
+    "copyNode": "Copy Node",
+    "cutNode": "Cut Node",
+    "pasteNode": "Paste Node"
+  },
   "editorSettings": {
     "title": "Typography Settings",
     "resetToDefault": "Reset to Default",

@@ -382,6 +382,21 @@
     "save": "保存文件",
     "settings": "设置"
   },
+  "mindMap": {
+    "insertSibling": "插入同级节点",
+    "insertChild": "插入子节点",
+    "insertParent": "插入父节点",
+    "addSummary": "插入概要",
+    "moveUp": "上移节点",
+    "moveDown": "下移节点",
+    "collapseAll": "收起所有下级节点",
+    "expandAll": "展开所有下级节点",
+    "deleteNode": "删除节点",
+    "deleteOnlyCurrent": "仅删除当前节点",
+    "copyNode": "复制节点",
+    "cutNode": "剪切节点",
+    "pasteNode": "粘贴节点"
+  },
   "editorSettings": {
     "title": "排版设置",
     "resetToDefault": "恢复默认",
