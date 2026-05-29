@@ -1,15 +1,19 @@
-/**
- * Node Style Plugin for MindMap
- *
- * Controls selected node styles: border, background, shape, line, padding, image layout, tag layout
- * Similar to the "节点样式" panel in simple-mind-map official example
- */
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { X, Minus, Plus, Square, Paintbrush, Shapes, Spline, BoxSelect, Image, Tag } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { ColorButton } from './ColorPicker'
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 
 interface NodeStylePluginProps {
-  mindMap: any // simple-mind-map instance
+  mindMap: any
   onClose: () => void
 }
 
@@ -23,6 +27,9 @@ interface NodeStyleConfig {
   background: {
     color: string
     gradient: boolean
+    gradientStart?: string
+    gradientEnd?: string
+    gradientDirection?: 'to right' | 'to left' | 'to bottom' | 'to top' | 'to bottom right' | 'to bottom left'
   }
   shape: 'rectangle' | 'diamond' | 'parallelogram' | 'roundedRectangle' | 'circle' | 'ellipse'
   line: {
@@ -72,26 +79,205 @@ const ARROW_POSITIONS = [
   { value: 'both', label: '两端' },
 ]
 
-const IMAGE_LAYOUTS = [
-  { value: 'top', label: '上' },
-  { value: 'bottom', label: '下' },
-  { value: 'left', label: '左' },
-  { value: 'right', label: '右' },
+const GRADIENT_DIRECTIONS = [
+  { value: 'to right', label: '向右' },
+  { value: 'to left', label: '向左' },
+  { value: 'to bottom', label: '向下' },
+  { value: 'to top', label: '向上' },
+  { value: 'to bottom right', label: '右下' },
+  { value: 'to bottom left', label: '左下' },
+  { value: 'to top right', label: '右上' },
+  { value: 'to top left', label: '左上' },
 ]
 
-const TAG_LAYOUTS = [
-  { value: 'right', label: '右' },
-  { value: 'bottom', label: '下' },
-]
+const DIRECTION_MAP: Record<string, { startDir: [number, number]; endDir: [number, number] }> = {
+  'to right': { startDir: [0, 0.5], endDir: [1, 0.5] },
+  'to left': { startDir: [1, 0.5], endDir: [0, 0.5] },
+  'to bottom': { startDir: [0.5, 0], endDir: [0.5, 1] },
+  'to top': { startDir: [0.5, 1], endDir: [0.5, 0] },
+  'to bottom right': { startDir: [0, 0], endDir: [1, 1] },
+  'to bottom left': { startDir: [1, 0], endDir: [0, 1] },
+  'to top right': { startDir: [0, 1], endDir: [1, 0] },
+  'to top left': { startDir: [1, 1], endDir: [0, 0] },
+}
+
+function Stepper({
+  value,
+  onChange,
+  min = 0,
+  max = 20,
+  step = 1,
+}: {
+  value: number
+  onChange: (v: number) => void
+  min?: number
+  max?: number
+  step?: number
+}) {
+  return (
+    <div
+      className="flex items-center h-[22px] rounded-[3px] overflow-hidden"
+      style={{ border: '1px solid var(--border-color)' }}
+    >
+      <button
+        onClick={() => onChange(Math.max(min, value - step))}
+        disabled={value <= min}
+        className="w-[18px] h-full flex items-center justify-center transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+        style={{ color: 'var(--text-tertiary)', borderRight: '1px solid var(--border-color)' }}
+      >
+        <Minus size={10} strokeWidth={2.5} />
+      </button>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => {
+          const v = parseInt(e.target.value)
+          if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v)))
+        }}
+        className="w-[26px] h-full text-center text-[10px] bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        style={{ color: 'var(--text-primary)' }}
+      />
+      <button
+        onClick={() => onChange(Math.min(max, value + step))}
+        disabled={value >= max}
+        className="w-[18px] h-full flex items-center justify-center transition-colors duration-100 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:hover:bg-transparent"
+        style={{ color: 'var(--text-tertiary)', borderLeft: '1px solid var(--border-color)' }}
+      >
+        <Plus size={10} strokeWidth={2.5} />
+      </button>
+    </div>
+  )
+}
+
+function SectionLabel({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+  return (
+    <div className="flex items-center gap-1 select-none shrink-0">
+      <Icon size={11} style={{ color: 'var(--text-tertiary)' }} strokeWidth={1.8} />
+      <span className="text-[10px] font-medium tracking-wide" style={{ color: 'var(--text-tertiary)' }}>
+        {label}
+      </span>
+    </div>
+  )
+}
+
+function Divider() {
+  return (
+    <div className="w-px self-stretch mx-2 opacity-30" style={{ backgroundColor: 'var(--border-color)' }} />
+  )
+}
+
+function GradientPicker({
+  startColor,
+  endColor,
+  direction,
+  onChange,
+}: {
+  startColor: string
+  endColor: string
+  direction: NodeStyleConfig['background']['gradientDirection']
+  onChange: (start: string, end: string, dir: NodeStyleConfig['background']['gradientDirection']) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 4, left: rect.left })
+    }
+  }, [open])
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node) && triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(!open)}
+        className="w-[28px] h-[22px] rounded-[4px] cursor-pointer transition-all duration-150 hover:shadow-[0_0_0_1.5px_var(--theme-color)] hover:scale-105 border"
+        style={{
+          background: `linear-gradient(${direction || 'to right'}, ${startColor}, ${endColor})`,
+          borderColor: 'rgba(0,0,0,0.12)',
+        }}
+      />
+      {open && createPortal(
+        <div
+          ref={panelRef}
+          className="fixed z-[9999] rounded-lg shadow-lg p-3 flex flex-col gap-2.5 min-w-[180px]"
+          style={{
+            top: pos.top,
+            left: pos.left,
+            backgroundColor: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>开始</span>
+            <input
+              type="color"
+              value={startColor}
+              onChange={(e) => onChange(e.target.value, endColor, direction)}
+              className="w-6 h-6 p-0 border-0 rounded cursor-pointer bg-transparent"
+            />
+            <span className="text-[9px] font-mono" style={{ color: 'var(--text-tertiary)' }}>{startColor}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>结束</span>
+            <input
+              type="color"
+              value={endColor}
+              onChange={(e) => onChange(startColor, e.target.value, direction)}
+              className="w-6 h-6 p-0 border-0 rounded cursor-pointer bg-transparent"
+            />
+            <span className="text-[9px] font-mono" style={{ color: 'var(--text-tertiary)' }}>{endColor}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>方向</span>
+            <select
+              value={direction ?? 'to right'}
+              onChange={(e) => {
+                const dir = e.target.value as NodeStyleConfig['background']['gradientDirection']
+                onChange(startColor, endColor, dir)
+              }}
+              className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent px-1 outline-none cursor-pointer"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {GRADIENT_DIRECTIONS.map((d) => (
+                <option key={d.value} value={d.value}>{d.label}</option>
+              ))}
+            </select>
+          </div>
+          <div
+            className="w-full h-[20px] rounded-[3px]"
+            style={{ background: `linear-gradient(${direction || 'to right'}, ${startColor}, ${endColor})` }}
+          />
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
 
 export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
   const [activeNodes, setActiveNodes] = useState<any[]>([])
   const activeNodesRef = useRef<any[]>([])
 
-  // Keep ref in sync with state
   useEffect(() => {
     activeNodesRef.current = activeNodes
   }, [activeNodes])
+
   const [config, setConfig] = useState<NodeStyleConfig>({
     border: {
       color: '#549688',
@@ -102,6 +288,9 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
     background: {
       color: '#fff',
       gradient: false,
+      gradientStart: '#549688',
+      gradientEnd: '#e8a87c',
+      gradientDirection: 'to right' as const,
     },
     shape: 'rectangle',
     line: {
@@ -122,20 +311,16 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
     },
   })
 
-  // Listen for active node changes
   useEffect(() => {
-    console.log('NodeStylePlugin useEffect - mindMap:', mindMap)
     if (!mindMap) return
 
     const handleNodeActive = (_node: any, activeNodeList: any[]) => {
-      console.log('NodeStylePlugin - node_active fired:', activeNodeList)
       setActiveNodes(activeNodeList || [])
-      // Load node style if single node selected
       if (activeNodeList && activeNodeList.length === 1) {
         const selectedNode = activeNodeList[0]
         const nodeData = selectedNode.getData() || {}
         const style = nodeData.style || {}
-        
+
         setConfig({
           border: {
             color: style.borderColor || '#549688',
@@ -170,9 +355,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
 
     mindMap.on('node_active', handleNodeActive)
 
-    // Get currently active nodes on mount
     const currentActiveNodes = mindMap.renderer?.activeNodeList || []
-    console.log('NodeStylePlugin - initial active nodes:', currentActiveNodes)
     if (currentActiveNodes.length > 0) {
       setActiveNodes(currentActiveNodes)
     }
@@ -182,19 +365,24 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
     }
   }, [mindMap])
 
-  // Apply style to selected nodes
   const applyStyle = useCallback((newConfig: NodeStyleConfig) => {
     if (!mindMap || activeNodesRef.current.length === 0) return
-    
+
+    const dir = newConfig.background.gradientDirection || 'to right'
+    const dirCoords = DIRECTION_MAP[dir] || DIRECTION_MAP['to right']
+
     activeNodesRef.current.forEach((node) => {
-      // Use SET_NODE_STYLES (with S) to batch set styles
       mindMap.execCommand('SET_NODE_STYLES', node, {
         borderColor: newConfig.border.color,
         borderStyle: newConfig.border.style,
         borderWidth: newConfig.border.width,
         borderRadius: newConfig.border.radius,
         fillColor: newConfig.background.color,
-        gradient: newConfig.background.gradient,
+        gradientStyle: newConfig.background.gradient,
+        startColor: newConfig.background.gradientStart,
+        endColor: newConfig.background.gradientEnd,
+        startDir: dirCoords.startDir,
+        endDir: dirCoords.endDir,
         shape: newConfig.shape,
         lineColor: newConfig.line.color,
         lineStyle: newConfig.line.style,
@@ -221,260 +409,216 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
   }
 
   const hasSelection = activeNodes.length > 0
-  // const isRootNode = hasSelection && activeNodes[0]?.isRoot
+  const sectionCls = "flex flex-col gap-1"
+
+  if (!hasSelection) {
+    return (
+      <div
+        className="border-b bg-[var(--bg-primary)] px-4 py-2 flex items-center justify-between"
+        style={{ borderColor: 'var(--border-color)' }}
+      >
+        <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>请先选择节点</span>
+        <button
+          onClick={onClose}
+          className="p-1 rounded-[3px] transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+          style={{ color: 'var(--text-tertiary)' }}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    )
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="w-[400px] max-h-[80vh] overflow-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)]">
-          <h3 className="text-sm font-medium text-[var(--text-primary)]">节点样式</h3>
+    <div
+      className="border-b bg-[var(--bg-primary)]"
+      style={{ borderColor: 'var(--border-color)' }}
+    >
+      <ScrollArea className="w-full" onWheel={(e) => {
+        if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
+          const viewport = (e.currentTarget as HTMLElement).querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
+          if (viewport) {
+            e.preventDefault()
+            viewport.scrollLeft += e.deltaY
+          }
+        }
+      }}>
+        <div className="flex items-stretch px-3 py-1.5 gap-0 min-w-max">
+          {/* 边框 */}
+          <div className={sectionCls}>
+            <SectionLabel icon={Square} label="边框" />
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+              <div className="scale-[0.82] origin-left"><ColorButton value={config.border.color} onChange={(c) => updateConfig('border.color', c)} /></div>
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>样式</span>
+              <Select value={config.border.style} onValueChange={(v) => updateConfig('border.style', v)}>
+                <SelectTrigger className="h-[22px] w-[64px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BORDER_STYLES.map((s) => (
+                    <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>宽度</span>
+              <Stepper value={config.border.width} onChange={(v) => updateConfig('border.width', v)} min={0} max={10} />
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>圆角</span>
+              <Stepper value={config.border.radius} onChange={(v) => updateConfig('border.radius', v)} min={0} max={50} />
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* 背景 */}
+          <div className={sectionCls}>
+            <SectionLabel icon={Paintbrush} label="背景" />
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+              <div className="scale-[0.82] origin-left"><ColorButton value={config.background.color} onChange={(c) => updateConfig('background.color', c)} /></div>
+            </div>
+            <div className="flex items-center gap-2 relative">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>渐变色</span>
+              <Switch checked={config.background.gradient} onCheckedChange={(v) => updateConfig('background.gradient', v)} className="scale-[0.55] origin-center" />
+              {config.background.gradient && (
+                <GradientPicker
+                  startColor={config.background.gradientStart || '#549688'}
+                  endColor={config.background.gradientEnd || '#e8a87c'}
+                  direction={config.background.gradientDirection || 'to right'}
+                  onChange={(start, end, dir) => {
+                    const newConfig = { ...config, background: { ...config.background, gradientStart: start, gradientEnd: end, gradientDirection: dir } }
+                    setConfig(newConfig)
+                    applyStyle(newConfig)
+                  }}
+                />
+              )}
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* 形状 */}
+          <div className={sectionCls}>
+            <SectionLabel icon={Shapes} label="形状" />
+            <div className="flex items-center gap-2">
+              <Select value={config.shape} onValueChange={(v) => updateConfig('shape', v)}>
+                <SelectTrigger className="h-[22px] w-[80px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SHAPES.map((s) => (
+                    <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* 线条 */}
+          <div className={sectionCls}>
+            <SectionLabel icon={Spline} label="线条" />
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+              <div className="scale-[0.82] origin-left"><ColorButton value={config.line.color} onChange={(c) => updateConfig('line.color', c)} /></div>
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>样式</span>
+              <Select value={config.line.style} onValueChange={(v) => updateConfig('line.style', v)}>
+                <SelectTrigger className="h-[22px] w-[64px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LINE_STYLES.map((s) => (
+                    <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>宽度</span>
+              <Stepper value={config.line.width} onChange={(v) => updateConfig('line.width', v)} min={1} max={10} />
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>箭头</span>
+              <Select value={config.line.arrowPosition} onValueChange={(v) => updateConfig('line.arrowPosition', v)}>
+                <SelectTrigger className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ARROW_POSITIONS.map((s) => (
+                    <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* 节点内边距 */}
+          <div className={sectionCls}>
+            <SectionLabel icon={BoxSelect} label="节点内边距" />
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>水平</span>
+              <Stepper value={config.padding.horizontal} onChange={(v) => updateConfig('padding.horizontal', v)} min={0} max={50} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>垂直</span>
+              <Stepper value={config.padding.vertical} onChange={(v) => updateConfig('padding.vertical', v)} min={0} max={50} />
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* 图片 */}
+          <div className={sectionCls}>
+            <SectionLabel icon={Image} label="图片" />
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>布局</span>
+              <Select value={config.image.layout} onValueChange={(v) => updateConfig('image.layout', v)}>
+                <SelectTrigger className="h-[22px] w-[48px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="top" className="text-xs">上</SelectItem>
+                  <SelectItem value="bottom" className="text-xs">下</SelectItem>
+                  <SelectItem value="left" className="text-xs">左</SelectItem>
+                  <SelectItem value="right" className="text-xs">右</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <Divider />
+
+          {/* 标签 */}
+          <div className={sectionCls}>
+            <SectionLabel icon={Tag} label="标签" />
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>布局</span>
+              <Select value={config.tag.layout} onValueChange={(v) => updateConfig('tag.layout', v)}>
+                <SelectTrigger className="h-[22px] w-[48px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent" style={{ color: 'var(--text-primary)' }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="right" className="text-xs">右</SelectItem>
+                  <SelectItem value="bottom" className="text-xs">下</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* 关闭 */}
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]"
+            className="ml-auto self-start p-1 rounded-[3px] transition-colors duration-100 hover:bg-[var(--bg-hover)]"
+            style={{ color: 'var(--text-tertiary)' }}
           >
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
-
-        {!hasSelection ? (
-          <div className="p-8 text-center text-sm text-[var(--text-secondary)]">
-            请先选择一个节点
-          </div>
-        ) : (
-          <div className="p-4 space-y-6">
-            {/* Border Section */}
-            <section>
-              <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">边框</h4>
-              <div className="space-y-3">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text-secondary)]">颜色</span>
-                    <ColorButton
-                      value={config.border.color}
-                      onChange={(color) => updateConfig('border.color', color)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text-secondary)]">样式</span>
-                    <select
-                      value={config.border.style}
-                      onChange={(e) => updateConfig('border.style', e.target.value)}
-                      className="px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                    >
-                      {BORDER_STYLES.map((s) => (
-                        <option key={s.value} value={s.value}>{s.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text-secondary)]">宽度</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={10}
-                      value={config.border.width}
-                      onChange={(e) => updateConfig('border.width', parseInt(e.target.value) || 0)}
-                      className="w-16 px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text-secondary)]">圆角</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={50}
-                      value={config.border.radius}
-                      onChange={(e) => updateConfig('border.radius', parseInt(e.target.value) || 0)}
-                      className="w-16 px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                    />
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Background Section */}
-            <section>
-              <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">背景</h4>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-secondary)]">颜色</span>
-                  <ColorButton
-                    value={config.background.color}
-                    onChange={(color) => updateConfig('background.color', color)}
-                  />
-                </div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.background.gradient}
-                    onChange={(e) => updateConfig('background.gradient', e.target.checked)}
-                    className="w-4 h-4 rounded border-[var(--border-color)]"
-                  />
-                  <span className="text-xs text-[var(--text-secondary)]">渐变</span>
-                </label>
-              </div>
-            </section>
-
-            {/* Shape Section */}
-            <section>
-              <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">形状</h4>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">形状</span>
-                <select
-                  value={config.shape}
-                  onChange={(e) => updateConfig('shape', e.target.value)}
-                  className="px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                >
-                  {SHAPES.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </div>
-            </section>
-
-            {/* Line Section */}
-            <section>
-              <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">线条</h4>
-              <div className="space-y-3">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text-secondary)]">颜色</span>
-                    <ColorButton
-                      value={config.line.color}
-                      onChange={(color) => updateConfig('line.color', color)}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text-secondary)]">样式</span>
-                    <select
-                      value={config.line.style}
-                      onChange={(e) => updateConfig('line.style', e.target.value)}
-                      className="px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                    >
-                      {LINE_STYLES.map((s) => (
-                        <option key={s.value} value={s.value}>{s.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text-secondary)]">宽度</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={config.line.width}
-                      onChange={(e) => updateConfig('line.width', parseInt(e.target.value) || 1)}
-                      className="w-16 px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text-secondary)]">箭头位置</span>
-                    <select
-                      value={config.line.arrowPosition}
-                      onChange={(e) => updateConfig('line.arrowPosition', e.target.value)}
-                      className="px-2 py-1 text-xs border border-[var(--border-color)] rounded bg-[var(--bg-secondary)]"
-                    >
-                      {ARROW_POSITIONS.map((s) => (
-                        <option key={s.value} value={s.value}>{s.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Padding Section */}
-            <section>
-              <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">节点内边距</h4>
-              <div className="space-y-3">
-                <div className="flex items-center gap-4">
-                  <span className="text-xs text-[var(--text-secondary)] w-8">水平</span>
-                  <input
-                    type="range"
-                    min={5}
-                    max={50}
-                    value={config.padding.horizontal}
-                    onChange={(e) => updateConfig('padding.horizontal', parseInt(e.target.value))}
-                    className="flex-1 h-1 bg-[var(--bg-secondary)] rounded-lg appearance-none cursor-pointer"
-                  />
-                  <span className="text-xs text-[var(--text-secondary)] w-8 text-right">
-                    {config.padding.horizontal}
-                  </span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-xs text-[var(--text-secondary)] w-8">垂直</span>
-                  <input
-                    type="range"
-                    min={5}
-                    max={50}
-                    value={config.padding.vertical}
-                    onChange={(e) => updateConfig('padding.vertical', parseInt(e.target.value))}
-                    className="flex-1 h-1 bg-[var(--bg-secondary)] rounded-lg appearance-none cursor-pointer"
-                  />
-                  <span className="text-xs text-[var(--text-secondary)] w-8 text-right">
-                    {config.padding.vertical}
-                  </span>
-                </div>
-              </div>
-            </section>
-
-            {/* Image Layout Section */}
-            <section>
-              <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">图片</h4>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">布局</span>
-                <div className="flex rounded border border-[var(--border-color)] overflow-hidden">
-                  {IMAGE_LAYOUTS.map((layout) => (
-                    <button
-                      key={layout.value}
-                      onClick={() => updateConfig('image.layout', layout.value)}
-                      className={`
-                        px-3 py-1 text-xs transition-colors
-                        ${config.image.layout === layout.value
-                          ? 'bg-[var(--theme-color)] text-white'
-                          : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                        }
-                      `}
-                    >
-                      {layout.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            {/* Tag Layout Section */}
-            <section>
-              <h4 className="text-xs font-medium text-[var(--text-primary)] mb-3">标签</h4>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">布局</span>
-                <div className="flex rounded border border-[var(--border-color)] overflow-hidden">
-                  {TAG_LAYOUTS.map((layout) => (
-                    <button
-                      key={layout.value}
-                      onClick={() => updateConfig('tag.layout', layout.value)}
-                      className={`
-                        px-3 py-1 text-xs transition-colors
-                        ${config.tag.layout === layout.value
-                          ? 'bg-[var(--theme-color)] text-white'
-                          : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                        }
-                      `}
-                    >
-                      {layout.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </section>
-          </div>
-        )}
-      </div>
+        <ScrollBar orientation="horizontal" />
+      </ScrollArea>
     </div>
   )
 }
