@@ -363,7 +363,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
                     if (b.y < minY) minY = b.y
                     if (b.y + b.height > maxY) maxY = b.y + b.height
                     ok = true
-                  } catch (_e) {}
+                  } catch { /* ignore */ }
                 })
                 if (!ok || !isFinite(minX) || !isFinite(minY)
                   || !isFinite(maxX - minX) || !isFinite(maxY - minY)) return
@@ -384,7 +384,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
               })
               root.children?.forEach((c: any) => walkNode(c))
             })(tree)
-          } catch (_e) { orig() }
+          } catch { orig() }
         }
       }
 

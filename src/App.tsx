@@ -61,7 +61,7 @@ function App() {
       // Now that theme and settings are loaded, show the window.
       try {
         await getCurrentWindow().show()
-      } catch {}
+      } catch { /* ignore */ }
     }
     init()
   }, [])

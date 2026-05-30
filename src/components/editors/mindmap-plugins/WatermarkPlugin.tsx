@@ -213,7 +213,6 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
                 min={0} 
                 max={100} 
                 step={5}
-                suffix="%"
               />
               <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>%</span>
             </div>

@@ -92,7 +92,7 @@ export function MindMapContextMenu({ mindMap, children }: MindMapContextMenuProp
 
     const renderer = mindMap.renderer
     if (renderer) {
-      const rect = (mindMap.el || mindMap?.el).getBoundingClientRect()
+      const rect = (mindMap.el || mindMap.el).getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
       const node = renderer.findNodeByPosition?.(x, y)
