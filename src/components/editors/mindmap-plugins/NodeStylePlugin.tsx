@@ -112,7 +112,8 @@ const DIRECTION_MAP: Record<string, { startDir: [number, number]; endDir: [numbe
   'to top left': { startDir: [1, 1], endDir: [0, 0] },
 }
 
-function coordsToDirection(startDir: number[], endDir: number[]): NodeStyleConfig['background']['gradientDirection'] {
+function coordsToDirection(startDir?: number[], endDir?: number[]): NodeStyleConfig['background']['gradientDirection'] {
+  if (!startDir || !endDir) return 'to right'
   for (const [dir, coords] of Object.entries(DIRECTION_MAP)) {
     if (coords.startDir[0] === startDir[0] && coords.startDir[1] === startDir[1] &&
         coords.endDir[0] === endDir[0] && coords.endDir[1] === endDir[1]) {

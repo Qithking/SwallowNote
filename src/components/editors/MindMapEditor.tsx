@@ -93,6 +93,8 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   } | null>(null)
 
   const isDark = theme === 'dark' || (theme === 'system' && systemDark)
+  const isDarkRef = useRef(isDark)
+  isDarkRef.current = isDark
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -136,9 +138,16 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   const doInitMindMap = useCallback(async (dataContent: string) => {
     const el = containerRef.current
     if (!el) return
-    if (initStartedRef.current) return
-    if (destroyedRef.current) return
+    if (initStartedRef.current) {
+      console.log('[MindMapEditor] doInitMindMap skipped: already started')
+      return
+    }
+    if (destroyedRef.current) {
+      console.log('[MindMapEditor] doInitMindMap skipped: destroyed')
+      return
+    }
 
+    console.log('[MindMapEditor] doInitMindMap starting, content length:', dataContent?.length)
     initStartedRef.current = true
     isInitialLoad.current = true
     mountTimeRef.current = Date.now()
@@ -166,7 +175,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         data: mindMapData.root || mindMapData,
         readonly: false,
         layout: mindMapData.layout || 'logicalStructure',
-        theme: isDark ? 'dark' : 'default',
+        theme: isDarkRef.current ? 'dark' : 'default',
         fit: true,
         nodeTextEditZIndex: 1000,
         nodeNoteTooltipZIndex: 1000,
@@ -302,7 +311,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         setLoading(false)
       }
     }
-  }, [isDark, scheduleSave])
+  }, [scheduleSave])
 
   useEffect(() => {
     const el = containerRef.current
@@ -316,6 +325,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       if (rect.width > 0 && rect.height > 0) {
         containerReadyRef.current = true
         const pc = pendingContentRef.current
+        console.log('[MindMapEditor] container ready, pendingContent:', pc ? `length=${pc.length}` : 'null')
         if (pc && pc.trim()) {
           doInitMindMap(pc)
         }
@@ -328,6 +338,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
               if (destroyedRef.current) return
               containerReadyRef.current = true
               const pc = pendingContentRef.current
+              console.log('[MindMapEditor] container ready (observer), pendingContent:', pc ? `length=${pc.length}` : 'null')
               if (pc && pc.trim()) {
                 doInitMindMap(pc)
               }
@@ -362,11 +373,18 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   }, [])
 
   useEffect(() => {
-    if (!content || !content.trim()) return
+    if (!content || !content.trim()) {
+      console.log('[MindMapEditor] content effect: content is empty, skipping')
+      return
+    }
 
     if (mindMapReadyRef.current) {
-      if (content === lastLoadedContentRef.current) return
+      if (content === lastLoadedContentRef.current) {
+        console.log('[MindMapEditor] content effect: same content, skipping setData')
+        return
+      }
 
+      console.log('[MindMapEditor] content effect: calling setData')
       isInitialLoad.current = true
       lastLoadedContentRef.current = content
 
@@ -379,8 +397,12 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       return
     }
 
-    if (initStartedRef.current) return
+    if (initStartedRef.current) {
+      console.log('[MindMapEditor] content effect: init already started, skipping')
+      return
+    }
 
+    console.log('[MindMapEditor] content effect: setting pendingContent and checking container')
     pendingContentRef.current = content
 
     if (containerReadyRef.current) {

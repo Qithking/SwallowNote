@@ -356,7 +356,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       <div
         ref={toolbarRef}
         onWheel={handleToolbarWheel}
-        className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-x-auto overflow-y-hidden scrollbar-none"
+        className="flex items-center px-2 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-x-auto overflow-y-hidden scrollbar-none"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', minHeight: '37px', maxHeight: '37px' }}
       >
       {/* Undo / Redo */}
@@ -366,7 +366,6 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           title="回退 (Ctrl+Z)"
         >
           <Undo2 size={14} />
-          <span className="text-[10px]">回退</span>
         </ToolbarButton>
 
         <ToolbarButton
@@ -374,7 +373,6 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           title="前进 (Ctrl+Y)"
         >
           <Redo2 size={14} />
-          <span className="text-[10px]">前进</span>
         </ToolbarButton>
       </div>
 
