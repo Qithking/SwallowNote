@@ -245,7 +245,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
   return (
     <div
-      className="border-b bg-[var(--bg-primary)]"
+      className="border-b bg-[var(--bg-secondary)]"
       style={{ borderColor: 'var(--border-color)' }}
     >
       <ScrollArea className="w-full" onWheel={(e) => {

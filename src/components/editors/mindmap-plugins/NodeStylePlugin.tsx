@@ -442,7 +442,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
   if (!hasSelection) {
     return (
       <div
-        className="border-b bg-[var(--bg-primary)] px-4 py-2 flex items-center justify-between"
+        className="border-b bg-[var(--bg-secondary)] px-4 py-2 flex items-center justify-between"
         style={{ borderColor: 'var(--border-color)' }}
       >
         <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>请先选择节点</span>
@@ -459,7 +459,7 @@ export function NodeStylePlugin({ mindMap, onClose }: NodeStylePluginProps) {
 
   return (
     <div
-      className="border-b bg-[var(--bg-primary)]"
+      className="border-b bg-[var(--bg-secondary)]"
       style={{ borderColor: 'var(--border-color)' }}
     >
       <ScrollArea className="w-full" onWheel={(e) => {

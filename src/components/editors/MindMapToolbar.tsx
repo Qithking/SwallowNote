@@ -308,9 +308,10 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
 
   const handleThemeChange = (theme: string) => {
     if (!mindMap) return
+    const bgSecondary = getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary').trim()
     if (theme === 'dark') {
       mindMap.setThemeConfig({
-        backgroundColor: '#1a1a1a',
+        backgroundColor: bgSecondary || '#1a1a1a',
         lineColor: '#4a9eff',
         root: {
           fillColor: '#2d5a8a',
@@ -329,7 +330,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       })
     } else {
       mindMap.setThemeConfig({
-        backgroundColor: '#fafafa',
+        backgroundColor: bgSecondary || '#fafafa',
         lineColor: '#549688',
         root: {
           fillColor: '#549688',
@@ -599,6 +600,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       {/* Hyperlink Dialog */}
       <Dialog open={hyperlinkDialogOpen} onOpenChange={setHyperlinkDialogOpen}>
         <DialogContent
+          hideOverlay
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border-color)',
@@ -657,6 +659,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       {/* Note Dialog */}
       <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
         <DialogContent
+          hideOverlay
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border-color)',
@@ -698,6 +701,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       {/* Icon Dialog */}
       <Dialog open={iconDialogOpen} onOpenChange={setIconDialogOpen}>
         <DialogContent
+          hideOverlay
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border-color)',
@@ -741,6 +745,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       {/* Tag Dialog */}
       <Dialog open={tagDialogOpen} onOpenChange={setTagDialogOpen}>
         <DialogContent
+          hideOverlay
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border-color)',
