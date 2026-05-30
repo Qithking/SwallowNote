@@ -378,10 +378,11 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
   }, [mindMap])
 
   const updateConfig = (path: string, value: any) => {
-    const newConfig = { ...config }
     const keys = path.split('.')
+    const newConfig = { ...config }
     let target: any = newConfig
     for (let i = 0; i < keys.length - 1; i++) {
+      target[keys[i]] = { ...target[keys[i]] }
       target = target[keys[i]]
     }
     target[keys[keys.length - 1]] = value

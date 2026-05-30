@@ -100,28 +100,19 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
 
   // Watermark drawing function
   const drawWatermark = useCallback((options?: { forExport?: boolean }) => {
-    console.log('drawWatermark called', { options, hasRef: !!watermarkRef.current, hasMindMap: !!mindMapInstanceRef.current })
-    
-    if (!watermarkRef.current || !mindMapInstanceRef.current) {
-      console.log('drawWatermark early return: missing ref or mindMap')
-      return
-    }
+    if (!watermarkRef.current || !mindMapInstanceRef.current) return
     
     const watermarkConfig = mindMapInstanceRef.current.opt?.watermark
-    console.log('drawWatermark config', watermarkConfig)
     
     if (!watermarkConfig?.enabled) {
-      console.log('drawWatermark: watermark not enabled, clearing')
       watermarkRef.current.innerHTML = ''
       return
     }
 
     const { text, color, opacity, fontSize, rotate, lineSpacing, textSpacing, showBelowNodes, showOnExport } = watermarkConfig
-    console.log('drawWatermark values', { text, showBelowNodes, showOnExport })
 
     // If showOnExport is true and this is not for export, hide watermark on canvas
     if (showOnExport && !options?.forExport) {
-      console.log('drawWatermark: showOnExport is true but not for export, clearing')
       watermarkRef.current.innerHTML = ''
       return
     }
@@ -129,20 +120,14 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
     // Update z-index based on showBelowNodes
     // When showBelowNodes is true, watermark should be behind nodes (z-index: 1)
     // When showBelowNodes is false, watermark should be in front of nodes (z-index: 10)
-    const watermarkZIndex = showBelowNodes ? '1' : '10'
-    watermarkRef.current.style.zIndex = watermarkZIndex
-    console.log('drawWatermark: set zIndex to', watermarkZIndex)
+    watermarkRef.current.style.zIndex = showBelowNodes ? '1' : '10'
 
     // Get container dimensions
     const container = containerRef.current
-    if (!container) {
-      console.log('drawWatermark: no container')
-      return
-    }
+    if (!container) return
     const containerRect = container.getBoundingClientRect()
     const width = containerRect.width
     const height = containerRect.height
-    console.log('drawWatermark: dimensions', { width, height })
 
     // Create watermark pattern
     const pattern = document.createElementNS('http://www.w3.org/2000/svg', 'pattern')
@@ -186,8 +171,6 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
     rect.setAttribute('fill', `url(#${patternId})`)
     rect.setAttribute('pointer-events', 'none')
     watermarkRef.current.appendChild(rect)
-    
-    console.log('drawWatermark: watermark drawn successfully')
   }, [])
 
   useEffect(() => {
