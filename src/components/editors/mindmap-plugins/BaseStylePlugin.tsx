@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, Palette, Minus, Plus, Spline, GitBranch, Link, BoxSelect, Square } from 'lucide-react'
+import { X, Palette, Minus, Plus, Spline, GitBranch, Link, BoxSelect, Square, Crown, Binary, Layers, Braces } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import {
   Select,
@@ -14,6 +14,15 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 interface BaseStylePluginProps {
   mindMap: any
   onClose: () => void
+}
+
+interface NodeTextStyleConfig {
+  color: string
+  fontFamily: string
+  fontSize: number
+  fontWeight: string
+  fontStyle: string
+  textDecoration: string
 }
 
 interface BaseStyleConfig {
@@ -46,6 +55,10 @@ interface BaseStyleConfig {
     horizontal: number
     vertical: number
   }
+  root: NodeTextStyleConfig
+  second: NodeTextStyleConfig
+  node: NodeTextStyleConfig
+  generalization: NodeTextStyleConfig
 }
 
 const LINE_STYLES = [
@@ -59,6 +72,46 @@ const DASHARRAY_OPTIONS = [
   { value: '5,5', label: '虚线' },
   { value: '10,10', label: '长虚线' },
   { value: '5,10', label: '点线' },
+]
+
+const FONT_FAMILY_OPTIONS = [
+  { value: '微软雅黑, Microsoft YaHei', label: '微软雅黑' },
+  { value: '宋体, SimSun', label: '宋体' },
+  { value: '黑体, SimHei', label: '黑体' },
+  { value: '楷体, KaiTi', label: '楷体' },
+  { value: '仿宋, FangSong', label: '仿宋' },
+  { value: 'Arial, Helvetica, sans-serif', label: 'Arial' },
+  { value: 'Times New Roman, Times, serif', label: 'Times' },
+  { value: 'Georgia, serif', label: 'Georgia' },
+  { value: 'Courier New, Courier, monospace', label: 'Courier' },
+  { value: 'Verdana, Geneva, sans-serif', label: 'Verdana' },
+]
+
+const FONT_WEIGHT_OPTIONS = [
+  { value: 'normal', label: '常规' },
+  { value: 'bold', label: '粗体' },
+  { value: 'lighter', label: '细体' },
+  { value: '100', label: '100' },
+  { value: '200', label: '200' },
+  { value: '300', label: '300' },
+  { value: '400', label: '400' },
+  { value: '500', label: '500' },
+  { value: '600', label: '600' },
+  { value: '700', label: '700' },
+  { value: '800', label: '800' },
+  { value: '900', label: '900' },
+]
+
+const FONT_STYLE_OPTIONS = [
+  { value: 'normal', label: '正常' },
+  { value: 'italic', label: '斜体' },
+]
+
+const TEXT_DECORATION_OPTIONS = [
+  { value: 'none', label: '无' },
+  { value: 'underline', label: '下划线' },
+  { value: 'line-through', label: '删除线' },
+  { value: 'overline', label: '上划线' },
 ]
 
 function Stepper({
@@ -159,11 +212,47 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
       horizontal: 10,
       vertical: 10,
     },
+    root: {
+      color: '#fff',
+      fontFamily: '微软雅黑, Microsoft YaHei',
+      fontSize: 16,
+      fontWeight: 'bold',
+      fontStyle: 'normal',
+      textDecoration: 'none',
+    },
+    second: {
+      color: '#565656',
+      fontFamily: '微软雅黑, Microsoft YaHei',
+      fontSize: 16,
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+      textDecoration: 'none',
+    },
+    node: {
+      color: '#6a6d6c',
+      fontFamily: '微软雅黑, Microsoft YaHei',
+      fontSize: 14,
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+      textDecoration: 'none',
+    },
+    generalization: {
+      color: '#565656',
+      fontFamily: '微软雅黑, Microsoft YaHei',
+      fontSize: 16,
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+      textDecoration: 'none',
+    },
   })
 
   useEffect(() => {
     if (!mindMap) return
     const themeConfig = mindMap.getThemeConfig()
+    const rootTheme = themeConfig.root || {}
+    const secondTheme = themeConfig.second || {}
+    const nodeTheme = themeConfig.node || {}
+    const generalizationTheme = themeConfig.generalization || {}
     setConfig({
       backgroundColor: themeConfig.backgroundColor || '#fafafa',
       backgroundImage: themeConfig.backgroundImage || '',
@@ -194,6 +283,38 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
         horizontal: mindMap.opt?.outerFramePaddingX ?? 10,
         vertical: mindMap.opt?.outerFramePaddingY ?? 10,
       },
+      root: {
+        color: rootTheme.color || '#fff',
+        fontFamily: rootTheme.fontFamily || '微软雅黑, Microsoft YaHei',
+        fontSize: rootTheme.fontSize || 16,
+        fontWeight: rootTheme.fontWeight || 'bold',
+        fontStyle: rootTheme.fontStyle || 'normal',
+        textDecoration: rootTheme.textDecoration || 'none',
+      },
+      second: {
+        color: secondTheme.color || '#565656',
+        fontFamily: secondTheme.fontFamily || '微软雅黑, Microsoft YaHei',
+        fontSize: secondTheme.fontSize || 16,
+        fontWeight: secondTheme.fontWeight || 'normal',
+        fontStyle: secondTheme.fontStyle || 'normal',
+        textDecoration: secondTheme.textDecoration || 'none',
+      },
+      node: {
+        color: nodeTheme.color || '#6a6d6c',
+        fontFamily: nodeTheme.fontFamily || '微软雅黑, Microsoft YaHei',
+        fontSize: nodeTheme.fontSize || 14,
+        fontWeight: nodeTheme.fontWeight || 'normal',
+        fontStyle: nodeTheme.fontStyle || 'normal',
+        textDecoration: nodeTheme.textDecoration || 'none',
+      },
+      generalization: {
+        color: generalizationTheme.color || '#565656',
+        fontFamily: generalizationTheme.fontFamily || '微软雅黑, Microsoft YaHei',
+        fontSize: generalizationTheme.fontSize || 16,
+        fontWeight: generalizationTheme.fontWeight || 'normal',
+        fontStyle: generalizationTheme.fontStyle || 'normal',
+        textDecoration: generalizationTheme.textDecoration || 'none',
+      },
     })
   }, [mindMap])
 
@@ -217,6 +338,38 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
       associativeLineDasharray: newConfig.associativeLine.dasharray,
       paddingX: newConfig.padding.horizontal,
       paddingY: newConfig.padding.vertical,
+      root: {
+        color: newConfig.root.color,
+        fontFamily: newConfig.root.fontFamily,
+        fontSize: newConfig.root.fontSize,
+        fontWeight: newConfig.root.fontWeight,
+        fontStyle: newConfig.root.fontStyle,
+        textDecoration: newConfig.root.textDecoration,
+      },
+      second: {
+        color: newConfig.second.color,
+        fontFamily: newConfig.second.fontFamily,
+        fontSize: newConfig.second.fontSize,
+        fontWeight: newConfig.second.fontWeight,
+        fontStyle: newConfig.second.fontStyle,
+        textDecoration: newConfig.second.textDecoration,
+      },
+      node: {
+        color: newConfig.node.color,
+        fontFamily: newConfig.node.fontFamily,
+        fontSize: newConfig.node.fontSize,
+        fontWeight: newConfig.node.fontWeight,
+        fontStyle: newConfig.node.fontStyle,
+        textDecoration: newConfig.node.textDecoration,
+      },
+      generalization: {
+        color: newConfig.generalization.color,
+        fontFamily: newConfig.generalization.fontFamily,
+        fontSize: newConfig.generalization.fontSize,
+        fontWeight: newConfig.generalization.fontWeight,
+        fontStyle: newConfig.generalization.fontStyle,
+        textDecoration: newConfig.generalization.textDecoration,
+      },
     })
     if (mindMap.opt) {
       mindMap.opt.outerFramePaddingX = newConfig.outerFramePadding.horizontal
@@ -399,6 +552,290 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
           <div className="flex items-center gap-2">
             <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>垂直</span>
             <Stepper value={config.outerFramePadding.vertical} onChange={(v) => updateConfig('outerFramePadding.vertical', v)} min={0} max={50} />
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* 根节点文字 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={Crown} label="根节点文字" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <div className="scale-[0.82] origin-left"><ColorButton value={config.root.color} onChange={(c) => updateConfig('root.color', c)} /></div>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字号</span>
+            <Stepper value={config.root.fontSize} onChange={(v) => updateConfig('root.fontSize', v)} min={10} max={60} />
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字体</span>
+            <Select value={config.root.fontFamily} onValueChange={(v) => updateConfig('root.fontFamily', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_FAMILY_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <Select value={config.root.fontWeight} onValueChange={(v) => updateConfig('root.fontWeight', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_WEIGHT_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>斜体</span>
+            <Select value={config.root.fontStyle} onValueChange={(v) => updateConfig('root.fontStyle', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_STYLE_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>线</span>
+            <Select value={config.root.textDecoration} onValueChange={(v) => updateConfig('root.textDecoration', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TEXT_DECORATION_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* 二级节点文字 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={Binary} label="二级节点文字" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <div className="scale-[0.82] origin-left"><ColorButton value={config.second.color} onChange={(c) => updateConfig('second.color', c)} /></div>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字号</span>
+            <Stepper value={config.second.fontSize} onChange={(v) => updateConfig('second.fontSize', v)} min={10} max={60} />
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字体</span>
+            <Select value={config.second.fontFamily} onValueChange={(v) => updateConfig('second.fontFamily', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_FAMILY_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <Select value={config.second.fontWeight} onValueChange={(v) => updateConfig('second.fontWeight', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_WEIGHT_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>斜体</span>
+            <Select value={config.second.fontStyle} onValueChange={(v) => updateConfig('second.fontStyle', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_STYLE_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>线</span>
+            <Select value={config.second.textDecoration} onValueChange={(v) => updateConfig('second.textDecoration', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TEXT_DECORATION_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* 普通节点文字 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={Layers} label="普通节点文字" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <div className="scale-[0.82] origin-left"><ColorButton value={config.node.color} onChange={(c) => updateConfig('node.color', c)} /></div>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字号</span>
+            <Stepper value={config.node.fontSize} onChange={(v) => updateConfig('node.fontSize', v)} min={10} max={60} />
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字体</span>
+            <Select value={config.node.fontFamily} onValueChange={(v) => updateConfig('node.fontFamily', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_FAMILY_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <Select value={config.node.fontWeight} onValueChange={(v) => updateConfig('node.fontWeight', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_WEIGHT_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>斜体</span>
+            <Select value={config.node.fontStyle} onValueChange={(v) => updateConfig('node.fontStyle', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_STYLE_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>线</span>
+            <Select value={config.node.textDecoration} onValueChange={(v) => updateConfig('node.textDecoration', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TEXT_DECORATION_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <Divider />
+
+        {/* 概要节点文字 */}
+        <div className={sectionCls}>
+          <SectionLabel icon={Braces} label="概要节点文字" />
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <div className="scale-[0.82] origin-left"><ColorButton value={config.generalization.color} onChange={(c) => updateConfig('generalization.color', c)} /></div>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字号</span>
+            <Stepper value={config.generalization.fontSize} onChange={(v) => updateConfig('generalization.fontSize', v)} min={10} max={60} />
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字体</span>
+            <Select value={config.generalization.fontFamily} onValueChange={(v) => updateConfig('generalization.fontFamily', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_FAMILY_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <Select value={config.generalization.fontWeight} onValueChange={(v) => updateConfig('generalization.fontWeight', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_WEIGHT_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>斜体</span>
+            <Select value={config.generalization.fontStyle} onValueChange={(v) => updateConfig('generalization.fontStyle', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_STYLE_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>线</span>
+            <Select value={config.generalization.textDecoration} onValueChange={(v) => updateConfig('generalization.textDecoration', v)}>
+              <SelectTrigger
+                className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TEXT_DECORATION_OPTIONS.map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
