@@ -227,6 +227,15 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         setLoading(false)
         setError(null)
 
+        const mindMapAny: any = mindMap
+        if (mindMapAny.outerFrame) {
+          const originalRender = mindMapAny.outerFrame.renderOuterFrames.bind(mindMapAny.outerFrame)
+          mindMapAny.outerFrame.renderOuterFrames = function () {
+            mindMapAny.getElRectInfo()
+            originalRender()
+          }
+        }
+
         // Mark that initial data has been loaded
         initialDataLoaded.current = true
 
