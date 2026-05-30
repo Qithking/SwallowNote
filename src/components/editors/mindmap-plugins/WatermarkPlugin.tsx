@@ -42,14 +42,12 @@ function Stepper({
   min = 0,
   max = 100,
   step = 1,
-  suffix = '',
 }: {
   value: number
   onChange: (v: number) => void
   min?: number
   max?: number
   step?: number
-  suffix?: string
 }) {
   return (
     <div

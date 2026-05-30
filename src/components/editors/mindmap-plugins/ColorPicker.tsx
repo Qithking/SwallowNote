@@ -115,13 +115,14 @@ export function ColorSwatch({
   )
 }
 
-export function ColorButton({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+export function ColorButton({ value, onChange, disabled }: { value: string; onChange: (color: string) => void; disabled?: boolean }) {
   return (
     <div className="relative">
       <input
         type="color"
         value={value.startsWith('#') ? value : '#000000'}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
         className="w-7 h-7 p-0 border-0 rounded cursor-pointer opacity-0 absolute inset-0 z-10"
       />
       <div
