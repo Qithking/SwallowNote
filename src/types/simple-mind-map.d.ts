@@ -24,6 +24,9 @@ declare module 'simple-mind-map' {
     view: any
     renderer: any
     command: any
+    svg?: SVGSVGElement
+    opt?: any
+    drawWatermark?: () => void
 
     static usePlugin(plugin: any, opt?: any): typeof MindMap
     static hasPlugin(plugin: any): number

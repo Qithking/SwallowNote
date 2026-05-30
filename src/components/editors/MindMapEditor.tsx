@@ -41,19 +41,20 @@ function ensureNodeTextValid(node: any): void {
 function parseMindMapData(content: string) {
   let data: any
   if (!content || !content.trim()) {
-    data = DEFAULT_DATA
+    data = { ...DEFAULT_DATA }
   } else {
     try {
       const parsed = JSON.parse(content)
       if (parsed && parsed.root) {
+        // Keep all config fields (layout, theme, themeConfig, etc.)
         data = parsed
       } else if (parsed && parsed.data && parsed.data.text) {
         data = { root: parsed }
       } else {
-        data = DEFAULT_DATA
+        data = { ...DEFAULT_DATA }
       }
     } catch {
-      data = DEFAULT_DATA
+      data = { ...DEFAULT_DATA }
     }
   }
   if (data?.root) {
@@ -91,10 +92,103 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
     fontSize: number
     color: string
   } | null>(null)
+  const watermarkRef = useRef<SVGSVGElement>(null)
 
   const isDark = theme === 'dark' || (theme === 'system' && systemDark)
   const isDarkRef = useRef(isDark)
   isDarkRef.current = isDark
+
+  // Watermark drawing function
+  const drawWatermark = useCallback((options?: { forExport?: boolean }) => {
+    console.log('drawWatermark called', { options, hasRef: !!watermarkRef.current, hasMindMap: !!mindMapInstanceRef.current })
+    
+    if (!watermarkRef.current || !mindMapInstanceRef.current) {
+      console.log('drawWatermark early return: missing ref or mindMap')
+      return
+    }
+    
+    const watermarkConfig = mindMapInstanceRef.current.opt?.watermark
+    console.log('drawWatermark config', watermarkConfig)
+    
+    if (!watermarkConfig?.enabled) {
+      console.log('drawWatermark: watermark not enabled, clearing')
+      watermarkRef.current.innerHTML = ''
+      return
+    }
+
+    const { text, color, opacity, fontSize, rotate, lineSpacing, textSpacing, showBelowNodes, showOnExport } = watermarkConfig
+    console.log('drawWatermark values', { text, showBelowNodes, showOnExport })
+
+    // If showOnExport is true and this is not for export, hide watermark on canvas
+    if (showOnExport && !options?.forExport) {
+      console.log('drawWatermark: showOnExport is true but not for export, clearing')
+      watermarkRef.current.innerHTML = ''
+      return
+    }
+
+    // Update z-index based on showBelowNodes
+    // When showBelowNodes is true, watermark should be behind nodes (z-index: 1)
+    // When showBelowNodes is false, watermark should be in front of nodes (z-index: 10)
+    const watermarkZIndex = showBelowNodes ? '1' : '10'
+    watermarkRef.current.style.zIndex = watermarkZIndex
+    console.log('drawWatermark: set zIndex to', watermarkZIndex)
+
+    // Get container dimensions
+    const container = containerRef.current
+    if (!container) {
+      console.log('drawWatermark: no container')
+      return
+    }
+    const containerRect = container.getBoundingClientRect()
+    const width = containerRect.width
+    const height = containerRect.height
+    console.log('drawWatermark: dimensions', { width, height })
+
+    // Create watermark pattern
+    const pattern = document.createElementNS('http://www.w3.org/2000/svg', 'pattern')
+    const patternId = 'mindmap-watermark-pattern'
+    pattern.setAttribute('id', patternId)
+    pattern.setAttribute('x', '0')
+    pattern.setAttribute('y', '0')
+    pattern.setAttribute('width', String(textSpacing))
+    pattern.setAttribute('height', String(lineSpacing))
+    pattern.setAttribute('patternUnits', 'userSpaceOnUse')
+
+    // Create text element - center it in the pattern cell
+    const textEl = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    textEl.setAttribute('x', String(textSpacing / 2))
+    textEl.setAttribute('y', String(lineSpacing / 2))
+    textEl.setAttribute('text-anchor', 'middle')
+    textEl.setAttribute('dominant-baseline', 'middle')
+    textEl.setAttribute('fill', color)
+    textEl.setAttribute('opacity', String(opacity))
+    textEl.setAttribute('font-size', String(fontSize))
+    textEl.setAttribute('font-family', 'sans-serif')
+    textEl.setAttribute('transform', `rotate(${rotate}, ${textSpacing / 2}, ${lineSpacing / 2})`)
+    textEl.textContent = text
+
+    pattern.appendChild(textEl)
+
+    // Clear previous watermark
+    watermarkRef.current.innerHTML = ''
+    
+    // Create defs and add pattern
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs')
+    defs.appendChild(pattern)
+    watermarkRef.current.appendChild(defs)
+
+    // Create rect with pattern fill
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    rect.setAttribute('x', '0')
+    rect.setAttribute('y', '0')
+    rect.setAttribute('width', String(width))
+    rect.setAttribute('height', String(height))
+    rect.setAttribute('fill', `url(#${patternId})`)
+    rect.setAttribute('pointer-events', 'none')
+    watermarkRef.current.appendChild(rect)
+    
+    console.log('drawWatermark: watermark drawn successfully')
+  }, [])
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
@@ -108,6 +202,11 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       if (mindMapInstanceRef.current) {
         try {
           const data = mindMapInstanceRef.current.getData(true)
+          // Include watermark config in saved data
+          const watermarkConfig = mindMapInstanceRef.current.opt?.watermark
+          if (watermarkConfig) {
+            data.watermark = watermarkConfig
+          }
           lastSavedContent.current = JSON.stringify(data)
         } catch (e) {
           console.error('Failed to get initial mind map data:', e)
@@ -123,6 +222,11 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       if (!mindMapInstanceRef.current || !onChange) return
       try {
         const data = mindMapInstanceRef.current.getData(true)
+        // Include watermark config in saved data
+        const watermarkConfig = mindMapInstanceRef.current.opt?.watermark
+        if (watermarkConfig) {
+          data.watermark = watermarkConfig
+        }
         const newContent = JSON.stringify(data)
         if (newContent !== lastSavedContent.current) {
           lastSavedContent.current = newContent
@@ -170,15 +274,22 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       const mindMapData = parseMindMapData(dataContent)
       lastSavedContent.current = dataContent
 
+      // Determine theme: use saved theme if available, otherwise use current app theme
+      const savedTheme = mindMapData.theme
+      const currentTheme = isDarkRef.current ? 'dark' : 'default'
+      const themeToUse = savedTheme || currentTheme
+
       const mindMap = new MindMap({
         el,
         data: mindMapData.root || mindMapData,
         readonly: false,
         layout: mindMapData.layout || 'logicalStructure',
-        theme: isDarkRef.current ? 'dark' : 'default',
+        theme: themeToUse,
         fit: true,
         nodeTextEditZIndex: 1000,
         nodeNoteTooltipZIndex: 1000,
+        // Restore watermark config if exists
+        watermark: mindMapData.watermark || { enabled: false },
         expandBtnSize: 20,
         enableShortcutOnlyWhenMouseInSvg: false,
         mouseScaleCenterUseMousePosition: true,
@@ -303,7 +414,16 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         console.error('Failed to get initial mind map data:', e)
       }
 
+      // Listen for render events to redraw watermark
+      mindMap.on('render_end', drawWatermark)
+      mindMap.on('view_change', drawWatermark)
       mindMap.on('data_change', scheduleSave)
+      
+      // Expose drawWatermark function for plugins to call
+      ;(mindMap as any).drawWatermark = drawWatermark
+      
+      // Initial watermark draw
+      setTimeout(drawWatermark, 100)
     } catch (e) {
       console.error('Failed to initialize MindMap:', e)
       if (!destroyedRef.current) {
@@ -488,15 +608,27 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         </div>
       )}
       <MindMapContextMenu mindMap={mindMapInstance}>
-        <div
-          ref={containerRef}
-          className="flex-1"
-          style={{
-            width: '100%',
-            height: '100%',
-            minHeight: '200px',
-          }}
-        />
+        <div className="flex-1 relative" style={{ width: '100%', height: '100%', minHeight: '200px' }}>
+          {/* Watermark layer - controlled by z-index via drawWatermark */}
+          <svg
+            ref={watermarkRef}
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              width: '100%',
+              height: '100%',
+            }}
+          />
+          {/* MindMap container - background must be transparent for watermark to show through */}
+          <div
+            ref={containerRef}
+            className="absolute inset-0"
+            style={{
+              width: '100%',
+              height: '100%',
+              backgroundColor: 'transparent',
+            }}
+          />
+        </div>
       </MindMapContextMenu>
       {noteTooltip?.visible && (
         <div

@@ -22,6 +22,7 @@ import {
   Maximize,
   Settings,
   Check,
+  Droplets,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -41,10 +42,15 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { BaseStylePlugin, NodeStylePlugin } from './mindmap-plugins'
+import { BaseStylePlugin, NodeStylePlugin, WatermarkPlugin, ColorPicker } from './mindmap-plugins'
 
 interface MindMapToolbarProps {
   mindMap: any // simple-mind-map instance
+}
+
+interface TagItem {
+  text: string
+  style?: { fill?: string }
 }
 
 const LAYOUT_GROUPS = [
@@ -138,6 +144,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const [currentTheme, setCurrentTheme] = useState('default')
   const [showBaseStylePlugin, setShowBaseStylePlugin] = useState(false)
   const [showNodeStylePlugin, setShowNodeStylePlugin] = useState(false)
+  const [showWatermarkPlugin, setShowWatermarkPlugin] = useState(false)
   const [isPainterActive, setIsPainterActive] = useState(false)
   const [hyperlinkDialogOpen, setHyperlinkDialogOpen] = useState(false)
   const [noteDialogOpen, setNoteDialogOpen] = useState(false)
@@ -146,7 +153,10 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const [hyperlinkUrl, setHyperlinkUrl] = useState('')
   const [hyperlinkTitle, setHyperlinkTitle] = useState('')
   const [noteText, setNoteText] = useState('')
-  const [tagInput, setTagInput] = useState('')
+  const [tags, setTags] = useState<TagItem[]>([])
+  const [newTagText, setNewTagText] = useState('')
+  const [selectedColor, setSelectedColor] = useState('#e74c3c')
+  const [editingTagIndex, setEditingTagIndex] = useState<number | null>(null)
 
   const handleToolbarWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     const el = toolbarRef.current
@@ -231,8 +241,14 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const handleOpenTagDialog = () => {
     if (!mindMap || !hasActiveNode) return
     const node = activeNodes[0]
-    const existingTags = node.getData('tag') || []
-    setTagInput(existingTags.join(', '))
+    const existingTags: any[] = node.getData('tag') || []
+    const normalized: TagItem[] = existingTags.map((item) =>
+      typeof item === 'string' ? { text: item } : { text: item.text, style: item.style }
+    )
+    setTags(normalized)
+    setNewTagText('')
+    setSelectedColor('#e74c3c')
+    setEditingTagIndex(null)
     setTagDialogOpen(true)
   }
 
@@ -267,13 +283,12 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const handleSetTag = useCallback(() => {
     if (!mindMap || !hasActiveNode) return
     const node = activeNodes[0]
-    const tags = tagInput
-      .split(',')
-      .map(t => t.trim())
-      .filter(t => t.length > 0)
-    mindMap.execCommand('SET_NODE_TAG', node, tags)
+    const tagData = tags
+      .filter((t) => t.text.trim().length > 0)
+      .map((t) => ({ text: t.text.trim(), style: t.style }))
+    mindMap.execCommand('SET_NODE_TAG', node, tagData)
     setTagDialogOpen(false)
-  }, [mindMap, activeNodes, tagInput])
+  }, [mindMap, activeNodes, tags])
 
   const handleAddSummary = () => {
     if (!mindMap || !hasActiveNode) return
@@ -562,6 +577,19 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           <Paintbrush size={14} />
           <span className="text-[10px]">节点</span>
         </ToolbarButton>
+
+        <ToolbarButton
+          onClick={() => {
+            if (showBaseStylePlugin) setShowBaseStylePlugin(false)
+            if (showNodeStylePlugin) setShowNodeStylePlugin(false)
+            setShowWatermarkPlugin(!showWatermarkPlugin)
+          }}
+          title="水印设置"
+          style={showWatermarkPlugin ? { background: 'var(--bg-hover)' } : undefined}
+        >
+          <Droplets size={14} />
+          <span className="text-[10px]">水印</span>
+        </ToolbarButton>
       </div>
 
       <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
@@ -592,6 +620,12 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
         <NodeStylePlugin
           mindMap={mindMap}
           onClose={() => setShowNodeStylePlugin(false)}
+        />
+      )}
+      {showWatermarkPlugin && (
+        <WatermarkPlugin
+          mindMap={mindMap}
+          onClose={() => setShowWatermarkPlugin(false)}
         />
       )}
 
@@ -752,21 +786,100 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           <DialogHeader>
             <DialogTitle style={{ color: 'var(--text-primary)' }}>设置标签</DialogTitle>
           </DialogHeader>
-          <div>
-            <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>
-              输入标签，多个标签用逗号分隔
-            </label>
-            <Input
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              placeholder="标签1, 标签2, 标签3"
+
+          <div className="space-y-3">
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {tags.map((tag, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded text-xs cursor-pointer hover:ring-2 hover:ring-[var(--theme-color)] transition-all"
+                    style={{
+                      background: tag.style?.fill || '#888',
+                      color: '#fff',
+                    }}
+                    onClick={() => {
+                      setSelectedColor(tag.style?.fill || '#888')
+                      setEditingTagIndex(index)
+                    }}
+                    title={`点击修改颜色: ${tag.text}`}
+                  >
+                    <span>{tag.text}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setTags(tags.filter((_, i) => i !== index))
+                        if (editingTagIndex === index) setEditingTagIndex(null)
+                      }}
+                      className="ml-0.5 opacity-70 hover:opacity-100 transition-opacity"
+                      title="删除"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <Input
+                value={newTagText}
+                onChange={(e) => setNewTagText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newTagText.trim()) {
+                    e.preventDefault()
+                    setTags([...tags, { text: newTagText.trim(), style: { fill: selectedColor } }])
+                    setNewTagText('')
+                    setEditingTagIndex(null)
+                  }
+                }}
+                placeholder="输入标签后按回车添加"
+                className="flex-1"
+                style={{
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  borderColor: 'var(--border-color)',
+                }}
+              />
+            </div>
+
+            <div>
+              <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>
+                选择颜色后点击添加
+              </label>
+              <ColorPicker
+                value={selectedColor}
+                onChange={(color) => {
+                  setSelectedColor(color)
+                  if (editingTagIndex !== null && editingTagIndex < tags.length) {
+                    const updated = [...tags]
+                    updated[editingTagIndex] = { ...updated[editingTagIndex], style: { fill: color } }
+                    setTags(updated)
+                  }
+                }}
+                size="sm"
+              />
+            </div>
+
+            <button
+                onClick={() => {
+                  if (newTagText.trim()) {
+                    setTags([...tags, { text: newTagText.trim(), style: { fill: selectedColor } }])
+                    setNewTagText('')
+                    setEditingTagIndex(null)
+                  }
+                }}
+              disabled={!newTagText.trim()}
+              className="w-full px-3 py-1.5 rounded text-xs text-white transition-opacity"
               style={{
-                background: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-                borderColor: 'var(--border-color)',
+                background: 'var(--theme-color)',
+                opacity: newTagText.trim() ? 1 : 0.5,
               }}
-            />
+            >
+              添加标签
+            </button>
           </div>
+
           <DialogFooter>
             <button
               onClick={() => setTagDialogOpen(false)}
