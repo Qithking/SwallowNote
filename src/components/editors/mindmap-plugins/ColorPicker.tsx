@@ -14,6 +14,7 @@ const PRESET_COLORS = [
 ]
 
 export function ColorPicker({ value, onChange, size = 'md', showMore = true }: ColorPickerProps) {
+  const { t } = useTranslation()
   const sizeClasses = {
     sm: 'w-5 h-5',
     md: 'w-6 h-6',
@@ -80,7 +81,6 @@ export function ColorSwatch({
   size?: number
   showHex?: boolean
 }) {
-  const { t } = useTranslation()
   return (
     <div className="flex items-center gap-1.5 group">
       <div
