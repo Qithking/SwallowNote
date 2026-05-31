@@ -399,7 +399,59 @@
     "deleteOnlyCurrent": "Delete Only Current Node",
     "copyNode": "Copy Node",
     "cutNode": "Cut Node",
-    "pasteNode": "Paste Node"
+    "pasteNode": "Paste Node",
+    "toolbar": {
+      "formatBrush": "Format Brush",
+      "icon": "Icon",
+      "hyperlink": "Hyperlink",
+      "remark": "Remark",
+      "tag": "Tag",
+      "summary": "Summary",
+      "outline": "Outline",
+      "layout": "Layout",
+      "theme": "Theme",
+      "basic": "Basic",
+      "node": "Node",
+      "watermark": "Watermark",
+      "zoomIn": "Zoom In",
+      "zoomOut": "Zoom Out",
+      "fitCanvas": "Fit Canvas"
+    },
+    "dialog": {
+      "setHyperlink": "Set Hyperlink",
+      "linkUrl": "Link URL",
+      "linkTitle": "Link Title",
+      "setRemark": "Set Remark",
+      "setIcon": "Set Icon",
+      "setTag": "Set Tag",
+      "tagPlaceholder": "Press Enter to add tag",
+      "delete": "Delete"
+    },
+    "watermark": {
+      "title": "Watermark Settings",
+      "text": "Text",
+      "textPlaceholder": "Watermark text",
+      "color": "Color",
+      "opacity": "Opacity",
+      "fontSize": "Font Size",
+      "rotation": "Rotation",
+      "lineSpacing": "Line Spacing",
+      "letterSpacing": "Letter Spacing",
+      "layer": "Layer",
+      "export": "Export"
+    },
+    "style": {
+      "background": "Background",
+      "connection": "Connection Line",
+      "connectionColor": "Color"
+    },
+    "colorPicker": {
+      "moreColors": "More Colors"
+    },
+    "loadFailed": "Mind map load failed",
+    "loading": "Loading mind map...",
+    "defaultRootText": "Central Topic",
+    "invalidContainer": "Invalid container size, cannot initialize mind map"
   },
   "editorSettings": {
     "title": "Typography Settings",
@@ -431,7 +483,8 @@
     "noResults": "No results",
     "inputPlaceholder": "Type to search",
     "searching": "Searching...",
-    "notFound": "No matches found"
+    "notFound": "No matches found",
+    "hint": "Enter to search, Esc to close"
   },
   "git": {
     "title":"Sync Management",

@@ -5,6 +5,7 @@
  * This is a simplified toolbar inspired by the official simple-mind-map Vue2 example.
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Undo2,
   Redo2,
@@ -53,53 +54,53 @@ interface TagItem {
   style?: { fill?: string }
 }
 
-const LAYOUT_GROUPS = [
+const getLayoutGroups = (t: any) => [
   {
-    label: '逻辑结构',
+    label: t('mindMap.toolbar.layout'),
     children: [
-      { value: 'logicalStructure', label: '逻辑结构图' },
-      { value: 'logicalStructureLeft', label: '向左逻辑结构图' },
+      { value: 'logicalStructure', label: t('mindMap.toolbar.layout') },
+      { value: 'logicalStructureLeft', label: `${t('mindMap.toolbar.layout')} (←)` },
     ],
   },
   {
-    label: '思维导图',
+    label: t('mindMap.toolbar.theme'),
     children: [
-      { value: 'mindMap', label: '思维导图' },
+      { value: 'mindMap', label: t('mindMap.toolbar.theme') },
     ],
   },
   {
-    label: '组织结构',
+    label: t('mindMap.toolbar.layout'),
     children: [
-      { value: 'organizationStructure', label: '组织结构图' },
-      { value: 'catalogOrganization', label: '目录组织图' },
+      { value: 'organizationStructure', label: t('mindMap.toolbar.layout') },
+      { value: 'catalogOrganization', label: t('mindMap.toolbar.outline') },
     ],
   },
   {
-    label: '时间轴',
+    label: t('mindMap.toolbar.zoomIn'),
     children: [
-      { value: 'timeline', label: '时间轴' },
-      { value: 'timeline2', label: '时间轴2' },
-      { value: 'verticalTimeline', label: '竖向时间轴' },
-      { value: 'verticalTimeline2', label: '竖向时间轴2' },
-      { value: 'verticalTimeline3', label: '竖向时间轴3' },
+      { value: 'timeline', label: `${t('mindMap.toolbar.zoomIn')} 1` },
+      { value: 'timeline2', label: `${t('mindMap.toolbar.zoomIn')} 2` },
+      { value: 'verticalTimeline', label: `| ${t('mindMap.toolbar.zoomIn')} 1` },
+      { value: 'verticalTimeline2', label: `| ${t('mindMap.toolbar.zoomIn')} 2` },
+      { value: 'verticalTimeline3', label: `| ${t('mindMap.toolbar.zoomIn')} 3` },
     ],
   },
   {
-    label: '鱼骨图',
+    label: t('mindMap.dialog.setTag'),
     children: [
-      { value: 'fishbone', label: '鱼骨图' },
-      { value: 'fishbone2', label: '鱼骨图2' },
-      { value: 'rightFishbone', label: '向右鱼骨图' },
-      { value: 'rightFishbone2', label: '向右鱼骨图2' },
+      { value: 'fishbone', label: `→ ${t('mindMap.dialog.setTag')} 1` },
+      { value: 'fishbone2', label: `→ ${t('mindMap.dialog.setTag')} 2` },
+      { value: 'rightFishbone', label: `→→ ${t('mindMap.dialog.setTag')} 1` },
+      { value: 'rightFishbone2', label: `→→ ${t('mindMap.dialog.setTag')} 2` },
     ],
   },
 ]
 
 // simple-mind-map 的 dist 文件只包含 default 主题
 // 其他主题需要通过 MindMap.defineTheme() 注册或使用 setThemeConfig() 自定义
-const THEME_OPTIONS = [
-  { value: 'default', label: '默认' },
-  { value: 'dark', label: '深色' },
+const getThemeOptions = (t: any) => [
+  { value: 'default', label: t('mindMap.toolbar.basic') },
+  { value: 'dark', label: t('editorSettings.darkMode') },
 ]
 
 const ICON_LIST = [
@@ -138,6 +139,7 @@ const ICON_LIST = [
 ]
 
 export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
+  const { t } = useTranslation()
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [activeNodes, setActiveNodes] = useState<any[]>([])
   const [currentLayout, setCurrentLayout] = useState('logicalStructure')
@@ -157,6 +159,10 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
   const [newTagText, setNewTagText] = useState('')
   const [selectedColor, setSelectedColor] = useState('#e74c3c')
   const [editingTagIndex, setEditingTagIndex] = useState<number | null>(null)
+
+  // 使用翻译后的布局和主题选项
+  const LAYOUT_GROUPS = getLayoutGroups(t)
+  const THEME_OPTIONS = getThemeOptions(t)
 
   const handleToolbarWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
     const el = toolbarRef.current
@@ -397,12 +403,12 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       <ToolbarButton
         onClick={handleFormatPainter}
         disabled={!hasActiveNode}
-        title="格式刷"
+        title={t('mindMap.toolbar.formatBrush')}
         className="shrink-0"
         style={isPainterActive ? { background: 'var(--bg-hover)' } : undefined}
       >
         <Paintbrush size={14} />
-        <span className="text-[10px]">格式刷</span>
+        <span className="text-[10px]">{t('mindMap.toolbar.formatBrush')}</span>
       </ToolbarButton>
 
       <div className="w-px h-4 bg-[var(--border-color)] mx-1 shrink-0" />
@@ -412,55 +418,55 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
         <ToolbarButton
           onClick={handleOpenIconDialog}
           disabled={!hasActiveNode}
-          title="图标"
+          title={t('mindMap.toolbar.icon')}
         >
           <SmilePlus size={14} />
-          <span className="text-[10px]">图标</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.icon')}</span>
         </ToolbarButton>
 
         <ToolbarButton
           onClick={handleOpenHyperlinkDialog}
           disabled={!hasActiveNode}
-          title="超链接"
+          title={t('mindMap.toolbar.hyperlink')}
         >
           <Link size={14} />
-          <span className="text-[10px]">超链接</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.hyperlink')}</span>
         </ToolbarButton>
 
         <ToolbarButton
           onClick={handleOpenNoteDialog}
           disabled={!hasActiveNode}
-          title="备注"
+          title={t('mindMap.toolbar.remark')}
         >
           <FileText size={14} />
-          <span className="text-[10px]">备注</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.remark')}</span>
         </ToolbarButton>
 
         <ToolbarButton
           onClick={handleOpenTagDialog}
           disabled={!hasActiveNode}
-          title="标签"
+          title={t('mindMap.toolbar.tag')}
         >
           <Tag size={14} />
-          <span className="text-[10px]">标签</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.tag')}</span>
         </ToolbarButton>
 
         <ToolbarButton
           onClick={handleAddSummary}
           disabled={!hasActiveNode}
-          title="概要 (Ctrl+G)"
+          title={`${t('mindMap.toolbar.summary')} (Ctrl+G)`}
         >
           <Type size={14} />
-          <span className="text-[10px]">概要</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.summary')}</span>
         </ToolbarButton>
 
         <ToolbarButton
           onClick={handleAddOuterFrame}
           disabled={!hasActiveNode}
-          title="外框"
+          title={t('mindMap.toolbar.outline')}
         >
           <Square size={14} />
-          <span className="text-[10px]">外框</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.outline')}</span>
         </ToolbarButton>
       </div>
 
@@ -470,7 +476,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-[var(--bg-hover)] transition-colors outline-none shrink-0">
           <Layout size={14} />
-          <span className="text-[10px] ml-0.5">布局</span>
+          <span className="text-[10px] ml-0.5">{t('mindMap.toolbar.layout')}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           className="min-w-[140px]"
@@ -526,7 +532,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-0.5 px-1.5 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-[var(--bg-hover)] transition-colors outline-none shrink-0">
           <Palette size={14} />
-          <span className="text-[10px] ml-0.5">主题</span>
+          <span className="text-[10px] ml-0.5">{t('mindMap.toolbar.theme')}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           className="min-w-[100px]"
@@ -558,11 +564,11 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
             if (showNodeStylePlugin) setShowNodeStylePlugin(false)
             setShowBaseStylePlugin(!showBaseStylePlugin)
           }}
-          title="基础样式"
+          title={t('mindMap.toolbar.basic')}
           style={showBaseStylePlugin ? { background: 'var(--bg-hover)' } : undefined}
         >
           <Settings size={14} />
-          <span className="text-[10px]">基础</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.basic')}</span>
         </ToolbarButton>
 
         <ToolbarButton
@@ -571,11 +577,11 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
             setShowNodeStylePlugin(!showNodeStylePlugin)
           }}
           disabled={!hasActiveNode}
-          title="节点样式"
+          title={t('mindMap.toolbar.node')}
           style={showNodeStylePlugin ? { background: 'var(--bg-hover)' } : undefined}
         >
           <Paintbrush size={14} />
-          <span className="text-[10px]">节点</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.node')}</span>
         </ToolbarButton>
 
         <ToolbarButton
@@ -584,11 +590,11 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
             if (showNodeStylePlugin) setShowNodeStylePlugin(false)
             setShowWatermarkPlugin(!showWatermarkPlugin)
           }}
-          title="水印设置"
+          title={t('mindMap.watermark.title')}
           style={showWatermarkPlugin ? { background: 'var(--bg-hover)' } : undefined}
         >
           <Droplets size={14} />
-          <span className="text-[10px]">水印</span>
+          <span className="text-[10px]">{t('mindMap.toolbar.watermark')}</span>
         </ToolbarButton>
       </div>
 
@@ -596,15 +602,15 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
 
       {/* View Operations */}
       <div className="flex items-center gap-0.5 shrink-0">
-        <ToolbarButton onClick={handleZoomIn} title="放大">
+        <ToolbarButton onClick={handleZoomIn} title={t('mindMap.toolbar.zoomIn')}>
           <ZoomIn size={14} />
         </ToolbarButton>
 
-        <ToolbarButton onClick={handleZoomOut} title="缩小">
+        <ToolbarButton onClick={handleZoomOut} title={t('mindMap.toolbar.zoomOut')}>
           <ZoomOut size={14} />
         </ToolbarButton>
 
-        <ToolbarButton onClick={handleFit} title="适应画布">
+        <ToolbarButton onClick={handleFit} title={t('mindMap.toolbar.fitCanvas')}>
           <Maximize size={14} />
         </ToolbarButton>
       </div>
@@ -639,11 +645,11 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           }}
         >
           <DialogHeader>
-            <DialogTitle style={{ color: 'var(--text-primary)' }}>设置超链接</DialogTitle>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>{t('mindMap.dialog.setHyperlink')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>链接地址</label>
+              <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('mindMap.dialog.linkUrl')}</label>
               <Input
                 value={hyperlinkUrl}
                 onChange={(e) => setHyperlinkUrl(e.target.value)}
@@ -656,11 +662,11 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
               />
             </div>
             <div>
-              <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>链接标题</label>
+              <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('mindMap.dialog.linkTitle')}</label>
               <Input
                 value={hyperlinkTitle}
                 onChange={(e) => setHyperlinkTitle(e.target.value)}
-                placeholder="链接标题（可选）"
+                placeholder={t('mindMap.dialog.linkTitle')}
                 style={{
                   background: 'var(--bg-secondary)',
                   color: 'var(--text-primary)',
@@ -675,14 +681,14 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
               className="px-3 py-1.5 rounded text-xs"
               style={{ color: 'var(--text-secondary)' }}
             >
-              取消
+              {t('common.cancel')}
             </button>
             <button
               onClick={handleSetHyperlink}
               className="px-3 py-1.5 rounded text-xs text-white"
               style={{ background: 'var(--theme-color)' }}
             >
-              确定
+              {t('common.confirm')}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -698,12 +704,12 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           }}
         >
           <DialogHeader>
-            <DialogTitle style={{ color: 'var(--text-primary)' }}>设置备注</DialogTitle>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>{t('mindMap.dialog.setRemark')}</DialogTitle>
           </DialogHeader>
           <Textarea
             value={noteText}
             onChange={(e) => setNoteText(e.target.value)}
-            placeholder="输入备注内容..."
+            placeholder={t('mindMap.dialog.setRemark')}
             rows={5}
             style={{
               background: 'var(--bg-secondary)',
@@ -717,14 +723,14 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
               className="px-3 py-1.5 rounded text-xs"
               style={{ color: 'var(--text-secondary)' }}
             >
-              取消
+              {t('common.cancel')}
             </button>
             <button
               onClick={handleSetNote}
               className="px-3 py-1.5 rounded text-xs text-white"
               style={{ background: 'var(--theme-color)' }}
             >
-              确定
+              {t('common.confirm')}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -740,7 +746,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           }}
         >
           <DialogHeader>
-            <DialogTitle style={{ color: 'var(--text-primary)' }}>设置图标</DialogTitle>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>{t('mindMap.dialog.setIcon')}</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-8 gap-1">
             {ICON_LIST.map((icon) => {
@@ -768,7 +774,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
               className="px-3 py-1.5 rounded text-xs"
               style={{ color: 'var(--text-secondary)' }}
             >
-              关闭
+              {t('common.close')}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -784,7 +790,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
           }}
         >
           <DialogHeader>
-            <DialogTitle style={{ color: 'var(--text-primary)' }}>设置标签</DialogTitle>
+            <DialogTitle style={{ color: 'var(--text-primary)' }}>{t('mindMap.dialog.setTag')}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-3">
@@ -802,7 +808,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
                       setSelectedColor(tag.style?.fill || '#888')
                       setEditingTagIndex(index)
                     }}
-                    title={`点击修改颜色: ${tag.text}`}
+                    title={`${t('mindMap.dialog.setTag')}: ${tag.text}`}
                   >
                     <span>{tag.text}</span>
                     <button
@@ -812,7 +818,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
                         if (editingTagIndex === index) setEditingTagIndex(null)
                       }}
                       className="ml-0.5 opacity-70 hover:opacity-100 transition-opacity"
-                      title="删除"
+                      title={t('mindMap.dialog.delete')}
                     >
                       ×
                     </button>
@@ -833,7 +839,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
                     setEditingTagIndex(null)
                   }
                 }}
-                placeholder="输入标签后按回车添加"
+                placeholder={t('mindMap.dialog.tagPlaceholder')}
                 className="flex-1"
                 style={{
                   background: 'var(--bg-secondary)',
@@ -845,7 +851,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
 
             <div>
               <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-secondary)' }}>
-                选择颜色后点击添加
+                {t('mindMap.dialog.setTag')}
               </label>
               <ColorPicker
                 value={selectedColor}
@@ -876,7 +882,7 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
                 opacity: newTagText.trim() ? 1 : 0.5,
               }}
             >
-              添加标签
+              {t('mindMap.dialog.setTag')}
             </button>
           </div>
 
@@ -886,14 +892,14 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
               className="px-3 py-1.5 rounded text-xs"
               style={{ color: 'var(--text-secondary)' }}
             >
-              取消
+              {t('common.cancel')}
             </button>
             <button
               onClick={handleSetTag}
               className="px-3 py-1.5 rounded text-xs text-white"
               style={{ background: 'var(--theme-color)' }}
             >
-              确定
+              {t('common.confirm')}
             </button>
           </DialogFooter>
         </DialogContent>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { X, Palette, Minus, Plus, Spline, GitBranch, Link, BoxSelect, Square, Crown, Binary, Layers, Braces } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -182,6 +183,7 @@ function Divider() {
 }
 
 export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<BaseStyleConfig>({
     backgroundColor: '#fafafa',
     backgroundImage: '',
@@ -414,7 +416,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
         <div className="flex items-stretch px-3 py-1.5 gap-0 min-w-max">
         {/* 背景 */}
         <div className={sectionCls}>
-          <SectionLabel icon={Palette} label="背景" />
+          <SectionLabel icon={Palette} label={t('mindMap.style.background')} />
           <div className="flex items-center gap-2">
             <ColorSwatch
               value={config.backgroundColor}
@@ -443,13 +445,13 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 基础连线 */}
         <div className={sectionCls}>
-          <SectionLabel icon={Spline} label="基础连线" />
+          <SectionLabel icon={Spline} label={t('mindMap.style.connection')} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.color')}</span>
             <div className="scale-[0.82] origin-left"><ColorButton value={config.line.color} onChange={(c) => updateConfig('line.color', c)} /></div>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.zoomOut')}</span>
             <Stepper value={config.line.width} onChange={(v) => updateConfig('line.width', v)} min={1} max={10} />
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>箭头</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.zoomIn')}</span>
             <Switch
               checked={config.line.showArrow}
               onCheckedChange={(v) => updateConfig('line.showArrow', v)}
@@ -457,7 +459,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
             />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>风格</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.layout')}</span>
             <Select value={config.line.style} onValueChange={(v) => updateConfig('line.style', v)}>
               <SelectTrigger
                 className="h-[22px] w-[64px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -480,15 +482,15 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 概要连线 */}
         <div className={sectionCls}>
-          <SectionLabel icon={GitBranch} label="概要连线" />
+          <SectionLabel icon={GitBranch} label={`${t('mindMap.style.connection')} ${t('mindMap.toolbar.summary')}`} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.color')}</span>
             <div className="scale-[0.82] origin-left">
               <ColorButton value={config.generalizationLine.color} onChange={(c) => updateConfig('generalizationLine.color', c)} />
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.zoomOut')}</span>
             <Stepper value={config.generalizationLine.width} onChange={(v) => updateConfig('generalizationLine.width', v)} min={1} max={10} />
           </div>
         </div>
@@ -497,13 +499,13 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 关联线 */}
         <div className={sectionCls}>
-          <SectionLabel icon={Link} label="关联线" />
+          <SectionLabel icon={Link} label={t('mindMap.dialog.hyperlink')} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.color')}</span>
             <div className="scale-[0.82] origin-left"><ColorButton value={config.associativeLine.color} onChange={(c) => updateConfig('associativeLine.color', c)} /></div>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.zoomOut')}</span>
             <Stepper value={config.associativeLine.width} onChange={(v) => updateConfig('associativeLine.width', v)} min={1} max={10} />
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>样式</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.layout')}</span>
             <Select value={config.associativeLine.dasharray} onValueChange={(v) => updateConfig('associativeLine.dasharray', v)}>
               <SelectTrigger
                 className="h-[22px] w-[64px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -519,9 +521,9 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
             </Select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>激活颜色</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Active {t('mindMap.watermark.color')}</span>
             <div className="scale-[0.82] origin-left"><ColorButton value={config.associativeLine.activeColor} onChange={(c) => updateConfig('associativeLine.activeColor', c)} /></div>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>激活粗细</span>
+              <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Active {t('mindMap.toolbar.zoomOut')}</span>
             <Stepper value={config.associativeLine.activeWidth} onChange={(v) => updateConfig('associativeLine.activeWidth', v)} min={1} max={20} />
           </div>
         </div>
@@ -530,13 +532,13 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 节点内边距 */}
         <div className={sectionCls}>
-          <SectionLabel icon={BoxSelect} label="节点内边距" />
+          <SectionLabel icon={BoxSelect} label={`${t('mindMap.toolbar.node')} Padding`} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>水平</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>H</span>
             <Stepper value={config.padding.horizontal} onChange={(v) => updateConfig('padding.horizontal', v)} min={0} max={50} />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>垂直</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>V</span>
             <Stepper value={config.padding.vertical} onChange={(v) => updateConfig('padding.vertical', v)} min={0} max={50} />
           </div>
         </div>
@@ -545,13 +547,13 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 外框内边距 */}
         <div className={sectionCls}>
-          <SectionLabel icon={Square} label="外框内边距" />
+          <SectionLabel icon={Square} label={`${t('mindMap.toolbar.outline')} Padding`} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>水平</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>H</span>
             <Stepper value={config.outerFramePadding.horizontal} onChange={(v) => updateConfig('outerFramePadding.horizontal', v)} min={0} max={50} />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>垂直</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>V</span>
             <Stepper value={config.outerFramePadding.vertical} onChange={(v) => updateConfig('outerFramePadding.vertical', v)} min={0} max={50} />
           </div>
         </div>
@@ -560,13 +562,13 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 根节点文字 */}
         <div className={sectionCls}>
-          <SectionLabel icon={Crown} label="根节点文字" />
+          <SectionLabel icon={Crown} label={`Root ${t('editorSettings.title')}`} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.color')}</span>
             <div className="scale-[0.82] origin-left"><ColorButton value={config.root.color} onChange={(c) => updateConfig('root.color', c)} /></div>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字号</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.fontSize')}</span>
             <Stepper value={config.root.fontSize} onChange={(v) => updateConfig('root.fontSize', v)} min={10} max={60} />
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字体</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.icon')}</span>
             <Select value={config.root.fontFamily} onValueChange={(v) => updateConfig('root.fontFamily', v)}>
               <SelectTrigger
                 className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -582,7 +584,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
             </Select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.zoomOut')}</span>
             <Select value={config.root.fontWeight} onValueChange={(v) => updateConfig('root.fontWeight', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -596,7 +598,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>斜体</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Italic</span>
             <Select value={config.root.fontStyle} onValueChange={(v) => updateConfig('root.fontStyle', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -610,7 +612,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>线</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Line</span>
             <Select value={config.root.textDecoration} onValueChange={(v) => updateConfig('root.textDecoration', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -631,13 +633,13 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 二级节点文字 */}
         <div className={sectionCls}>
-          <SectionLabel icon={Binary} label="二级节点文字" />
+          <SectionLabel icon={Binary} label={`L2 ${t('editorSettings.title')}`} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.color')}</span>
             <div className="scale-[0.82] origin-left"><ColorButton value={config.second.color} onChange={(c) => updateConfig('second.color', c)} /></div>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字号</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.fontSize')}</span>
             <Stepper value={config.second.fontSize} onChange={(v) => updateConfig('second.fontSize', v)} min={10} max={60} />
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字体</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.icon')}</span>
             <Select value={config.second.fontFamily} onValueChange={(v) => updateConfig('second.fontFamily', v)}>
               <SelectTrigger
                 className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -653,7 +655,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
             </Select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.zoomOut')}</span>
             <Select value={config.second.fontWeight} onValueChange={(v) => updateConfig('second.fontWeight', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -667,7 +669,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>斜体</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Italic</span>
             <Select value={config.second.fontStyle} onValueChange={(v) => updateConfig('second.fontStyle', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -681,7 +683,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>线</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Line</span>
             <Select value={config.second.textDecoration} onValueChange={(v) => updateConfig('second.textDecoration', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -702,13 +704,13 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 普通节点文字 */}
         <div className={sectionCls}>
-          <SectionLabel icon={Layers} label="普通节点文字" />
+          <SectionLabel icon={Layers} label={`${t('common.normal')} ${t('mindMap.toolbar.node')} ${t('editorSettings.title')}`} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.color')}</span>
             <div className="scale-[0.82] origin-left"><ColorButton value={config.node.color} onChange={(c) => updateConfig('node.color', c)} /></div>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字号</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.fontSize')}</span>
             <Stepper value={config.node.fontSize} onChange={(v) => updateConfig('node.fontSize', v)} min={10} max={60} />
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字体</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.icon')}</span>
             <Select value={config.node.fontFamily} onValueChange={(v) => updateConfig('node.fontFamily', v)}>
               <SelectTrigger
                 className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -724,7 +726,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
             </Select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.zoomOut')}</span>
             <Select value={config.node.fontWeight} onValueChange={(v) => updateConfig('node.fontWeight', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -738,7 +740,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>斜体</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Italic</span>
             <Select value={config.node.fontStyle} onValueChange={(v) => updateConfig('node.fontStyle', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -752,7 +754,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>线</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Line</span>
             <Select value={config.node.textDecoration} onValueChange={(v) => updateConfig('node.textDecoration', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -773,13 +775,13 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
 
         {/* 概要节点文字 */}
         <div className={sectionCls}>
-          <SectionLabel icon={Braces} label="概要节点文字" />
+          <SectionLabel icon={Braces} label={`${t('mindMap.toolbar.summary')} ${t('mindMap.toolbar.node')} ${t('editorSettings.title')}`} />
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>颜色</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.color')}</span>
             <div className="scale-[0.82] origin-left"><ColorButton value={config.generalization.color} onChange={(c) => updateConfig('generalization.color', c)} /></div>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字号</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.watermark.fontSize')}</span>
             <Stepper value={config.generalization.fontSize} onChange={(v) => updateConfig('generalization.fontSize', v)} min={10} max={60} />
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>字体</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.icon')}</span>
             <Select value={config.generalization.fontFamily} onValueChange={(v) => updateConfig('generalization.fontFamily', v)}>
               <SelectTrigger
                 className="h-[22px] w-[72px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -795,7 +797,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
             </Select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>粗细</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>{t('mindMap.toolbar.zoomOut')}</span>
             <Select value={config.generalization.fontWeight} onValueChange={(v) => updateConfig('generalization.fontWeight', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -809,7 +811,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>斜体</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Italic</span>
             <Select value={config.generalization.fontStyle} onValueChange={(v) => updateConfig('generalization.fontStyle', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"
@@ -823,7 +825,7 @@ export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>线</span>
+            <span className="text-[9px] select-none" style={{ color: 'var(--text-tertiary)' }}>Line</span>
             <Select value={config.generalization.textDecoration} onValueChange={(v) => updateConfig('generalization.textDecoration', v)}>
               <SelectTrigger
                 className="h-[22px] w-[52px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent"

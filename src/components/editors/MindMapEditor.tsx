@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useUIStore } from '@/stores'
 import { MindMapToolbar } from './MindMapToolbar'
 import { MindMapContextMenu } from './MindMapContextMenu'
@@ -8,12 +9,12 @@ interface MindMapEditorProps {
   onChange?: (content: string) => void
 }
 
-const DEFAULT_DATA = {
+const DEFAULT_DATA = (t: (key: string) => string) => ({
   root: {
-    data: { text: '中心主题' },
+    data: { text: t('mindMap.defaultRootText') },
     children: [],
   },
-}
+})
 
 function ensureNodeTextValid(node: any): void {
   if (!node) return
@@ -38,10 +39,10 @@ function ensureNodeTextValid(node: any): void {
   }
 }
 
-function parseMindMapData(content: string) {
+function parseMindMapData(content: string, t?: (key: string) => string) {
   let data: any
   if (!content || !content.trim()) {
-    data = { ...DEFAULT_DATA }
+    data = { ...DEFAULT_DATA(t || ((k: string) => k)) }
   } else {
     try {
       const parsed = JSON.parse(content)
@@ -64,6 +65,7 @@ function parseMindMapData(content: string) {
 }
 
 export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
+  const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
   const mindMapInstanceRef = useRef<any>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -249,12 +251,12 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
 
       const rect = el.getBoundingClientRect()
       if (rect.width <= 0 || rect.height <= 0) {
-        setError('容器尺寸无效，无法初始化思维导图')
+        setError(t('mindMap.invalidContainer'))
         setLoading(false)
         return
       }
 
-      const mindMapData = parseMindMapData(dataContent)
+      const mindMapData = parseMindMapData(dataContent, t)
       lastSavedContent.current = dataContent
 
       // Determine theme: use saved theme if available, otherwise use current app theme
@@ -491,7 +493,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       isInitialLoad.current = true
       lastLoadedContentRef.current = content
 
-      const mindMapData = parseMindMapData(content)
+      const mindMapData = parseMindMapData(content, t)
       try {
         mindMapInstanceRef.current.setData(mindMapData.root || mindMapData)
       } catch (e) {
@@ -560,7 +562,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         }}
       >
         <div className="text-center">
-          <p className="text-sm font-medium mb-2">思维导图加载失败</p>
+          <p className="text-sm font-medium mb-2">{t('mindMap.loadFailed')}</p>
           <p className="text-xs opacity-70">{error}</p>
         </div>
       </div>
@@ -586,7 +588,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
         >
           <div className="text-center">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mb-2" />
-            <p className="text-xs opacity-50">加载思维导图...</p>
+            <p className="text-xs opacity-50">{t('mindMap.loading')}</p>
           </div>
         </div>
       )}

@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 interface ColorPickerProps {
   value: string
   onChange: (color: string) => void
@@ -46,7 +48,7 @@ export function ColorPicker({ value, onChange, size = 'md', showMore = true }: C
 
       {showMore && (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-[var(--text-secondary)]">更多颜色</span>
+          <span className="text-xs text-[var(--text-secondary)]">{t('mindMap.colorPicker.moreColors')}</span>
           <div className="relative">
             <input
               type="color"
@@ -78,6 +80,7 @@ export function ColorSwatch({
   size?: number
   showHex?: boolean
 }) {
+  const { t } = useTranslation()
   return (
     <div className="flex items-center gap-1.5 group">
       <div

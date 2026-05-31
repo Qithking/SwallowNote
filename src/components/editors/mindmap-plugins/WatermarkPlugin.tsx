@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { X, Droplets, Type, Palette, RotateCw, Space, Grid3X3, Layers, Download } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -104,6 +105,7 @@ function Divider() {
 }
 
 export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<WatermarkConfig>(DEFAULT_CONFIG)
 
   // Load watermark config from mindMap
@@ -157,7 +159,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
         <div className="flex items-stretch px-3 py-1.5 gap-0 min-w-max">
           {/* 启用开关 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Droplets} label="水印" />
+            <SectionLabel icon={Droplets} label={t('mindMap.watermark.title')} />
             <div className="flex items-center gap-2">
               <Switch
                 checked={config.enabled}
@@ -165,7 +167,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
                 className="scale-[0.55] origin-center"
               />
               <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-                {config.enabled ? '开启' : '关闭'}
+                {config.enabled ? t('common.on') : t('common.off')}
               </span>
             </div>
           </div>
@@ -174,11 +176,11 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 文字内容 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Type} label="文字" />
+            <SectionLabel icon={Type} label={t('mindMap.watermark.text')} />
             <Input
               value={config.text}
               onChange={(e) => updateConfig('text', e.target.value)}
-              placeholder="水印文字"
+              placeholder={t('mindMap.watermark.textPlaceholder')}
               disabled={!config.enabled}
               className="h-[22px] w-[100px] text-[10px] rounded-[3px] border-[var(--border-color)] bg-transparent disabled:opacity-50"
               style={{ color: 'var(--text-primary)' }}
@@ -189,7 +191,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 颜色 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Palette} label="颜色" />
+            <SectionLabel icon={Palette} label={t('mindMap.watermark.color')} />
             <div className="flex items-center gap-2">
               <div className={`scale-[0.82] origin-left ${!config.enabled ? 'opacity-50' : ''}`}>
                 <ColorButton 
@@ -205,7 +207,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 透明度 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Droplets} label="透明度" />
+            <SectionLabel icon={Droplets} label={t('mindMap.watermark.opacity')} />
             <div className="flex items-center gap-2">
               <Stepper 
                 value={Math.round(config.opacity * 100)} 
@@ -222,7 +224,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 字号 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Type} label="字号" />
+            <SectionLabel icon={Type} label={t('mindMap.watermark.fontSize')} />
             <div className="flex items-center gap-2">
               <Stepper 
                 value={config.fontSize} 
@@ -239,7 +241,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 旋转角度 */}
           <div className={sectionCls}>
-            <SectionLabel icon={RotateCw} label="旋转" />
+            <SectionLabel icon={RotateCw} label={t('mindMap.watermark.rotation')} />
             <div className="flex items-center gap-2">
               <Stepper 
                 value={config.rotate} 
@@ -256,7 +258,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 行间距 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Space} label="行间距" />
+            <SectionLabel icon={Space} label={t('mindMap.watermark.lineSpacing')} />
             <div className="flex items-center gap-2">
               <Stepper 
                 value={config.lineSpacing} 
@@ -273,7 +275,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 文字间距 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Grid3X3} label="文字间距" />
+            <SectionLabel icon={Grid3X3} label={t('mindMap.watermark.letterSpacing')} />
             <div className="flex items-center gap-2">
               <Stepper 
                 value={config.textSpacing} 
@@ -290,7 +292,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 在节点下方显示 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Layers} label="层级" />
+            <SectionLabel icon={Layers} label={t('mindMap.watermark.layer')} />
             <div className="flex items-center gap-2">
               <Switch
                 checked={config.showBelowNodes}
@@ -299,7 +301,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
                 className="scale-[0.55] origin-center"
               />
               <span className="text-[10px]" style={{ color: config.enabled ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
-                {config.showBelowNodes ? '节点下方' : '节点上方'}
+                {config.showBelowNodes ? t('mindMap.toolbar.zoomOut') : t('mindMap.toolbar.zoomIn')}
               </span>
             </div>
           </div>
@@ -308,7 +310,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
           {/* 导出时显示 */}
           <div className={sectionCls}>
-            <SectionLabel icon={Download} label="导出" />
+            <SectionLabel icon={Download} label={t('mindMap.watermark.export')} />
             <div className="flex items-center gap-2">
               <Switch
                 checked={config.showOnExport}
@@ -317,7 +319,7 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
                 className="scale-[0.55] origin-center"
               />
               <span className="text-[10px]" style={{ color: config.enabled ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
-                {config.showOnExport ? '仅导出' : '显示'}
+                {config.showOnExport ? `${t('mindMap.watermark.export')} ${t('common.only')}` : t('common.show')}
               </span>
             </div>
           </div>

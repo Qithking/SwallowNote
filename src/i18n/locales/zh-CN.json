@@ -399,7 +399,59 @@
     "deleteOnlyCurrent": "仅删除当前节点",
     "copyNode": "复制节点",
     "cutNode": "剪切节点",
-    "pasteNode": "粘贴节点"
+    "pasteNode": "粘贴节点",
+    "toolbar": {
+      "formatBrush": "格式刷",
+      "icon": "图标",
+      "hyperlink": "超链接",
+      "remark": "备注",
+      "tag": "标签",
+      "summary": "概要",
+      "outline": "外框",
+      "layout": "布局",
+      "theme": "主题",
+      "basic": "基础",
+      "node": "节点",
+      "watermark": "水印",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "fitCanvas": "适应画布"
+    },
+    "dialog": {
+      "setHyperlink": "设置超链接",
+      "linkUrl": "链接地址",
+      "linkTitle": "链接标题",
+      "setRemark": "设置备注",
+      "setIcon": "设置图标",
+      "setTag": "设置标签",
+      "tagPlaceholder": "输入标签后按回车添加",
+      "delete": "删除"
+    },
+    "watermark": {
+      "title": "水印设置",
+      "text": "文字",
+      "textPlaceholder": "水印文字",
+      "color": "颜色",
+      "opacity": "透明度",
+      "fontSize": "字号",
+      "rotation": "旋转",
+      "lineSpacing": "行间距",
+      "letterSpacing": "字间距",
+      "layer": "层级",
+      "export": "导出"
+    },
+    "style": {
+      "background": "背景",
+      "connection": "基础连线",
+      "connectionColor": "颜色"
+    },
+    "colorPicker": {
+      "moreColors": "更多颜色"
+    },
+    "loadFailed": "思维导图加载失败",
+    "loading": "加载思维导图...",
+    "defaultRootText": "中心主题",
+    "invalidContainer": "容器尺寸无效，无法初始化思维导图"
   },
   "editorSettings": {
     "title": "排版设置",
@@ -431,7 +483,8 @@
     "noResults": "无结果",
     "inputPlaceholder": "输入搜索内容",
     "searching": "搜索中...",
-    "notFound": "未找到匹配项"
+    "notFound": "未找到匹配项",
+    "hint": "回车搜索，Esc 关闭"
   },
   "git": {
     "title":"同步管理",

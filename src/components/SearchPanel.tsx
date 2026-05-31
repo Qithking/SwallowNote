@@ -101,7 +101,7 @@ function SearchPanel() {
 
       {/* Search Footer */}
       <div className="flex items-center justify-between px-3 py-2 border-t border-border text-xs text-muted-foreground">
-        <span>Enter to search, Esc to close</span>
+        <span>{t('search.hint')}</span>
         <span>{results.length} results</span>
       </div>
     </div>
