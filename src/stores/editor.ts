@@ -216,14 +216,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }))
     } catch (e) {
       console.error('Failed to load tab content:', e)
+      // Instead of closing the tab, mark it as having external change
+      // This keeps the tab open and lets the user decide what to do
       set((state) => ({
         tabs: state.tabs.map((t) =>
-          t.id === id ? { ...t, isLoading: false } : t
+          t.id === id ? { ...t, isLoading: false, hasExternalChange: true } : t
         ),
       }))
-      window.dispatchEvent(new CustomEvent('tab-load-error', {
-        detail: { id, path: tab.path, name: tab.name }
-      }))
+      // Only show error dialog for initial load (when content is empty)
+      // Don't show for external file changes to avoid interrupting user
+      if (tab.content === undefined || tab.content === '') {
+        window.dispatchEvent(new CustomEvent('tab-load-error', {
+          detail: { id, path: tab.path, name: tab.name }
+        }))
+      }
     }
   },
   updateTabContent: (id, content) =>

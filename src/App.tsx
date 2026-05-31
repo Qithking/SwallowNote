@@ -113,7 +113,13 @@ function App() {
   useEffect(() => {
     const unlisten = listen('file-watcher-event', (event) => {
       const { type, path } = event.payload as { type: string; path: string }
-      
+
+      // Skip file events during Git sync to avoid interference with git pull/push operations
+      const gitStore = useGitStore.getState()
+      if (gitStore.isPulling || gitStore.syncStatus.isSyncing) {
+        return
+      }
+
       if (type === 'modified') {
         const editorStore = useEditorStore.getState()
         // Skip if this path is currently being saved (atomic write may trigger modified event)
@@ -141,11 +147,11 @@ function App() {
             editorStore.removeTab(tab.id)
           }
         }
-        
+
         const { workspaceMode } = useUIStore.getState()
         const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
         const parentPath = path.substring(0, path.lastIndexOf('/'))
-        
+
         if (workspaceMode === 'workspace') {
           for (const folder of workspaceFolders) {
             if (parentPath === folder || parentPath.startsWith(folder + '/')) {
@@ -160,7 +166,7 @@ function App() {
         }
       }
     })
-    
+
     return () => { unlisten.then(fn => fn()) }
   }, [])
 
