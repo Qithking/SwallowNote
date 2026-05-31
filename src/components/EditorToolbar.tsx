@@ -2,7 +2,7 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Copy, Settings, Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Copy, Clipboard, Settings, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
@@ -170,7 +170,7 @@ function EditorToolbar() {
                 className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
                 style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
               >
-                <Settings size={14} style={{ color: 'inherit' }} />
+                <Type size={14} style={{ color: 'inherit' }} />
               </button>
             </TooltipTrigger>
             <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
@@ -208,7 +208,7 @@ function EditorToolbar() {
               className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
               style={{ color: copied ? 'var(--theme-color)' : 'var(--text-primary)' }}
             >
-              <Copy size={14} style={{ color: 'inherit' }} />
+              <Clipboard size={14} style={{ color: 'inherit' }} />
             </button>
           </TooltipTrigger>
           <TooltipContent>{t('editorToolbar.copyFullPath')}</TooltipContent>
