@@ -172,11 +172,13 @@ function CredentialDialog({
 function CommitSection({ 
   selectedRepos, 
   allRepos, 
-  onRefresh 
+  onRefresh,
+  onStatusUpdate,
 }: { 
   selectedRepos: string[]
   allRepos: GitRepository[]
-  onRefresh: () => void
+  onRefresh: () => Promise<void>
+  onStatusUpdate: (conflictPaths: string[], errorPaths: string[]) => void
 }) {
   const [isCommitting, setIsCommitting] = useState(false)
   const [credentialDialog, setCredentialDialog] = useState<{
@@ -226,6 +228,9 @@ function CommitSection({
     setIsCommitting(true)
     let successCount = 0
     let failCount = 0
+    const errorDetails: string[] = []
+    const conflictPaths: string[] = []
+    const errorPaths: string[] = []
 
     for (const repo of finalRepos) {
       try {
@@ -267,23 +272,32 @@ function CommitSection({
           successCount++
         } else if (errorMessage.startsWith('SUBMODULE_UNCOMMITTED:')) {
           successCount++
-          showToast(`${repo.name}: ${t('git.submoduleHasChanges')}`, 'error')
+          errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
+          errorPaths.push(repo.path)
         } else if (errorMessage.startsWith('SUBMODULE_REF_NEEDS_UPDATE:')) {
           successCount++
-          showToast(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`, 'error')
+          errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
+          errorPaths.push(repo.path)
         } else if (errorMessage.startsWith('REBASE_CONFLICT:')) {
           failCount++
-          showToast(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`, 'error')
+          errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
+          conflictPaths.push(repo.path)
         } else {
           failCount++
-          showToast(`${repo.name}: ${errorMessage || t('git.unknownError')}`, 'error')
+          errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
+          errorPaths.push(repo.path)
         }
       }
     }
 
     setIsCommitting(false)
 
-    onRefresh()
+    await onRefresh()
+    
+    // Update repository statuses after refresh (refresh resets all to normal)
+    if (conflictPaths.length > 0 || errorPaths.length > 0) {
+      onStatusUpdate(conflictPaths, errorPaths)
+    }
     
     if (failCount === 0) {
       if (successCount > 0 && !credentialDialog.open) {
@@ -291,6 +305,12 @@ function CommitSection({
       }
     } else {
       showToast(t('git.syncPartial', { success: successCount, fail: failCount }), 'error')
+    }
+    // Show collected errors as a single warning toast (max 3 repos shown)
+    if (errorDetails.length > 0) {
+      const shown = errorDetails.slice(0, 3).join('\n')
+      const suffix = errorDetails.length > 3 ? `\n... +${errorDetails.length - 3}` : ''
+      showToast(shown + suffix, 'error')
     }
   }
   
@@ -445,10 +465,14 @@ function RepositoryItem({
           >
             {isSelected && <Check size={10} className="text-[var(--text-primary)]" />}
           </div>
-          {/* Status dot: red for uncommitted, green for clean */}
+          {/* Status dot: red for error, yellow for conflict, orange for uncommitted, green for clean */}
           <div className="relative">
-            {repo.hasUncommittedChanges ? (
+            {repo.status === 'conflict' ? (
+              <Circle size={8} className="fill-yellow-500 text-yellow-500" />
+            ) : repo.status === 'error' ? (
               <Circle size={8} className="fill-red-500 text-red-500" />
+            ) : repo.hasUncommittedChanges ? (
+              <Circle size={8} className="fill-orange-500 text-orange-500" />
             ) : (
               <Circle size={8} className="fill-green-500 text-green-500" />
             )}
@@ -514,7 +538,7 @@ function RepositoryItem({
 }
 
 function GitView() {
-  const { repositories, setRepositories, setCachedRepositories, scanProgress, pullAllRepos } = useGitStore()
+  const { repositories, setRepositories, setCachedRepositories, scanProgress, pullAllRepos, updateRepositoryStatuses, resetRepositoryStatuses } = useGitStore()
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode, showToast } = useUIStore()
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
@@ -589,6 +613,8 @@ function GitView() {
     }
 
     setIsPullingRepos(true)
+    // Reset statuses before pulling
+    resetRepositoryStatuses()
     const gitStore = useGitStore.getState()
     gitStore.setSyncStatus({ isSyncing: true })
 
@@ -597,6 +623,9 @@ function GitView() {
       const succeeded = results.filter(r => r.success).length
       const failed = results.filter(r => !r.success && !r.isConflict).length
       const conflicted = results.filter(r => r.isConflict).length
+
+      // Update repository statuses based on pull results
+      updateRepositoryStatuses(results)
 
       gitStore.setSyncStatus({
         isSyncing: false,
@@ -611,9 +640,10 @@ function GitView() {
         fileTreeStore.refreshExpanded()
       }
 
+      // Consolidate toast messages: show one summary toast instead of per-repo toasts
       if (conflicted > 0) {
-        const repoNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
-        showToast(t('git.pullConflict', { repos: repoNames }), 'error')
+        const conflictNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
+        showToast(t('git.pullConflict', { repos: conflictNames }), 'error')
       } else if (failed > 0) {
         showToast(t('git.pullResult', { success: succeeded, fail: failed }), 'error')
       } else if (succeeded > 0) {
@@ -690,6 +720,15 @@ function GitView() {
         selectedRepos={selectedRepos}
         allRepos={repositories}
         onRefresh={handleRefresh}
+        onStatusUpdate={(conflictPaths, errorPaths) => {
+          // Update repository statuses based on commit+push results
+          const { updateRepositoryStatuses: updateStatuses } = useGitStore.getState()
+          const pullResults = [
+            ...conflictPaths.map(p => ({ path: p, name: '', success: false, isConflict: true })),
+            ...errorPaths.map(p => ({ path: p, name: '', success: false, isConflict: false })),
+          ]
+          updateStatuses(pullResults)
+        }}
       />
 
       {/* Scan Progress */}

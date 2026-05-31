@@ -9,6 +9,8 @@ export interface GitBranch {
   isCurrent: boolean
 }
 
+export type RepoStatus = 'normal' | 'conflict' | 'error'
+
 export interface GitRepository {
   name: string
   path: string
@@ -19,6 +21,7 @@ export interface GitRepository {
   branches: GitBranch[]
   isSubmodule: boolean
   parentPath: string | null
+  status: RepoStatus
 }
 
 export function mapRepoInfoToRepository(info: GitRepositoryInfo): GitRepository {
@@ -32,6 +35,7 @@ export function mapRepoInfoToRepository(info: GitRepositoryInfo): GitRepository 
     branches: [],
     isSubmodule: info.is_submodule,
     parentPath: info.parent_path,
+    status: 'normal',
   }
 }
 
@@ -80,6 +84,8 @@ export interface GitState {
   setScanProgress: (progress: { current: number; total: number; message: string } | null) => void
   clearScanProgress: () => void
   setSyncStatus: (status: Partial<SyncStatus>) => void
+  updateRepositoryStatuses: (pullResults: PullResult[]) => void
+  resetRepositoryStatuses: () => void
   pullAllRepos: (repos: GitRepository[]) => Promise<PullResult[]>
 }
 
@@ -105,6 +111,30 @@ export const useGitStore = create<GitState>((set) => ({
   clearScanProgress: () => set({ scanProgress: null }),
   setSyncStatus: (status) => set((state) => ({
     syncStatus: { ...state.syncStatus, ...status }
+  })),
+  updateRepositoryStatuses: (pullResults) => set((state) => {
+    const statusMap = new Map<string, RepoStatus>()
+    for (const r of pullResults) {
+      if (r.isConflict) {
+        statusMap.set(r.path, 'conflict')
+      } else if (!r.success) {
+        statusMap.set(r.path, 'error')
+      }
+    }
+    return {
+      repositories: state.repositories.map((repo) => ({
+        ...repo,
+        status: statusMap.get(repo.path) || 'normal',
+      })),
+      cachedRepositories: state.cachedRepositories.map((repo) => ({
+        ...repo,
+        status: statusMap.get(repo.path) || 'normal',
+      })),
+    }
+  }),
+  resetRepositoryStatuses: () => set((state) => ({
+    repositories: state.repositories.map((repo) => ({ ...repo, status: 'normal' as RepoStatus })),
+    cachedRepositories: state.cachedRepositories.map((repo) => ({ ...repo, status: 'normal' as RepoStatus })),
   })),
   pullAllRepos: async (repos: GitRepository[]) => {
     // Filter repos that have a remote URL

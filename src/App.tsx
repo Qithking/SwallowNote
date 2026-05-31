@@ -256,6 +256,9 @@ function App() {
           }
         }
 
+        // Update repository statuses based on pull results
+        gitStore.updateRepositoryStatuses(results)
+
         gitStore.setSyncStatus({
           isSyncing: false,
           lastSyncTime: Date.now(),
@@ -268,6 +271,7 @@ function App() {
           const fileTreeStore = useFileTreeStore.getState()
           fileTreeStore.refreshExpanded()
         }
+        // Only show one consolidated toast for conflicts
         if (conflicted > 0) {
           const repoNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
           toast.warning(t('git.pullConflict', { repos: repoNames }))
