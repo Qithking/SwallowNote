@@ -7,6 +7,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
+/// Get the current running app bundle path on macOS
+#[cfg(target_os = "macos")]
+fn get_current_app_bundle_path() -> Option<PathBuf> {
+    // Get the path to the current executable
+    std::env::current_exe().ok().and_then(|exe_path| {
+        // Traverse up to find the .app bundle
+        // Path structure: SwallowNote.app/Contents/MacOS/SwallowNote
+        let mut path = exe_path;
+        while path.parent().is_some() {
+            if path.extension().is_some_and(|ext| ext == "app") {
+                return Some(path);
+            }
+            path = path.parent()?.to_path_buf();
+        }
+        None
+    })
+}
+
 /// Global lock to prevent concurrent downloads.
 /// If a download is already in progress, subsequent calls are rejected.
 static IS_DOWNLOADING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
@@ -282,7 +300,45 @@ pub async fn install_and_restart(app: AppHandle, dmg_path: String) -> Result<(),
         let app_name = app_bundle.file_name();
         let app_name_str = app_name.to_string_lossy().to_string();
         let source_app = app_bundle.path();
-        let dest_app = PathBuf::from("/Applications").join(&app_name_str);
+        
+        // Determine the destination path for the app
+        // Priority: 1. Current running app location (if it's an .app bundle)
+        //          2. /Applications (standard system location)
+        let mut dest_app = if let Some(current_bundle) = get_current_app_bundle_path() {
+            // If the current running app is in an .app bundle, replace it there
+            // This handles cases where the app is in ~/Applications, /Applications, or other locations
+            current_bundle
+        } else {
+            // Fallback to /Applications if we can't determine current location
+            PathBuf::from("/Applications").join(&app_name_str)
+        };
+        
+        // Check if we have permission to write to the destination
+        // Try to create a test file to verify actual write permissions
+        let dest_parent = dest_app.parent().ok_or("Invalid destination path")?;
+        let test_file = dest_parent.join(".swallownote_write_test");
+        let is_writable = std::fs::File::create(&test_file)
+            .and_then(|_| std::fs::remove_file(&test_file))
+            .is_ok();
+        
+        if !is_writable {
+            // Try to use /Applications as fallback if current location is not writable
+            let fallback_dest = PathBuf::from("/Applications").join(&app_name_str);
+            if fallback_dest != dest_app {
+                // Verify /Applications is writable too
+                let app_test = PathBuf::from("/Applications").join(".swallownote_write_test");
+                let app_writable = std::fs::File::create(&app_test)
+                    .and_then(|_| std::fs::remove_file(&app_test))
+                    .is_ok();
+                if app_writable {
+                    dest_app = fallback_dest;
+                } else {
+                    return Err("No writable location found for app installation. Please install manually.".to_string());
+                }
+            } else {
+                return Err("Destination directory is not writable. Please install manually or run with appropriate permissions.".to_string());
+            }
+        }
 
         // Step 3: Remove old app and copy new one
         // Remove the old version if it exists
@@ -337,43 +393,19 @@ pub async fn install_and_restart(app: AppHandle, dmg_path: String) -> Result<(),
         //   1. Waits for the current app's PID to disappear (with a timeout)
         //   2. Launches the new app with `open`
         //
-        // We use `setsid` to create a new session, ensuring the helper is completely
-        // independent of the parent's process group and terminal.
+        // On macOS, we use `nohup` with redirected I/O instead of Linux's `setsid`
+        // to create a detached process that survives parent termination.
         let current_pid = std::process::id();
         let new_app_path = dest_app.to_string_lossy().to_string();
 
         // Create a temporary restart script with timeout protection
         let tmp_dir = std::env::temp_dir();
         let restart_script_path = tmp_dir.join(format!("swallownote_restart_{}.sh", current_pid));
-        let restart_script_content = format!(
-            "#!/bin/bash\n\
-# Wait for the old SwallowNote process to exit (with 30s timeout)\n\
-wait_count=0\n\
-while kill -0 {pid} 2>/dev/null; do\n\
-  sleep 0.2\n\
-  wait_count=$((wait_count + 1))\n\
-  if [ $wait_count -ge 150 ]; then\n\
-    echo \"Timeout waiting for old process to exit\" >&2\n\
-    break\n\
-  fi\n\
-done\n\
-# Additional pause to ensure all resources are released\n\
-sleep 1\n\
-# Launch the new version with open command\n\
-# Use -a to specify the app path explicitly\n\
-# Use --args to pass any necessary arguments\n\
-open -a \"{app_path}\" || {{\n\
-  # Fallback: try using the app path directly\n\
-  \"{app_path}/Contents/MacOS/SwallowNote\" &\n\
-}}\n\
-# Wait a moment for the app to launch\n\
-sleep 2\n\
-# Clean up this script\n\
-rm -f \"$0\"\n",
-            pid = current_pid,
-            app_path = new_app_path,
-        );
-        std::fs::write(&restart_script_path, &restart_script_content)
+        
+        // Build the restart script content - using a more reliable approach
+        let script_content = build_restart_script(current_pid, &new_app_path, &app_name_str);
+        
+        std::fs::write(&restart_script_path, script_content)
             .map_err(|e| format!("Failed to write restart script: {}", e))?;
 
         // Make the script executable
@@ -385,11 +417,13 @@ rm -f \"$0\"\n",
         }
 
         // Execute the restart script as a fully detached process
-        // Using setsid ensures the script runs in a new session, completely
-        // independent of the parent process lifecycle
+        // Using nohup with proper I/O redirection to ensure it survives parent termination
         let script_path_str = restart_script_path.to_string_lossy().to_string();
-        std::process::Command::new("setsid")
-            .args(["bash", &script_path_str])
+        std::process::Command::new("bash")
+            .args(["-c", &format!(
+                "(nohup bash '{}' </dev/null >/dev/null 2>&1 &)",
+                script_path_str
+            )])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -398,7 +432,7 @@ rm -f \"$0\"\n",
         // Step 8: Exit the current app
         // Small delay to ensure the helper script has started and is watching our PID
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(1000));
             // Use std::process::exit for a clean exit
             std::process::exit(0);
         });
@@ -412,4 +446,128 @@ rm -f \"$0\"\n",
         let _ = app;
         open_installer(dmg_path).await
     }
+}
+
+/// Build the restart helper script content
+#[cfg(target_os = "macos")]
+fn build_restart_script(pid: u32, app_path: &str, app_name: &str) -> String {
+    format!(r#"#!/bin/bash
+# SwallowNote restart helper script
+LOG_FILE="$TMPDIR/swallownote_restart_{pid}.log"
+APP_PATH="{app_path}"
+APP_NAME="{app_name}"
+BIN_PATH="$APP_PATH/Contents/MacOS/$APP_NAME"
+
+exec >> "$LOG_FILE" 2>&1
+echo "$(date '+%Y-%m-%d %H:%M:%S'): Restart helper started"
+echo "App path: $APP_PATH"
+echo "Binary path: $BIN_PATH"
+
+# Verify binary exists
+if [ ! -f "$BIN_PATH" ]; then
+    echo "ERROR: Binary not found at $BIN_PATH"
+    ls -la "$APP_PATH/Contents/MacOS/" 2>/dev/null || echo "Cannot list MacOS directory"
+    exit 1
+fi
+
+# Helper function to check if app is running
+check_app_running() {{
+    local check_count=0
+    while [ $check_count -lt 3 ]; do
+        # Method 1: Check by exact process name
+        if pgrep -x "$APP_NAME" > /dev/null 2>&1; then
+            return 0
+        fi
+        # Method 2: Check by binary path in ps output
+        if ps aux | grep -v grep | grep -q "$BIN_PATH"; then
+            return 0
+        fi
+        # Method 3: Check for any process with the app name (broader match)
+        if pgrep -i "$APP_NAME" > /dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        check_count=$((check_count + 1))
+    done
+    return 1
+}}
+
+# Wait for the old SwallowNote process to exit (with 30s timeout)
+echo "Waiting for old process (PID: {pid}) to exit..."
+wait_count=0
+while kill -0 {pid} 2>/dev/null; do
+    sleep 0.2
+    wait_count=$((wait_count + 1))
+    if [ $wait_count -ge 150 ]; then
+        echo "WARNING: Timeout waiting for old process to exit, continuing anyway"
+        break
+    fi
+done
+
+# Additional pause to ensure all resources are released
+echo "Old process exited, waiting for resources to release..."
+sleep 2
+
+# Launch the new version
+LAUNCH_SUCCESS=false
+
+# Method 1: Use open with the full path (preferred - avoids Launch Services cache issues)
+echo "Method 1: Trying open with full path..."
+if open "$APP_PATH" 2>/dev/null; then
+    echo "open command succeeded, waiting to verify..."
+    if check_app_running; then
+        echo "SUCCESS: Verified app is running after open"
+        LAUNCH_SUCCESS=true
+    else
+        echo "WARNING: App may not have started properly after open"
+    fi
+else
+    echo "ERROR: open command failed"
+fi
+
+# Method 2: If open failed or didn't start properly, try direct binary execution
+if [ "$LAUNCH_SUCCESS" = false ] && [ -x "$BIN_PATH" ]; then
+    echo "Method 2: Trying direct binary execution..."
+    # Use nohup to ensure the process survives this script's termination
+    nohup "$BIN_PATH" > /dev/null 2>&1 &
+    BIN_PID=$!
+    echo "Started binary with PID: $BIN_PID"
+    sleep 4
+    # Check if process is still running
+    if kill -0 $BIN_PID 2>/dev/null; then
+        echo "SUCCESS: Binary is running (PID: $BIN_PID)"
+        LAUNCH_SUCCESS=true
+    else
+        echo "ERROR: Direct binary launch failed or process died quickly"
+    fi
+fi
+
+# Method 3: Last resort - try open -n (new instance) with the app path
+if [ "$LAUNCH_SUCCESS" = false ]; then
+    echo "Method 3: Trying open -n (new instance)..."
+    if open -n "$APP_PATH" 2>/dev/null; then
+        if check_app_running; then
+            echo "SUCCESS: App launched with open -n"
+            LAUNCH_SUCCESS=true
+        fi
+    fi
+fi
+
+if [ "$LAUNCH_SUCCESS" = false ]; then
+    echo "FATAL ERROR: All launch methods failed!"
+    echo "App path: $APP_PATH"
+    echo "Binary path: $BIN_PATH"
+    echo "Binary exists: $(test -f "$BIN_PATH" && echo 'yes' || echo 'no')"
+    echo "Binary executable: $(test -x "$BIN_PATH" && echo 'yes' || echo 'no')"
+    ls -la "$APP_PATH" 2>/dev/null || echo "Cannot list app bundle"
+fi
+
+# Clean up this script
+rm -f "$0"
+"#, pid = pid, app_path = app_path, app_name = app_name)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn build_restart_script(_pid: u32, _app_path: &str, _app_name: &str) -> String {
+    String::new()
 }
