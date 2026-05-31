@@ -144,18 +144,18 @@ fn is_auth_error(error: &str) -> bool {
     lower.contains("authentication failed")
         || lower.contains("could not read username")
         || lower.contains("could not read password")
-        || lower.contains("permission denied")
+        || lower.contains("permission denied (publickey)")
+        || lower.contains("permission denied (keyboard-interactive)")
         || lower.contains("access denied")
         || lower.contains("fatal: could not read from remote repository")
-        || lower.contains("403")
+        || lower.contains("http 403")
         || lower.contains("invalid username or password")
         || lower.contains("authentication error")
-        || lower.contains("credentials")
         || lower.contains("logon failed")
         || lower.contains("authentication required")
         || lower.contains("username for")
         || lower.contains("password for")
-        || lower.contains("fatal: unable to access")
+        || lower.contains("fatal: unable to access") && (lower.contains("403") || lower.contains("401") || lower.contains("authentication") || lower.contains("credential"))
 }
 
 /// Pull changes from remote with rebase by default
@@ -194,13 +194,15 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
 
     #[cfg(not(target_os = "windows"))]
     let script_content = format!(
-        "#!/bin/sh\necho '{}'",
+        "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
+        username.replace('\'', "'\\''"),
         password.replace('\'', "'\\''")
     );
 
     #[cfg(target_os = "windows")]
     let script_content = format!(
-        "@echo off\necho {}",
+        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
+        username.replace('"', "\"\""),
         password.replace('"', "\"\"")
     );
 
@@ -226,7 +228,6 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
         &[
             ("GIT_ASKPASS", askpass_path.as_str()),
             ("GIT_TERMINAL_PROMPT", "0"),
-            ("GIT_USERNAME", &username),
         ],
     );
 
@@ -275,13 +276,15 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
 
     #[cfg(not(target_os = "windows"))]
     let script_content = format!(
-        "#!/bin/sh\necho '{}'",
+        "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
+        username.replace('\'', "'\\''"),
         password.replace('\'', "'\\''")
     );
 
     #[cfg(target_os = "windows")]
     let script_content = format!(
-        "@echo off\necho {}",
+        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
+        username.replace('"', "\"\""),
         password.replace('"', "\"\"")
     );
 
@@ -308,8 +311,6 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
         &[
             ("GIT_ASKPASS", askpass_path.as_str()),
             ("GIT_TERMINAL_PROMPT", "0"),
-            // Pass username via env variable to avoid embedding in script
-            ("GIT_USERNAME", &username),
         ],
     );
 
@@ -335,6 +336,60 @@ pub async fn git_force_push(path: String) -> Result<(), String> {
                 Err(format!("Failed to force push: {}", e))
             }
         }
+    }
+}
+
+/// Force push with provided credentials (username and password/token)
+#[tauri::command]
+pub async fn git_force_push_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
+    let temp_dir = std::env::temp_dir();
+    let unique_id = uuid::Uuid::new_v4().to_string();
+    let askpass_script = temp_dir.join(format!("swallownote_force_push_askpass_{}.sh", unique_id));
+
+    #[cfg(not(target_os = "windows"))]
+    let script_content = format!(
+        "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
+        username.replace('\'', "'\\''"),
+        password.replace('\'', "'\\''")
+    );
+
+    #[cfg(target_os = "windows")]
+    let script_content = format!(
+        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
+        username.replace('"', "\"\""),
+        password.replace('"', "\"\"")
+    );
+
+    std::fs::write(&askpass_script, &script_content)
+        .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&askpass_script)
+            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(&askpass_script, perms)
+            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+    }
+
+    let askpass_path = askpass_script.to_string_lossy().to_string();
+
+    let result = run_git_with_env(
+        &path,
+        &["push", "--force"],
+        &[
+            ("GIT_ASKPASS", askpass_path.as_str()),
+            ("GIT_TERMINAL_PROMPT", "0"),
+        ],
+    );
+
+    let _ = std::fs::remove_file(&askpass_script);
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to force push: {}", e)),
     }
 }
 
@@ -375,7 +430,11 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
     let status_output = run_git(&path, &["status"])?;
     
     // Check for submodule with modified content (submodule internal changes)
-    let has_submodule_modified = status_output.contains("modified content") || status_output.contains("submodule");
+    // Use precise patterns: "modified content" is what git outputs for dirty submodules
+    // and "new commits" / "modified refs" indicate submodule pointer changes
+    let has_submodule_modified = status_output.contains("modified content")
+        || (status_output.contains("(new commits)") && status_output.contains("submodule"))
+        || (status_output.contains("(modified refs)") && status_output.contains("submodule"));
     
     if has_submodule_modified {
         // First try to commit changes in submodules
@@ -383,7 +442,15 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             Ok(_) => {
                 // Submodules committed successfully, now stage and commit parent
                 run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
-                run_git(&path, &["commit", "-m", &message]).map_err(|e| format!("Failed to commit: {}", e))?;
+                let commit_result = run_git(&path, &["commit", "-m", &message]);
+                if let Err(e) = commit_result {
+                    let err_msg = e.to_lowercase();
+                    if !err_msg.contains("nothing to commit") 
+                        && !err_msg.contains("working tree clean")
+                        && !err_msg.contains("no changes added to commit") {
+                        return Err(format!("Failed to commit: {}", e));
+                    }
+                }
             }
             Err(e) => {
                 // Submodule commit failed - this means submodule has uncommitted changes
@@ -392,16 +459,40 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             }
         }
     } else {
-        // Regular commit
+        // Regular commit - allow "nothing to commit" since there may be unpushed local commits
         let commit_result = run_git(&path, &["commit", "-m", &message]);
         if let Err(e) = commit_result {
-            return Err(format!("Failed to commit: {}", e));
+            let err_msg = e.to_lowercase();
+            if !err_msg.contains("nothing to commit") 
+                && !err_msg.contains("working tree clean")
+                && !err_msg.contains("no changes added to commit") {
+                return Err(format!("Failed to commit: {}", e));
+            }
+            // "nothing to commit" is not an error - continue to push in case there are unpushed commits
         }
     }
 
     // Push - only if remote exists
     let remote_url = get_remote_url(&path);
     if remote_url.is_ok() {
+        // Pull --rebase first to integrate remote changes before pushing
+        // This avoids non-fast-forward push failures
+        let pull_result = run_git(&path, &["pull", "--rebase"]);
+        if let Err(e) = pull_result {
+            let err_lower = e.to_lowercase();
+            // If it's a conflict, abort the rebase and return error
+            if err_lower.contains("conflict") || err_lower.contains("could not apply") {
+                let _ = run_git(&path, &["rebase", "--abort"]);
+                return Err(format!("REBASE_CONFLICT:{}", e));
+            }
+            // Auth errors during pull
+            if is_auth_error(&e) {
+                return Err(format!("AUTH_REQUIRED:{}", e));
+            }
+            // Other pull errors (e.g., no upstream) - try to push anyway
+            // since we might have local commits that don't conflict
+        }
+        
         let push_result = run_git(&path, &["push"]);
         if let Err(e) = push_result {
             if is_auth_error(&e) {
@@ -724,7 +815,8 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
     )?;
 
     // Also checkout the file from remote to update the working tree
-    let _ = run_git(repo_path, &["checkout", &format!("origin/{}", branch), "--", relative_path_str]);
+    run_git(repo_path, &["checkout", &format!("origin/{}", branch), "--", relative_path_str])
+        .map_err(|e| format!("Failed to checkout file: {}", e))?;
 
     Ok(output)
 }
@@ -933,21 +1025,17 @@ fn get_remote_url(path: &str) -> Result<String, String> {
 fn get_uncommitted_count(path: &str) -> (bool, usize) {
     let status_output = run_git(path, &["status", "--porcelain"]).unwrap_or_default();
     
-    let mut file_count = 0usize;
-    for line in status_output.lines() {
-        if line.is_empty() {
-            continue;
-        }
-        let xy = line.get(..2).unwrap_or("  ");
-        if xy.starts_with('?') || xy.ends_with('?') {
-            continue;
-        }
-        file_count += 1;
-    }
-
-    let total_count = status_output.lines().filter(|l| !l.is_empty()).count();
+    let total_lines = status_output.lines().filter(|l| !l.is_empty()).count();
     
-    (total_count > 0, file_count)
+    // Count only tracked (staged/modified) files, excluding untracked
+    let tracked_count = status_output.lines()
+        .filter(|line| {
+            let xy = line.get(..2).unwrap_or("  ");
+            !xy.starts_with('?') && !xy.ends_with('?')
+        })
+        .count();
+    
+    (total_lines > 0, tracked_count)
 }
 
 fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
@@ -1035,13 +1123,15 @@ async fn do_git_clone(
 
         #[cfg(not(target_os = "windows"))]
         let script_content = format!(
-            "#!/bin/sh\necho '{}'",
+            "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
+            username.unwrap().replace('\'', "'\\''"),
             password.unwrap().replace('\'', "'\\''")
         );
 
         #[cfg(target_os = "windows")]
         let script_content = format!(
-            "@echo off\necho {}",
+            "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
+            username.unwrap().replace('"', "\"\""),
             password.unwrap().replace('"', "\"\"")
         );
 

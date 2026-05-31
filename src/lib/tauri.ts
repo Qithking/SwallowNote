@@ -229,6 +229,10 @@ export async function gitForcePush(path: string): Promise<void> {
   await invoke('git_force_push', { path })
 }
 
+export async function gitForcePushWithCredentials(path: string, username: string, password: string): Promise<void> {
+  await invoke('git_force_push_with_credentials', { path, username, password })
+}
+
 export async function gitForcePull(path: string): Promise<void> {
   await invoke('git_force_pull', { path })
 }

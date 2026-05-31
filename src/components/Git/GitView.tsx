@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, mapRepoInfosToRepositories } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitCredentialSave, gitCredentialGet, gitForcePush, gitForcePull } from '@/lib/tauri'
+import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitForcePushWithCredentials, gitCredentialSave, gitCredentialGet, gitForcePush, gitForcePull } from '@/lib/tauri'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -236,13 +236,14 @@ function CommitSection({
         console.error('Failed to commit and push:', repo.path, errorMessage)
         if (errorMessage.startsWith('AUTH_REQUIRED:')) {
           // Try to use saved credentials from keyring first
+          let pushedWithSavedCred = false
           try {
             const savedCred = await gitCredentialGet(repo.path)
             if (savedCred) {
               try {
                 await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
+                pushedWithSavedCred = true
                 successCount++
-                continue
               } catch {
                 // Saved credentials failed, fall through to show dialog
               }
@@ -250,14 +251,15 @@ function CommitSection({
           } catch {
             // Failed to get saved credentials, fall through
           }
-          // Show credential dialog for manual input
-          setCredentialDialog({
-            open: true,
-            repoPath: repo.path,
-            repoName: repo.name,
-          })
-          // Don't count as failure since user can retry with credentials
-          successCount++
+          if (!pushedWithSavedCred) {
+            // Show credential dialog for manual input
+            // Don't count as success or failure since user can retry with credentials
+            setCredentialDialog({
+              open: true,
+              repoPath: repo.path,
+              repoName: repo.name,
+            })
+          }
         } else if (errorMessage.includes('nothing to commit') ||
             errorMessage.includes('working tree clean') ||
             errorMessage.includes('no changes added to commit') ||
@@ -269,6 +271,9 @@ function CommitSection({
         } else if (errorMessage.startsWith('SUBMODULE_REF_NEEDS_UPDATE:')) {
           successCount++
           showToast(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`, 'error')
+        } else if (errorMessage.startsWith('REBASE_CONFLICT:')) {
+          failCount++
+          showToast(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`, 'error')
         } else {
           failCount++
           showToast(`${repo.name}: ${errorMessage || t('git.unknownError')}`, 'error')
@@ -346,8 +351,8 @@ function RepositoryItem({
           const savedCred = await gitCredentialGet(repo.path)
           if (savedCred) {
             try {
-              // Force push with credentials requires using push --force with credentials
-              await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
+              // Force push with credentials
+              await gitForcePushWithCredentials(repo.path, savedCred.username, savedCred.password)
               showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
               onRefresh()
               return
