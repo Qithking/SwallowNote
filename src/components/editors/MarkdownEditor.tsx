@@ -9,6 +9,7 @@ import { BlockNoteEditor, PartialBlock, createCodeBlockSpec } from '@blocknote/c
 import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote } from '@blocknote/react'
 import { codeBlockOptions } from '@blocknote/code-block'
+import { TextSelection } from 'prosemirror-state'
 import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
@@ -437,30 +438,65 @@ function BlockNoteInner({
 
   // Handle Cmd+A / Ctrl+A select all in BlockNote
   // In Tauri WebView, the browser's native selectAll intercepts Cmd+A before
-  // ProseMirror's keymap can handle it, so BlockNote's built-in selectAll never fires.
-  // We intercept it in the capture phase and delegate to TipTap's selectAll command.
+  // ProseMirror's keymap can handle it. We use a direct DOM onkeydown handler
+  // on the ProseMirror editor element to ensure it works reliably.
   useEffect(() => {
-    const container = editorContainerRef.current
-    if (!container) return
+    if (!editor) return
 
-    const handleSelectAll = (e: KeyboardEvent) => {
+    const tiptapEditor = (editor as any)?._tiptapEditor
+    const editorElement = tiptapEditor?.view?.dom as HTMLElement | undefined
+    if (!editorElement) return
+
+    // Use a direct DOM handler instead of addEventListener for maximum reliability
+    const originalOnKeyDown = editorElement.onkeydown
+    editorElement.onkeydown = (e: KeyboardEvent) => {
       const isMod = e.metaKey || e.ctrlKey
       if (isMod && e.key.toLowerCase() === 'a' && !e.shiftKey && !e.altKey) {
         e.preventDefault()
-        e.stopPropagation()
+        e.stopImmediatePropagation()
         try {
-          const tiptapEditor = (editor as any)?._tiptapEditor
-          if (tiptapEditor) {
-            tiptapEditor.chain().focus().selectAll().run()
-          }
+          // Use ProseMirror's TextSelection with document traversal
+          // BlockNote's document structure requires positions to be within valid text nodes
+          const { state, dispatch } = tiptapEditor.view
+          const doc = state.doc
+
+          // Traverse document to find first and last text positions
+          let startPos = 1  // Default fallback
+          let endPos = Math.max(1, doc.content.size - 1)  // Default fallback
+
+          // Find first text node position
+          doc.descendants((node: any, pos: number) => {
+            if (node.isText && startPos === 1) {
+              startPos = pos
+            }
+            // Continue traversal to find last position
+            if (node.isText) {
+              endPos = pos + node.nodeSize
+            }
+          })
+
+          // Ensure positions are valid
+          startPos = Math.max(1, Math.min(startPos, doc.content.size - 1))
+          endPos = Math.max(startPos + 1, Math.min(endPos, doc.content.size))
+
+          // Create TextSelection with found positions
+          const selection = TextSelection.create(state.doc, startPos, endPos)
+          const tr = state.tr.setSelection(selection)
+          dispatch(tr)
         } catch (err) {
-          console.error('Failed to select all in BlockNote:', err)
+          console.error('Failed to select all:', err)
         }
+        return false
+      }
+      // Call original handler if exists
+      if (originalOnKeyDown) {
+        return originalOnKeyDown.call(editorElement, e)
       }
     }
 
-    container.addEventListener('keydown', handleSelectAll, true) // capture phase
-    return () => container.removeEventListener('keydown', handleSelectAll, true)
+    return () => {
+      editorElement.onkeydown = originalOnKeyDown
+    }
   }, [editor])
 
   // Replace selected text or entire content in BlockNote
