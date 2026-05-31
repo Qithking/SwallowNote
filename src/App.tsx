@@ -28,7 +28,7 @@ function App() {
   useTheme()
   useKeyboardShortcuts()
   const { t } = useTranslation()
-  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth, syncInterval, autoSyncPush } = useUIStore()
+  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth, syncInterval, autoSyncPush, sidebarView } = useUIStore()
   const { tabs } = useEditorStore()
   const { cachedRepositories, pullAllRepos } = useGitStore()
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
@@ -649,8 +649,8 @@ function App() {
           {/* Activity Bar */}
           <ActivityBar />
 
-          {/* Sidebar - hidden when settings panel is open or sidebar is collapsed */}
-          {!settingsPanelVisible && sidebarVisible && (
+          {/* Sidebar - hidden when settings panel is open, sidebar is collapsed, or sidebar view is 'settings' (settings shown in main area) */}
+          {!settingsPanelVisible && sidebarVisible && sidebarView !== 'settings' && (
             <div 
               className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 
               style={{ width: sidebarWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))' }}
@@ -660,7 +660,7 @@ function App() {
           )}
 
           {/* Left Resize Handle */}
-          {!settingsPanelVisible && sidebarVisible && (
+          {!settingsPanelVisible && sidebarVisible && sidebarView !== 'settings' && (
             <div
               className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
               onMouseDown={handleMouseDownLeft}
