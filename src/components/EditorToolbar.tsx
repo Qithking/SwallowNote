@@ -2,7 +2,7 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Copy, Clipboard, Settings, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
