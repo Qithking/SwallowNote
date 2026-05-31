@@ -28,7 +28,7 @@ function App() {
   useTheme()
   useKeyboardShortcuts()
   const { t } = useTranslation()
-  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth, syncInterval } = useUIStore()
+  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth, syncInterval, autoSyncPush } = useUIStore()
   const { tabs } = useEditorStore()
   const { cachedRepositories, pullAllRepos } = useGitStore()
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
@@ -193,6 +193,8 @@ function App() {
   // Auto sync: periodically pull all git repositories based on syncInterval setting
   const syncIntervalRef = useRef(syncInterval)
   syncIntervalRef.current = syncInterval
+  const autoSyncPushRef = useRef(autoSyncPush)
+  autoSyncPushRef.current = autoSyncPush
   const cachedReposRef = useRef(cachedRepositories)
   cachedReposRef.current = cachedRepositories
   const pullAllReposRef = useRef(pullAllRepos)
@@ -205,19 +207,64 @@ function App() {
       const gitStore = useGitStore.getState()
       gitStore.setSyncStatus({ isSyncing: true })
       try {
+        // Step 1: Always pull first
         const results = await pullAllReposRef.current(repos)
         const succeeded = results.filter(r => r.success).length
         const failed = results.filter(r => !r.success && !r.isConflict).length
         const conflicted = results.filter(r => r.isConflict).length
+
+        // Step 2: If autoSyncPush is enabled, commit and push repos with uncommitted changes
+        let pushSucceeded = 0
+        let pushFailed = 0
+        if (autoSyncPushRef.current) {
+          const reposWithChanges = repos.filter(r => r.hasUncommittedChanges && r.remoteUrl)
+          if (reposWithChanges.length > 0) {
+            const { gitCommitAndPush, gitCredentialGet, gitPushWithCredentials } = await import('@/lib/tauri')
+            for (const repo of reposWithChanges) {
+              try {
+                await gitCommitAndPush(repo.path, 'Auto sync')
+                pushSucceeded++
+              } catch (e) {
+                const errorMessage = String(e).trim()
+                // Try saved credentials on auth error
+                if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+                  try {
+                    const savedCred = await gitCredentialGet(repo.path)
+                    if (savedCred) {
+                      try {
+                        await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
+                        pushSucceeded++
+                        continue
+                      } catch {
+                        // Saved credentials failed
+                      }
+                    }
+                  } catch {
+                    // Failed to get credentials
+                  }
+                }
+                // Ignore "nothing to commit" errors (already committed by auto_commit)
+                if (!errorMessage.includes('nothing to commit') &&
+                    !errorMessage.includes('working tree clean') &&
+                    !errorMessage.includes('no changes added to commit') &&
+                    !errorMessage.startsWith('AUTH_REQUIRED:')) {
+                  pushFailed++
+                  console.error('Auto sync push failed:', repo.path, errorMessage)
+                }
+              }
+            }
+          }
+        }
+
         gitStore.setSyncStatus({
           isSyncing: false,
           lastSyncTime: Date.now(),
-          succeeded,
-          failed,
+          succeeded: succeeded + pushSucceeded,
+          failed: failed + pushFailed,
           conflicted,
         })
-        if (succeeded > 0 || conflicted > 0) {
-          // Refresh file tree to reflect any pulled changes
+        if (succeeded > 0 || conflicted > 0 || pushSucceeded > 0) {
+          // Refresh file tree to reflect any pulled/pushed changes
           const fileTreeStore = useFileTreeStore.getState()
           fileTreeStore.refreshExpanded()
         }

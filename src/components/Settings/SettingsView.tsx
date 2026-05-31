@@ -73,6 +73,7 @@ function SettingsView() {
     showAllFiles, setShowAllFiles,
     markdownOnly, setMarkdownOnly,
     syncInterval, setSyncInterval,
+    autoSyncPush, setAutoSyncPush,
     uploadPath, setUploadPath,
     aiPort, setAiPort,
     aiModels, activeAiModelId,
@@ -267,7 +268,7 @@ function SettingsView() {
               <Card>
                 <CardContent className="p-0 divide-y divide-border">
                   <div className="px-4">
-                    <SettingRow label={t('settings.sync.interval')} desc={t('settings.sync.interval.desc')}>
+                    <SettingRow label={t('settings.sync.pullInterval')} desc={t('settings.sync.pullInterval.desc')}>
                       <Select value={String(syncInterval)} onValueChange={(v) => setSyncInterval(Number(v))}>
                         <SelectTrigger className="w-[160px]">
                           <SelectValue />
@@ -280,6 +281,11 @@ function SettingsView() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </SettingRow>
+                  </div>
+                  <div className="px-4">
+                    <SettingRow label={t('settings.sync.autoSyncPush')} desc={t('settings.sync.autoSyncPush.desc')}>
+                      <Switch checked={autoSyncPush} onCheckedChange={setAutoSyncPush} />
                     </SettingRow>
                   </div>
                   <div className="px-4">

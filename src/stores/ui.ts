@@ -125,6 +125,7 @@ export interface UIState {
   markdownOnly: boolean
   customShortcuts: Record<string, string>
   syncInterval: number
+  autoSyncPush: boolean
   uploadPath: string
   aiProvider: string
   aiApiKey: string
@@ -166,6 +167,7 @@ export interface UIState {
   setShowAllFiles: (value: boolean) => void
   setMarkdownOnly: (value: boolean) => void
   setSyncInterval: (interval: number) => void
+  setAutoSyncPush: (value: boolean) => void
   setUploadPath: (path: string) => void
   setAiProvider: (provider: string) => void
   setAiApiKey: (key: string) => Promise<void>
@@ -216,6 +218,7 @@ export const useUIStore = create<UIState>((set) => ({
   markdownOnly: false,
   customShortcuts: {},
   syncInterval: 10,
+  autoSyncPush: false,
   uploadPath: '',
   aiProvider: '',
   aiApiKey: '',
@@ -325,6 +328,10 @@ export const useUIStore = create<UIState>((set) => ({
   setSyncInterval: (interval: number) => {
     set({ syncInterval: interval })
     saveAppSettings({ syncInterval: String(interval) })
+  },
+  setAutoSyncPush: (value: boolean) => {
+    set({ autoSyncPush: value })
+    saveAppSettings({ autoSyncPush: String(value) })
   },
   setUploadPath: (path: string) => {
     set({ uploadPath: path })
@@ -574,6 +581,7 @@ export const useUIStore = create<UIState>((set) => ({
         markdownOnly: s.markdownOnly === 'true',
         customShortcuts,
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
+        autoSyncPush: s.autoSyncPush === 'true',
         uploadPath: s.uploadPath || '',
         aiProvider: s.aiProvider || '',
         aiApiKey: s.aiApiKey || '',

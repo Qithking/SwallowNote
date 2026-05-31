@@ -394,6 +394,7 @@ export interface AppSettings {
   showAllFiles: string
   markdownOnly: string
   syncInterval: string
+  autoSyncPush: string
   customShortcuts: string
   customThemes: string
   activeLightCustomThemeId: string
@@ -421,6 +422,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     showAllFiles: get('showAllFiles', 'false'),
     markdownOnly: get('markdownOnly', 'false'),
     syncInterval: get('syncInterval', '10'),
+    autoSyncPush: get('autoSyncPush', 'false'),
     customShortcuts: get('customShortcuts', '{}'),
     customThemes: get('customThemes', '[]'),
     activeLightCustomThemeId: get('activeLightCustomThemeId', 'builtin-light'),
