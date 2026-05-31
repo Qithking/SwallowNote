@@ -358,9 +358,16 @@ while kill -0 {pid} 2>/dev/null; do\n\
   fi\n\
 done\n\
 # Additional pause to ensure all resources are released\n\
-sleep 0.5\n\
-# Launch the new version\n\
-open \"{app_path}\"\n\
+sleep 1\n\
+# Launch the new version with open command\n\
+# Use -a to specify the app path explicitly\n\
+# Use --args to pass any necessary arguments\n\
+open -a \"{app_path}\" || {{\n\
+  # Fallback: try using the app path directly\n\
+  \"{app_path}/Contents/MacOS/SwallowNote\" &\n\
+}}\n\
+# Wait a moment for the app to launch\n\
+sleep 2\n\
 # Clean up this script\n\
 rm -f \"$0\"\n",
             pid = current_pid,
