@@ -304,11 +304,11 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (!filePath || !rootPath) return
 
     const { nodes, expanded } = get()
-    const parentPath = filePath.substring(0, filePath.lastIndexOf('/'))
 
-    // Always ensure direct parent is in expanded set
     const newExpanded = new Set(expanded)
-    newExpanded.add(parentPath)
+
+    // Ensure root directory is expanded
+    newExpanded.add(rootPath)
 
     // Check if we need to load children for any missing directories
     const relativePath = filePath.substring(rootPath.length + 1)
@@ -316,8 +316,15 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     let currentPath = rootPath
     let currentNodes = nodes
 
-    // Collect directories that need loading
+    // Collect directories that need loading, starting from root
     const dirsToLoad: string[] = []
+
+    // Check if root directory needs loading
+    const rootNode = findNodeInList(currentNodes, rootPath)
+    if (rootNode && rootNode.isDirectory && (!rootNode.children || rootNode.children.length === 0)) {
+      dirsToLoad.push(rootPath)
+    }
+
     for (let i = 0; i < parts.length - 1; i++) {
       currentPath = currentPath + '/' + parts[i]
       if (!newExpanded.has(currentPath)) {
@@ -451,6 +458,10 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       : parentPath
     const parts = pathToExpand.split('/')
     const expandedPaths = new Set<string>()
+    // Always expand root directory
+    if (rootPath) {
+      expandedPaths.add(rootPath)
+    }
     let currentPath = rootPath || ''
     for (const part of parts) {
       if (!part) continue
