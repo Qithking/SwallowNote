@@ -3,7 +3,6 @@ import { FileText, FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronR
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
-import { useGitStore } from '@/stores/git'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { openFolderDialog, createFile, deleteFile as deleteFileTauri, renameFile } from '@/lib/tauri'
 import type { FileNode } from '@/stores/filetree'
@@ -77,12 +76,11 @@ interface NewItemState {
 }
 
 export function FileTreeView() {
-  const { rootPath, workspaceFolders, addWorkspaceFolder, saveWorkspaceFile } = useWorkspaceStore()
+  const { rootPath, addWorkspaceFolder, saveWorkspaceFile } = useWorkspaceStore()
   const { workspaceMode, showAllFiles, markdownOnly, showToast } = useUIStore()
   const { addTab, updateTabPath } = useEditorStore()
-  const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, setNodes, refreshNode, refreshExpanded,
+  const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, setNodes, refreshExpanded,
     multiSelectedPaths, setMultiSelectedPaths, lastClickedPath, setLastClickedPath, clearMultiSelection } = useFileTreeStore()
-  const { cachedRepositories, isPulling, pullAllRepos } = useGitStore()
   const { customShortcuts } = useUIStore()
   const inputRef = useRef<HTMLInputElement>(null)
   const editingCommitRef = useRef(false)
@@ -96,78 +94,12 @@ export function FileTreeView() {
     if (isRefreshing) return
     setIsRefreshing(true)
     try {
-      // Determine the directory to refresh based on current selection
-      let targetDir: string | null = null
-      if (selectedPath) {
-        const selectedNode = findNodeByPath(selectedPath, nodes)
-        if (selectedNode?.isDirectory) {
-          targetDir = selectedPath
-        }
-        // If a file is selected, find its parent directory
-        else if (selectedPath) {
-          const parentPath = selectedPath.substring(0, selectedPath.lastIndexOf('/'))
-          const parentNode = findNodeByPath(parentPath, nodes)
-          if (parentNode?.isDirectory) {
-            targetDir = parentPath
-          }
-        }
-      }
-
-      if (targetDir) {
-        // Case 1: A directory is selected - refresh only that directory and its repo
-        const currentRepo = cachedRepositories.find(r =>
-          targetDir === r.path || targetDir.startsWith(r.path + '/')
-        )
-
-        const refreshPromise = refreshNode(targetDir)
-        const pullPromise = currentRepo
-          ? pullAllRepos([currentRepo])
-          : Promise.resolve([] as import('@/stores/git').PullResult[])
-
-        const [, pullResults] = await Promise.all([refreshPromise, pullPromise])
-        showPullToast(pullResults)
-      } else {
-        // Case 2: No directory selected - refresh all root nodes and their repos
-        const paths = workspaceMode === 'workspace'
-          ? workspaceFolders
-          : (rootPath ? [rootPath] : [])
-        const currentRepos = paths
-          .map(p => cachedRepositories.find(r => p === r.path || p.startsWith(r.path + '/')))
-          .filter((r): r is NonNullable<typeof r> => r != null)
-          .filter((r, i, arr) => arr.findIndex(x => x.path === r.path) === i)
-
-        const refreshPromise = refreshExpanded()
-        const pullPromise = currentRepos.length > 0
-          ? pullAllRepos(currentRepos)
-          : Promise.resolve([] as import('@/stores/git').PullResult[])
-
-        const [, pullResults] = await Promise.all([refreshPromise, pullPromise])
-        showPullToast(pullResults)
-      }
+      // Refresh all expanded directories to ensure they stay expanded with updated content
+      await refreshExpanded()
     } catch (e) {
       console.error('Failed to refresh:', e)
     } finally {
       setIsRefreshing(false)
-    }
-  }
-
-  const showPullToast = (pullResults: import('@/stores/git').PullResult[]) => {
-    if (!Array.isArray(pullResults) || pullResults.length === 0) return
-    const successCount = pullResults.filter(r => r.success).length
-    const conflictRepos = pullResults.filter(r => r.isConflict)
-    const failCount = pullResults.filter(r => !r.success && !r.isConflict).length
-
-    // Show conflict-specific toast for repos with merge conflicts
-    if (conflictRepos.length > 0) {
-      const repoNames = conflictRepos.map(r => r.name).join(', ')
-      showToast(t('git.pullConflict', { repos: repoNames }), 'error')
-    }
-
-    // Show other failures
-    if (failCount > 0) {
-      showToast(t('git.pullResult', { success: successCount, fail: failCount }), 'error')
-    } else if (successCount > 0 && conflictRepos.length === 0) {
-      showToast(t('git.pullSuccess', { count: successCount }), 'success')
     }
   }
 
@@ -852,8 +784,8 @@ export function FileTreeView() {
               </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRefresh} disabled={isRefreshing || isPulling}>
-                <RefreshCw size={12} className={isRefreshing || isPulling ? 'animate-spin' : ''} />
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRefresh} disabled={isRefreshing}>
+                <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t('fileTree.refresh')}</TooltipContent>
