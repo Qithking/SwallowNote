@@ -237,6 +237,32 @@ export async function gitForcePull(path: string): Promise<void> {
   await invoke('git_force_pull', { path })
 }
 
+// Conflict resolution APIs
+export interface ConflictFile {
+  path: string
+  abs_path: string
+}
+
+export async function gitGetConflictFiles(repoPath: string): Promise<ConflictFile[]> {
+  return await invoke('git_get_conflict_files', { repoPath })
+}
+
+export async function gitGetConflictLocalContent(repoPath: string, filePath: string): Promise<string> {
+  return await invoke('git_get_conflict_local_content', { repoPath, filePath })
+}
+
+export async function gitGetConflictRemoteContent(repoPath: string, filePath: string): Promise<string> {
+  return await invoke('git_get_conflict_remote_content', { repoPath, filePath })
+}
+
+export async function gitResolveConflictFile(repoPath: string, filePath: string, side: string): Promise<void> {
+  await invoke('git_resolve_conflict_file', { repoPath, filePath, side })
+}
+
+export async function gitAbortConflict(repoPath: string): Promise<void> {
+  await invoke('git_abort_conflict', { repoPath })
+}
+
 // Git Keyring Credential APIs
 export interface GitCredential {
   username: string

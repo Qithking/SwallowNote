@@ -42,11 +42,14 @@ export interface EditorTab {
   }
   // View mode for markdown files: 'preview' (BlockNote) or 'source' (CodeMirror)
   viewMode: 'preview' | 'source'
-  // Tab type: 'file' for normal files, 'diff' for git diff view
-  type?: 'file' | 'diff'
+  // Tab type: 'file' for normal files, 'diff' for git diff view, 'conflict' for conflict resolution
+  type?: 'file' | 'diff' | 'conflict'
   // For diff tabs: commit hash and diff content
   commitHash?: string
   diffContent?: string
+  // For conflict tabs: conflict info
+  conflictRepoPath?: string
+  conflictRepoName?: string
 }
 
 export interface EditorState {
@@ -56,6 +59,7 @@ export interface EditorState {
   savingPaths: Set<string>
   addTab: (tab: EditorTab) => void
   openDiffTab: (filePath: string, commitHash: string, commitMessage: string) => Promise<void>
+  openConflictTab: (repoPath: string, repoName: string) => void
   removeTab: (id: string) => void
   removeTabs: (ids: string[]) => void
   setActiveTab: (id: string) => void
@@ -145,6 +149,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return {
         tabs: [...state.tabs, newTab],
         activeTabId: diffTabId,
+      }
+    })
+  },
+  openConflictTab: (repoPath: string, repoName: string) => {
+    const conflictTabId = `conflict-${repoPath}`
+    
+    set((state) => {
+      const existing = state.tabs.find((t) => t.id === conflictTabId)
+      if (existing) {
+        return { activeTabId: existing.id }
+      }
+      
+      const newTab: EditorTab = {
+        id: conflictTabId,
+        path: repoPath,
+        name: `⚠ ${repoName}`,
+        content: '',
+        isDirty: false,
+        isEdited: false,
+        type: 'conflict',
+        conflictRepoPath: repoPath,
+        conflictRepoName: repoName,
+        viewMode: 'source',
+      }
+      
+      return {
+        tabs: [...state.tabs, newTab],
+        activeTabId: conflictTabId,
       }
     })
   },

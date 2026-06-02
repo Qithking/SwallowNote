@@ -281,6 +281,15 @@ function App() {
         if (conflicted > 0) {
           const repoNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
           toast.warning(t('git.pullConflict', { repos: repoNames }))
+          
+          // Auto-open conflict resolution tabs for conflicted repos
+          const { useEditorStore } = await import('@/stores')
+          const editorStore = useEditorStore.getState()
+          for (const result of results) {
+            if (result.isConflict) {
+              editorStore.openConflictTab(result.path, result.name)
+            }
+          }
         }
       } catch (e) {
         console.error('Auto sync failed:', e)
@@ -636,8 +645,8 @@ function App() {
 
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
+  const handleContextMenu = useCallback((_e: React.MouseEvent) => {
+    //e.preventDefault()
   }, [])
 
   return (

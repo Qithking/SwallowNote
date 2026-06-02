@@ -26,6 +26,26 @@ pub struct GitFileLogEntry {
     pub deletions: usize,
 }
 
+/// Information about a single conflicting file in a git repository
+#[derive(Serialize, Deserialize)]
+pub struct ConflictFile {
+    /// Relative path within the repository
+    pub path: String,
+    /// Absolute path of the file
+    pub abs_path: String,
+}
+
+/// Result of checking conflicts in a repository
+#[derive(Serialize, Deserialize)]
+pub struct ConflictInfo {
+    /// Repository path
+    pub repo_path: String,
+    /// Repository name
+    pub repo_name: String,
+    /// List of conflicting files
+    pub files: Vec<ConflictFile>,
+}
+
 #[derive(Serialize)]
 pub struct GitStatus {
     pub branch: String,
@@ -167,6 +187,15 @@ pub async fn git_pull(path: String) -> Result<(), String> {
         return Ok(()); // No remote, nothing to pull
     }
 
+    // Check if already in a conflict state (ongoing rebase/merge)
+    // If so, don't attempt another pull - return conflict status
+    let rebase_merge = Path::new(&path).join(".git/rebase-merge");
+    let rebase_apply = Path::new(&path).join(".git/rebase-apply");
+    let merge_head = Path::new(&path).join(".git/MERGE_HEAD");
+    if rebase_merge.exists() || rebase_apply.exists() || merge_head.exists() {
+        return Err("REBASE_CONFLICT:Already in a conflict state. Please resolve conflicts first.".to_string());
+    }
+
     let result = run_git(&path, &["pull", "--rebase"]);
     match result {
         Ok(_) => Ok(()),
@@ -174,8 +203,7 @@ pub async fn git_pull(path: String) -> Result<(), String> {
             if is_auth_error(&e) {
                 Err(format!("AUTH_REQUIRED:{}", e))
             } else if is_conflict_error(&e) {
-                // Abort the rebase to restore the working tree to a clean state
-                let _ = run_git(&path, &["rebase", "--abort"]);
+                // Do NOT abort the rebase - preserve the conflict state for the UI to resolve
                 Err(format!("REBASE_CONFLICT:{}", e))
             } else {
                 Err(format!("Failed to pull: {}", e))
@@ -238,8 +266,7 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
         Ok(_) => Ok(()),
         Err(e) => {
             if is_conflict_error(&e) {
-                // Abort the rebase to restore the working tree to a clean state
-                let _ = run_git(&path, &["rebase", "--abort"]);
+                // Do NOT abort the rebase - preserve the conflict state for the UI to resolve
                 Err(format!("REBASE_CONFLICT:{}", e))
             } else {
                 Err(format!("Failed to pull: {}", e))
@@ -1020,6 +1047,318 @@ fn get_remote_url(path: &str) -> Result<String, String> {
     // Try to get the first remote URL (usually 'origin')
     let output = run_git(path, &["remote", "get-url", "origin"])?;
     Ok(output.trim().to_string())
+}
+
+/// Get list of conflicting files in a repository during a rebase or merge
+#[tauri::command]
+pub async fn git_get_conflict_files(repo_path: String) -> Result<Vec<ConflictFile>, String> {
+    // Check if there's an ongoing rebase or merge
+    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
+    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
+    let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
+
+    if !rebase_merge.exists() && !rebase_apply.exists() && !merge_head.exists() {
+        eprintln!("[INFO] git_get_conflict_files: no rebase/merge state found in {}", repo_path);
+        return Ok(vec![]);
+    }
+
+    let mut seen_paths = std::collections::HashSet::new();
+    let mut files = Vec::new();
+
+    // Method 1: Get unmerged files using diff-filter=U
+    if let Ok(output) = run_git(&repo_path, &["diff", "--name-only", "--diff-filter=U"]) {
+        eprintln!("[INFO] git_get_conflict_files: diff --diff-filter=U output for {}: {:?}", repo_path, output);
+        for line in output.lines() {
+            let rel_path = line.trim();
+            if !rel_path.is_empty() && seen_paths.insert(rel_path.to_string()) {
+                let abs_path = format!("{}/{}", repo_path.trim_end_matches('/'), rel_path);
+                files.push(ConflictFile {
+                    path: rel_path.to_string(),
+                    abs_path,
+                });
+            }
+        }
+    }
+
+    // Method 2: Use ls-files --unmerged as fallback
+    if files.is_empty() {
+        if let Ok(ls_output) = run_git(&repo_path, &["ls-files", "--unmerged"]) {
+            eprintln!("[INFO] git_get_conflict_files: ls-files --unmerged output: {:?}", ls_output);
+            // Parse ls-files output: mode hash stage path
+            for line in ls_output.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    let rel_path = parts[3..].join(" ");
+                    if seen_paths.insert(rel_path.clone()) {
+                        let abs_path = format!("{}/{}", repo_path.trim_end_matches('/'), rel_path);
+                        files.push(ConflictFile {
+                            path: rel_path,
+                            abs_path,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Method 3: Use git status --porcelain to find conflict markers (UU, AA, DU, UD etc)
+    if files.is_empty() {
+        if let Ok(status_output) = run_git(&repo_path, &["status", "--porcelain"]) {
+            eprintln!("[INFO] git_get_conflict_files: status --porcelain output: {:?}", status_output);
+            for line in status_output.lines() {
+                let line = line.trim();
+                if line.len() >= 4 {
+                    let xy = &line[0..2];
+                    // Conflict indicators: DD, AU, UD, UA, DU, UU, AA
+                    if xy.contains("U") || xy == "DD" || xy == "AA" {
+                        let rel_path = line[3..].trim().to_string();
+                        if seen_paths.insert(rel_path.clone()) {
+                            let abs_path = format!("{}/{}", repo_path.trim_end_matches('/'), rel_path);
+                            files.push(ConflictFile {
+                                path: rel_path,
+                                abs_path,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("[INFO] git_get_conflict_files: found {} conflict files in {}", files.len(), repo_path);
+    Ok(files)
+}
+
+/// Get the local version (ours) of a conflicting file
+/// Uses git show with multiple fallback strategies:
+/// 1. HEAD:<path> (works in most cases)
+/// 2. :2:<path> (stage 2 = ours in the index)
+/// 3. Read the file from ORIG_HEAD (before rebase)
+#[tauri::command]
+pub async fn git_get_conflict_local_content(repo_path: String, file_path: String) -> Result<String, String> {
+    eprintln!("[INFO] git_get_conflict_local_content: repo_path={}, file_path={}", repo_path, file_path);
+
+    // Strategy 1: Try git show HEAD:<path>
+    match run_git(&repo_path, &["show", &format!("HEAD:{}", file_path)]) {
+        Ok(output) if !output.is_empty() => {
+            eprintln!("[INFO] git_get_conflict_local_content: got content from HEAD:{} (len={})", file_path, output.len());
+            return Ok(output);
+        }
+        Ok(_) => eprintln!("[WARN] git_get_conflict_local_content: HEAD:{} returned empty", file_path),
+        Err(e) => eprintln!("[WARN] git_get_conflict_local_content: HEAD:{} failed: {}", file_path, e),
+    }
+
+    // Strategy 2: Try git show :2:<path> (stage 2 = ours in the index)
+    match run_git(&repo_path, &["show", &format!(":2:{}", file_path)]) {
+        Ok(output) if !output.is_empty() => {
+            eprintln!("[INFO] git_get_conflict_local_content: got content from :2:{} (len={})", file_path, output.len());
+            return Ok(output);
+        }
+        Ok(_) => eprintln!("[WARN] git_get_conflict_local_content: :2:{} returned empty", file_path),
+        Err(e) => eprintln!("[WARN] git_get_conflict_local_content: :2:{} failed: {}", file_path, e),
+    }
+
+    // Strategy 3: Read the file directly from the working tree (which has conflict markers)
+    // and extract just our portion
+    let abs_path = format!("{}/{}", repo_path.trim_end_matches('/'), file_path);
+    match std::fs::read_to_string(&abs_path) {
+        Ok(content) => {
+            eprintln!("[INFO] git_get_conflict_local_content: read file directly (len={})", content.len());
+            // Return the working tree version (has conflict markers but at least shows something)
+            Ok(content)
+        }
+        Err(e) => {
+            eprintln!("[ERROR] git_get_conflict_local_content: all strategies failed for {} in {}: {}", file_path, repo_path, e);
+            Err(format!("Failed to get local content for {}: all strategies failed", file_path))
+        }
+    }
+}
+
+/// Get the remote version (theirs) of a conflicting file
+/// Uses multiple fallback strategies:
+/// 1. REBASE_HEAD:<path> (during rebase-merge)
+/// 2. :3:<path> (stage 3 = theirs in the index)
+/// 3. MERGE_HEAD:<path> (during merge)
+/// 4. ORIG_HEAD:<path> (fallback)
+#[tauri::command]
+pub async fn git_get_conflict_remote_content(repo_path: String, file_path: String) -> Result<String, String> {
+    eprintln!("[INFO] git_get_conflict_remote_content: repo_path={}, file_path={}", repo_path, file_path);
+
+    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
+    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
+    let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
+
+    // Strategy 1: Try REBASE_HEAD (during rebase-merge)
+    if rebase_merge.exists() || rebase_apply.exists() {
+        match run_git(&repo_path, &["show", &format!("REBASE_HEAD:{}", file_path)]) {
+            Ok(output) if !output.is_empty() => {
+                eprintln!("[INFO] git_get_conflict_remote_content: got content from REBASE_HEAD:{} (len={})", file_path, output.len());
+                return Ok(output);
+            }
+            Ok(_) => eprintln!("[WARN] git_get_conflict_remote_content: REBASE_HEAD:{} returned empty", file_path),
+            Err(e) => eprintln!("[WARN] git_get_conflict_remote_content: REBASE_HEAD:{} failed: {}", file_path, e),
+        }
+    }
+
+    // Strategy 2: Try :3:<path> (stage 3 = theirs in the index)
+    // This is the most reliable method for getting "their" version during any conflict
+    match run_git(&repo_path, &["show", &format!(":3:{}", file_path)]) {
+        Ok(output) if !output.is_empty() => {
+            eprintln!("[INFO] git_get_conflict_remote_content: got content from :3:{} (len={})", file_path, output.len());
+            return Ok(output);
+        }
+        Ok(_) => eprintln!("[WARN] git_get_conflict_remote_content: :3:{} returned empty", file_path),
+        Err(e) => eprintln!("[WARN] git_get_conflict_remote_content: :3:{} failed: {}", file_path, e),
+    }
+
+    // Strategy 3: Try MERGE_HEAD (during merge)
+    if merge_head.exists() {
+        match run_git(&repo_path, &["show", &format!("MERGE_HEAD:{}", file_path)]) {
+            Ok(output) if !output.is_empty() => {
+                eprintln!("[INFO] git_get_conflict_remote_content: got content from MERGE_HEAD:{} (len={})", file_path, output.len());
+                return Ok(output);
+            }
+            Ok(_) => eprintln!("[WARN] git_get_conflict_remote_content: MERGE_HEAD:{} returned empty", file_path),
+            Err(e) => eprintln!("[WARN] git_get_conflict_remote_content: MERGE_HEAD:{} failed: {}", file_path, e),
+        }
+    }
+
+    // Strategy 4: Try ORIG_HEAD (fallback)
+    match run_git(&repo_path, &["show", &format!("ORIG_HEAD:{}", file_path)]) {
+        Ok(output) if !output.is_empty() => {
+            eprintln!("[INFO] git_get_conflict_remote_content: got content from ORIG_HEAD:{} (len={})", file_path, output.len());
+            return Ok(output);
+        }
+        Ok(_) => eprintln!("[WARN] git_get_conflict_remote_content: ORIG_HEAD:{} returned empty", file_path),
+        Err(e) => eprintln!("[WARN] git_get_conflict_remote_content: ORIG_HEAD:{} failed: {}", file_path, e),
+    }
+
+    eprintln!("[ERROR] git_get_conflict_remote_content: all strategies failed for {} in {}", file_path, repo_path);
+    Err(format!("Failed to get remote content for {}: all strategies failed", file_path))
+}
+
+/// Resolve a conflict by choosing a side for a specific file
+/// side: "local" or "remote"
+#[tauri::command]
+pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, side: String) -> Result<(), String> {
+    let rel_path = Path::new(&file_path)
+        .strip_prefix(Path::new(&repo_path))
+        .map_err(|e| format!("Invalid relative path: {}", e))?;
+    let rel_path_str = rel_path.to_str().ok_or("Invalid path encoding")?;
+
+    eprintln!("[INFO] git_resolve_conflict_file: repo_path={}, file_path={}, side={}", repo_path, file_path, side);
+
+    // Get content based on chosen side, with multiple fallback strategies
+    let content = get_conflict_content(&repo_path, rel_path_str, &side)?;
+
+    std::fs::write(&file_path, &content)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    // Stage the resolved file
+    run_git(&repo_path, &["add", rel_path_str])?;
+
+    check_and_continue_rebase(&repo_path)
+}
+
+/// Helper function to get conflict content for a specific side
+fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<String, String> {
+    if side == "local" {
+        // Get local version (ours) - try multiple strategies
+        // Strategy 1: HEAD:<path>
+        if let Ok(output) = run_git(repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
+            if !output.is_empty() {
+                return Ok(output);
+            }
+        }
+        // Strategy 2: :2:<path> (stage 2 = ours in the index)
+        if let Ok(output) = run_git(repo_path, &["show", &format!(":2:{}", rel_path)]) {
+            if !output.is_empty() {
+                return Ok(output);
+            }
+        }
+        Err(format!("Failed to get local content for {}", rel_path))
+    } else if side == "remote" {
+        // Get remote version (theirs) - try multiple strategies
+        let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
+        let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
+        let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
+
+        // Strategy 1: REBASE_HEAD (during rebase)
+        if rebase_merge.exists() || rebase_apply.exists() {
+            if let Ok(output) = run_git(repo_path, &["show", &format!("REBASE_HEAD:{}", rel_path)]) {
+                if !output.is_empty() {
+                    return Ok(output);
+                }
+            }
+        }
+
+        // Strategy 2: :3:<path> (stage 3 = theirs in the index)
+        if let Ok(output) = run_git(repo_path, &["show", &format!(":3:{}", rel_path)]) {
+            if !output.is_empty() {
+                return Ok(output);
+            }
+        }
+
+        // Strategy 3: MERGE_HEAD (during merge)
+        if merge_head.exists() {
+            if let Ok(output) = run_git(repo_path, &["show", &format!("MERGE_HEAD:{}", rel_path)]) {
+                if !output.is_empty() {
+                    return Ok(output);
+                }
+            }
+        }
+
+        Err(format!("Failed to get remote content for {}", rel_path))
+    } else {
+        Err(format!("Invalid side: {}", side))
+    }
+}
+
+/// Helper function to check if all conflicts are resolved and continue rebase/merge if so
+fn check_and_continue_rebase(repo_path: &str) -> Result<(), String> {
+    let remaining = run_git(repo_path, &["diff", "--name-only", "--diff-filter=U"])?;
+    if remaining.trim().is_empty() {
+        // All conflicts resolved - continue the rebase/merge
+        let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
+        let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
+
+        if rebase_merge.exists() || rebase_apply.exists() {
+            // Continue rebase - use GIT_EDITOR=true to skip editor
+            let result = run_git_with_env(
+                repo_path,
+                &["rebase", "--continue"],
+                &[("GIT_EDITOR", "true")],
+            );
+            if let Err(e) = result {
+                eprintln!("[WARN] git_resolve_conflict_file: rebase --continue failed: {}", e);
+                // Don't fail the whole operation - the conflict is resolved but rebase couldn't continue
+                // User can continue manually
+            }
+        } else {
+            let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
+            if merge_head.exists() {
+                run_git(repo_path, &["commit", "--no-edit"])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Abort the current rebase or merge, restoring the repository to a clean state
+#[tauri::command]
+pub async fn git_abort_conflict(repo_path: String) -> Result<(), String> {
+    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
+    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
+    let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
+
+    if rebase_merge.exists() || rebase_apply.exists() {
+        run_git(&repo_path, &["rebase", "--abort"])?;
+    } else if merge_head.exists() {
+        run_git(&repo_path, &["merge", "--abort"])?;
+    } else {
+        return Err("No rebase or merge in progress".to_string());
+    }
+    Ok(())
 }
 
 fn get_uncommitted_count(path: &str) -> (bool, usize) {

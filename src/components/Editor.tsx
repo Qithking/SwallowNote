@@ -9,6 +9,7 @@ import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
 import { MindMapEditor } from './editors/MindMapEditor'
 import DiffViewer from './DiffViewer/DiffViewer'
+import ConflictResolver from './DiffViewer/ConflictResolver'
 import { FileCode, FolderOpen, FileText, Clock, GitFork, ArrowRight, Layers } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { useTranslation } from 'react-i18next'
@@ -302,6 +303,18 @@ export function EditorView() {
     return (
       <div className="flex-1 flex flex-col overflow-hidden relative">
         <DiffViewer diffContent={activeTab.diffContent || ''} />
+      </div>
+    )
+  }
+
+  // Handle conflict tab
+  if (activeTab.type === 'conflict' && activeTab.conflictRepoPath && activeTab.conflictRepoName) {
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        <ConflictResolver
+          repoPath={activeTab.conflictRepoPath}
+          repoName={activeTab.conflictRepoName}
+        />
       </div>
     )
   }

@@ -26,7 +26,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useWorkspaceStore, useUIStore, useFileTreeStore } from '@/stores'
+import { useWorkspaceStore, useUIStore, useFileTreeStore, useEditorStore } from '@/stores'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
@@ -282,6 +282,8 @@ function CommitSection({
           failCount++
           errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
           conflictPaths.push(repo.path)
+          // Auto-open conflict resolution tab
+          useEditorStore.getState().openConflictTab(repo.path, repo.name)
         } else {
           failCount++
           errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
@@ -355,6 +357,15 @@ function RepositoryItem({
   const { showToast } = useUIStore()
   const [isForceAction, setIsForceAction] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'forcePush' | 'forcePull' | null>(null)
+
+  const handleClick = () => {
+    if (repo.status === 'conflict') {
+      // Open conflict resolution tab for this repo
+      useEditorStore.getState().openConflictTab(repo.path, repo.name)
+    } else {
+      onToggle()
+    }
+  }
 
   const handleForcePush = async () => {
     setIsForceAction(true)
@@ -449,8 +460,8 @@ function RepositoryItem({
           isSelected && 'bg-[var(--bg-hover)]',
           repo.isSubmodule && 'pl-8 ml-4 border-l-2 border-[var(--border-color)]'
         )}
-        onClick={onToggle}
-        title={[repo.path, repo.isSubmodule && repo.parentPath ? `${t('git.parentRepo')}: ${repo.parentPath}` : '', repo.hasUncommittedChanges ? `${t('git.pendingFiles')}: ${repo.uncommittedCount} ${t('git.files')}` : ''].filter(Boolean).join('\n')}
+        onClick={handleClick}
+        title={[repo.path, repo.isSubmodule && repo.parentPath ? `${t('git.parentRepo')}: ${repo.parentPath}` : '', repo.hasUncommittedChanges ? `${t('git.pendingFiles')}: ${repo.uncommittedCount} ${t('git.files')}` : '', repo.status === 'conflict' ? t('git.conflictTitle') : ''].filter(Boolean).join('\n')}
       >
         {/* Repo name with status indicator and checkbox */}
         <div className="flex items-center gap-2">
@@ -644,6 +655,14 @@ function GitView() {
       if (conflicted > 0) {
         const conflictNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
         showToast(t('git.pullConflict', { repos: conflictNames }), 'error')
+        
+        // Auto-open conflict resolution tabs for conflicted repos
+        const editorStore = useEditorStore.getState()
+        for (const result of results) {
+          if (result.isConflict) {
+            editorStore.openConflictTab(result.path, result.name)
+          }
+        }
       } else if (failed > 0) {
         showToast(t('git.pullResult', { success: succeeded, fail: failed }), 'error')
       } else if (succeeded > 0) {
