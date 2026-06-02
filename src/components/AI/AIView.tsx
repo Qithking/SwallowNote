@@ -81,6 +81,7 @@ function AIView() {
   // Use Zustand selectors to avoid unnecessary re-renders from unrelated state changes
   const aiModels = useUIStore((s) => s.aiModels)
   const activeAiModelId = useUIStore((s) => s.activeAiModelId)
+  const defaultAiModelId = useUIStore((s) => s.defaultAiModelId)
   const aiPort = useUIStore((s) => s.aiPort)
   const setSettingsPanelVisible = useUIStore((s) => s.setSettingsPanelVisible)
   const setActiveAiModel = useUIStore((s) => s.setActiveAiModel)
@@ -139,8 +140,11 @@ function AIView() {
   }, [messages, scrollToBottom])
 
   useEffect(() => {
+    // If no active model or active model not in list, set default model
     if ((!activeAiModelId || !aiModels.find((m) => m.id === activeAiModelId)) && aiModels.length > 0) {
-      setActiveAiModel(aiModels[0].id)
+      // Priority: 1. defaultAiModelId if valid, 2. first available model
+      const defaultModel = defaultAiModelId && aiModels.find((m) => m.id === defaultAiModelId)
+      setActiveAiModel(defaultModel ? defaultModel.id : aiModels[0].id)
     }
     if (activeAiModelId) {
       const model = aiModels.find((m) => m.id === activeAiModelId)

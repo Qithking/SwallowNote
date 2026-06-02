@@ -76,8 +76,8 @@ function SettingsView() {
     autoSyncPush, setAutoSyncPush,
     uploadPath, setUploadPath,
     aiPort, setAiPort,
-    aiModels, activeAiModelId,
-    addAiModel, removeAiModel, setActiveAiModel, updateAiModelApiKey,
+    aiModels, activeAiModelId, defaultAiModelId,
+    addAiModel, removeAiModel, setActiveAiModel, setDefaultAiModel, updateAiModelApiKey,
     customThemes, activeLightCustomThemeId, activeDarkCustomThemeId,
     setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
   } = useUIStore()
@@ -487,6 +487,24 @@ function SettingsView() {
               
               <Card>
                 <CardContent className="p-0">
+                  {/* 默认模型设置 */}
+                  <div className="px-4 py-3 border-b border-border">
+                    <SettingRow label={t('settings.ai.defaultModel')} desc={t('settings.ai.defaultModel.desc')}>
+                      <Select value={defaultAiModelId} onValueChange={(v) => setDefaultAiModel(v)}>
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder={t('settings.ai.defaultModel.placeholder')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {aiModels.map((model) => (
+                            <SelectItem key={model.id} value={model.id}>
+                              {model.name}{model.isBuiltIn ? ` · ${t('ai.builtIn')}` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </SettingRow>
+                  </div>
+
                   <div className="px-4 pt-4 pb-2">
                     <Tabs value={aiCategoryTab} onValueChange={(v) => {
                       setAiCategoryTab(v as AiProviderCategory)

@@ -135,6 +135,7 @@ export interface UIState {
   aiPort: number
   aiModels: AiModelConfig[]
   activeAiModelId: string
+  defaultAiModelId: string
   aiAttachedFiles: string[]
   aiContextMenuRequest: AiContextMenuRequest | null
   customThemes: CustomTheme[]
@@ -177,6 +178,7 @@ export interface UIState {
   addAiModel: (model: Omit<AiModelConfig, 'id'>) => void
   removeAiModel: (id: string) => void
   setActiveAiModel: (id: string) => void
+  setDefaultAiModel: (id: string) => void
   addAiAttachedFile: (filePath: string) => void
   removeAiAttachedFile: (index: number) => void
   clearAiAttachedFiles: () => void
@@ -228,6 +230,7 @@ export const useUIStore = create<UIState>((set) => ({
   aiPort: 4017,
   aiModels: [],
   activeAiModelId: '',
+  defaultAiModelId: '',
   aiAttachedFiles: [],
   aiContextMenuRequest: null,
   customThemes: [...BUILT_IN_THEMES],
@@ -397,6 +400,10 @@ export const useUIStore = create<UIState>((set) => ({
   setActiveAiModel: (id: string) => {
     set({ activeAiModelId: id })
     saveAppSettings({ activeAiModelId: id })
+  },
+  setDefaultAiModel: (id: string) => {
+    set({ defaultAiModelId: id })
+    saveAppSettings({ defaultAiModelId: id })
   },
   addAiAttachedFile: (filePath: string) => {
     set((state) => {
@@ -591,6 +598,7 @@ export const useUIStore = create<UIState>((set) => ({
         aiPort: s.aiPort ? Number(s.aiPort) : 4017,
         aiModels,
         activeAiModelId: s.activeAiModelId || (aiModels.length > 0 ? aiModels[0].id : ''),
+        defaultAiModelId: s.defaultAiModelId || '',
         customThemes,
         activeLightCustomThemeId: s.activeLightCustomThemeId || 'builtin-light',
         activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',
