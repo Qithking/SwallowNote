@@ -329,9 +329,8 @@ function computeDiffDecorations(content: string, diffLines: DiffLine[]): Decorat
 }
 
 // StateField-based diff decoration extension
-// Uses the `provide` pattern to connect the StateField to EditorView.decorations facet.
-// This is the idiomatic CodeMirror 6 approach: the StateField declares what facet it provides,
-// and CodeMirror handles the wiring internally. Never use EditorView.decorations.of(StateField).
+// Uses Facet.compute to explicitly read the StateField value into EditorView.decorations.
+// This is more reliable than the `provide` pattern for decoration fields.
 function createDiffDecorationExtension(diffLines: DiffLine[]): Extension {
   const field = StateField.define<DecorationSet>({
     create(state: EditorState) {
@@ -343,9 +342,11 @@ function createDiffDecorationExtension(diffLines: DiffLine[]): Extension {
       }
       return value
     },
-    provide: (f) => EditorView.decorations.from(f),
   })
-  return field
+  return [
+    field,
+    EditorView.decorations.compute([field], (state) => state.field(field)),
+  ]
 }
 
 function SplitDiffViewer({ localContent, remoteContent, localLabel, remoteLabel, editedContent: editedContentProp, onLocalContentChange, filename }: SplitDiffViewerProps) {

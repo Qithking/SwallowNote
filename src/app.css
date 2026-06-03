@@ -629,8 +629,9 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 /* ---- Diff Viewer ---- */
 .split-diff-editor .cm-editor { height: 100%; position: relative; }
 .split-diff-editor .cm-scroller {
+  position: absolute !important;
+  inset: 0;
   overflow: auto !important;
-  height: 100% !important;
   /* Restore scrollbar visibility in diff viewer */
   scrollbar-width: thin !important;
   -ms-overflow-style: thin !important;
