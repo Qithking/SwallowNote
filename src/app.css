@@ -627,15 +627,14 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .cm-editor .cm-selectionMatch { background: rgba(0,0,0,0.06); }
 
 /* ---- Diff Viewer ---- */
-.split-diff-editor .cm-editor { height: 100%; position: relative; }
+/* Constrain editor height to parent so CodeMirror's native scroll kicks in */
+.split-diff-editor .cm-editor { height: 100%; }
+/* Override global .cm-editor .cm-scroller { overflow: visible } */
 .split-diff-editor .cm-scroller {
-  position: absolute !important;
-  inset: 0;
   overflow: auto !important;
-  /* Restore scrollbar visibility in diff viewer */
   scrollbar-width: thin !important;
-  -ms-overflow-style: thin !important;
 }
+/* Restore scrollbar visibility (global CSS hides them: ::-webkit-scrollbar { display: none }) */
 .split-diff-editor .cm-scroller::-webkit-scrollbar {
   display: block !important;
   width: 6px;
