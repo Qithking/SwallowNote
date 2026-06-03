@@ -192,16 +192,7 @@ pub async fn git_pull(path: String) -> Result<(), String> {
     // 1. User clicks "Overwrite Local/Remote" in file history
     // 2. User clicks "Mark as Resolved" in the ConflictResolver panel
     if is_rebase_or_merge_in_progress(&path) {
-        // Check if there are actually any unmerged files using multiple methods
-        let diff_check = run_git(&path, &["diff", "--name-only", "--diff-filter=U"])
-            .map(|o| !o.trim().is_empty())
-            .unwrap_or(false);
-        let ls_check = run_git(&path, &["ls-files", "--unmerged"])
-            .map(|o| !o.trim().is_empty())
-            .unwrap_or(false);
-        let has_real_conflicts = diff_check || ls_check;
-
-        if has_real_conflicts {
+        if has_real_conflicts(&path) {
             // Real conflicts exist - require explicit user resolution
             return Err("REBASE_CONFLICT:Already in a conflict state. Please resolve conflicts first.".to_string());
         } else {
@@ -209,9 +200,7 @@ pub async fn git_pull(path: String) -> Result<(), String> {
             // Abort the stale state to clean up - this is NOT resolving conflicts,
             // it's cleaning up invalid git state before proceeding with the pull.
             // All patches will be re-applied during the actual pull --rebase below.
-            eprintln!("[INFO] git_pull: stale rebase/merge state detected in {}, aborting to clean up", path);
-            let _ = run_git(&path, &["rebase", "--abort"]);
-            let _ = run_git(&path, &["merge", "--abort"]);
+            cleanup_stale_rebase_state(&path);
             // Fall through to proceed with the actual pull
         }
     }
@@ -232,9 +221,7 @@ pub async fn git_pull(path: String) -> Result<(), String> {
             } else {
                 // Non-conflict error (network, zlib, etc.): clean up stale rebase state
                 // that pull --rebase may have left behind
-                eprintln!("[INFO] git_pull: non-conflict error during pull --rebase, cleaning up stale state: {}", e);
-                let _ = run_git(&path, &["rebase", "--abort"]);
-                let _ = run_git(&path, &["merge", "--abort"]);
+                cleanup_stale_rebase_state(&path);
                 Err(format!("Failed to pull: {}", e))
             }
         }
@@ -298,6 +285,8 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
                 // Do NOT abort the rebase - preserve the conflict state for the UI to resolve
                 Err(format!("REBASE_CONFLICT:{}", e))
             } else {
+                // Non-conflict error: clean up stale rebase state that pull --rebase may have left
+                cleanup_stale_rebase_state(&path);
                 Err(format!("Failed to pull: {}", e))
             }
         }
@@ -308,9 +297,13 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
 /// Handles detached HEAD state by using HEAD:<branch> format
 #[tauri::command]
 pub async fn git_push(path: String) -> Result<(), String> {
-    // Check if we're in a rebase/merge state - do NOT auto-continue, user must resolve
+    // Check if we're in a rebase/merge state
     if is_rebase_or_merge_in_progress(&path) {
-        return Err("REBASE_CONFLICT:Cannot push while rebase/merge is in progress. Please resolve conflicts first.".to_string());
+        if has_real_conflicts(&path) {
+            return Err("REBASE_CONFLICT:Cannot push while rebase/merge is in progress. Please resolve conflicts first.".to_string());
+        }
+        // Stale state files - clean up before proceeding
+        cleanup_stale_rebase_state(&path);
     }
 
     // Try normal push first
@@ -348,9 +341,13 @@ pub async fn git_push(path: String) -> Result<(), String> {
 /// The script is created with minimal permissions (0o600) and deleted immediately after use.
 #[tauri::command]
 pub async fn git_push_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
-    // Check if we're in a rebase/merge state - do NOT auto-continue, user must resolve
+    // Check if we're in a rebase/merge state
     if is_rebase_or_merge_in_progress(&path) {
-        return Err("REBASE_CONFLICT:Cannot push while rebase/merge is in progress. Please resolve conflicts first.".to_string());
+        if has_real_conflicts(&path) {
+            return Err("REBASE_CONFLICT:Cannot push while rebase/merge is in progress. Please resolve conflicts first.".to_string());
+        }
+        // Stale state files - clean up before proceeding
+        cleanup_stale_rebase_state(&path);
     }
 
     // Create a temporary askpass script with a unique name to avoid conflicts
@@ -562,9 +559,13 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
     // Push - only if remote exists
     let remote_url = get_remote_url(&path);
     if remote_url.is_ok() {
-        // Check if already in a rebase/merge conflict state - do NOT auto-continue
+        // Check if already in a rebase/merge state before pulling
         if is_rebase_or_merge_in_progress(&path) {
-            return Err("REBASE_CONFLICT:Cannot push while rebase/merge is in progress".to_string());
+            if has_real_conflicts(&path) {
+                return Err("REBASE_CONFLICT:Cannot push while rebase/merge is in progress".to_string());
+            }
+            // Stale state files - clean up before proceeding
+            cleanup_stale_rebase_state(&path);
         }
 
         // Pull --rebase first to integrate remote changes before pushing
@@ -582,15 +583,17 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             // Non-conflict, non-auth error (network, zlib, etc.):
             // Clean up stale rebase state that pull --rebase may have left
             // and report error without triggering conflict UI
-            eprintln!("[INFO] git_commit_and_push: non-conflict error during pull, cleaning up stale state: {}", e);
-            let _ = run_git(&path, &["rebase", "--abort"]);
-            let _ = run_git(&path, &["merge", "--abort"]);
+            cleanup_stale_rebase_state(&path);
             return Err(format!("Pull failed: {}", e));
         }
         
         // Check again after pull - if we're now in a conflict state, don't push
         if is_rebase_or_merge_in_progress(&path) {
-            return Err("REBASE_CONFLICT:Cannot push while rebase/merge is in progress".to_string());
+            if has_real_conflicts(&path) {
+                return Err("REBASE_CONFLICT:Cannot push while rebase/merge is in progress".to_string());
+            }
+            // Pull left stale state (shouldn't happen normally but be defensive)
+            cleanup_stale_rebase_state(&path);
         }
 
         let push_result = run_git(&path, &["push"]);
@@ -1044,6 +1047,52 @@ fn is_rebase_or_merge_in_progress(repo_path: &str) -> bool {
     let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
     let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
     rebase_merge.exists() || rebase_apply.exists() || merge_head.exists()
+}
+
+/// Check if the repository has REAL merge conflicts (not just stale state files).
+/// Returns true only if there are actual unmerged files in the index or working tree.
+/// This should be used instead of is_rebase_or_merge_in_progress() when deciding
+/// whether to trigger the conflict resolution UI, to avoid false positives from
+/// stale rebase/merge state files left behind by interrupted operations.
+fn has_real_conflicts(repo_path: &str) -> bool {
+    // Method 1: Check for unmerged files via diff-filter=U
+    let diff_check = run_git(repo_path, &["diff", "--name-only", "--diff-filter=U"])
+        .map(|o| !o.trim().is_empty())
+        .unwrap_or(false);
+    if diff_check {
+        return true;
+    }
+
+    // Method 2: Check for unmerged entries in the index via ls-files --unmerged
+    let ls_check = run_git(repo_path, &["ls-files", "--unmerged"])
+        .map(|o| !o.trim().is_empty())
+        .unwrap_or(false);
+    if ls_check {
+        return true;
+    }
+
+    // Method 3: Check porcelain status for conflict indicators (UU, AA, DU, UD, DD)
+    if let Ok(status_output) = run_git(repo_path, &["status", "--porcelain"]) {
+        for line in status_output.lines() {
+            if line.len() >= 4 {
+                let xy = &line[0..2];
+                if xy.contains("U") || xy == "DD" || xy == "AA" {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Clean up stale rebase/merge state files (when state files exist but no real conflicts).
+/// This happens when an operation (pull --rebase, etc.) was interrupted (network error, crash)
+/// but left behind .git/rebase-merge or .git/MERGE_HEAD files without actual unmerged files.
+fn cleanup_stale_rebase_state(repo_path: &str) {
+    eprintln!("[INFO] Cleaning up stale rebase/merge state in {}", repo_path);
+    let _ = run_git(repo_path, &["rebase", "--abort"]);
+    let _ = run_git(repo_path, &["merge", "--abort"]);
 }
 
 /// Fix detached HEAD state by switching back to the correct branch

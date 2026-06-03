@@ -164,6 +164,7 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
       }
 
       const repos: ConflictRepo[] = []
+      const stalePaths: string[] = [] // Paths with conflict status but no actual conflict files
       for (const path of conflictPaths) {
         try {
           const files = await gitGetConflictFiles(path)
@@ -171,13 +172,40 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
             const repo = gitStore.repositories.find(r => r.path === path)
             const name = repo?.name || path.split('/').pop() || path
             repos.push({ path, name, files })
+          } else {
+            // Backend returned no conflict files - this is a stale state
+            // (state files exist but no unmerged files)
+            stalePaths.push(path)
           }
-          // NOTE: Do NOT auto-change repo status to 'normal' when files is empty.
-          // The conflict tab should remain open until the user explicitly resolves or aborts.
         } catch (e) {
           console.error('Failed to get conflict files for:', path, e)
         }
       }
+
+      // If ALL repos have no actual conflict files, this is a false positive.
+      // Clean up the stale state: reset repo status to normal and close the conflict tab.
+      if (repos.length === 0 && stalePaths.length > 0) {
+        console.warn('[ConflictResolver] All repos have no actual conflict files - cleaning up stale state')
+        const gitStoreNow = useGitStore.getState()
+        for (const path of stalePaths) {
+          gitStoreNow.updateRepository(path, { status: 'normal' })
+        }
+        // Close the conflict tab
+        const { useEditorStore } = await import('@/stores')
+        const editorStore = useEditorStore.getState()
+        const conflictTabId = `conflict-${repoPath}`
+        editorStore.removeTab(conflictTabId)
+        return
+      }
+
+      // If some repos have real conflicts and some are stale, just reset the stale ones
+      if (stalePaths.length > 0) {
+        const gitStoreNow = useGitStore.getState()
+        for (const path of stalePaths) {
+          gitStoreNow.updateRepository(path, { status: 'normal' })
+        }
+      }
+
       setConflictRepos(repos)
 
       // Auto-expand all repos with conflicts
