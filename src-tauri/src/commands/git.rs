@@ -188,7 +188,9 @@ pub async fn git_pull(path: String) -> Result<(), String> {
     }
 
     // Check if already in a rebase/merge state
-    // If it's a STALE state (state file exists but no actual unmerged files), auto-complete it first
+    // IMPORTANT: Never auto-resolve or auto-continue. Only two resolution paths exist:
+    // 1. User clicks "Overwrite Local/Remote" in file history
+    // 2. User clicks "Mark as Resolved" in the ConflictResolver panel
     if is_rebase_or_merge_in_progress(&path) {
         // Check if there are actually any unmerged files using multiple methods
         let diff_check = run_git(&path, &["diff", "--name-only", "--diff-filter=U"])
@@ -199,22 +201,18 @@ pub async fn git_pull(path: String) -> Result<(), String> {
             .unwrap_or(false);
         let has_real_conflicts = diff_check || ls_check;
 
-        if !has_real_conflicts {
-            // Stale rebase/merge state: no actual conflicts. Try to complete it.
-            eprintln!("[INFO] git_pull: stale rebase/merge state detected in {}, attempting to complete", path);
-            let completed = run_git(&path, &["rebase", "--continue"]).is_ok()
-                || run_git(&path, &["merge", "--continue"]).is_ok();
-
-            if completed {
-                eprintln!("[INFO] git_pull: successfully completed stale rebase/merge in {}", path);
-                // Fall through to proceed with the actual pull
-            } else {
-                // Couldn't auto-complete, report as conflict
-                return Err("REBASE_CONFLICT:Already in a conflict state (stale). Please resolve or abort.".to_string());
-            }
-        } else {
-            // Real conflicts exist, let the user resolve them
+        if has_real_conflicts {
+            // Real conflicts exist - require explicit user resolution
             return Err("REBASE_CONFLICT:Already in a conflict state. Please resolve conflicts first.".to_string());
+        } else {
+            // Stale rebase/merge state: state files exist but no unmerged files.
+            // Abort the stale state to clean up - this is NOT resolving conflicts,
+            // it's cleaning up invalid git state before proceeding with the pull.
+            // All patches will be re-applied during the actual pull --rebase below.
+            eprintln!("[INFO] git_pull: stale rebase/merge state detected in {}, aborting to clean up", path);
+            let _ = run_git(&path, &["rebase", "--abort"]);
+            let _ = run_git(&path, &["merge", "--abort"]);
+            // Fall through to proceed with the actual pull
         }
     }
 
