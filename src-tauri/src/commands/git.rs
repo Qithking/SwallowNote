@@ -230,6 +230,11 @@ pub async fn git_pull(path: String) -> Result<(), String> {
                 // Do NOT abort the rebase - preserve the conflict state for the UI to resolve
                 Err(format!("REBASE_CONFLICT:{}", e))
             } else {
+                // Non-conflict error (network, zlib, etc.): clean up stale rebase state
+                // that pull --rebase may have left behind
+                eprintln!("[INFO] git_pull: non-conflict error during pull --rebase, cleaning up stale state: {}", e);
+                let _ = run_git(&path, &["rebase", "--abort"]);
+                let _ = run_git(&path, &["merge", "--abort"]);
                 Err(format!("Failed to pull: {}", e))
             }
         }
@@ -574,10 +579,13 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             if is_auth_error(&e) {
                 return Err(format!("AUTH_REQUIRED:{}", e));
             }
-            // Any other pull error is unsafe to continue - do NOT push
-            // Previously this would "try to push anyway" which could push
-            // incomplete/incorrect state when rebase failed silently
-            return Err(format!("REBASE_CONFLICT:Pull failed, cannot push safely: {}", e));
+            // Non-conflict, non-auth error (network, zlib, etc.):
+            // Clean up stale rebase state that pull --rebase may have left
+            // and report error without triggering conflict UI
+            eprintln!("[INFO] git_commit_and_push: non-conflict error during pull, cleaning up stale state: {}", e);
+            let _ = run_git(&path, &["rebase", "--abort"]);
+            let _ = run_git(&path, &["merge", "--abort"]);
+            return Err(format!("Pull failed: {}", e));
         }
         
         // Check again after pull - if we're now in a conflict state, don't push
