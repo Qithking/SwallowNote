@@ -28,6 +28,9 @@ function EditorToolbar() {
 
   if (!activeTab) return null
 
+  // Don't show toolbar for diff and conflict tabs
+  if (activeTab.type === 'diff' || activeTab.type === 'conflict') return null
+
   const { path, viewMode } = activeTab
   const isMarkdown = /\.(md|markdown)$/i.test(path)
 

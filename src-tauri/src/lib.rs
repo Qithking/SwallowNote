@@ -122,6 +122,7 @@ pub fn run() {
             commands::git::git_get_conflict_local_content,
             commands::git::git_get_conflict_remote_content,
             commands::git::git_resolve_conflict_file,
+            commands::git::git_save_conflict_file_content,
             commands::git::git_abort_conflict,
             commands::folder_history::save_folder_history,
             commands::folder_history::get_latest_folder,

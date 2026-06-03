@@ -259,6 +259,10 @@ export async function gitResolveConflictFile(repoPath: string, filePath: string,
   await invoke('git_resolve_conflict_file', { repoPath, filePath, side })
 }
 
+export async function gitSaveConflictFileContent(repoPath: string, filePath: string, content: string): Promise<void> {
+  await invoke('git_save_conflict_file_content', { repoPath, filePath, content })
+}
+
 export async function gitAbortConflict(repoPath: string): Promise<void> {
   await invoke('git_abort_conflict', { repoPath })
 }

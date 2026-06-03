@@ -588,8 +588,16 @@ function GitView() {
         const allRepos = results.flat()
 
         const storeRepos = mapRepoInfosToRepositories(allRepos)
-        setRepositories(storeRepos)
-        setCachedRepositories(storeRepos)
+        const prevRepos = useGitStore.getState().repositories
+        const mergedRepos = storeRepos.map(repo => {
+          const prev = prevRepos.find(r => r.path === repo.path)
+          if (prev && prev.status !== 'normal') {
+            return { ...repo, status: prev.status }
+          }
+          return repo
+        })
+        setRepositories(mergedRepos)
+        setCachedRepositories(mergedRepos)
       } catch (e) {
         console.error('Failed to scan git repos:', e)
         const latestCached = useGitStore.getState().cachedRepositories
@@ -700,8 +708,16 @@ function GitView() {
       const allRepos = results.flat()
 
       const storeRepos = mapRepoInfosToRepositories(allRepos)
-      setRepositories(storeRepos)
-      setCachedRepositories(storeRepos)
+      const prevRepos = useGitStore.getState().repositories
+      const mergedRepos = storeRepos.map(repo => {
+        const prev = prevRepos.find(r => r.path === repo.path)
+        if (prev && prev.status !== 'normal') {
+          return { ...repo, status: prev.status }
+        }
+        return repo
+      })
+      setRepositories(mergedRepos)
+      setCachedRepositories(mergedRepos)
     } catch (e) {
       console.error('Failed to refresh repos:', e)
     }

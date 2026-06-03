@@ -626,6 +626,41 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .cm-editor .cm-panels .cm-button:hover { background: var(--bg-hover); }
 .cm-editor .cm-selectionMatch { background: rgba(0,0,0,0.06); }
 
+/* ---- Diff Viewer ---- */
+.split-diff-editor .cm-editor { height: 100%; position: relative; }
+.split-diff-editor .cm-scroller {
+  overflow: auto !important;
+  height: 100% !important;
+  /* Restore scrollbar visibility in diff viewer */
+  scrollbar-width: thin !important;
+  -ms-overflow-style: thin !important;
+}
+.split-diff-editor .cm-scroller::-webkit-scrollbar {
+  display: block !important;
+  width: 6px;
+  height: 6px;
+}
+.split-diff-editor .cm-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+.split-diff-editor .cm-scroller::-webkit-scrollbar-thumb {
+  background: var(--border-color, rgba(0,0,0,0.15));
+  border-radius: 3px;
+}
+.split-diff-editor .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted, rgba(0,0,0,0.3));
+}
+.cm-readonly-diff .cm-cursor { display: none !important; }
+.cm-readonly-diff .cm-selectionLayer .cm-selectionBackground { display: none !important; }
+/* Light theme diff highlights */
+.cm-diff-added-line { background: rgba(34, 197, 94, 0.15) !important; border-left: 3px solid rgba(34, 197, 94, 0.6) !important; }
+.cm-diff-removed-line { background: rgba(239, 68, 68, 0.15) !important; border-left: 3px solid rgba(239, 68, 68, 0.6) !important; }
+.cm-diff-empty-line { background: var(--bg-tertiary, rgba(0,0,0,0.05)) !important; }
+/* Dark theme diff highlights */
+.dark .cm-diff-added-line { background: rgba(34, 197, 94, 0.12) !important; border-left: 3px solid rgba(34, 197, 94, 0.5) !important; }
+.dark .cm-diff-removed-line { background: rgba(239, 68, 68, 0.12) !important; border-left: 3px solid rgba(239, 68, 68, 0.5) !important; }
+.dark .cm-diff-empty-line { background: rgba(255,255,255,0.04) !important; }
+
 /* ---- BlockNote Editor ---- */
 .blocknote-editor-container {
   height: 100%;

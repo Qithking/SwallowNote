@@ -220,10 +220,12 @@ function App() {
         const conflicted = results.filter(r => r.isConflict).length
 
         // Step 2: If autoSyncPush is enabled, commit and push repos with uncommitted changes
+        // Skip repos that are in conflict state (detected in pull step)
         let pushSucceeded = 0
         let pushFailed = 0
         if (autoSyncPushRef.current) {
-          const reposWithChanges = repos.filter(r => r.hasUncommittedChanges && r.remoteUrl)
+          const conflictedPaths = new Set(results.filter(r => r.isConflict).map(r => r.path))
+          const reposWithChanges = repos.filter(r => r.hasUncommittedChanges && r.remoteUrl && !conflictedPaths.has(r.path))
           if (reposWithChanges.length > 0) {
             const { gitCommitAndPush, gitCredentialGet, gitPushWithCredentials } = await import('@/lib/tauri')
             for (const repo of reposWithChanges) {
@@ -232,6 +234,10 @@ function App() {
                 pushSucceeded++
               } catch (e) {
                 const errorMessage = String(e).trim()
+                // Skip repos that have conflict errors - they need manual resolution
+                if (errorMessage.startsWith('REBASE_CONFLICT:') || errorMessage.includes('rebase/merge is in progress')) {
+                  continue
+                }
                 // Try saved credentials on auth error
                 if (errorMessage.startsWith('AUTH_REQUIRED:')) {
                   try {
@@ -563,7 +569,7 @@ function App() {
       const uiState = useUIStore.getState()
       const editorSettingsState = useEditorSettingsStore.getState()
 
-      const fileTabs = editorState.tabs.filter(tab => tab.type !== 'diff')
+      const fileTabs = editorState.tabs.filter(tab => tab.type !== 'diff' && tab.type !== 'conflict')
       const tabsData = fileTabs.map(tab => ({
         id: tab.id,
         path: tab.path,
