@@ -9,8 +9,9 @@
 import { useEffect, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Lock } from 'lucide-react'
-import { EditorView, basicSetup } from 'codemirror'
-import { EditorView as CMView } from '@codemirror/view'
+import { EditorView } from '@codemirror/view'
+import { keymap, drawSelection, highlightActiveLine, highlightSpecialChars, lineNumbers } from '@codemirror/view'
+import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
 import { EditorState, Extension, RangeSetBuilder, Compartment, StateField } from '@codemirror/state'
 import { Decoration, DecorationSet } from '@codemirror/view'
 import { StreamLanguage } from '@codemirror/language'
@@ -62,6 +63,10 @@ import { properties } from '@codemirror/legacy-modes/mode/properties'
 import { groovy } from '@codemirror/legacy-modes/mode/groovy'
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
+
+// Maximum content size for diff comparison (characters)
+// Files larger than this will be truncated to prevent main thread freeze
+const MAX_DIFF_CONTENT_SIZE = 500_000 // ~500KB
 
 interface SplitDiffViewerProps {
   localContent: string
@@ -323,7 +328,10 @@ function computeDiffDecorations(content: string, diffLines: DiffLine[]): Decorat
   }
 }
 
-// StateField-based diff decoration extension that gets reconfigured via compartment
+// StateField-based diff decoration extension
+// Uses the `provide` pattern to connect the StateField to EditorView.decorations facet.
+// This is the idiomatic CodeMirror 6 approach: the StateField declares what facet it provides,
+// and CodeMirror handles the wiring internally. Never use EditorView.decorations.of(StateField).
 function createDiffDecorationExtension(diffLines: DiffLine[]): Extension {
   const field = StateField.define<DecorationSet>({
     create(state: EditorState) {
@@ -331,13 +339,13 @@ function createDiffDecorationExtension(diffLines: DiffLine[]): Extension {
     },
     update(value: DecorationSet, tr: any) {
       if (tr.docChanged) {
-        // When the document changes, recompute decorations based on current content
         return computeDiffDecorations(tr.state.doc.toString(), diffLines)
       }
       return value
-    }
+    },
+    provide: (f) => EditorView.decorations.from(f),
   })
-  return [field, EditorView.decorations.of(field)]
+  return field
 }
 
 function SplitDiffViewer({ localContent, remoteContent, localLabel, remoteLabel, editedContent: editedContentProp, onLocalContentChange, filename }: SplitDiffViewerProps) {
@@ -351,16 +359,24 @@ function SplitDiffViewer({ localContent, remoteContent, localLabel, remoteLabel,
   // The effective content for diff display: use prop if provided, else localContent
   const effectiveEditedContent = editedContentProp ?? localContent
 
+  // Truncate oversized content to prevent CodeMirror initialization freeze
+  const truncatedRemote = remoteContent.length > MAX_DIFF_CONTENT_SIZE
+    ? remoteContent.slice(0, MAX_DIFF_CONTENT_SIZE) + '\n\n... [truncated]'
+    : remoteContent
+  const truncatedLocal = effectiveEditedContent.length > MAX_DIFF_CONTENT_SIZE
+    ? effectiveEditedContent.slice(0, MAX_DIFF_CONTENT_SIZE) + '\n\n... [truncated]'
+    : effectiveEditedContent
+
   // Stable callback ref for onLocalContentChange
   const onContentChangeRef = useRef(onLocalContentChange)
   onContentChangeRef.current = onLocalContentChange
 
   // Compute diff data
   const diffData = useMemo(() => {
-    const localLines = effectiveEditedContent.split('\n')
-    const remoteLines = remoteContent.split('\n')
+    const localLines = truncatedLocal.split('\n')
+    const remoteLines = truncatedRemote.split('\n')
     return computeDiffLines(localLines, remoteLines)
-  }, [effectiveEditedContent, remoteContent])
+  }, [truncatedLocal, truncatedRemote])
 
   // Get language extension
   const langExt = useMemo(() => {
@@ -370,22 +386,28 @@ function SplitDiffViewer({ localContent, remoteContent, localLabel, remoteLabel,
 
   // Create left editor (remote, read-only) - created once on mount
   // Parent uses `key` to force remount when switching files
+  // NOTE: Intentionally NOT using basicSetup to avoid expensive extensions
+  // (autocomplete, search, fold, bracket matching) that freeze on large files
   useEffect(() => {
     if (!leftContainerRef.current) return
 
     const compartment = new Compartment()
 
     const extensions: Extension[] = [
-      basicSetup,
-      compartment.of(langExt()),
-      CMView.lineWrapping,
+      // Minimal editor setup (avoid basicSetup's heavy extensions)
+      lineNumbers(),
+      highlightActiveLine(),
+      highlightSpecialChars(),
+      drawSelection(),
+      EditorView.lineWrapping,
       EditorState.readOnly.of(true),
-      CMView.editorAttributes.of({ class: 'cm-readonly-diff' }),
+      EditorView.editorAttributes.of({ class: 'cm-readonly-diff' }),
+      compartment.of(langExt()),
       createDiffDecorationExtension(diffData.left),
     ]
 
     const state = EditorState.create({
-      doc: remoteContent,
+      doc: truncatedRemote,
       extensions,
     })
 
@@ -404,13 +426,21 @@ function SplitDiffViewer({ localContent, remoteContent, localLabel, remoteLabel,
   }, []) // Mount only - parent key controls remounting
 
   // Create right editor (local, editable) - created once on mount
+  // NOTE: Intentionally NOT using basicSetup to avoid expensive extensions
+  // (autocomplete, search, fold, bracket matching) that freeze on large files
   useEffect(() => {
     if (!rightContainerRef.current) return
 
     const extensions: Extension[] = [
-      basicSetup,
+      // Minimal editor setup with editing support
+      lineNumbers(),
+      highlightActiveLine(),
+      highlightSpecialChars(),
+      drawSelection(),
+      EditorView.lineWrapping,
+      history(),
+      keymap.of([...defaultKeymap, ...historyKeymap]),
       langExt(),
-      CMView.lineWrapping,
       createDiffDecorationExtension(diffData.right),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -420,7 +450,7 @@ function SplitDiffViewer({ localContent, remoteContent, localLabel, remoteLabel,
     ]
 
     const state = EditorState.create({
-      doc: localContent,
+      doc: truncatedLocal,
       extensions,
     })
 
