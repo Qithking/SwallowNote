@@ -1,22 +1,36 @@
 /**
- * SplitDiffViewer - Side-by-side diff comparison component
- * Shows remote content on the left (read-only CodeMirror) and local content on the right (editable CodeMirror)
- * Highlights differences between the two versions
+ * SplitDiffViewer — Two-pane diff viewer for conflict files
  *
- * IMPORTANT: This component relies on the parent using a `key` prop to force remount
- * when switching between different files. This ensures clean editor state on file change.
+ * Uses @codemirror/merge's MergeView for side-by-side diff with:
+ * - Automatic line alignment between unchanged content
+ * - Word-level change highlighting (inserted/deleted)
+ * - Synchronized scrolling (toggleable)
+ * - Revert controls between changed chunks
+ * - Copy left/right buttons to overwrite entire content
+ *
+ * Layout:
+ * ┌──────────────────┬──────────────────┐
+ * │     Remote       │      Local       │
+ * │   (read-only)    │   (editable)     │
+ * └──────────────────┴──────────────────┘
+ *
+ * IMPORTANT: Parent must use a `key` prop to force remount when switching files.
  */
-import { useEffect, useRef, useMemo } from 'react'
-import { useTranslation } from 'react-i18next'
-import { Lock } from 'lucide-react'
-import { EditorView } from '@codemirror/view'
-import { keymap, drawSelection, highlightActiveLine, highlightSpecialChars, lineNumbers } from '@codemirror/view'
-import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
-import { EditorState, Extension, RangeSetBuilder, Compartment, StateField } from '@codemirror/state'
-import { Decoration, DecorationSet } from '@codemirror/view'
-import { StreamLanguage } from '@codemirror/language'
 
-// Native CodeMirror 6 language packages
+import { useEffect, useRef, useMemo, useState, useImperativeHandle, forwardRef, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
+import { Lock, Pencil, Copy, Check } from 'lucide-react'
+
+// @codemirror/merge — provides MergeView for side-by-side diff
+import { MergeView } from '@codemirror/merge'
+
+// CodeMirror core
+import { EditorView, keymap, drawSelection, highlightActiveLine, highlightSpecialChars, lineNumbers, ViewUpdate } from '@codemirror/view'
+import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
+import { EditorState, Extension } from '@codemirror/state'
+
+// Language support
+import { StreamLanguage } from '@codemirror/language'
 import { javascript } from '@codemirror/lang-javascript'
 import { python } from '@codemirror/lang-python'
 import { html } from '@codemirror/lang-html'
@@ -64,153 +78,33 @@ import { groovy } from '@codemirror/legacy-modes/mode/groovy'
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 
-// Maximum content size for diff comparison (characters)
-// Files larger than this will be truncated to prevent main thread freeze
-const MAX_DIFF_CONTENT_SIZE = 500_000 // ~500KB
+// ──────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────
 
-interface SplitDiffViewerProps {
-  localContent: string
-  remoteContent: string
-  localLabel?: string
-  remoteLabel?: string
-  editedContent?: string
+export interface SplitDiffViewerProps {
+  localContent: string      // Local (HEAD) content — the original unedited content
+  remoteContent: string     // Remote (theirs) content
+  localLabel?: string       // Label for local side
+  remoteLabel?: string      // Label for remote side
+  editedContent?: string    // Edited local content (controlled) — only used for initial sync
   onLocalContentChange?: (content: string) => void
   filename?: string
+  /** Initial cursor line to scroll to in the local (right) editor */
+  initialCursorLine?: number
+  /** Callback when cursor position changes in the local editor */
+  onCursorLineChange?: (line: number) => void
 }
 
-interface DiffLine {
-  type: 'context' | 'added' | 'removed' | 'empty'
-  content: string
-  lineNum: number
+export interface SplitDiffViewerHandle {
+  /** Get the current content of the local (editable) editor */
+  getLocalContent: () => string
 }
 
-function computeDiffLines(localLines: string[], remoteLines: string[]): { left: DiffLine[], right: DiffLine[] } {
-  const m = localLines.length
-  const n = remoteLines.length
+// ──────────────────────────────────────────────
+// Language extensions
+// ──────────────────────────────────────────────
 
-  // For large files, use a sliding-window heuristic to avoid O(m*n) DP freeze
-  // Threshold: total lines > 1000 triggers the fast path
-  if (m + n > 1000) {
-    return computeDiffLinesFast(localLines, remoteLines)
-  }
-  return computeDiffLinesDP(localLines, remoteLines)
-}
-
-/// Fast sliding-window alignment: O((m+n) * WINDOW) instead of O(m*n)
-function computeDiffLinesFast(localLines: string[], remoteLines: string[]): { left: DiffLine[], right: DiffLine[] } {
-  const WINDOW = 15
-  const left: DiffLine[] = []
-  const right: DiffLine[] = []
-  let li = 0, ri = 0
-
-  while (li < localLines.length || ri < remoteLines.length) {
-    if (li >= localLines.length) {
-      left.push({ type: 'removed', content: remoteLines[ri], lineNum: ri + 1 })
-      right.push({ type: 'empty', content: '', lineNum: -1 })
-      ri++
-    } else if (ri >= remoteLines.length) {
-      left.push({ type: 'empty', content: '', lineNum: -1 })
-      right.push({ type: 'added', content: localLines[li], lineNum: li + 1 })
-      li++
-    } else if (localLines[li] === remoteLines[ri]) {
-      left.push({ type: 'context', content: remoteLines[ri], lineNum: ri + 1 })
-      right.push({ type: 'context', content: localLines[li], lineNum: li + 1 })
-      li++; ri++
-    } else {
-      let matched = false
-      // Look ahead in local for current remote line
-      for (let w = 1; w <= WINDOW && li + w < localLines.length; w++) {
-        if (localLines[li + w] === remoteLines[ri]) {
-          for (let k = 0; k < w; k++) {
-            left.push({ type: 'empty', content: '', lineNum: -1 })
-            right.push({ type: 'added', content: localLines[li], lineNum: li + 1 })
-            li++
-          }
-          matched = true
-          break
-        }
-      }
-      if (matched) continue
-      // Look ahead in remote for current local line
-      for (let w = 1; w <= WINDOW && ri + w < remoteLines.length; w++) {
-        if (localLines[li] === remoteLines[ri + w]) {
-          for (let k = 0; k < w; k++) {
-            left.push({ type: 'removed', content: remoteLines[ri], lineNum: ri + 1 })
-            right.push({ type: 'empty', content: '', lineNum: -1 })
-            ri++
-          }
-          matched = true
-          break
-        }
-      }
-      if (!matched) {
-        left.push({ type: 'removed', content: remoteLines[ri], lineNum: ri + 1 })
-        right.push({ type: 'added', content: localLines[li], lineNum: li + 1 })
-        li++; ri++
-      }
-    }
-  }
-  return { left, right }
-}
-
-/// Full DP LCS: O(m*n) — used only for small files
-function computeDiffLinesDP(localLines: string[], remoteLines: string[]): { left: DiffLine[], right: DiffLine[] } {
-  const m = localLines.length
-  const n = remoteLines.length
-
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0))
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (localLines[i - 1] === remoteLines[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1] + 1
-      } else {
-        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
-      }
-    }
-  }
-
-  const left: DiffLine[] = []
-  const right: DiffLine[] = []
-  let i = m, j = n
-
-  const changes: Array<{ type: 'context' | 'added' | 'removed'; localIdx: number; remoteIdx: number }> = []
-
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && localLines[i - 1] === remoteLines[j - 1]) {
-      changes.unshift({ type: 'context', localIdx: i - 1, remoteIdx: j - 1 })
-      i--
-      j--
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      changes.unshift({ type: 'added', localIdx: -1, remoteIdx: j - 1 })
-      j--
-    } else {
-      changes.unshift({ type: 'removed', localIdx: i - 1, remoteIdx: -1 })
-      i--
-    }
-  }
-
-  let li = 0, ri = 0
-  for (const change of changes) {
-    if (change.type === 'context') {
-      left.push({ type: 'context', content: remoteLines[change.remoteIdx], lineNum: ri + 1 })
-      right.push({ type: 'context', content: localLines[change.localIdx], lineNum: li + 1 })
-      li++
-      ri++
-    } else if (change.type === 'removed') {
-      left.push({ type: 'empty', content: '', lineNum: -1 })
-      right.push({ type: 'added', content: localLines[change.localIdx], lineNum: li + 1 })
-      li++
-    } else {
-      left.push({ type: 'removed', content: remoteLines[change.remoteIdx], lineNum: ri + 1 })
-      right.push({ type: 'empty', content: '', lineNum: -1 })
-      ri++
-    }
-  }
-
-  return { left, right }
-}
-
-// Helper to wrap a legacy StreamParser into a CodeMirror extension
 function streamLang(parser: any): any {
   return StreamLanguage.define(parser)
 }
@@ -275,270 +169,437 @@ const languageExtensions: Record<string, () => any> = {
   text: () => [],
 }
 
-// Diff highlight decorations
-const addedLineDecoration = Decoration.line({ class: 'cm-diff-added-line' })
-const removedLineDecoration = Decoration.line({ class: 'cm-diff-removed-line' })
+// ──────────────────────────────────────────────
+// Theme extensions for merge view editors
+// ──────────────────────────────────────────────
 
-/**
- * Compute decorations for a document based on its corresponding diff lines.
- * The key insight: diffLines includes 'empty' placeholders that have no counterpart in the document.
- * We walk through both simultaneously, advancing the doc position only for non-empty lines.
- */
-function computeDiffDecorations(content: string, diffLines: DiffLine[]): DecorationSet {
-  if (!content || diffLines.length === 0) {
-    return Decoration.none
-  }
+const mergeEditorTheme = EditorView.theme({
+  '.cm-content': {
+    fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+    fontSize: '13px',
+    lineHeight: '1.6',
+    padding: '4px 0',
+  },
+})
 
-  try {
-    const builder = new RangeSetBuilder<Decoration>()
-    const docLines = content.split('\n')
-    let docLineIdx = 0
-    let pos = 0
-    let hasAnyDecoration = false
+// ──────────────────────────────────────────────
+// SplitDiffViewer Component
+// ──────────────────────────────────────────────
 
-    for (const line of diffLines) {
-      if (line.type === 'empty') {
-        // Empty placeholder - no corresponding line in the document, skip
-        continue
-      }
-
-      // Safety check
-      if (docLineIdx >= docLines.length) break
-
-      if (line.type === 'added') {
-        builder.add(pos, pos, addedLineDecoration)
-        hasAnyDecoration = true
-      } else if (line.type === 'removed') {
-        builder.add(pos, pos, removedLineDecoration)
-        hasAnyDecoration = true
-      }
-      // 'context' lines get no decoration
-
-      // Advance position by this line's length + newline
-      const lineLength = docLines[docLineIdx].length
-      pos += lineLength + 1
-      docLineIdx++
-    }
-
-    if (!hasAnyDecoration) return Decoration.none
-    return builder.finish()
-  } catch (e) {
-    console.error('[SplitDiffViewer] computeDiffDecorations error:', e)
-    return Decoration.none
-  }
-}
-
-// StateField-based diff decoration extension
-// Uses Facet.compute to explicitly read the StateField value into EditorView.decorations.
-// This is more reliable than the `provide` pattern for decoration fields.
-function createDiffDecorationExtension(diffLines: DiffLine[]): Extension {
-  const field = StateField.define<DecorationSet>({
-    create(state: EditorState) {
-      return computeDiffDecorations(state.doc.toString(), diffLines)
-    },
-    update(value: DecorationSet, tr: any) {
-      if (tr.docChanged) {
-        return computeDiffDecorations(tr.state.doc.toString(), diffLines)
-      }
-      return value
-    },
-  })
-  return [
-    field,
-    EditorView.decorations.compute([field], (state) => state.field(field)),
-  ]
-}
-
-function SplitDiffViewer({ localContent, remoteContent, localLabel, remoteLabel, editedContent: editedContentProp, onLocalContentChange, filename }: SplitDiffViewerProps) {
+const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(({
+  localContent,
+  remoteContent,
+  localLabel,
+  remoteLabel,
+  editedContent: editedContentProp,
+  onLocalContentChange,
+  filename,
+  initialCursorLine,
+  onCursorLineChange,
+}, ref) => {
   const { t } = useTranslation()
-  const leftContainerRef = useRef<HTMLDivElement>(null)
-  const rightContainerRef = useRef<HTMLDivElement>(null)
-  const leftViewRef = useRef<EditorView | null>(null)
-  const rightViewRef = useRef<EditorView | null>(null)
-  const isSyncingScroll = useRef(false)
+  const mergeContainerRef = useRef<HTMLDivElement>(null)
+  const mergeViewRef = useRef<MergeView | null>(null)
 
-  // The effective content for diff display: use prop if provided, else localContent
-  const effectiveEditedContent = editedContentProp ?? localContent
+  // The initial content for the local editor. Uses `editedContent` if provided
+  // (i.e., parent has unsaved edits), otherwise falls back to the original `localContent`.
+  const initialLocalContent = editedContentProp ?? localContent
 
-  // Truncate oversized content to prevent CodeMirror initialization freeze
-  const truncatedRemote = remoteContent.length > MAX_DIFF_CONTENT_SIZE
-    ? remoteContent.slice(0, MAX_DIFF_CONTENT_SIZE) + '\n\n... [truncated]'
-    : remoteContent
-  const truncatedLocal = effectiveEditedContent.length > MAX_DIFF_CONTENT_SIZE
-    ? effectiveEditedContent.slice(0, MAX_DIFF_CONTENT_SIZE) + '\n\n... [truncated]'
-    : effectiveEditedContent
-
-  // Stable callback ref for onLocalContentChange
+  // Stable callback refs to avoid recreating effects
   const onContentChangeRef = useRef(onLocalContentChange)
   onContentChangeRef.current = onLocalContentChange
+  const onCursorLineChangeRef = useRef(onCursorLineChange)
+  onCursorLineChangeRef.current = onCursorLineChange
 
-  // Compute diff data
-  const diffData = useMemo(() => {
-    const localLines = truncatedLocal.split('\n')
-    const remoteLines = truncatedRemote.split('\n')
-    return computeDiffLines(localLines, remoteLines)
-  }, [truncatedLocal, truncatedRemote])
+  // Track if initial edited content has been applied to prevent recreating editor
+  const initialContentAppliedRef = useRef(false)
+  const prevLocalContentRef = useRef(localContent)
+  const prevRemoteContentRef = useRef(remoteContent)
 
-  // Get language extension
+  // Copy feedback state
+  const [remoteCopied, setRemoteCopied] = useState(false)
+  const [localCopied, setLocalCopied] = useState(false)
+  const remoteCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const localCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  // Expose getLocalContent via ref for parent components (e.g., ConflictResolver save logic)
+  useImperativeHandle(ref, () => ({
+    getLocalContent: () => {
+      return mergeViewRef.current?.b.state.doc.toString() ?? initialLocalContent
+    },
+  }), [initialLocalContent])
+
+  const handleCopyRemote = () => {
+    navigator.clipboard.writeText(remoteContent)
+    setRemoteCopied(true)
+    clearTimeout(remoteCopiedTimer.current)
+    remoteCopiedTimer.current = setTimeout(() => setRemoteCopied(false), 3000)
+  }
+
+  const handleCopyLocal = () => {
+    navigator.clipboard.writeText(
+      mergeViewRef.current?.b.state.doc.toString() ?? localContent
+    )
+    setLocalCopied(true)
+    clearTimeout(localCopiedTimer.current)
+    localCopiedTimer.current = setTimeout(() => setLocalCopied(false), 3000)
+  }
+
+  // Copy entire remote content to local (overwrite)
+  const handleCopyRemoteToLocal = useCallback(() => {
+    const mv = mergeViewRef.current
+    if (!mv) return
+
+    const remoteDoc = mv.a.state.doc.toString()
+    // Preserve current cursor position/selection if possible
+    const currentSelection = mv.b.state.selection.main
+    mv.b.dispatch({
+      changes: { from: 0, to: mv.b.state.doc.length, insert: remoteDoc },
+      selection: { 
+        anchor: Math.min(currentSelection.anchor, remoteDoc.length),
+        head: Math.min(currentSelection.head, remoteDoc.length)
+      },
+    })
+    onContentChangeRef.current?.(remoteDoc)
+  }, [])
+
+  // Copy entire local content to remote (overwrite) — remote is read-only, so this is mainly for symmetry
+  const handleCopyLocalToRemote = useCallback(() => {
+    const mv = mergeViewRef.current
+    if (!mv) return
+
+    const localDoc = mv.b.state.doc.toString()
+    // Remote is read-only, but we can still update its content programmatically
+    // Preserve current cursor position/selection if possible
+    const currentSelection = mv.a.state.selection.main
+    mv.a.dispatch({
+      changes: { from: 0, to: mv.a.state.doc.length, insert: localDoc },
+      selection: { 
+        anchor: Math.min(currentSelection.anchor, localDoc.length),
+        head: Math.min(currentSelection.head, localDoc.length)
+      },
+    })
+  }, [])
+
+  // Stable refs for renderRevertControl callback (to avoid recreating MergeView on every render)
+  const handleCopyLocalToRemoteRef = useRef(handleCopyLocalToRemote)
+  handleCopyLocalToRemoteRef.current = handleCopyLocalToRemote
+  const handleCopyRemoteToLocalRef = useRef(handleCopyRemoteToLocal)
+  handleCopyRemoteToLocalRef.current = handleCopyRemoteToLocal
+  const tRef = useRef(t)
+  tRef.current = t
+
+  // Get language extension based on filename
   const langExt = useMemo(() => {
     const lang = filename ? getCodeMirrorLanguage(filename) : 'text'
     return languageExtensions[lang] || (() => [])
   }, [filename])
 
-  // Create left editor (remote, read-only) - created once on mount
-  // Parent uses `key` to force remount when switching files
-  // NOTE: Intentionally NOT using basicSetup to avoid expensive extensions
-  // (autocomplete, search, fold, bracket matching) that freeze on large files
+  // Detect dark mode
+  const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+
+  // ── Create / recreate MergeView when content changes ──
   useEffect(() => {
-    if (!leftContainerRef.current) return
+    if (!mergeContainerRef.current) return
 
-    const compartment = new Compartment()
+    // Only recreate if the source content (from props) actually changed, not edited content
+    const localContentChanged = prevLocalContentRef.current !== localContent
+    const remoteContentChanged = prevRemoteContentRef.current !== remoteContent
+    
+    // Update refs
+    prevLocalContentRef.current = localContent
+    prevRemoteContentRef.current = remoteContent
 
-    const extensions: Extension[] = [
-      // Minimal editor setup (avoid basicSetup's heavy extensions)
+    // If only edited content changed (not source), don't recreate - update editor instead
+    if (mergeViewRef.current && !localContentChanged && !remoteContentChanged) {
+      // Check if we need to apply initial edited content
+      if (editedContentProp && !initialContentAppliedRef.current) {
+        const mv = mergeViewRef.current
+        const currentDoc = mv.b.state.doc.toString()
+        if (currentDoc !== editedContentProp) {
+          mv.b.dispatch({
+            changes: { from: 0, to: currentDoc.length, insert: editedContentProp },
+          })
+        }
+        initialContentAppliedRef.current = true
+      }
+      return
+    }
+
+    // Reset the flag when source content changes
+    initialContentAppliedRef.current = false
+
+    // Destroy previous merge view if exists
+    if (mergeViewRef.current) {
+      mergeViewRef.current.destroy()
+      mergeViewRef.current = null
+    }
+
+    // Shared base extensions for both panes
+    const baseExtensions: Extension[] = [
       lineNumbers(),
       highlightActiveLine(),
       highlightSpecialChars(),
       drawSelection(),
       EditorView.lineWrapping,
-      EditorState.readOnly.of(true),
-      EditorView.editorAttributes.of({ class: 'cm-readonly-diff' }),
-      compartment.of(langExt()),
-      createDiffDecorationExtension(diffData.left),
+      langExt(),
+      mergeEditorTheme,
     ]
 
-    const state = EditorState.create({
-      doc: truncatedRemote,
-      extensions,
-    })
+    // Left pane (Remote/A) — read-only
+    const aExtensions: Extension = [
+      ...baseExtensions,
+      EditorState.readOnly.of(true),
+      EditorView.editable.of(false),
+    ]
 
-    const view = new EditorView({
-      state,
-      parent: leftContainerRef.current,
-    })
-
-    leftViewRef.current = view
-
-    return () => {
-      view.destroy()
-      leftViewRef.current = null
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Mount only - parent key controls remounting
-
-  // Create right editor (local, editable) - created once on mount
-  // NOTE: Intentionally NOT using basicSetup to avoid expensive extensions
-  // (autocomplete, search, fold, bracket matching) that freeze on large files
-  useEffect(() => {
-    if (!rightContainerRef.current) return
-
-    const extensions: Extension[] = [
-      // Minimal editor setup with editing support
-      lineNumbers(),
-      highlightActiveLine(),
-      highlightSpecialChars(),
-      drawSelection(),
-      EditorView.lineWrapping,
+    // Right pane (Local/B) — editable with history and keymap
+    const bExtensions: Extension = [
+      ...baseExtensions,
       history(),
       keymap.of([...defaultKeymap, ...historyKeymap]),
-      langExt(),
-      createDiffDecorationExtension(diffData.right),
-      EditorView.updateListener.of((update) => {
+      EditorView.updateListener.of((update: ViewUpdate) => {
         if (update.docChanged) {
           onContentChangeRef.current?.(update.state.doc.toString())
+        }
+        // Track cursor position for session persistence
+        if (update.selectionSet || update.docChanged) {
+          const pos = update.state.selection.main.head
+          const line = update.state.doc.lineAt(pos).number
+          onCursorLineChangeRef.current?.(line)
         }
       }),
     ]
 
-    const state = EditorState.create({
-      doc: truncatedLocal,
-      extensions,
-    })
+    try {
+      const mv = new MergeView({
+        parent: mergeContainerRef.current,
+        a: {
+          doc: remoteContent,
+          extensions: aExtensions,
+        },
+        b: {
+          doc: initialLocalContent,
+          extensions: bExtensions,
+        },
+        revertControls: 'a-to-b',
+        highlightChanges: true,
+        gutter: true,
+        // Custom render function for revert controls — replaces default ⇝ button
+        // with our left/right arrow buttons for full content overwrite
+        renderRevertControl: () => {
+          
+          const wrapper = document.createElement('div')
+          wrapper.className = 'cm-diff-arrows-wrapper'
+          // CM6 will set style.top on this element with the document coordinate.
+          // CM6's default theme sets .cm-merge-revert button { position: absolute },
+          // and .cm-merge-revert is { position: relative }, so top is relative to .cm-merge-revert.
+          // We only override display/gap for layout; let CM6 handle positioning.
+          // CRITICAL: position:absolute is required because CM6 sets style.top on this element.
+          // CM6's .cm-merge-revert is position:relative, so top is relative to it.
+          // The .cm-merge-revert MUST stretch to document height for positioning to work.
+          wrapper.style.cssText = 'position:absolute;display:flex;flex-direction:row;gap:2px;'
 
-    const view = new EditorView({
-      state,
-      parent: rightContainerRef.current,
-    })
+          // Use refs to access latest callbacks without recreating MergeView
+          const copyLocalToRemote = () => handleCopyLocalToRemoteRef.current()
+          const copyRemoteToLocal = () => handleCopyRemoteToLocalRef.current()
+          const translate = (key: string, fallback: string) => tRef.current(key, { defaultValue: fallback })
 
-    rightViewRef.current = view
+          // Left arrow — copy local to remote
+          const leftBtn = document.createElement('button')
+          leftBtn.className = 'cm-diff-arrow-btn cm-diff-arrow-left'
+          leftBtn.title = translate('git.copyLocalToRemote', 'Copy local to remote')
+          leftBtn.textContent = '\u2190' // ←
+          leftBtn.style.cssText = 'width:20px;height:20px;font-size:11px;font-weight:500;line-height:1;padding:0;border:none;border-radius:4px;background:hsl(var(--primary));color:hsl(var(--primary-foreground));cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.08);transition:all 0.15s ease;';
+          leftBtn.onmouseenter = () => { leftBtn.style.background = 'hsl(var(--primary) / 0.9)' };
+          leftBtn.onmouseleave = () => { leftBtn.style.background = 'hsl(var(--primary))' };
+          leftBtn.addEventListener('click', (e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            
+            copyLocalToRemote()
+          })
+
+          // Right arrow — copy remote to local
+          const rightBtn = document.createElement('button')
+          rightBtn.className = 'cm-diff-arrow-btn cm-diff-arrow-right'
+          rightBtn.title = translate('git.copyRemoteToLocal', 'Copy remote to local')
+          rightBtn.textContent = '\u2192' // →
+          rightBtn.style.cssText = 'width:20px;height:20px;font-size:11px;font-weight:500;line-height:1;padding:0;border:none;border-radius:4px;background:hsl(var(--primary));color:hsl(var(--primary-foreground));cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.08);transition:all 0.15s ease;';
+          rightBtn.onmouseenter = () => { rightBtn.style.background = 'hsl(var(--primary) / 0.9)' };
+          rightBtn.onmouseleave = () => { rightBtn.style.background = 'hsl(var(--primary))' };
+          rightBtn.addEventListener('click', (e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            
+            copyRemoteToLocal()
+          })
+
+          wrapper.appendChild(leftBtn)
+          wrapper.appendChild(rightBtn)
+          
+          return wrapper
+        },
+      })
+
+      mergeViewRef.current = mv
+
+      // Restore initial cursor position if specified
+      if (initialCursorLine && initialCursorLine > 1) {
+        try {
+          const lineInfo = mv.b.state.doc.line(Math.min(initialCursorLine, mv.b.state.doc.lines))
+          mv.b.dispatch({
+            selection: { anchor: lineInfo.from },
+            scrollIntoView: true,
+          })
+        } catch {
+          // Ignore invalid line numbers
+        }
+      }
+    } catch (e) {
+      console.error('[SplitDiffViewer] Failed to create MergeView:', e)
+    }
 
     return () => {
-      view.destroy()
-      rightViewRef.current = null
+      if (mergeViewRef.current) {
+        mergeViewRef.current.destroy()
+        mergeViewRef.current = null
+      }
     }
+    // We intentionally depend on content strings so the merge view is recreated
+    // when files switch. The parent should also pass a changing `key` prop.
+    // Only depend on source content and config, not edited content
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Mount only - parent key controls remounting
+  }, [remoteContent, localContent, langExt, isDark])
 
-  // Sync scrolling between left and right panels
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      const leftEl = leftContainerRef.current?.querySelector('.cm-scroller')
-      const rightEl = rightContainerRef.current?.querySelector('.cm-scroller')
-
-      if (!leftEl || !rightEl) return
-
-      const handleLeftScroll = () => {
-        if (isSyncingScroll.current) return
-        isSyncingScroll.current = true
-        ;(rightEl as HTMLElement).scrollTop = (leftEl as HTMLElement).scrollTop
-        ;(rightEl as HTMLElement).scrollLeft = (leftEl as HTMLElement).scrollLeft
-        requestAnimationFrame(() => { isSyncingScroll.current = false })
-      }
-
-      const handleRightScroll = () => {
-        if (isSyncingScroll.current) return
-        isSyncingScroll.current = true
-        ;(leftEl as HTMLElement).scrollTop = (rightEl as HTMLElement).scrollTop
-        ;(leftEl as HTMLElement).scrollLeft = (rightEl as HTMLElement).scrollLeft
-        requestAnimationFrame(() => { isSyncingScroll.current = false })
-      }
-
-      leftEl.addEventListener('scroll', handleLeftScroll)
-      rightEl.addEventListener('scroll', handleRightScroll)
-
-      ;(leftEl as any)._scrollCleanup = () => {
-        leftEl.removeEventListener('scroll', handleLeftScroll)
-        rightEl.removeEventListener('scroll', handleRightScroll)
-      }
-    }, 100)
-
-    return () => {
-      clearTimeout(timer)
-      const leftEl = leftContainerRef.current?.querySelector('.cm-scroller')
-      if ((leftEl as any)?._scrollCleanup) {
-        (leftEl as any)._scrollCleanup()
-      }
-    }
-  }, [])
+  // ── Note: Custom revert buttons are rendered via renderRevertControl in MergeView config ──
+  // The renderRevertControl callback lets us inject custom elements that survive CM6's measure cycle.
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left panel - Remote (Read-only CodeMirror) */}
-      <div className="flex-1 flex flex-col border-r" style={{ borderColor: 'var(--border-color)' }}>
-        <div className="flex items-center justify-center h-7 px-3 text-xs font-medium shrink-0 border-b gap-1"
-          style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
-          {remoteLabel || t('git.remote')}
-          <span className="flex items-center gap-0.5 text-[10px] px-1 rounded" style={{ background: 'rgba(156, 163, 175, 0.15)', color: 'var(--text-muted)' }}>
-            <Lock size={9} />
-            {t('git.remoteReadOnly')}
-          </span>
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header toolbar — two-column layout matching MergeView editors below */}
+      <div className="flex h-7 text-xs font-medium shrink-0 border-b"
+        style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
+        {/* Left column — Remote (aligns with left editor) */}
+        <div className="flex items-center justify-between pl-3 pr-2 flex-1">
+          <div className="flex items-center gap-1">
+            <span>{remoteLabel || t('git.remote')}</span>
+            <span className="flex items-center gap-0.5 text-[10px] px-1 rounded" style={{ background: 'rgba(156, 163, 175, 0.15)', color: 'var(--text-muted)' }}>
+              <Lock size={9} />
+            </span>
+          </div>
+          <button
+            className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] transition-colors shrink-0"
+            onClick={handleCopyRemote}
+            title={t('git.copyRemoteContent')}
+          >
+            {remoteCopied
+              ? <Check size={12} className="text-green-500" />
+              : <Copy size={12} style={{ color: 'var(--text-muted)' }} />}
+          </button>
         </div>
-        <div ref={leftContainerRef} className="flex-1 overflow-hidden split-diff-editor" style={{ minHeight: 0 }} />
+
+        {/* Divider line (aligns with .cm-merge-revert gutter) */}
+        <div className="w-px h-full" style={{ backgroundColor: 'var(--border-color)' }} />
+
+        {/* Right column — Local (aligns with right editor) */}
+        <div className="flex items-center justify-between pr-3 pl-2 flex-1">
+          <div className="flex items-center gap-1">
+            <span>{localLabel || t('git.local')}</span>
+            <span className="flex items-center gap-0.5 text-[10px] px-1 rounded" style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
+              <Pencil size={9} />
+            </span>
+          </div>
+          <button
+            className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] transition-colors shrink-0"
+            onClick={handleCopyLocal}
+            title={t('git.copyLocalContent')}
+          >
+            {localCopied
+              ? <Check size={12} className="text-green-500" />
+              : <Copy size={12} style={{ color: 'var(--text-muted)' }} />}
+          </button>
+        </div>
       </div>
 
-      {/* Right panel - Local (Editable CodeMirror) */}
-      <div className="flex-1 flex flex-col">
-        <div className="flex items-center justify-center h-7 px-3 text-xs font-medium shrink-0 border-b"
-          style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
-          <span className="text-xs font-medium">{localLabel || t('git.local')}</span>
-          <span className="ml-1 text-[10px] px-1 rounded" style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#22c55e' }}>
-            {t('git.localEditable')}
-          </span>
-        </div>
-        <div ref={rightContainerRef} className="flex-1 overflow-hidden split-diff-editor" style={{ minHeight: 0 }} />
-      </div>
+      {/* MergeView container — renders both side-by-side editors */}
+      <div ref={mergeContainerRef} className="flex-1 min-h-0 overflow-hidden cm-split-diff-viewer" />
+
+      {/* Global styles for the merge view */}
+      <style>{`
+        /* Root merge view container — use CM6's default scrolling model
+         * CM6's baseTheme sets .cm-mergeView to overflowY:auto (scrollable)
+         * and .cm-scroller to height:auto;overflowY:visible.
+         * This means the WHOLE mergeView scrolls as one unit,
+         * and .cm-merge-revert stretches to document height so
+         * position:absolute revert buttons with style.top work correctly.
+         *
+         * We only constrain the outer container height; let CM6 handle the rest.
+         */
+        .cm-split-diff-viewer > .cm-mergeView {
+          height: 100% !important;
+          /* Keep CM6's default overflowY:auto for unified scrolling */
+        }
+        .cm-split-diff-viewer .cm-mergeViewEditors {
+          display: flex;
+          /* Don't constrain height or overflow — let it grow with content */
+        }
+        /* Each editor pane */
+        .cm-split-diff-viewer .cm-mergeViewEditor {
+          flex: 1;
+          min-width: 0;
+        }
+        /* ── Gutter background: distinguish the revert control column from editor content ── */
+        .cm-split-diff-viewer .cm-merge-revert {
+          background: var(--bg-secondary);
+        }
+        /* ── Per-chunk diff arrows (replace default revert buttons, scrolls with content) ── */
+        /* CM6 positions these via style.top (document coord) inside .cm-merge-revert (position:relative) */
+        .cm-split-diff-viewer .cm-merge-revert .cm-diff-arrows-wrapper {
+          display: flex;
+          flex-direction: row;
+          gap: 2px;
+          /* Inherit position:absolute from CM6's .cm-merge-revert button rule */
+        }
+        .cm-split-diff-viewer .cm-merge-revert .cm-diff-arrow-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 20px;
+          height: 20px;
+          border-radius: 4px;
+          background: hsl(var(--primary));
+          color: hsl(var(--primary-foreground));
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 500;
+          line-height: 1;
+          padding: 0;
+          border: none;
+          transition: all 0.15s ease;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+        }
+        .cm-split-diff-viewer .cm-merge-revert .cm-diff-arrow-btn:hover {
+          background: hsl(var(--primary) / 0.9);
+        }
+        .cm-split-diff-viewer .cm-merge-revert button {
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-color);
+          border-radius: 4px;
+          padding: 2px 6px;
+          font-size: 11px;
+          cursor: pointer;
+          color: var(--text-muted);
+        }
+        .cm-split-diff-viewer .cm-merge-revert button:hover {
+          background: var(--bg-hover);
+          color: var(--text-primary);
+        }
+      `}</style>
     </div>
   )
-}
+})
+
+SplitDiffViewer.displayName = 'SplitDiffViewer'
 
 export default SplitDiffViewer

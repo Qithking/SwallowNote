@@ -50,6 +50,10 @@ export interface EditorTab {
   // For conflict tabs: conflict info
   conflictRepoPath?: string
   conflictRepoName?: string
+  // For conflict tabs: the currently selected conflict file (relative path within repo)
+  conflictSelectedFile?: string
+  // For conflict tabs: cursor line number in the local editor
+  conflictCursorLine?: number
 }
 
 export interface EditorState {
@@ -71,6 +75,7 @@ export interface EditorState {
   clearExternalChange: (id: string) => void
   updateTabPath: (oldPath: string, newPath: string, newName: string) => void
   updateCursorPosition: (id: string, line: number, column: number) => void
+  updateConflictTabState: (id: string, selectedFile: string | undefined, cursorLine: number | undefined) => void
   toggleViewMode: () => void
   getActiveTab: () => EditorTab | undefined
   scrollToLine: (line: number) => void
@@ -212,6 +217,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   loadTabContent: async (id) => {
     const tab = get().tabs.find((t) => t.id === id)
     if (!tab || tab.content || tab.isLoading) return
+    // Conflict and diff tabs don't have file content to load
+    if (tab.type === 'conflict' || tab.type === 'diff') return
 
     set((state) => ({
       tabs: state.tabs.map((t) =>
@@ -230,7 +237,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         if (metadata?.modified_time) {
           modifiedTime = metadata.modified_time
         }
-      } catch {}
+      } catch { /* ignore */ }
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === id
@@ -306,6 +313,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         t.id === id ? { ...t, cursorPosition: { line, column } } : t
       ),
     })),
+  updateConflictTabState: (id, selectedFile, cursorLine) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === id ? { ...t, conflictSelectedFile: selectedFile, conflictCursorLine: cursorLine } : t
+      ),
+    })),
   getActiveTab: () => {
     const state = get()
     return state.tabs.find((t) => t.id === state.activeTabId)
@@ -369,7 +382,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         // Auto commit if file is in a git repo (async, non-blocking)
         try {
           await gitAutoCommit(tab.path)
-        } catch {}
+        } catch { /* ignore */ }
         window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: tab.path } }))
       } catch (e) {
         console.error('Failed to save tab:', tab.path, e)
@@ -423,6 +436,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const validTabs: EditorTab[] = []
         for (const tab of tabs) {
           if (tab.path && tab.path.trim()) {
+            // Conflict tabs use repo path (directory) — always include them
+            // and validate against the conflict repo database later
+            if (tab.type === 'conflict') {
+              validTabs.push({
+                ...tab,
+                content: tab.content || '',
+                isDirty: false,
+                isEdited: false,
+                type: 'conflict',
+                viewMode: tab.viewMode || 'source',
+                conflictRepoPath: tab.conflictRepoPath,
+                conflictRepoName: tab.conflictRepoName,
+                conflictSelectedFile: tab.conflictSelectedFile,
+                conflictCursorLine: tab.conflictCursorLine,
+              })
+              continue
+            }
             const exists = await pathExists(tab.path)
             if (exists) {
               validTabs.push({

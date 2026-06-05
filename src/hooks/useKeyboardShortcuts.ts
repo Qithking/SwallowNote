@@ -324,7 +324,7 @@ export function useKeyboardShortcuts() {
         const index = parseInt(e.key) - 1
         if (tabs[index]) {
           const tab = tabs[index]
-          if (!tab.content && !tab.isLoading && tab.type !== 'diff') {
+          if (!tab.content && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
             await useEditorStore.getState().loadTabContent(tab.id)
           }
           useEditorStore.getState().setActiveTab(tab.id)

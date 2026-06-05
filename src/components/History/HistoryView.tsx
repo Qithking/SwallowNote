@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { FileText, Loader2, RotateCcw, Download, Upload } from 'lucide-react'
 import { useEditorStore } from '@/stores'
 import { gitFileLog, gitShowFileContent, gitPullFileLatest, gitForceUploadFile, GitFileLogEntry, writeFile } from '@/lib/tauri'
@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 
 const PAGE_SIZE = 50
 
-function HistoryView({ visible }: { visible: boolean }) {
+const HistoryView = memo(function HistoryView({ visible }: { visible: boolean }) {
   const { tabs, activeTabId, openDiffTab, updateTabContent } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
@@ -454,6 +454,6 @@ function HistoryView({ visible }: { visible: boolean }) {
       )}
     </div>
   )
-}
+})
 
 export { HistoryView }

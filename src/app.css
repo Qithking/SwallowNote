@@ -626,15 +626,14 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .cm-editor .cm-panels .cm-button:hover { background: var(--bg-hover); }
 .cm-editor .cm-selectionMatch { background: rgba(0,0,0,0.06); }
 
-/* ---- Diff Viewer ---- */
-/* Constrain editor height to parent so CodeMirror's native scroll kicks in */
+/* ---- Diff Viewer & Merge Editor ---- */
+/* split-diff-editor: legacy 2-pane diff, uses CodeMirror native scroll */
 .split-diff-editor .cm-editor { height: 100%; }
-/* Override global .cm-editor .cm-scroller { overflow: visible } */
 .split-diff-editor .cm-scroller {
   overflow: auto !important;
   scrollbar-width: thin !important;
+  -ms-overflow-style: auto !important;
 }
-/* Restore scrollbar visibility (global CSS hides them: ::-webkit-scrollbar { display: none }) */
 .split-diff-editor .cm-scroller::-webkit-scrollbar {
   display: block !important;
   width: 6px;
@@ -650,16 +649,73 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .split-diff-editor .cm-scroller::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted, rgba(0,0,0,0.3));
 }
+
+/* merge-editor-pane: 3-way merge editor wrapped by ScrollArea */
+/* Let CodeMirror expand to full content height — ScrollArea handles the scrolling */
+.merge-editor-pane .cm-editor { height: auto !important; }
+.merge-editor-pane .cm-scroller { overflow: visible !important; }
+/* Ensure ScrollArea viewport scrolls correctly */
+.merge-editor-pane [data-radix-scroll-area-viewport] {
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+}
+
+/* ── Resizable Panel Handles for Merge Editor ── */
+[data-panel-group-direction="horizontal"] > [data-panel-resize-handle-id] {
+  transition: background-color 0.15s ease;
+}
+[data-panel-group-direction="horizontal"] > [data-panel-resize-handle-id]:hover,
+[data-panel-group-direction="horizontal"] > [data-panel-resize-handle-id][data-resize-handle-active] {
+  background-color: var(--accent, rgba(59, 130, 246, 0.4));
+}
+
+/* Read-only editor: hide cursor and selection */
 .cm-readonly-diff .cm-cursor { display: none !important; }
 .cm-readonly-diff .cm-selectionLayer .cm-selectionBackground { display: none !important; }
-/* Light theme diff highlights */
-.cm-diff-added-line { background: rgba(34, 197, 94, 0.15) !important; border-left: 3px solid rgba(34, 197, 94, 0.6) !important; }
-.cm-diff-removed-line { background: rgba(239, 68, 68, 0.15) !important; border-left: 3px solid rgba(239, 68, 68, 0.6) !important; }
-.cm-diff-empty-line { background: var(--bg-tertiary, rgba(0,0,0,0.05)) !important; }
-/* Dark theme diff highlights */
-.dark .cm-diff-added-line { background: rgba(34, 197, 94, 0.12) !important; border-left: 3px solid rgba(34, 197, 94, 0.5) !important; }
-.dark .cm-diff-removed-line { background: rgba(239, 68, 68, 0.12) !important; border-left: 3px solid rgba(239, 68, 68, 0.5) !important; }
-.dark .cm-diff-empty-line { background: rgba(255,255,255,0.04) !important; }
+
+/* Light theme diff highlights — VS Code style (soft background, no border) */
+.cm-diff-added-line { background: rgba(34, 197, 94, 0.15) !important; }
+.cm-diff-removed-line { background: rgba(239, 68, 68, 0.15) !important; }
+.cm-diff-empty-line { background: rgba(128, 128, 128, 0.06) !important; }
+/* Dark theme diff highlights — VS Code style */
+.dark .cm-diff-added-line { background: rgba(34, 197, 94, 0.12) !important; }
+.dark .cm-diff-removed-line { background: rgba(239, 68, 68, 0.12) !important; }
+.dark .cm-diff-empty-line { background: rgba(255,255,255,0.03) !important; }
+
+/* Diff gutter ( +/- markers ) */
+.cm-diff-gutter { width: 18px; border-right: none; background: transparent; }
+.cm-diff-gutter .cm-gutterElement { padding: 0 2px; text-align: center; }
+
+/* ── Merge Editor: Conflict block highlights ── */
+/* Unresolved conflict — yellow/warning style */
+.cm-conflict-unresolved {
+  background: rgba(234, 179, 8, 0.12) !important;
+  border-left: 3px solid rgba(234, 179, 8, 0.8) !important;
+}
+/* Resolved conflict — green/success style */
+.cm-conflict-resolved {
+  background: rgba(34, 197, 94, 0.08) !important;
+  border-left: 3px solid rgba(34, 197, 94, 0.5) !important;
+}
+/* Dark theme conflict highlights */
+.dark .cm-conflict-unresolved {
+  background: rgba(234, 179, 8, 0.10) !important;
+  border-left: 3px solid rgba(234, 179, 8, 0.7) !important;
+}
+.dark .cm-conflict-resolved {
+  background: rgba(34, 197, 94, 0.06) !important;
+  border-left: 3px solid rgba(34, 197, 94, 0.4) !important;
+}
+
+/* Merge editor three-pane layout adjustments */
+.merge-editor-pane .cm-editor .cm-line {
+  padding: 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.merge-editor-pane .cm-editor .cm-content {
+  padding: 8px 0;
+}
 
 /* ---- BlockNote Editor ---- */
 .blocknote-editor-container {

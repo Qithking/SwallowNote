@@ -227,16 +227,8 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   const doInitMindMap = useCallback(async (dataContent: string) => {
     const el = containerRef.current
     if (!el) return
-    if (initStartedRef.current) {
-      console.log('[MindMapEditor] doInitMindMap skipped: already started')
-      return
-    }
-    if (destroyedRef.current) {
-      console.log('[MindMapEditor] doInitMindMap skipped: destroyed')
-      return
-    }
-
-    console.log('[MindMapEditor] doInitMindMap starting, content length:', dataContent?.length)
+    if (initStartedRef.current) return
+    if (destroyedRef.current) return
     initStartedRef.current = true
     isInitialLoad.current = true
     mountTimeRef.current = Date.now()
@@ -430,7 +422,6 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       if (rect.width > 0 && rect.height > 0) {
         containerReadyRef.current = true
         const pc = pendingContentRef.current
-        console.log('[MindMapEditor] container ready, pendingContent:', pc ? `length=${pc.length}` : 'null')
         if (pc && pc.trim()) {
           doInitMindMap(pc)
         }
@@ -443,7 +434,6 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
               if (destroyedRef.current) return
               containerReadyRef.current = true
               const pc = pendingContentRef.current
-              console.log('[MindMapEditor] container ready (observer), pendingContent:', pc ? `length=${pc.length}` : 'null')
               if (pc && pc.trim()) {
                 doInitMindMap(pc)
               }
@@ -478,18 +468,10 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
   }, [])
 
   useEffect(() => {
-    if (!content || !content.trim()) {
-      console.log('[MindMapEditor] content effect: content is empty, skipping')
-      return
-    }
+    if (!content || !content.trim()) return
 
     if (mindMapReadyRef.current) {
-      if (content === lastLoadedContentRef.current) {
-        console.log('[MindMapEditor] content effect: same content, skipping setData')
-        return
-      }
-
-      console.log('[MindMapEditor] content effect: calling setData')
+      if (content === lastLoadedContentRef.current) return
       isInitialLoad.current = true
       lastLoadedContentRef.current = content
 
@@ -502,12 +484,7 @@ export function MindMapEditor({ content, onChange }: MindMapEditorProps) {
       return
     }
 
-    if (initStartedRef.current) {
-      console.log('[MindMapEditor] content effect: init already started, skipping')
-      return
-    }
-
-    console.log('[MindMapEditor] content effect: setting pendingContent and checking container')
+    if (initStartedRef.current) return
     pendingContentRef.current = content
 
     if (containerReadyRef.current) {

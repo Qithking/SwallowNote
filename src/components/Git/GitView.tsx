@@ -1,7 +1,7 @@
 /**
  * GitView Component - Git integration panel with multi-repository support
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo } from 'react'
 import {
   GitBranch,
   RefreshCw,
@@ -548,13 +548,25 @@ function RepositoryItem({
   )
 }
 
-function GitView() {
-  const { repositories, setRepositories, setCachedRepositories, scanProgress, pullAllRepos, updateRepositoryStatuses, resetRepositoryStatuses } = useGitStore()
+const GitView = memo(function GitView() {
+  const repositories = useGitStore((s) => s.repositories)
+  const setRepositories = useGitStore((s) => s.setRepositories)
+  const setCachedRepositories = useGitStore((s) => s.setCachedRepositories)
+  const scanProgress = useGitStore((s) => s.scanProgress)
+  const pullAllRepos = useGitStore((s) => s.pullAllRepos)
+  const updateRepositoryStatuses = useGitStore((s) => s.updateRepositoryStatuses)
+  const resetRepositoryStatuses = useGitStore((s) => s.resetRepositoryStatuses)
+  const loadConflictRepos = useGitStore((s) => s.loadConflictRepos)
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode, showToast } = useUIStore()
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [isPullingRepos, setIsPullingRepos] = useState(false)
   const { t } = useTranslation()
+
+  // Load conflict repos from database on mount
+  useEffect(() => {
+    loadConflictRepos()
+  }, [loadConflictRepos])
 
   useEffect(() => {
     setSelectedRepos([])
@@ -671,6 +683,10 @@ function GitView() {
             editorStore.openConflictTab(result.path, result.name)
           }
         }
+
+        // Sync conflict repos to database
+        const gitStore = useGitStore.getState()
+        await gitStore.syncConflictReposFromPullResults(results)
       } else if (failed > 0) {
         showToast(t('git.pullResult', { success: succeeded, fail: failed }), 'error')
       } else if (succeeded > 0) {
@@ -799,6 +815,6 @@ function GitView() {
       </ScrollArea>
     </div>
   )
-}
+})
 
 export { GitView }

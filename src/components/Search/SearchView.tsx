@@ -1,7 +1,7 @@
 /**
  * SearchView Component - VSCode-like search with file content search support
  */
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import { Search, ChevronRight, ChevronDown, X } from 'lucide-react'
 import { searchInFiles, SearchResult as TSearchResult } from '@/lib/tauri'
 import { useWorkspaceStore, useEditorStore, useUIStore } from '@/stores'
@@ -9,8 +9,23 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
 import { useTranslation } from 'react-i18next'
+import { useVirtualizer } from '@tanstack/react-virtual'
 
-interface SearchResult extends TSearchResult {}
+type SearchResult = TSearchResult
+
+interface FlattenedResult {
+  type: 'file'
+  file: SearchResult
+  isExpanded: boolean
+}
+
+interface FlattenedMatch {
+  type: 'match'
+  file: SearchResult
+  match: { line_number: number; content: string; start_col: number; end_col: number }
+}
+
+type FlattenedItem = FlattenedResult | FlattenedMatch
 
 /**
  * Count words in content, properly handling CJK characters.
@@ -28,10 +43,117 @@ function countWords(content: string): number {
   return count
 }
 
-function SearchView() {
-  const { rootPath, workspaceFolders } = useWorkspaceStore()
-  const { workspaceMode } = useUIStore()
-  const { addTab } = useEditorStore()
+// 单个搜索结果文件项 - 使用 memo 优化
+const SearchResultFile = memo(function SearchResultFile({
+  result,
+  isExpanded,
+  onToggle,
+}: {
+  result: SearchResult
+  isExpanded: boolean
+  onToggle: (filePath: string) => void
+}) {
+  return (
+    <div
+      className="flex items-center h-6 px-2 cursor-pointer hover:bg-[var(--bg-hover)]"
+      onClick={() => onToggle(result.file_path)}
+    >
+      {isExpanded ? (
+        <ChevronDown size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+      ) : (
+        <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+      )}
+      {getFileIcon(result.file_name, 14)}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>
+            {result.file_name}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="start">{result.file_path}</TooltipContent>
+      </Tooltip>
+      <span className="ml-auto text-xs px-1 rounded shrink-0" style={{ 
+        color: 'var(--text-muted)',
+        backgroundColor: 'var(--bg-tertiary)'
+      }}>
+        {result.line_matches.length}
+      </span>
+    </div>
+  )
+})
+
+// 单个匹配项 - 使用 memo 优化
+const SearchResultMatch = memo(function SearchResultMatch({
+  file,
+  match,
+  query,
+  onClick,
+}: {
+  file: SearchResult
+  match: { line_number: number; content: string; start_col: number; end_col: number }
+  query: string
+  onClick: (file: SearchResult, lineNumber: number) => void
+}) {
+  return (
+    <div
+      className="flex items-center h-5 cursor-pointer hover:bg-[var(--bg-hover)]"
+      onClick={() => onClick(file, match.line_number)}
+    >
+      <div className="w-[26px] shrink-0" />
+      <span className="text-xs truncate flex-1" style={{ color: 'var(--text-secondary)' }}>
+        <HighlightMatches content={match.content} query={query} />
+      </span>
+    </div>
+  )
+})
+
+// 高亮匹配文本 - 使用 memo 优化
+const HighlightMatches = memo(function HighlightMatches({ content, query }: { content: string; query: string }) {
+  if (!query) return <>{content}</>
+  
+  const lowerContent = content.toLowerCase()
+  const lowerQuery = query.toLowerCase()
+  const matches: { start: number; end: number }[] = []
+  
+  let pos = 0
+  while ((pos = lowerContent.indexOf(lowerQuery, pos)) !== -1) {
+    matches.push({ start: pos, end: pos + query.length })
+    pos += 1
+  }
+  
+  if (matches.length === 0) return <>{content}</>
+  
+  const parts: { text: string; highlighted: boolean }[] = []
+  let lastEnd = 0
+  
+  for (const m of matches) {
+    if (m.start > lastEnd) {
+      parts.push({ text: content.substring(lastEnd, m.start), highlighted: false })
+    }
+    parts.push({ text: content.substring(m.start, m.end), highlighted: true })
+    lastEnd = m.end
+  }
+  
+  if (lastEnd < content.length) {
+    parts.push({ text: content.substring(lastEnd), highlighted: false })
+  }
+  
+  return (
+    <>
+      {parts.map((part, i) => 
+        part.highlighted 
+          ? <span key={i} style={{ backgroundColor: 'rgba(255, 200, 0, 0.4)' }}>{part.text}</span>
+          : <span key={i}>{part.text}</span>
+      )}
+    </>
+  )
+})
+
+const SearchView = memo(function SearchView() {
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
+  const workspaceMode = useUIStore((s) => s.workspaceMode)
+  const addTab = useEditorStore((s) => s.addTab)
   const inputRef = useRef<HTMLInputElement>(null)
   const { t } = useTranslation()
 
@@ -48,13 +170,12 @@ function SearchView() {
     inputRef.current?.focus()
   }, [])
 
-  const handleSearch = async () => {
+  const handleSearch = useCallback(async () => {
     if (!query.trim()) {
       setResults([])
       return
     }
 
-    // Determine search paths based on workspace mode
     const searchPaths = workspaceMode === 'workspace' 
       ? workspaceFolders 
       : (rootPath ? [rootPath] : [])
@@ -81,12 +202,10 @@ function SearchView() {
 
       const allResults = await Promise.all(searchPromises)
       
-      // Merge results and deduplicate by file_path
       const mergedMap = new Map<string, SearchResult>()
       for (const results of allResults) {
         for (const result of results) {
           if (mergedMap.has(result.file_path)) {
-            // Merge line_matches for existing file
             const existing = mergedMap.get(result.file_path)!
             const existingLines = new Set(existing.line_matches.map(m => m.line_number))
             for (const match of result.line_matches) {
@@ -104,20 +223,20 @@ function SearchView() {
       const mergedResults = Array.from(mergedMap.values())
       setResults(mergedResults)
       setExpandedFiles(new Set(mergedResults.map(r => r.file_path)))
-    } catch (e) {
+    } catch (_e) {
       setResults([])
     } finally {
       setIsSearching(false)
     }
-  }
+  }, [query, workspaceMode, workspaceFolders, rootPath, caseSensitive, wholeWord, useRegex])
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       handleSearch()
     }
-  }
+  }, [handleSearch])
 
-  const toggleFileExpanded = (filePath: string) => {
+  const toggleFileExpanded = useCallback((filePath: string) => {
     setExpandedFiles(prev => {
       const next = new Set(prev)
       if (next.has(filePath)) {
@@ -127,9 +246,9 @@ function SearchView() {
       }
       return next
     })
-  }
+  }, [])
 
-  const handleResultClick = async (result: SearchResult, lineNumber?: number) => {
+  const handleResultClick = useCallback(async (result: SearchResult, lineNumber?: number) => {
     try {
       const { readFile } = await import('@/lib/tauri')
       const content = await readFile(result.file_path)
@@ -146,7 +265,6 @@ function SearchView() {
         wordCount: countWords(content),
         cursorPosition: lineNumber ? { line: lineNumber, column: 1 } : undefined,
       })
-      // Scroll to the matched line after a short delay
       if (lineNumber) {
         setTimeout(() => {
           window.dispatchEvent(new CustomEvent('scroll-to-line', { detail: { line: lineNumber } }))
@@ -155,9 +273,33 @@ function SearchView() {
     } catch (e) {
       console.error('Failed to open file:', e)
     }
-  }
+  }, [addTab])
 
-  const totalMatches = results.reduce((sum, r) => sum + r.line_matches.length, 0)
+  // 扁平化搜索结果用于虚拟化
+  const flattenedItems = useMemo<FlattenedItem[]>(() => {
+    const items: FlattenedItem[] = []
+    for (const result of results) {
+      items.push({ type: 'file', file: result, isExpanded: expandedFiles.has(result.file_path) })
+      if (expandedFiles.has(result.file_path)) {
+        for (const match of result.line_matches) {
+          items.push({ type: 'match', file: result, match })
+        }
+      }
+    }
+    return items
+  }, [results, expandedFiles])
+
+  // 虚拟化配置
+  const parentRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({
+    count: flattenedItems.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => flattenedItems[index]?.type === 'file' ? 24 : 20,
+    overscan: 10,
+  })
+
+  const virtualItems = virtualizer.getVirtualItems()
+  const totalMatches = useMemo(() => results.reduce((sum, r) => sum + r.line_matches.length, 0), [results])
 
   return (
     <div className="flex flex-col h-full">
@@ -166,14 +308,12 @@ function SearchView() {
         <span className="text-sm font-medium ">{t('search.title')}</span>
       </div>
 
-      {/* Search Input - VSCode style */}
+      {/* Search Input */}
       <div className="p-2 ">
         <div 
           className="flex items-center h-8 rounded overflow-hidden"
           style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}
         >
-         
-          {/* Input */}
           <input
             ref={inputRef}
             type="text"
@@ -185,7 +325,6 @@ function SearchView() {
             onKeyDown={handleKeyDown}
           />
           
-          {/* Clear Button */}
           {query && (
             <button
               onClick={() => setQuery('')}
@@ -196,10 +335,7 @@ function SearchView() {
             </button>
           )}
           
-          {/* Search Options */}
-          <div 
-            className="flex items-center h-6 m-1 rounded"            
-          >
+          <div className="flex items-center h-6 m-1 rounded">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -260,7 +396,7 @@ function SearchView() {
         </div>
       )}
 
-      {/* Results List - VSCode style */}
+      {/* Results List with Virtualization */}
       <ScrollArea className="flex-1">
         {!query ? (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
@@ -278,109 +414,51 @@ function SearchView() {
             <p className="text-sm">{t('search.notFound')}</p>
           </div>
         ) : (
-          <div className="py-1">
-            {results.map((result) => {
-              const isExpanded = expandedFiles.has(result.file_path)
-              
-              return (
-                <div key={result.file_path}>
-                  {/* File header - VSCode style */}
+          <div ref={parentRef} style={{ height: '100%', overflow: 'auto' }}>
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {virtualItems.map((virtualItem) => {
+                const item = flattenedItems[virtualItem.index]
+                return (
                   <div
-                    className="flex items-center h-6 px-2 cursor-pointer hover:bg-[var(--bg-hover)]"
-                    onClick={() => toggleFileExpanded(result.file_path)}
+                    key={virtualItem.key}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualItem.size}px`,
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
                   >
-                    {/* Collapse/Expand arrow */}
-                    {isExpanded ? (
-                      <ChevronDown size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                    {item.type === 'file' ? (
+                      <SearchResultFile
+                        result={item.file}
+                        isExpanded={item.isExpanded}
+                        onToggle={toggleFileExpanded}
+                      />
                     ) : (
-                      <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
+                      <SearchResultMatch
+                        file={item.file}
+                        match={item.match}
+                        query={query}
+                        onClick={handleResultClick}
+                      />
                     )}
-                    {/* File icon */}
-                    {getFileIcon(result.file_name, 14)}
-                    {/* File name with tooltip */}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>
-                          {result.file_name}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" align="start">{result.file_path}</TooltipContent>
-                    </Tooltip>
-                    {/* Match count badge */}
-                    <span className="ml-auto text-xs px-1 rounded shrink-0" style={{ 
-                      color: 'var(--text-muted)',
-                      backgroundColor: 'var(--bg-tertiary)'
-                    }}>
-                      {result.line_matches.length}
-                    </span>
                   </div>
-
-                  {/* Match lines - content aligned with file icon */}
-                  {isExpanded && result.line_matches.map((match, idx) => (
-                    <div
-                      key={`${result.file_path}-${match.line_number}-${idx}`}
-                      className="flex items-center h-5 cursor-pointer hover:bg-[var(--bg-hover)]"
-                      onClick={() => handleResultClick(result, match.line_number)}
-                    >
-                      {/* Spacer = arrow(14) + gap(4) = 18px to align with icon */}
-                      <div className="w-[26px] shrink-0" />
-                      {/* Content aligned with file icon */}
-                      <span className="text-xs truncate flex-1" style={{ color: 'var(--text-secondary)' }}>
-                        {highlightAllMatches(match.content, query)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
         )}
       </ScrollArea>
     </div>
   )
-}
-
-// Highlight all matches in content (VSCode style)
-function highlightAllMatches(content: string, query: string) {
-  if (!query) return <>{content}</>
-  
-  const lowerContent = content.toLowerCase()
-  const lowerQuery = query.toLowerCase()
-  const matches: { start: number; end: number }[] = []
-  
-  let pos = 0
-  while ((pos = lowerContent.indexOf(lowerQuery, pos)) !== -1) {
-    matches.push({ start: pos, end: pos + query.length })
-    pos += 1
-  }
-  
-  if (matches.length === 0) return <>{content}</>
-  
-  // Build highlighted JSX
-  const parts: { text: string; highlighted: boolean }[] = []
-  let lastEnd = 0
-  
-  for (const m of matches) {
-    if (m.start > lastEnd) {
-      parts.push({ text: content.substring(lastEnd, m.start), highlighted: false })
-    }
-    parts.push({ text: content.substring(m.start, m.end), highlighted: true })
-    lastEnd = m.end
-  }
-  
-  if (lastEnd < content.length) {
-    parts.push({ text: content.substring(lastEnd), highlighted: false })
-  }
-  
-  return (
-    <>
-      {parts.map((part, i) => 
-        part.highlighted 
-          ? <span key={i} style={{ backgroundColor: 'rgba(255, 200, 0, 0.4)' }}>{part.text}</span>
-          : <span key={i}>{part.text}</span>
-      )}
-    </>
-  )
-}
+})
 
 export { SearchView }

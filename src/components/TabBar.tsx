@@ -209,7 +209,7 @@ function TabBar() {
 
   const handleTabClick = async (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId)
-    if (tab && !tab.content && !tab.isLoading && tab.type !== 'diff') {
+    if (tab && !tab.content && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
       await useEditorStore.getState().loadTabContent(tabId)
     }
     setActiveTab(tabId)

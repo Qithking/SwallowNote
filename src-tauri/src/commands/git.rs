@@ -2013,3 +2013,200 @@ fn build_credential_key(repo_path: &str) -> Result<String, String> {
         Err(_) => Ok(format!("git:path:{}", repo_path.replace('\\', "/"))),
     }
 }
+
+// ===================== Word Diff =====================
+
+/// A single diff part returned by the word-level diff command.
+/// Each part represents either unchanged text, text only in the old version,
+/// or text only in the new version.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct WordDiffPart {
+    /// The text content of this diff part
+    pub value: String,
+    /// True if this text exists only in the old version (removed)
+    pub removed: bool,
+    /// True if this text exists only in the new version (added)
+    pub added: bool,
+}
+
+/// Result of a word-level diff comparison between two texts.
+/// Contains separate arrays for each side so the frontend can
+/// independently render decorations on the left (remote) and right (local) panes.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct WordDiffResult {
+    /// Diff parts for the old (remote/left) side
+    pub old_parts: Vec<WordDiffPart>,
+    /// Diff parts for the new (local/right) side
+    pub new_parts: Vec<WordDiffPart>,
+}
+
+/// Compute word-level diff between two text strings using the `similar` crate.
+/// This performs a word-granularity diff (similar to `diffWords` in jsdiff),
+/// then splits the result into separate arrays for the old and new sides.
+///
+/// Frontend usage:
+/// - Left pane (remote/old): iterate `old_parts`, highlight parts where `removed == true`
+/// - Right pane (local/new): iterate `new_parts`, highlight parts where `added == true`
+#[tauri::command]
+pub fn compute_word_diff(old_text: String, new_text: String) -> Result<WordDiffResult, String> {
+    use similar::{ChangeTag, TextDiff};
+
+    let diff = TextDiff::from_words(&old_text, &new_text);
+
+    let mut old_parts: Vec<WordDiffPart> = Vec::new();
+    let mut new_parts: Vec<WordDiffPart> = Vec::new();
+
+    for change in diff.iter_all_changes() {
+        // Use to_string_lossy() instead of to_string() — the Display impl of Change
+        // auto-appends '\n' when the value doesn't end with a newline (for unified diff
+        // output). This would corrupt the content and cause wrong position tracking in
+        // the frontend. to_string_lossy() returns the raw value without the extra '\n'.
+        let value = change.to_string_lossy().into_owned();
+        match change.tag() {
+            ChangeTag::Delete => {
+                old_parts.push(WordDiffPart {
+                    value,
+                    removed: true,
+                    added: false,
+                });
+            }
+            ChangeTag::Insert => {
+                new_parts.push(WordDiffPart {
+                    value,
+                    removed: false,
+                    added: true,
+                });
+            }
+            ChangeTag::Equal => {
+                let part = WordDiffPart {
+                    value,
+                    removed: false,
+                    added: false,
+                };
+                old_parts.push(part.clone());
+                new_parts.push(part);
+            }
+        }
+    }
+
+    Ok(WordDiffResult {
+        old_parts,
+        new_parts,
+    })
+}
+
+// ──────────────────────────────────────────────
+// Conflict Repo Record Commands
+// ──────────────────────────────────────────────
+
+/// Get all conflict repo records from the database
+#[tauri::command]
+pub fn get_conflict_repo_records(db: tauri::State<'_, crate::db::Database>) -> Result<Vec<crate::db::conflict_repo::ConflictRepoRecord>, String> {
+    crate::db::conflict_repo::get_all_conflict_repos(&db).map_err(|e| e.to_string())
+}
+
+/// Remove a conflict repo record (called when all conflicts in a repo are resolved)
+#[tauri::command]
+pub fn remove_conflict_repo_record(db: tauri::State<'_, crate::db::Database>, repo_path: String) -> Result<(), String> {
+    crate::db::conflict_repo::remove_conflict_repo(&db, &repo_path).map_err(|e| e.to_string())
+}
+
+/// Sync conflict repo records: update the database with current conflict state
+/// and return the final list. Called by the auto-sync task after pulling.
+#[tauri::command]
+pub async fn sync_conflict_repo_records(
+    db: tauri::State<'_, crate::db::Database>,
+    conflict_repos: Vec<(String, String, i64)>, // (repo_path, repo_name, file_count)
+) -> Result<Vec<crate::db::conflict_repo::ConflictRepoRecord>, String> {
+    crate::db::conflict_repo::sync_conflict_repos(&db, &conflict_repos).map_err(|e| e.to_string())
+}
+
+/// Check if a specific repo has conflicts and upsert the record.
+/// Returns the conflict file count (0 means no conflicts, record will be removed).
+#[tauri::command]
+pub async fn check_and_update_conflict_repo(
+    db: tauri::State<'_, crate::db::Database>,
+    repo_path: String,
+    repo_name: String,
+) -> Result<i64, String> {
+    // Check for actual conflict files
+    let files = git_get_conflict_files(repo_path.clone()).await?;
+
+    if files.is_empty() {
+        // No conflicts — remove the record
+        crate::db::conflict_repo::remove_conflict_repo(&db, &repo_path).map_err(|e| e.to_string())?;
+        Ok(0)
+    } else {
+        // Has conflicts — upsert the record
+        let count = files.len() as i64;
+        crate::db::conflict_repo::upsert_conflict_repo(&db, &repo_path, &repo_name, count).map_err(|e| e.to_string())?;
+        Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn compute_word_diff_test(old_text: &str, new_text: &str) -> WordDiffResult {
+        compute_word_diff(old_text.to_string(), new_text.to_string()).unwrap()
+    }
+
+    #[test]
+    fn test_identical_text() {
+        let result = compute_word_diff_test("hello world", "hello world");
+        
+        // old_parts should concatenate to old_text
+        let old_concatenated: String = result.old_parts.iter().map(|p| p.value.as_str()).collect();
+        let new_concatenated: String = result.new_parts.iter().map(|p| p.value.as_str()).collect();
+        
+        assert_eq!(old_concatenated, "hello world", "old_parts should concatenate to old_text");
+        assert_eq!(new_concatenated, "hello world", "new_parts should concatenate to new_text");
+        
+        // No parts should be marked as removed or added
+        assert!(result.old_parts.iter().all(|p| !p.removed && !p.added), "No parts should be marked as changed for identical text");
+        assert!(result.new_parts.iter().all(|p| !p.removed && !p.added), "No parts should be marked as changed for identical text");
+    }
+
+    #[test]
+    fn test_different_text() {
+        let result = compute_word_diff_test("hello world", "hello earth");
+        
+        let old_concatenated: String = result.old_parts.iter().map(|p| p.value.as_str()).collect();
+        let new_concatenated: String = result.new_parts.iter().map(|p| p.value.as_str()).collect();
+        
+        assert_eq!(old_concatenated, "hello world", "old_parts should concatenate to old_text");
+        assert_eq!(new_concatenated, "hello earth", "new_parts should concatenate to new_text");
+    }
+
+    #[test]
+    fn test_identical_multiline() {
+        let text = "line1\nline2\nline3";
+        let result = compute_word_diff_test(text, text);
+        
+        let old_concatenated: String = result.old_parts.iter().map(|p| p.value.as_str()).collect();
+        let new_concatenated: String = result.new_parts.iter().map(|p| p.value.as_str()).collect();
+        
+        assert_eq!(old_concatenated, text);
+        assert_eq!(new_concatenated, text);
+        
+        // No parts should be marked as changed
+        assert!(result.old_parts.iter().all(|p| !p.removed && !p.added));
+        assert!(result.new_parts.iter().all(|p| !p.removed && !p.added));
+    }
+
+    #[test]
+    fn test_different_multiline() {
+        let result = compute_word_diff_test("line1\nline2\nline3", "line1\nmodified\nline3");
+        
+        let old_concatenated: String = result.old_parts.iter().map(|p| p.value.as_str()).collect();
+        let new_concatenated: String = result.new_parts.iter().map(|p| p.value.as_str()).collect();
+        
+        assert_eq!(old_concatenated, "line1\nline2\nline3");
+        assert_eq!(new_concatenated, "line1\nmodified\nline3");
+        
+        // Should have some removed parts in old and added parts in new
+        assert!(result.old_parts.iter().any(|p| p.removed), "old should have removed parts");
+        assert!(result.new_parts.iter().any(|p| p.added), "new should have added parts");
+    }
+}

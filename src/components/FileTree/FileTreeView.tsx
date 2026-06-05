@@ -1,10 +1,18 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
-import { FileText, FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, GitFork } from 'lucide-react'
+/**
+ * FileTreeView — 文件树视图组件（纯渲染层）
+ * 操作逻辑已提取到：
+ *   - useFileTreeActions  (重命名/新建/删除)
+ *   - useFileTreeDragDrop (拖拽)
+ * 工具函数来自 @/lib/utils/treeUtils
+ */
+import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
+import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, GitFork, FileText } from 'lucide-react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
-import { loadFileContent, loadDirectory } from '@/lib/api'
-import { openFolderDialog, createFile, deleteFile as deleteFileTauri, renameFile } from '@/lib/tauri'
+import { loadFileContent } from '@/lib/api'
+import { openFolderDialog } from '@/lib/tauri'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -12,90 +20,243 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
 import { useTranslation } from 'react-i18next'
 import { matchShortcut, getShortcutKey } from '@/lib/shortcuts'
-import { invoke } from '@tauri-apps/api/core'
+import { useFileTreeActions } from '@/hooks/useFileTreeActions'
+import { useFileTreeDragDrop } from '@/hooks/useFileTreeDragDrop'
+import { findNodeByPath, collectAllPaths } from '@/lib/utils/treeUtils'
+import { useVirtualizer } from '@tanstack/react-virtual'
 
-function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return list.map((n) => {
-    if (n.path === path) return { ...n, children }
-    if (n.children) return { ...n, children: updateNodesWithChildren(n.children, path, children) }
-    return n
-  })
+// 扁平化的树节点，用于虚拟化
+interface FlattenedNode {
+  node: FileNode
+  depth: number
+  isLastInParent?: boolean
 }
 
-function findNodeByPath(path: string, list: FileNode[]): FileNode | null {
-  for (const n of list) {
-    if (n.path === path) return n
-    if (n.children) {
-      const found = findNodeByPath(path, n.children)
-      if (found) return found
+// 将嵌套的文件树扁平化为列表
+function flattenNodes(nodes: FileNode[], expanded: Set<string>, depth = 0): FlattenedNode[] {
+  const result: FlattenedNode[] = []
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
+    result.push({ node, depth, isLastInParent: i === nodes.length - 1 })
+    if (node.isDirectory && expanded.has(node.path) && node.children) {
+      result.push(...flattenNodes(node.children, expanded, depth + 1))
     }
   }
-  return null
+  return result
 }
 
-function findParentNode(node: FileNode, list: FileNode[]): FileNode | null {
-  for (const n of list) {
-    if (n.children) {
-      if (n.children.some(c => c.path === node.path)) return n
-      const found = findParentNode(node, n.children)
-      if (found) return found
-    }
-  }
-  return null
-}
+// 单个树节点组件 - 使用 memo 优化
+const TreeNodeItem = memo(function TreeNodeItem({
+  node,
+  depth,
+  isNewItemNode,
+  isEditing,
+  isSelected,
+  isMultiSelected,
+  isDragOver,
+  isDragging,
+  expanded,
+  editingName,
+  newItem,
+  inputRef,
+  onSelect,
+  onToggle,
+  onStartEdit,
+  onNewItem,
+  onFinishEdit,
+  onCancelEdit,
+  onFinishNewItem,
+  onCancelNewItem,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+  setEditingName,
+  setNewItem,
+}: {
+  node: FileNode
+  depth: number
+  isNewItemNode: boolean
+  isEditing: boolean
+  isSelected: boolean
+  isMultiSelected: boolean
+  isDragOver: boolean
+  isDragging: boolean
+  expanded: Set<string>
+  editingName: string
+  newItem: { type: 'file' | 'folder' | 'mindmap'; parentPath: string; name: string } | null
+  inputRef: React.RefObject<HTMLInputElement | null>
+  onSelect: (node: FileNode, shiftKey: boolean) => void
+  onToggle: (path: string) => void
+  onStartEdit: (path: string, name: string, isDirectory: boolean) => void
+  onNewItem: (type: 'file' | 'folder' | 'mindmap', parentPath?: string) => void
+  onFinishEdit: () => void
+  onCancelEdit: () => void
+  onFinishNewItem: () => void
+  onCancelNewItem: () => void
+  onDragStart: (e: React.DragEvent, node: FileNode) => void
+  onDragOver: (e: React.DragEvent, node: FileNode) => void
+  onDragLeave: (e: React.DragEvent) => void
+  onDrop: (e: React.DragEvent, node: FileNode) => void
+  onDragEnd: (e: React.DragEvent) => void
+  setEditingName: (name: string) => void
+  setNewItem: (item: { type: 'file' | 'folder' | 'mindmap'; parentPath: string; name: string } | null) => void
+}) {
+  const nodeContent = (
+    <div
+      data-path={node.path}
+      className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${
+        isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]'
+        : isDragOver ? 'bg-primary/15 text-[var(--text-primary)] border-t border-primary/30'
+        : isMultiSelected ? 'bg-primary/5 text-[var(--text-primary)]'
+        : isDragging ? 'opacity-50 text-[var(--text-secondary)]'
+        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+      }`}
+      style={{ paddingLeft: `${depth * 12 + 8}px` }}
+      onClick={(e) => !isEditing && onSelect(node, e.shiftKey)}
+    >
+      {node.isDirectory ? (
+        node.isLoading ? (
+          <Loader2 size={12} className="animate-spin shrink-0" />
+        ) : (
+          <ChevronRight
+            size={12}
+            className={`transition-transform shrink-0 ${expanded.has(node.path) ? 'rotate-90' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onToggle(node.path) }}
+          />
+        )
+      ) : (
+        <span className="w-[14px] shrink-0" />
+      )}
+      {node.isDirectory ? (
+        <Folder size={12} className="text-[#666666]" />
+      ) : (
+        getFileIcon(node.name)
+      )}
+      {isEditing ? (
+        <input
+          ref={inputRef}
+          type="text"
+          className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-xs text-[var(--text-primary)]"
+          value={editingName}
+          onChange={(e) => setEditingName(e.target.value)}
+          onBlur={onFinishEdit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); onFinishEdit() }
+            else if (e.key === 'Escape') { onCancelEdit() }
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <span className="truncate">{node.name}</span>
+      )}
+    </div>
+  )
 
-/** Collect all visible node paths in depth-first order (matching render order) */
-function collectAllPaths(nodes: FileNode[]): string[] {
-  const paths: string[] = []
-  for (const n of nodes) {
-    paths.push(n.path)
-    if (n.children) {
-      paths.push(...collectAllPaths(n.children))
-    }
-  }
-  return paths
-}
+  return (
+    <div
+      draggable={!isEditing}
+      onDragStart={(e) => onDragStart(e, node)}
+      onDragOver={(e) => onDragOver(e, node)}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => onDrop(e, node)}
+      onDragEnd={onDragEnd}
+    >
+      <TreeNodeContextMenu
+        node={node}
+        onRename={() => onStartEdit(node.path, node.name, node.isDirectory)}
+        onNewFile={() => onNewItem('file', node.path)}
+        onNewFolder={() => onNewItem('folder', node.path)}
+        onNewMindMap={() => onNewItem('mindmap', node.path)}
+      >
+        {nodeContent}
+      </TreeNodeContextMenu>
+      {isNewItemNode && newItem && (
+        <div
+          className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
+          style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
+        >
+          <span className="w-[14px]" />
+          {newItem.type === 'folder' ? (
+            <Folder size={12} className="text-[#666666]" />
+          ) : newItem.type === 'mindmap' ? (
+            getFileIcon(newItem.name || 'newfile.smm')
+          ) : (
+            getFileIcon(newItem.name || 'newfile')
+          )}
+          <input
+            ref={inputRef}
+            type="text"
+            className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-xs text-[var(--text-primary)]"
+            value={newItem.name}
+            onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+            onBlur={onFinishNewItem}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); onFinishNewItem() }
+              else if (e.key === 'Escape') { onCancelNewItem() }
+            }}
+          />
+        </div>
+      )}
+    </div>
+  )
+})
 
-function generateUniqueName(baseName: string, siblings: FileNode[]): string {
-  const ext = baseName.includes('.') ? '.' + baseName.split('.').pop() : ''
-  const nameWithoutExt = ext ? baseName.slice(0, -ext.length) : baseName
-  let counter = 1
-  let newName = baseName
-  while (siblings.some(s => s.name === newName)) {
-    newName = `${nameWithoutExt}${counter}${ext}`
-    counter++
-  }
-  return newName
-}
-
-// 新建文件/文件夹模式的状态
-interface NewItemState {
-  parentPath: string
-  name: string
-  type: 'file' | 'folder' | 'mindmap'
-}
-
-export function FileTreeView() {
-  const { rootPath, addWorkspaceFolder, saveWorkspaceFile } = useWorkspaceStore()
-  const { workspaceMode, showAllFiles, markdownOnly, showToast } = useUIStore()
-  const { addTab, updateTabPath } = useEditorStore()
-  const { nodes, expanded, selectedPath, isLoading, setSelectedPath, toggleNode, setNodes, refreshExpanded,
-    multiSelectedPaths, setMultiSelectedPaths, lastClickedPath, setLastClickedPath, clearMultiSelection } = useFileTreeStore()
-  const { customShortcuts } = useUIStore()
-  const inputRef = useRef<HTMLInputElement>(null)
-  const editingCommitRef = useRef(false)
-  const newItemCommitRef = useRef(false)
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [dragOverPath, setDragOverPath] = useState<string | null>(null)
-  const [dragSourcePaths, setDragSourcePaths] = useState<string[]>([])
+export const FileTreeView = memo(function FileTreeView() {
+  const addWorkspaceFolder = useWorkspaceStore((s) => s.addWorkspaceFolder)
+  const saveWorkspaceFile = useWorkspaceStore((s) => s.saveWorkspaceFile)
+  const workspaceMode = useUIStore((s) => s.workspaceMode)
+  const addTab = useEditorStore((s) => s.addTab)
+  const nodes = useFileTreeStore((s) => s.nodes)
+  const expanded = useFileTreeStore((s) => s.expanded)
+  const selectedPath = useFileTreeStore((s) => s.selectedPath)
+  const isLoading = useFileTreeStore((s) => s.isLoading)
+  const setSelectedPath = useFileTreeStore((s) => s.setSelectedPath)
+  const toggleNode = useFileTreeStore((s) => s.toggleNode)
+  const multiSelectedPaths = useFileTreeStore((s) => s.multiSelectedPaths)
+  const setMultiSelectedPaths = useFileTreeStore((s) => s.setMultiSelectedPaths)
+  const lastClickedPath = useFileTreeStore((s) => s.lastClickedPath)
+  const setLastClickedPath = useFileTreeStore((s) => s.setLastClickedPath)
+  const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
+  const customShortcuts = useUIStore((s) => s.customShortcuts)
   const { t } = useTranslation()
+
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  // ── 操作逻辑（重命名/新建/删除）──
+  const {
+    inputRef,
+    editingPath,
+    editingName,
+    setEditingName,
+    newItem,
+    setNewItem,
+    handleStartEdit,
+    handleFinishEdit,
+    handleCancelEdit,
+    handleNewItem,
+    handleFinishNewItem,
+    handleCancelNewItem,
+    handleDeleteSelected,
+  } = useFileTreeActions()
+
+  // ── 拖拽逻辑 ──
+  const {
+    dragOverPath,
+    dragSourcePaths,
+    handleDragStart,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+    handleDragEnd,
+  } = useFileTreeDragDrop(nodes)
 
   const handleRefresh = async () => {
     if (isRefreshing) return
     setIsRefreshing(true)
     try {
-      // Refresh all expanded directories to ensure they stay expanded with updated content
-      await refreshExpanded()
+      await useFileTreeStore.getState().refreshExpanded()
     } catch (e) {
       console.error('Failed to refresh:', e)
     } finally {
@@ -103,79 +264,21 @@ export function FileTreeView() {
     }
   }
 
-  // 重命名状态
-  const [editingPath, setEditingPath] = useState<string | null>(null)
-  const [editingName, setEditingName] = useState('')
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [editingType, setEditingType] = useState<'file' | 'folder' | null>(null)
-  // @ts-ignore editingType is used for future features
-  void editingType
-  const [isFirstEdit, setIsFirstEdit] = useState(true)
-
-  // 新建文件/文件夹状态
-  const [newItem, setNewItem] = useState<NewItemState | null>(null)
-  const [isNewItemFirstEdit, setIsNewItemFirstEdit] = useState(false)
-
-  const handleStartEdit = (path: string, name: string, isDirectory: boolean) => {
-    // 保存完整文件名，useEffect 中会设置选中范围
-    setEditingPath(path)
-    setEditingName(name)
-    setEditingType(isDirectory ? 'folder' : 'file')
-    setIsFirstEdit(true) // 初次编辑，选中文件名
-  }
-
-  useEffect(() => {
-    // 延迟到下一帧确保 DOM 已更新
-    requestAnimationFrame(() => {
-      if (!inputRef.current) return
-
-      if (editingPath !== null) {
-        inputRef.current.focus()
-        // 只在初次编辑时选中文件名（去除扩展名）
-        if (isFirstEdit) {
-          const editingNode = findNodeByPath(editingPath, nodes)
-          if (editingNode && !editingNode.isDirectory && editingName.includes('.')) {
-            const lastDot = editingName.lastIndexOf('.')
-            inputRef.current.setSelectionRange(0, lastDot)
-          } else {
-            inputRef.current.select()
-          }
-          setIsFirstEdit(false)
-        }
-      } else if (newItem !== null) {
-        inputRef.current.focus()
-        if (isNewItemFirstEdit) {
-          const name = newItem.name
-          if (newItem.type === 'file' && name.includes('.')) {
-            const lastDot = name.lastIndexOf('.')
-            inputRef.current.setSelectionRange(0, lastDot)
-          } else {
-            inputRef.current.select()
-          }
-          setIsNewItemFirstEdit(false)
-        }
-      }
-    })
-  }, [editingPath, newItem, editingName, nodes, isFirstEdit, isNewItemFirstEdit])
-
   const handleSelect = useCallback((node: FileNode, shiftKey: boolean) => {
-    if (editingPath !== null) return // 正在重命名时不处理点击
+    if (editingPath !== null) return
 
     if (shiftKey && lastClickedPath) {
-      // Shift+click: select range from last clicked to current
       const allPaths = collectAllPaths(nodes)
       const startIdx = allPaths.indexOf(lastClickedPath)
       const endIdx = allPaths.indexOf(node.path)
       if (startIdx >= 0 && endIdx >= 0) {
         const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
-        const rangePaths = allPaths.slice(from, to + 1)
-        setMultiSelectedPaths(new Set(rangePaths))
+        setMultiSelectedPaths(new Set(allPaths.slice(from, to + 1)))
         setSelectedPath(node.path)
         return
       }
     }
 
-    // Normal click: clear multi-selection, set as single selection
     clearMultiSelection()
     setSelectedPath(node.path)
     setLastClickedPath(node.path)
@@ -200,7 +303,7 @@ export function FileTreeView() {
         })
       })
       .catch(console.error)
-  }, [editingPath, lastClickedPath, nodes, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab])
+  }, [editingPath, lastClickedPath, nodes, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab, setMultiSelectedPaths])
 
   const handleOpenFolder = async () => {
     const path = await openFolderDialog()
@@ -213,545 +316,55 @@ export function FileTreeView() {
     }
   }
 
-  const handleFinishEdit = async () => {
-    if (editingCommitRef.current) return // 防止 Enter + onBlur 重复触发
-    editingCommitRef.current = true
-
-    if (!editingPath || !editingName.trim()) {
-      setEditingPath(null)
-      setEditingName('')
-      setEditingType(null)
-      editingCommitRef.current = false
-      return
-    }
-
-    const node = findNodeByPath(editingPath, nodes)
-    if (!node) {
-      setEditingPath(null)
-      setEditingName('')
-      setEditingType(null)
-      editingCommitRef.current = false
-      return
-    }
-
-    // 检查文件名是否改变
-    if (editingName.trim() === node.name) {
-      setEditingPath(null)
-      setEditingName('')
-      setEditingType(null)
-      editingCommitRef.current = false
-      return
-    }
-
-    try {
-      const parent = findParentNode(node, nodes)
-      const parentPath = parent?.path || rootPath || ''
-      const newName = editingName.trim()
-      const newPath = parentPath + '/' + newName
-      await renameFile(editingPath, newPath)
-
-      // 更新已打开的 tab
-      updateTabPath(editingPath, newPath, newName)
-
-      // 刷新父节点
-      if (parent) {
-        const children = await loadDirectory(parent.path, showAllFiles, markdownOnly)
-        const updatedNodes = updateNodesWithChildren(nodes, parent.path, children)
-        setNodes(updatedNodes)
-      } else {
-        // 根节点重命名，刷新根
-        const children = await loadDirectory(rootPath || editingPath, showAllFiles, markdownOnly)
-        const rootNode: FileNode = {
-          id: 'root',
-          name: rootPath?.split(/[\\/]/).pop() || rootPath || '',
-          path: rootPath || '',
-          isDirectory: true,
-          children,
-        }
-        setNodes([rootNode])
-      }
-    } catch (e) {
-      console.error('Failed to rename:', e)
-    }
-
-    setEditingPath(null)
-    setEditingName('')
-    setEditingType(null)
-    editingCommitRef.current = false
-  }
-
-  const handleCancelEdit = () => {
-    setEditingPath(null)
-    setEditingName('')
-    setEditingType(null)
-  }
-
-  const handleNewFile = async (dirPath?: string) => {
-    const targetPath = dirPath || selectedPath
-    if (!targetPath) return
-    const selected = findNodeByPath(targetPath, nodes)
-    if (!selected || !selected.isDirectory) return
-
-    // Ensure the directory is expanded and children are loaded before showing the input
-    if (!expanded.has(selected.path)) {
-      await toggleNode(selected.path)
-    }
-    // Re-read nodes after toggleNode may have loaded children
-    const currentNode = findNodeByPath(selected.path, useFileTreeStore.getState().nodes)
-    const siblings = currentNode?.children || []
-    const name = generateUniqueName(t('fileTree.defaultFileName'), siblings)
-    setSelectedPath(selected.path)
-    setNewItem({ parentPath: selected.path, name, type: 'file' })
-    setIsNewItemFirstEdit(true)
-  }
-
-  const handleNewMindMap = async (dirPath?: string) => {
-    const targetPath = dirPath || selectedPath
-    if (!targetPath) return
-    const selected = findNodeByPath(targetPath, nodes)
-    if (!selected || !selected.isDirectory) return
-
-    // Ensure the directory is expanded and children are loaded before showing the input
-    if (!expanded.has(selected.path)) {
-      await toggleNode(selected.path)
-    }
-    // Re-read nodes after toggleNode may have loaded children
-    const currentNode = findNodeByPath(selected.path, useFileTreeStore.getState().nodes)
-    const siblings = currentNode?.children || []
-    const name = generateUniqueName(t('fileTree.defaultMindMapName'), siblings)
-    setSelectedPath(selected.path)
-    setNewItem({ parentPath: selected.path, name, type: 'mindmap' })
-    setIsNewItemFirstEdit(true)
-  }
-
-  const handleNewFolder = async (dirPath?: string) => {
-    const targetPath = dirPath || selectedPath
-    if (!targetPath) return
-    const selected = findNodeByPath(targetPath, nodes)
-    if (!selected || !selected.isDirectory) return
-
-    // Ensure the directory is expanded and children are loaded before showing the input
-    if (!expanded.has(selected.path)) {
-      await toggleNode(selected.path)
-    }
-    // Re-read nodes after toggleNode may have loaded children
-    const currentNode = findNodeByPath(selected.path, useFileTreeStore.getState().nodes)
-    const siblings = currentNode?.children || []
-    const name = generateUniqueName(t('fileTree.defaultFolderName'), siblings)
-    setSelectedPath(selected.path)
-    setNewItem({ parentPath: selected.path, name, type: 'folder' })
-    setIsNewItemFirstEdit(true)
-  }
-
-  const handleFinishNewItem = async () => {
-    if (newItemCommitRef.current) return // 防止 Enter + onBlur 重复触发
-    newItemCommitRef.current = true
-
-    if (!newItem || !newItem.name.trim()) {
-      setNewItem(null)
-      newItemCommitRef.current = false
-      return
-    }
-
-    try {
-      const fullPath = newItem.parentPath + '/' + newItem.name.trim()
-      if (newItem.type === 'mindmap') {
-        // 创建思维导图文件，带有默认的 JSON 内容
-        const defaultMindMapData = {
-          root: {
-            data: { text: newItem.name.replace(/\.smm$/i, '') },
-            children: []
-          },
-          theme: 'default',
-          layout: 'logicalStructure',
-        }
-        await createFile(fullPath, false)
-        // 写入默认内容
-        const { writeFile } = await import('@/lib/tauri')
-        await writeFile(fullPath, JSON.stringify(defaultMindMapData, null, 2))
-      } else {
-        await createFile(fullPath, newItem.type === 'folder')
-      }
-      const children = await loadDirectory(newItem.parentPath, showAllFiles, markdownOnly)
-      const updatedNodes = updateNodesWithChildren(nodes, newItem.parentPath, children)
-      setNodes(updatedNodes)
-    } catch (e) {
-      console.error('Failed to create:', e)
-    }
-
-    setNewItem(null)
-    newItemCommitRef.current = false
-  }
-
-  const handleCancelNewItem = () => {
-    setNewItem(null)
-  }
-
-  // Delete selected file(s) - supports single and multi-selection
-  const handleDeleteSelected = useCallback(async () => {
-    if (editingPath !== null || newItem !== null) return // 正在编辑时不处理
-
-    // Collect paths to delete (multi-selection or single selection)
-    const pathsToDelete = multiSelectedPaths.size > 1
-      ? Array.from(multiSelectedPaths)
-      : (selectedPath ? [selectedPath] : [])
-
-    if (pathsToDelete.length === 0) return
-
-    // Confirm deletion
-    const confirmMsg = pathsToDelete.length === 1
-      ? t('dialog.confirmDelete', {
-          name: pathsToDelete[0].split('/').pop() || pathsToDelete[0],
-          extra: (() => {
-            const node = findNodeByPath(pathsToDelete[0], nodes)
-            return node?.isDirectory ? t('dialog.confirmDeleteDir') : ''
-          })(),
-        })
-      : t('dialog.confirmDeleteMulti', { count: pathsToDelete.length })
-
-    if (!confirm(confirmMsg)) return
-
-    let successCount = 0
-    let failCount = 0
-
-    for (const path of pathsToDelete) {
-      try {
-        await deleteFileTauri(path)
-
-        // Close any open tabs for the deleted file or files within the deleted directory
-        const editorStore = useEditorStore.getState()
-        const node = findNodeByPath(path, nodes)
-        const tabsToClose = editorStore.tabs.filter(tab => {
-          if (node?.isDirectory) {
-            return tab.path === path || tab.path.startsWith(path + '/')
-          }
-          return tab.path === path
-        })
-        for (const tab of tabsToClose) {
-          editorStore.removeTab(tab.id)
-        }
-        successCount++
-      } catch (e) {
-        console.error('Failed to delete:', path, e)
-        failCount++
-      }
-    }
-
-    // Clear selections
-    clearMultiSelection()
-    setSelectedPath(null)
-    setLastClickedPath(null)
-
-    // Refresh tree by refreshing all expanded parent directories
-    // Collect unique parent directories of deleted paths
-    const parentDirs = new Set<string>()
-    for (const path of pathsToDelete) {
-      const lastSlash = path.lastIndexOf('/')
-      if (lastSlash > 0) {
-        parentDirs.add(path.substring(0, lastSlash))
-      }
-    }
-    for (const dirPath of parentDirs) {
-      try {
-        const children = await loadDirectory(dirPath, showAllFiles, markdownOnly)
-        const currentNodes = useFileTreeStore.getState().nodes
-        setNodes(updateNodesWithChildren(currentNodes, dirPath, children))
-      } catch (e) {
-        console.error('Failed to refresh directory:', dirPath, e)
-      }
-    }
-
-    if (failCount === 0) {
-      showToast(t('fileTree.deleteSuccess', { count: successCount }), 'success')
-    } else {
-      showToast(t('fileTree.deletePartial', { success: successCount, fail: failCount }), 'error')
-    }
-  }, [editingPath, newItem, multiSelectedPaths, selectedPath, nodes, t, clearMultiSelection, setSelectedPath, setLastClickedPath, showAllFiles, markdownOnly, setNodes, showToast])
-
-  // File tree keyboard shortcuts (F2 rename, Delete delete)
+  // 键盘快捷键 (F2 重命名 / Delete 删除)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle shortcuts when the file tree area has focus or no input is focused
       const activeEl = document.activeElement
       if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || (activeEl as HTMLElement).isContentEditable)) {
         return
       }
 
-      // F2 - Rename
       const renameShortcut = getShortcutKey('renameFile', customShortcuts)
       if (matchShortcut(e, renameShortcut)) {
         e.preventDefault()
         if (selectedPath) {
           const node = findNodeByPath(selectedPath, nodes)
-          if (node) {
-            handleStartEdit(node.path, node.name, node.isDirectory)
-          }
+          if (node) handleStartEdit(node.path, node.name, node.isDirectory)
         }
         return
       }
 
-      // Delete - Delete file(s)
       const deleteShortcut = getShortcutKey('deleteFile', customShortcuts)
       if (matchShortcut(e, deleteShortcut)) {
         e.preventDefault()
         handleDeleteSelected()
-        return
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedPath, nodes, customShortcuts, handleDeleteSelected])
+  }, [selectedPath, nodes, customShortcuts, handleStartEdit, handleDeleteSelected])
 
   const handleNewItemKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault() // 防止触发 onBlur 重复提交
-      handleFinishNewItem()
-    } else if (e.key === 'Escape') {
-      handleCancelNewItem()
-    }
+    if (e.key === 'Enter') { e.preventDefault(); handleFinishNewItem() }
+    else if (e.key === 'Escape') { handleCancelNewItem() }
   }
 
   const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath, nodes)?.isDirectory ?? false) : false
 
-  // === Drag & Drop handlers ===
+  // 扁平化节点用于虚拟化
+  const flattenedNodes = useMemo(() => flattenNodes(nodes, expanded), [nodes, expanded])
 
-  /** Check if a target path is a valid drop target (must be a directory, and not a descendant of any source path) */
-  const isValidDropTarget = useCallback((targetPath: string, sourcePaths: string[]): boolean => {
-    const targetNode = findNodeByPath(targetPath, nodes)
-    if (!targetNode?.isDirectory) return false
-    // Cannot drop onto self or into a descendant of any source
-    for (const src of sourcePaths) {
-      if (targetPath === src || targetPath.startsWith(src + '/')) return false
-    }
-    return true
-  }, [nodes])
+  // 虚拟化配置
+  const parentRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({
+    count: flattenedNodes.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 22,
+    overscan: 10,
+  })
 
-  const handleDragStart = useCallback((e: React.DragEvent, node: FileNode) => {
-    e.stopPropagation()
-    // Determine what's being dragged: multi-selected nodes or just this node
-    const paths = multiSelectedPaths.size > 1 && multiSelectedPaths.has(node.path)
-      ? Array.from(multiSelectedPaths)
-      : [node.path]
-    setDragSourcePaths(paths)
-    e.dataTransfer.setData('application/json', JSON.stringify(paths))
-    e.dataTransfer.effectAllowed = 'move'
-  }, [multiSelectedPaths])
-
-  const handleDragOver = useCallback((e: React.DragEvent, node: FileNode) => {
-    e.preventDefault()
-    e.stopPropagation()
-    // Read from stored state since dataTransfer data isn't accessible in dragover
-    if (isValidDropTarget(node.path, dragSourcePaths)) {
-      e.dataTransfer.dropEffect = 'move'
-      setDragOverPath(node.path)
-    } else {
-      e.dataTransfer.dropEffect = 'none'
-    }
-  }, [dragSourcePaths, isValidDropTarget])
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    // Only clear if leaving the current element (not entering a child)
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    if (e.clientX <= rect.left || e.clientX >= rect.right || e.clientY <= rect.top || e.clientY >= rect.bottom) {
-      setDragOverPath(null)
-    }
-  }, [])
-
-  const handleDrop = useCallback(async (e: React.DragEvent, targetNode: FileNode) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragOverPath(null)
-
-    if (!isValidDropTarget(targetNode.path, dragSourcePaths)) {
-      setDragSourcePaths([])
-      return
-    }
-
-    const sourcePaths = [...dragSourcePaths]
-    setDragSourcePaths([])
-
-    if (sourcePaths.length === 0) return
-
-    let successCount = 0
-    let failCount = 0
-
-    for (const srcPath of sourcePaths) {
-      const fileName = srcPath.split('/').pop() || srcPath
-      const destPath = `${targetNode.path}/${fileName}`
-
-      // Skip if source and destination are the same
-      if (srcPath === destPath) continue
-
-      try {
-        await invoke('rename_file', {
-          req: { old_path: srcPath, new_path: destPath }
-        })
-
-        // Update any open tabs with the new path
-        const editorStore = useEditorStore.getState()
-        editorStore.updateTabPath(srcPath, destPath, fileName)
-        successCount++
-      } catch (err) {
-        console.error('Failed to move:', srcPath, err)
-        failCount++
-      }
-    }
-
-    // Refresh source parent directories and target directory
-    const dirsToRefresh = new Set<string>()
-    dirsToRefresh.add(targetNode.path)
-    for (const srcPath of sourcePaths) {
-      const parentPath = srcPath.substring(0, srcPath.lastIndexOf('/'))
-      if (parentPath && parentPath !== targetNode.path) {
-        dirsToRefresh.add(parentPath)
-      }
-    }
-
-    // Ensure target directory is expanded
-    if (!expanded.has(targetNode.path)) {
-      await toggleNode(targetNode.path)
-    }
-
-    for (const dirPath of dirsToRefresh) {
-      try {
-        const children = await loadDirectory(dirPath, showAllFiles, markdownOnly)
-        const currentNodes = useFileTreeStore.getState().nodes
-        setNodes(updateNodesWithChildren(currentNodes, dirPath, children))
-      } catch (err) {
-        console.error('Failed to refresh directory:', dirPath, err)
-      }
-    }
-
-    // Update selection
-    clearMultiSelection()
-    setSelectedPath(targetNode.path)
-
-    if (failCount === 0) {
-      showToast(t('fileTree.moveSuccess', { count: successCount, target: targetNode.name }), 'success')
-    } else {
-      showToast(t('fileTree.movePartial', { success: successCount, fail: failCount }), 'error')
-    }
-  }, [dragSourcePaths, isValidDropTarget, expanded, toggleNode, showAllFiles, markdownOnly, setNodes, clearMultiSelection, setSelectedPath, showToast, t])
-
-  const handleDragEnd = useCallback(() => {
-    setDragOverPath(null)
-    setDragSourcePaths([])
-  }, [])
-
-  const renderNode = (node: FileNode, depth: number): React.ReactNode => {
-    const isNewItemNode = newItem?.parentPath === node.path
-    const isEditing = editingPath === node.path
-    const isSelected = node.path === selectedPath
-    const isMultiSelected = multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1
-
-    const isDragOver = dragOverPath === node.path
-    const isDragging = dragSourcePaths.includes(node.path)
-
-    const nodeContent = (
-      <div
-        data-path={node.path}
-        className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : isDragOver ? 'bg-primary/15 text-[var(--text-primary)] border-t border-primary/30' : isMultiSelected ? 'bg-primary/5 text-[var(--text-primary)]' : isDragging ? 'opacity-50 text-[var(--text-secondary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-        style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={(e) => !isEditing && handleSelect(node, e.shiftKey)}
-      >
-        {node.isDirectory ? (
-          node.isLoading ? (
-            <Loader2 size={12} className="animate-spin shrink-0" />
-          ) : (
-            <ChevronRight
-              size={12}
-              className={`transition-transform shrink-0 ${expanded.has(node.path) ? 'rotate-90' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleNode(node.path)
-              }}
-            />
-          )
-        ) : (
-          <span className="w-[14px] shrink-0" />
-        )}
-        {node.isDirectory ? (
-          <Folder size={12} className="text-[#666666]" />
-        ) : (
-          getFileIcon(node.name)
-        )}
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-xs text-[var(--text-primary)]"
-            value={editingName}
-            onChange={(e) => setEditingName(e.target.value)}
-            onBlur={handleFinishEdit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault() // 防止触发 onBlur 重复提交
-                handleFinishEdit()
-              } else if (e.key === 'Escape') {
-                handleCancelEdit()
-              }
-            }}
-            onClick={(e) => e.stopPropagation()}
-          />
-        ) : (
-          <span className="truncate">{node.name}</span>
-        )}
-      </div>
-    )
-
-    return (
-      <div
-        key={node.path}
-        draggable={!isEditing}
-        onDragStart={(e) => handleDragStart(e, node)}
-        onDragOver={(e) => handleDragOver(e, node)}
-        onDragLeave={handleDragLeave}
-        onDrop={(e) => handleDrop(e, node)}
-        onDragEnd={handleDragEnd}
-      >
-        <TreeNodeContextMenu
-          node={node}
-          onRename={() => handleStartEdit(node.path, node.name, node.isDirectory)}
-          onNewFile={() => handleNewFile(node.path)}
-          onNewFolder={() => handleNewFolder(node.path)}
-          onNewMindMap={() => handleNewMindMap(node.path)}
-        >
-          {nodeContent}
-        </TreeNodeContextMenu>
-        {expanded.has(node.path) && (
-          <>
-            {node.children?.map((child) => renderNode(child, depth + 1))}
-            {/* New item input - rendered whenever a new item is pending under this directory */}
-            {isNewItemNode && (
-              <div
-                className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
-                style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
-              >
-                <span className="w-[14px]" />
-                {newItem.type === 'folder' ? (
-                  <Folder size={12} className="text-[#666666]" />
-                ) : newItem.type === 'mindmap' ? (
-                  getFileIcon(newItem.name || 'newfile.smm')
-                ) : (
-                  getFileIcon(newItem.name || 'newfile')
-                )}
-                <input
-                  ref={inputRef}
-                  type="text"
-                  className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-xs text-[var(--text-primary)]"
-                  value={newItem.name}
-                  onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
-                  onBlur={handleFinishNewItem}
-                  onKeyDown={handleNewItemKeyDown}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    )
-  }
+  const virtualItems = virtualizer.getVirtualItems()
 
   return (
     <div className="flex flex-col h-full">
@@ -767,21 +380,21 @@ export function FileTreeView() {
             <TooltipContent>{workspaceMode === 'workspace' ? t('fileTree.addToWorkspace') : t('fileTree.openFolder')}</TooltipContent>
           </Tooltip>
           <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleNewFile()} disabled={!isSelectedDirectory}>
-                    <FilePlus size={12} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t('fileTree.newFile')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleNewFolder()} disabled={!isSelectedDirectory}>
-                    <FolderPlus size={12} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t('fileTree.newFolder')}</TooltipContent>
-              </Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleNewItem('file')} disabled={!isSelectedDirectory}>
+                <FilePlus size={12} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('fileTree.newFile')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleNewItem('folder')} disabled={!isSelectedDirectory}>
+                <FolderPlus size={12} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t('fileTree.newFolder')}</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRefresh} disabled={isRefreshing}>
@@ -808,9 +421,62 @@ export function FileTreeView() {
             <RefreshCw size={16} className="animate-spin" />
           </div>
         ) : nodes.length > 0 ? (
-          <>
-            {nodes.map((node) => renderNode(node, 0))}
-            {/* 根目录下新建（当根目录没有直属子节点时） */}
+          <div ref={parentRef} style={{ height: '100%', overflow: 'auto' }}>
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {virtualItems.map((virtualItem) => {
+                const { node, depth } = flattenedNodes[virtualItem.index]
+                const isNewItemNode = newItem?.parentPath === node.path
+                return (
+                  <div
+                    key={node.path}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualItem.size}px`,
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                  >
+                    <TreeNodeItem
+                      node={node}
+                      depth={depth}
+                      isNewItemNode={isNewItemNode}
+                      isEditing={editingPath === node.path}
+                      isSelected={node.path === selectedPath}
+                      isMultiSelected={multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1}
+                      isDragOver={dragOverPath === node.path}
+                      isDragging={dragSourcePaths.includes(node.path)}
+                      expanded={expanded}
+                      editingName={editingName}
+                      newItem={newItem}
+                      inputRef={inputRef}
+                      onSelect={handleSelect}
+                      onToggle={toggleNode}
+                      onStartEdit={handleStartEdit}
+                      onNewItem={handleNewItem}
+                      onFinishEdit={handleFinishEdit}
+                      onCancelEdit={handleCancelEdit}
+                      onFinishNewItem={handleFinishNewItem}
+                      onCancelNewItem={handleCancelNewItem}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onDragEnd={handleDragEnd}
+                      setEditingName={setEditingName}
+                      setNewItem={setNewItem}
+                    />
+                  </div>
+                )
+              })}
+            </div>
             {newItem && nodes.length === 1 && nodes[0].children?.length === 0 && (
               <div
                 className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
@@ -835,7 +501,7 @@ export function FileTreeView() {
                 />
               </div>
             )}
-          </>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
             <FolderOpen size={24} className="mb-2 opacity-50" />
@@ -845,4 +511,6 @@ export function FileTreeView() {
       </ScrollArea>
     </div>
   )
-}
+})
+
+export default FileTreeView

@@ -267,6 +267,52 @@ export async function gitAbortConflict(repoPath: string): Promise<void> {
   await invoke('git_abort_conflict', { repoPath })
 }
 
+// Conflict Repo Record APIs (persistent conflict state)
+export interface ConflictRepoRecord {
+  repo_path: string
+  repo_name: string
+  conflict_file_count: number
+  detected_at: string
+  updated_at: string
+}
+
+export async function getConflictRepoRecords(): Promise<ConflictRepoRecord[]> {
+  return await invoke('get_conflict_repo_records')
+}
+
+export async function removeConflictRepoRecord(repoPath: string): Promise<void> {
+  await invoke('remove_conflict_repo_record', { repoPath })
+}
+
+export async function syncConflictRepoRecords(
+  conflictRepos: [string, string, number][] // [repo_path, repo_name, file_count][]
+): Promise<ConflictRepoRecord[]> {
+  return await invoke('sync_conflict_repo_records', { conflictRepos })
+}
+
+export async function checkAndUpdateConflictRepo(
+  repoPath: string,
+  repoName: string
+): Promise<number> {
+  return await invoke('check_and_update_conflict_repo', { repoPath, repoName })
+}
+
+// Word Diff API (computed in Rust via similar crate)
+export interface WordDiffPart {
+  value: string
+  removed: boolean
+  added: boolean
+}
+
+export interface WordDiffResult {
+  old_parts: WordDiffPart[]
+  new_parts: WordDiffPart[]
+}
+
+export async function computeWordDiff(oldText: string, newText: string): Promise<WordDiffResult> {
+  return await invoke('compute_word_diff', { oldText, newText })
+}
+
 // Git Keyring Credential APIs
 export interface GitCredential {
   username: string
@@ -437,6 +483,7 @@ export interface AppSettings {
   aiPort: string
   aiModels: string
   activeAiModelId: string
+  defaultAiModelId: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -465,6 +512,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     aiPort: get('aiPort', '4017'),
     aiModels: get('aiModels', '[]'),
     activeAiModelId: get('activeAiModelId', ''),
+    defaultAiModelId: get('defaultAiModelId', ''),
   }
 }
 

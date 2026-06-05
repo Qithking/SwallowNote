@@ -1,6 +1,7 @@
 pub mod ai_builtin_models;
 pub mod ai_chat;
 pub mod ai_role_prompts;
+pub mod conflict_repo;
 pub mod folder_history;
 pub mod session_state;
 
@@ -70,6 +71,9 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
         )",
         [],
     )?;
+
+    // conflict_repos table
+    conflict_repo::create_table(&conn)?;
 
     // Insert built-in role prompts if they don't exist
     let builtin_roles = [

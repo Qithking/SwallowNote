@@ -40,6 +40,7 @@ sha2 = "0.10"
 tokio-stream = "0.1"
 jwalk = "0.8"
 keyring = "3"
+similar = { version = "2", features = ["text"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"

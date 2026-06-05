@@ -1,2 +1,4 @@
 export { useKeyboardShortcuts } from './useKeyboardShortcuts'
 export { useTheme } from './useTheme'
+export { useFileTreeActions } from './useFileTreeActions'
+export { useFileTreeDragDrop } from './useFileTreeDragDrop'

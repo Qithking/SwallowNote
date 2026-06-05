@@ -430,7 +430,7 @@ export const useUIStore = create<UIState>((set) => ({
         saveAppSettings({ aiModels: JSON.stringify(aiModels) })
         return { aiModels }
       })
-    } catch {}
+    } catch { /* ignore */ }
   },
   setShortcut: (key, value) => {
     set((state) => ({
@@ -539,7 +539,7 @@ export const useUIStore = create<UIState>((set) => ({
               themeType: t.themeType || 'light' as const,
             }))
           customThemes = [...BUILT_IN_THEMES, ...userThemes]
-        } catch {}
+        } catch { /* ignore */ }
       }
       let aiModels: AiModelConfig[] = []
       if (s.aiModels) {
@@ -576,7 +576,7 @@ export const useUIStore = create<UIState>((set) => ({
             isBuiltIn: bm.is_built_in,
           }))
         aiModels = [...missing, ...aiModels]
-      } catch {}
+      } catch { /* ignore */ }
       set({
         theme: s.theme as Theme,
         themeColor: s.themeColor,

@@ -1,14 +1,22 @@
 /**
- * ConflictResolver Component - Conflict resolution module
+ * ConflictResolver Component — Conflict file diff viewer
+ *
+ * Layout:
+ * ┌────────────────────────────────────────────────────────┐
+ * │ Toolbar: [filename]  [Accept Incoming] [Accept Current] [Abort] │
+ * ├──────────┬─────────────────────────────────────────────┤
+ * │ Conflict │  Incoming          │  Current               │
+ * │ file     │  (read-only)       │  (read-only)           │
+ * │ tree     │                    │                        │
+ * └──────────┴─────────────────────────────────────────────┘
  *
  * Workflow:
- * 1. Left side shows repo names and conflict files in a proper tree structure
- * 2. Click a conflict file to open split diff viewer (local editable, remote read-only)
- * 3. User can edit local content and save (writes back to file, but conflict NOT resolved yet)
- * 4. Only when user clicks "Mark as Resolved" is the conflict considered handled
- * 5. Also supports "Overwrite Local" (use remote) and "Overwrite Remote" (use local)
+ * 1. Left side shows conflict files in a tree structure
+ * 2. Click a conflict file to view the Incoming vs Current diff
+ * 3. Use "Accept Incoming" or "Accept Current" to resolve the conflict
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import type { SplitDiffViewerHandle } from './SplitDiffViewer'
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
@@ -19,13 +27,14 @@ import {
   ChevronDown,
   CheckCircle2,
   Loader2,
-  XCircle,
+  Download,
+  Upload,
   Save,
-  CheckCheck,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import SplitDiffViewer from './SplitDiffViewer'
 import {
   gitGetConflictFiles,
@@ -33,10 +42,11 @@ import {
   gitGetConflictRemoteContent,
   gitResolveConflictFile,
   gitSaveConflictFileContent,
-  gitAbortConflict,
+  removeConflictRepoRecord,
+  readFile,
   ConflictFile,
 } from '@/lib/tauri'
-import { useUIStore, useGitStore, useFileTreeStore } from '@/stores'
+import { useUIStore, useGitStore, useFileTreeStore, useEditorStore } from '@/stores'
 
 interface ConflictRepo {
   path: string
@@ -47,6 +57,10 @@ interface ConflictRepo {
 interface ConflictResolverProps {
   repoPath: string
   repoName: string
+  /** Relative path of the conflict file to auto-select on mount (for session restore) */
+  initialSelectedFile?: string
+  /** Cursor line number to restore in the local editor (for session restore) */
+  initialCursorLine?: number
 }
 
 // ---- Tree node types for the file tree ----
@@ -125,7 +139,7 @@ function buildFileTree(files: ConflictFile[]): TreeNode[] {
   return sortNodes(root)
 }
 
-function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverProps) {
+function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, initialCursorLine }: ConflictResolverProps) {
   const { t } = useTranslation()
   const { showToast } = useUIStore()
   const [conflictRepos, setConflictRepos] = useState<ConflictRepo[]>([])
@@ -135,16 +149,21 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
   const [editedLocalContent, setEditedLocalContent] = useState<string>('')
   const [isLoadingContent, setIsLoadingContent] = useState(false)
   const [isResolving, setIsResolving] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
   const [expandedRepos, setExpandedRepos] = useState<Set<string>>(new Set([repoPath]))
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [isLoadingRepos, setIsLoadingRepos] = useState(true)
-  const [abortConfirmOpen, setAbortConfirmOpen] = useState(false)
-  const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState<'local' | 'remote' | null>(null)
-  const [markResolvedConfirmOpen, setMarkResolvedConfirmOpen] = useState(false)
   const [resolvedFiles, setResolvedFiles] = useState<Set<string>>(new Set())
   // Content version key to ensure SplitDiffViewer remounts when content source changes
   const [contentVersion, setContentVersion] = useState(0)
+  // Whether the conflict file tree panel is visible
+  const [isTreeVisible, setIsTreeVisible] = useState(true)
+  // Track whether initial file restore has been attempted
+  const initialRestoreDone = useRef(false)
+  // Current cursor line in the local editor (tracked for session persistence)
+  const [cursorLine, setCursorLine] = useState<number | undefined>(initialCursorLine)
+
+  // Ref to access SplitDiffViewer's real-time editor content
+  const splitDiffRef = useRef<SplitDiffViewerHandle>(null)
 
   // Whether the local content has been modified
   const hasUnsavedChanges = editedLocalContent !== localContent
@@ -173,8 +192,6 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
             const name = repo?.name || path.split('/').pop() || path
             repos.push({ path, name, files })
           } else {
-            // Backend returned no conflict files - this is a stale state
-            // (state files exist but no unmerged files)
             stalePaths.push(path)
           }
         } catch (e) {
@@ -182,15 +199,13 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
         }
       }
 
-      // If ALL repos have no actual conflict files, this is a false positive.
-      // Clean up the stale state: reset repo status to normal and close the conflict tab.
+      // If ALL repos have no actual conflict files, clean up stale state
       if (repos.length === 0 && stalePaths.length > 0) {
         console.warn('[ConflictResolver] All repos have no actual conflict files - cleaning up stale state')
         const gitStoreNow = useGitStore.getState()
         for (const path of stalePaths) {
           gitStoreNow.updateRepository(path, { status: 'normal' })
         }
-        // Close the conflict tab
         const { useEditorStore } = await import('@/stores')
         const editorStore = useEditorStore.getState()
         const conflictTabId = `conflict-${repoPath}`
@@ -218,6 +233,18 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
         collectAllDirs(tree, '', allDirs)
       }
       setExpandedDirs(allDirs)
+
+      // Auto-select initial file for session restore
+      if (initialSelectedFile && !initialRestoreDone.current) {
+        initialRestoreDone.current = true
+        for (const repo of repos) {
+          const file = repo.files.find(f => f.path === initialSelectedFile)
+          if (file) {
+            setSelectedFile({ repoPath: repo.path, file })
+            break
+          }
+        }
+      }
     } catch (e) {
       console.error('Failed to load conflicts:', e)
     } finally {
@@ -240,6 +267,16 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
     loadConflicts()
   }, [loadConflicts])
 
+  // Sync selected file and cursor line to the editor store for session persistence
+  useEffect(() => {
+    const tabId = `conflict-${repoPath}`
+    useEditorStore.getState().updateConflictTabState(
+      tabId,
+      selectedFile?.file.path,
+      cursorLine,
+    )
+  }, [repoPath, selectedFile, cursorLine])
+
   // Load file content when a file is selected
   useEffect(() => {
     if (!selectedFile) {
@@ -257,10 +294,16 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
       setEditedLocalContent('')
       setRemoteContent('')
       try {
-        const [local, remote] = await Promise.all([
-          gitGetConflictLocalContent(selectedFile.repoPath, selectedFile.file.path),
-          gitGetConflictRemoteContent(selectedFile.repoPath, selectedFile.file.path),
-        ])
+        // First try to read the actual file content (user may have saved changes)
+        // Fall back to git conflict content if file read fails
+        let local: string
+        try {
+          local = await readFile(selectedFile.file.abs_path)
+        } catch {
+          // If reading actual file fails, fall back to git's local version
+          local = await gitGetConflictLocalContent(selectedFile.repoPath, selectedFile.file.path)
+        }
+        const remote = await gitGetConflictRemoteContent(selectedFile.repoPath, selectedFile.file.path)
         // Set all content atomically to prevent SplitDiffViewer from seeing mismatched states
         setLocalContent(local || '')
         setEditedLocalContent(local || '')
@@ -301,33 +344,36 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
     })
   }
 
-  // Save edited local content back to file (does NOT mark conflict as resolved)
-  const handleSaveLocalContent = async () => {
+  // Save edited local content back to file (without marking as resolved)
+  const handleSave = async () => {
     if (!selectedFile) return
-    setIsSaving(true)
+    setIsResolving(true)
     try {
+      // Get the latest content from the editor via ref (real-time, not stale state)
+      const contentToSave = splitDiffRef.current?.getLocalContent() ?? editedLocalContent
       await gitSaveConflictFileContent(
         selectedFile.repoPath,
         selectedFile.file.abs_path,
-        editedLocalContent
+        contentToSave
       )
-      setLocalContent(editedLocalContent)
-      showToast(t('git.saveSuccess'), 'success')
+      // Update the base content so hasUnsavedChanges becomes false
+      setLocalContent(contentToSave)
+      setEditedLocalContent(contentToSave)
+      showToast(t('git.saved'), 'success')
     } catch (e) {
-      console.error('Failed to save conflict file content:', e)
-      showToast(t('git.saveFailed', { error: String(e) }), 'error')
+      console.error('Failed to save:', e)
+      showToast(t('git.conflictResolveFailed', { error: String(e) }), 'error')
     } finally {
-      setIsSaving(false)
+      setIsResolving(false)
     }
   }
 
-  // Mark the current conflict file as resolved (uses current file content on disk)
-  const handleMarkAsResolved = async () => {
+  // Mark the conflict as resolved (stages the file)
+  const handleMarkResolved = async () => {
     if (!selectedFile) return
-    setMarkResolvedConfirmOpen(false)
     setIsResolving(true)
     try {
-      // If there are unsaved changes, save first
+      // If there are unsaved changes, save them first
       if (hasUnsavedChanges) {
         await gitSaveConflictFileContent(
           selectedFile.repoPath,
@@ -336,123 +382,110 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
         )
       }
 
-      // Mark as resolved using "current" side (keep whatever is on disk)
+      // Mark as resolved — stage the file
       await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, 'current')
       showToast(t('git.conflictResolved'), 'success')
 
-      // Track resolved file
       setResolvedFiles(prev => new Set(prev).add(selectedFile.file.abs_path))
-
-      await loadConflicts()
-
-      const gitStore = useGitStore.getState()
-      const repo = gitStore.repositories.find(r => r.path === selectedFile.repoPath)
-      if (repo && repo.status === 'normal') {
-        const fileTreeStore = useFileTreeStore.getState()
-        fileTreeStore.refreshExpanded()
-      }
-
-      setSelectedFile(null)
-
-      // Auto-close tab when all conflicts are resolved
-      const updatedRepos = useGitStore.getState().repositories
-      const stillConflicted = updatedRepos.some(r => r.status === 'conflict')
-      if (!stillConflicted) {
-        const { useEditorStore } = await import('@/stores')
-        const conflictTabId = `conflict-${repoPath}`
-        const editorStore = useEditorStore.getState()
-        const tab = editorStore.tabs.find(t => t.id === conflictTabId)
-        if (tab) {
-          setTimeout(() => {
-            editorStore.removeTab(conflictTabId)
-          }, 1500)
-        }
-      }
+      await handlePostResolve()
     } catch (e) {
-      console.error('Failed to mark conflict as resolved:', e)
+      console.error('Failed to mark resolved:', e)
       showToast(t('git.conflictResolveFailed', { error: String(e) }), 'error')
     } finally {
       setIsResolving(false)
     }
   }
 
-  // Overwrite with local or remote version (marks as resolved immediately)
-  const handleOverwrite = async (side: 'local' | 'remote') => {
+  // Accept Remote — use remote content to resolve conflict
+  const handleAcceptRemote = async () => {
     if (!selectedFile) return
-    setOverwriteConfirmOpen(null)
     setIsResolving(true)
     try {
-      await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, side)
+      // Save remote content to the file
+      await gitSaveConflictFileContent(
+        selectedFile.repoPath,
+        selectedFile.file.abs_path,
+        remoteContent
+      )
+
+      // Mark as resolved — content already saved, just stage it
+      await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, 'current')
       showToast(t('git.conflictResolved'), 'success')
 
       setResolvedFiles(prev => new Set(prev).add(selectedFile.file.abs_path))
-
-      await loadConflicts()
-
-      const gitStore = useGitStore.getState()
-      const repo = gitStore.repositories.find(r => r.path === selectedFile.repoPath)
-      if (repo && repo.status === 'normal') {
-        const fileTreeStore = useFileTreeStore.getState()
-        fileTreeStore.refreshExpanded()
-      }
-
-      setSelectedFile(null)
-
-      // Auto-close tab when all conflicts are resolved
-      const updatedRepos = useGitStore.getState().repositories
-      const stillConflicted = updatedRepos.some(r => r.status === 'conflict')
-      if (!stillConflicted) {
-        const { useEditorStore } = await import('@/stores')
-        const conflictTabId = `conflict-${repoPath}`
-        const editorStore = useEditorStore.getState()
-        const tab = editorStore.tabs.find(t => t.id === conflictTabId)
-        if (tab) {
-          setTimeout(() => {
-            editorStore.removeTab(conflictTabId)
-          }, 1500)
-        }
-      }
+      await handlePostResolve()
     } catch (e) {
-      console.error('Failed to resolve conflict:', e)
+      console.error('Failed to accept remote:', e)
       showToast(t('git.conflictResolveFailed', { error: String(e) }), 'error')
     } finally {
       setIsResolving(false)
     }
   }
 
-  const handleAbort = async () => {
-    setAbortConfirmOpen(false)
+  // Accept Local — use local content to resolve conflict
+  const handleAcceptLocal = async () => {
+    if (!selectedFile) return
     setIsResolving(true)
     try {
-      // Abort all conflicted repos
-      for (const repo of conflictRepos) {
-        try {
-          await gitAbortConflict(repo.path)
-        } catch (e) {
-          console.error('Failed to abort conflict for:', repo.path, e)
-        }
-      }
-      showToast(t('git.abortSuccess'), 'success')
+      // Save edited local content (or original if unmodified) to the file
+      const contentToSave = hasUnsavedChanges ? editedLocalContent : localContent
+      await gitSaveConflictFileContent(
+        selectedFile.repoPath,
+        selectedFile.file.abs_path,
+        contentToSave
+      )
 
-      // Reset repo statuses
-      const gitStore = useGitStore.getState()
-      for (const repo of conflictRepos) {
-        gitStore.updateRepository(repo.path, { status: 'normal' })
-      }
+      // Mark as resolved — content already saved, just stage it
+      await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, 'current')
+      showToast(t('git.conflictResolved'), 'success')
 
-      // Refresh file tree
-      const fileTreeStore = useFileTreeStore.getState()
-      fileTreeStore.refreshExpanded()
-
-      // Close the conflict tab
-      const { useEditorStore } = await import('@/stores')
-      const conflictTabId = `conflict-${repoPath}`
-      useEditorStore.getState().removeTab(conflictTabId)
+      setResolvedFiles(prev => new Set(prev).add(selectedFile.file.abs_path))
+      await handlePostResolve()
     } catch (e) {
-      console.error('Failed to abort conflict:', e)
-      showToast(t('git.abortFailed', { error: String(e) }), 'error')
+      console.error('Failed to accept local:', e)
+      showToast(t('git.conflictResolveFailed', { error: String(e) }), 'error')
     } finally {
       setIsResolving(false)
+    }
+  }
+
+  // Shared post-resolve logic: refresh file tree, auto-close tab if all resolved
+  const handlePostResolve = async () => {
+    await loadConflicts()
+
+    const gitStore = useGitStore.getState()
+    const repo = gitStore.repositories.find(r => r.path === selectedFile!.repoPath)
+    if (repo && repo.status === 'normal') {
+      const fileTreeStore = useFileTreeStore.getState()
+      fileTreeStore.refreshExpanded()
+    }
+
+    setSelectedFile(null)
+
+    // Check if the repo still has conflicts and update the conflict record
+    const updatedRepos = useGitStore.getState().repositories
+    const stillConflicted = updatedRepos.some(r => r.status === 'conflict')
+    if (!stillConflicted) {
+      // All conflicts resolved — remove the conflict repo record
+      try {
+        await removeConflictRepoRecord(repoPath)
+        await useGitStore.getState().loadConflictRepos()
+      } catch (e) {
+        console.error('Failed to remove conflict repo record:', e)
+      }
+
+      const { useEditorStore } = await import('@/stores')
+      const conflictTabId = `conflict-${repoPath}`
+      const editorStore = useEditorStore.getState()
+      const tab = editorStore.tabs.find(t => t.id === conflictTabId)
+      if (tab) {
+        setTimeout(() => {
+          editorStore.removeTab(conflictTabId)
+        }, 1500)
+      }
+    } else {
+      // Some conflicts still exist — reload conflict repos to update file counts
+      await useGitStore.getState().loadConflictRepos()
     }
   }
 
@@ -522,178 +555,172 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left panel - Repo and file tree */}
-      <div className="w-[260px] shrink-0 flex flex-col border-r" style={{ borderColor: 'var(--border-color)' }}>
-        {/* Header */}
-        <div className="flex items-center justify-between h-8 px-3 shrink-0 border-b"
-          style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)' }}>
-          <div className="flex items-center gap-1.5">
-            <AlertTriangle size={13} className="text-yellow-500" />
-            <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
-              {t('git.conflictFiles')}
+      {isTreeVisible && (
+        <div className="w-[220px] shrink-0 flex flex-col border-r" style={{ borderColor: 'var(--border-color)' }}>
+          {/* Header — same height as the detail toolbar (h-9) */}
+          <div className="flex items-center justify-between h-9 px-3 shrink-0 border-b"
+            style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)' }}>
+            <div className="flex items-center gap-1.5">
+              <AlertTriangle size={13} className="text-yellow-500" />
+              <span className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
+                {t('git.conflictFiles')}
+              </span>
+            </div>
+            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>
+              {totalFiles}
             </span>
           </div>
-          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>
-            {totalFiles}
-          </span>
-        </div>
 
-        {/* File tree */}
-        <ScrollArea className="flex-1">
-          {isLoadingRepos ? (
-            <div className="flex items-center justify-center h-32">
-              <Loader2 size={20} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
-            </div>
-          ) : conflictRepos.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 px-4 text-center">
-              <AlertTriangle size={24} className="text-yellow-500 mb-2" />
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{t('git.noConflictFilesDetected')}</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{t('git.conflictStateHint')}</p>
-            </div>
-          ) : (
-            <div className="py-1">
-              {conflictRepos.map((repo) => {
-                const isExpanded = expandedRepos.has(repo.path)
-                const tree = buildFileTree(repo.files)
+          {/* File tree */}
+          <ScrollArea className="flex-1">
+            {isLoadingRepos ? (
+              <div className="flex items-center justify-center h-32">
+                <Loader2 size={20} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
+              </div>
+            ) : conflictRepos.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 px-4 text-center">
+                <AlertTriangle size={24} className="text-yellow-500 mb-2" />
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{t('git.noConflictFilesDetected')}</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{t('git.conflictStateHint')}</p>
+              </div>
+            ) : (
+              <div className="py-1">
+                {conflictRepos.map((repo) => {
+                  const isExpanded = expandedRepos.has(repo.path)
+                  const tree = buildFileTree(repo.files)
 
-                return (
-                  <div key={repo.path}>
-                    {/* Repo header */}
-                    <div
-                      className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-[var(--bg-hover)]"
-                      onClick={() => toggleRepoExpanded(repo.path)}
-                    >
-                      {isExpanded ? <ChevronDown size={12} style={{ color: 'var(--text-muted)' }} /> : <ChevronRight size={12} style={{ color: 'var(--text-muted)' }} />}
-                      <Folder size={13} className="text-yellow-500 shrink-0" />
-                      <span className="text-xs truncate flex-1" style={{ color: 'var(--text-primary)' }}>{repo.name}</span>
-                      <span className="text-[10px] shrink-0 px-1 rounded" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>
-                        {repo.files.length}
-                      </span>
+                  return (
+                    <div key={repo.path}>
+                      {/* Repo header */}
+                      <div
+                        className="flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-[var(--bg-hover)]"
+                        onClick={() => toggleRepoExpanded(repo.path)}
+                      >
+                        {isExpanded ? <ChevronDown size={12} style={{ color: 'var(--text-muted)' }} /> : <ChevronRight size={12} style={{ color: 'var(--text-muted)' }} />}
+                        <Folder size={13} className="text-yellow-500 shrink-0" />
+                        <span className="text-xs truncate flex-1" style={{ color: 'var(--text-primary)' }}>{repo.name}</span>
+                        <span className="text-[10px] shrink-0 px-1 rounded" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}>
+                          {repo.files.length}
+                        </span>
+                      </div>
+
+                      {/* Tree nodes */}
+                      {isExpanded && renderTreeNodes(tree, repo.path, 0)}
                     </div>
+                  )
+                })}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+      )}
 
-                    {/* Tree nodes */}
-                    {isExpanded && renderTreeNodes(tree, repo.path, 0)}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </ScrollArea>
-      </div>
-
-      {/* Right panel - Toolbar + Diff viewer */}
+      {/* Right panel - Toolbar + Merge Editor */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Toolbar */}
+        {/* VS Code–style toolbar — same height as the file tree header (h-9) */}
         <div className="flex items-center justify-between h-9 px-3 shrink-0 border-b"
           style={{ borderColor: 'var(--border-color)', background: 'var(--bg-secondary)' }}>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Toggle file tree visibility */}
+            <button
+              className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] transition-colors shrink-0"
+              onClick={() => setIsTreeVisible(prev => !prev)}
+              title={isTreeVisible ? t('git.hideConflictTree') : t('git.showConflictTree')}
+            >
+              {isTreeVisible ? <PanelLeftClose size={14} style={{ color: 'var(--text-muted)' }} /> : <PanelLeftOpen size={14} style={{ color: 'var(--text-muted)' }} />}
+            </button>
             {selectedFile && (
               <>
+                <FileText size={13} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
                 <span className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
-                  {selectedFile.file.abs_path}
+                  {selectedFile.file.path}
                 </span>
                 {hasUnsavedChanges && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>
                     {t('git.unsavedChanges')}
                   </span>
                 )}
               </>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            {/* Save local content button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1"
-                  disabled={!selectedFile || !hasUnsavedChanges || isSaving || isResolving}
-                  onClick={handleSaveLocalContent}
-                >
-                  <Save size={13} className={hasUnsavedChanges ? 'text-orange-500' : ''} />
-                  {t('git.saveLocalContent')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('git.saveLocalContent')}</TooltipContent>
-            </Tooltip>
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Save button — only enabled when there are unsaved changes */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1 font-medium"
+              disabled={!selectedFile || isResolving || !hasUnsavedChanges}
+              onClick={handleSave}
+              style={{
+                border: '1px solid var(--border-color)',
+                ...(!selectedFile || isResolving || !hasUnsavedChanges ? {} : {
+                  background: 'rgba(234, 179, 8, 0.1)',
+                  color: '#eab308',
+                  border: '1px solid rgba(234, 179, 8, 0.3)',
+                })
+              }}
+            >
+              <Save size={13} />
+              {t('git.save')}
+            </Button>
+
+            {/* Mark Resolved button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1 font-medium"
+              disabled={!selectedFile || isResolving}
+              onClick={handleMarkResolved}
+              style={!selectedFile || isResolving ? {} : {
+                background: 'rgba(34, 197, 94, 0.1)',
+                color: '#22c55e',
+                border: '1px solid rgba(34, 197, 94, 0.3)',
+              }}
+            >
+              <CheckCircle2 size={13} />
+              {t('git.markResolved')}
+            </Button>
 
             <div className="w-px h-4 mx-1" style={{ background: 'var(--border-color)' }} />
 
-            {/* Mark as Resolved button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1"
-                  disabled={!selectedFile || isResolving}
-                  onClick={() => setMarkResolvedConfirmOpen(true)}
-                >
-                  <CheckCheck size={13} className="text-green-500" />
-                  {t('git.markAsResolved')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('git.markAsResolved')}</TooltipContent>
-            </Tooltip>
+            {/* Accept Remote button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1 font-medium"
+              disabled={!selectedFile || isResolving}
+              onClick={handleAcceptRemote}
+              style={!selectedFile || isResolving ? {} : {
+                background: 'rgba(59, 130, 246, 0.1)',
+                color: '#3b82f6',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+              }}
+            >
+              <Download size={13} />
+              {t('git.acceptRemote')}
+            </Button>
 
-            <div className="w-px h-4 mx-1" style={{ background: 'var(--border-color)' }} />
+            {/* Accept Local button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1 font-medium"
+              disabled={!selectedFile || isResolving}
+              onClick={handleAcceptLocal}
+              style={!selectedFile || isResolving ? {} : {
+                background: 'rgba(34, 197, 94, 0.1)',
+                color: '#22c55e',
+                border: '1px solid rgba(34, 197, 94, 0.3)',
+              }}
+            >
+              <Upload size={13} />
+              {t('git.acceptLocal')}
+            </Button>
 
-            {/* Overwrite Remote (use local) */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1"
-                  disabled={!selectedFile || isResolving}
-                  onClick={() => setOverwriteConfirmOpen('remote')}
-                >
-                  <Folder size={13} className="text-blue-500" />
-                  {t('git.overwriteRemote')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('git.overwriteRemoteConfirm')}</TooltipContent>
-            </Tooltip>
-
-            {/* Overwrite Local (use remote) */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1"
-                  disabled={!selectedFile || isResolving}
-                  onClick={() => setOverwriteConfirmOpen('local')}
-                >
-                  <FileText size={13} className="text-orange-500" />
-                  {t('git.overwriteLocal')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('git.overwriteLocalConfirm')}</TooltipContent>
-            </Tooltip>
-
-            <div className="w-px h-4 mx-1" style={{ background: 'var(--border-color)' }} />
-
-            {/* Abort conflict resolution */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1 text-red-500 hover:text-red-600"
-                  disabled={isResolving}
-                  onClick={() => setAbortConfirmOpen(true)}
-                >
-                  <XCircle size={13} />
-                  {t('git.abortConflict')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('git.abortConflict')}</TooltipContent>
-            </Tooltip>
           </div>
         </div>
 
-        {/* Split diff viewer */}
+        {/* Diff viewer */}
         <div className="flex-1 overflow-hidden">
           {isLoadingContent ? (
             <div className="flex items-center justify-center h-full">
@@ -701,6 +728,7 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
             </div>
           ) : selectedFile ? (
             <SplitDiffViewer
+              ref={splitDiffRef}
               key={contentVersion}
               localContent={localContent}
               remoteContent={remoteContent}
@@ -709,6 +737,8 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
               editedContent={editedLocalContent}
               onLocalContentChange={setEditedLocalContent}
               filename={selectedFile.file.path}
+              initialCursorLine={initialCursorLine}
+              onCursorLineChange={setCursorLine}
             />
           ) : (
             <div className="flex items-center justify-center h-full">
@@ -722,72 +752,6 @@ function ConflictResolver({ repoPath, repoName: _repoName }: ConflictResolverPro
           )}
         </div>
       </div>
-
-      {/* Mark as Resolved Confirmation Dialog */}
-      {markResolvedConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="rounded-lg p-4 max-w-[400px] w-full mx-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-            <h3 className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>{t('git.markAsResolved')}</h3>
-            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
-              {hasUnsavedChanges
-                ? t('git.markAsResolvedConfirm') + ' ' + t('git.unsavedChanges') + ' - ' + t('git.saveLocalContent') + '?'
-                : t('git.markAsResolvedConfirm')
-              }
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setMarkResolvedConfirmOpen(false)} disabled={isResolving}>
-                {t('common.cancel')}
-              </Button>
-              <Button size="sm" onClick={handleMarkAsResolved} disabled={isResolving}>
-                {isResolving && <Loader2 size={12} className="animate-spin mr-1" />}
-                {t('git.markAsResolved')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Abort Confirmation Dialog */}
-      {abortConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="rounded-lg p-4 max-w-[400px] w-full mx-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-            <h3 className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>{t('git.abortConflict')}</h3>
-            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>{t('git.abortConflictConfirm')}</p>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setAbortConfirmOpen(false)} disabled={isResolving}>
-                {t('common.cancel')}
-              </Button>
-              <Button variant="destructive" size="sm" onClick={handleAbort} disabled={isResolving}>
-                {isResolving && <Loader2 size={12} className="animate-spin mr-1" />}
-                {t('git.abortConflict')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Overwrite Confirmation Dialog */}
-      {overwriteConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="rounded-lg p-4 max-w-[400px] w-full mx-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-            <h3 className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
-              {overwriteConfirmOpen === 'local' ? t('git.overwriteLocal') : t('git.overwriteRemote')}
-            </h3>
-            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
-              {overwriteConfirmOpen === 'local' ? t('git.overwriteLocalConfirm') : t('git.overwriteRemoteConfirm')}
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setOverwriteConfirmOpen(null)} disabled={isResolving}>
-                {t('common.cancel')}
-              </Button>
-              <Button variant="destructive" size="sm" onClick={() => handleOverwrite(overwriteConfirmOpen!)} disabled={isResolving}>
-                {isResolving && <Loader2 size={12} className="animate-spin mr-1" />}
-                {overwriteConfirmOpen === 'local' ? t('git.overwriteLocal') : t('git.overwriteRemote')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Resolving overlay */}
       {isResolving && (

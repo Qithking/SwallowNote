@@ -314,6 +314,8 @@ export function EditorView() {
         <ConflictResolver
           repoPath={activeTab.conflictRepoPath}
           repoName={activeTab.conflictRepoName}
+          initialSelectedFile={activeTab.conflictSelectedFile}
+          initialCursorLine={activeTab.conflictCursorLine}
         />
       </div>
     )

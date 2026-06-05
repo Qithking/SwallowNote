@@ -11,26 +11,39 @@ import { DirectoryView } from '@/components/Directory/DirectoryView'
 import { HistoryView } from '@/components/History/HistoryView'
 import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
 import { StatusBar } from '@/components/StatusBar'
-import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useEditorSettingsStore, useGitStore, type EditorTab, type EditorViewMode } from '@/stores'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useGitStore } from '@/stores'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
+import { useSessionPersistence } from '@/hooks/useSessionPersistence'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
-import { saveSessionState, getSessionState, setAppLocale } from '@/lib/tauri'
+import { setAppLocale } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
+import { useEditorSettingsStore } from '@/stores'
 
 function App() {
   useTheme()
   useKeyboardShortcuts()
   const { t } = useTranslation()
-  const { settingsPanelVisible, rightPanelType, sidebarWidth, rightPanelWidth, sidebarVisible, setSidebarWidth, setRightPanelWidth, syncInterval, autoSyncPush, sidebarView } = useUIStore()
-  const { tabs } = useEditorStore()
-  const { cachedRepositories, pullAllRepos } = useGitStore()
+  const settingsPanelVisible = useUIStore((s) => s.settingsPanelVisible)
+  const rightPanelType = useUIStore((s) => s.rightPanelType)
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth)
+  const rightPanelWidth = useUIStore((s) => s.rightPanelWidth)
+  const sidebarVisible = useUIStore((s) => s.sidebarVisible)
+  const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
+  const setRightPanelWidth = useUIStore((s) => s.setRightPanelWidth)
+  const syncInterval = useUIStore((s) => s.syncInterval)
+  const autoSyncPush = useUIStore((s) => s.autoSyncPush)
+  const sidebarView = useUIStore((s) => s.sidebarView)
+  const tabs = useEditorStore((s) => s.tabs)
+  const cachedRepositories = useGitStore((s) => s.cachedRepositories)
+  const pullAllRepos = useGitStore((s) => s.pullAllRepos)
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
   const [isDraggingRight, setIsDraggingRight] = useState(false)
   const [isHoveringLeft, setIsHoveringLeft] = useState(false)
@@ -40,6 +53,9 @@ function App() {
   const [showLoadErrorDialog, setShowLoadErrorDialog] = useState(false)
   const [failedTabInfo, setFailedTabInfo] = useState<{ id: string; path: string; name: string } | null>(null)
   const pendingCloseRef = useRef(false)
+
+  // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
+  const { saveSessionStateNow, restoreSessionState } = useSessionPersistence()
 
   useEffect(() => {
     const init = async () => {
@@ -125,7 +141,7 @@ function App() {
         // Skip if this path is currently being saved (atomic write may trigger modified event)
         if (editorStore.isPathSaving(path)) return
         const tab = editorStore.tabs.find(t => t.path === path)
-        if (tab) {
+        if (tab && tab.type !== 'conflict') {
           if (tab.isDirty) {
             editorStore.markExternalChange(tab.id)
           } else {
@@ -296,6 +312,9 @@ function App() {
               editorStore.openConflictTab(result.path, result.name)
             }
           }
+
+          // Sync conflict repos to database for persistence
+          await gitStore.syncConflictReposFromPullResults(results)
         }
       } catch (e) {
         console.error('Auto sync failed:', e)
@@ -447,198 +466,6 @@ function App() {
     }
   }, [isDraggingLeft, isDraggingRight, handleMouseMoveLeft, handleMouseMoveRight, handleMouseUp])
 
-  const restoreSessionState = async () => {
-    try {
-      const states = await getSessionState()
-      if (Object.keys(states).length === 0) {
-        return
-      }
-
-      const { workspaceMode } = useUIStore.getState()
-      const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
-
-      if (states.tabs) {
-        const tabsData = JSON.parse(states.tabs) as Partial<EditorTab>[]
-        const validTabs = tabsData.filter((tab): tab is Partial<EditorTab> => {
-          if (!tab.path) return false
-          if (workspaceMode === 'workspace') {
-            return workspaceFolders.some((f: string) => tab.path!.startsWith(f))
-          }
-          return !!(rootPath && tab.path.startsWith(rootPath))
-        })
-        if (validTabs.length > 0) {
-          const restoredTabs: EditorTab[] = validTabs.map((tab) => ({
-            id: tab.id || '',
-            path: tab.path || '',
-            name: tab.name || '',
-            content: '',
-            isDirty: false,
-            isEdited: false,
-            viewMode: tab.viewMode || 'preview',
-            fileSize: tab.fileSize,
-            modifiedTime: tab.modifiedTime,
-            wordCount: tab.wordCount,
-          }))
-          const activeTabId = states.activeTabId || null
-          useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
-          if (activeTabId) {
-            useEditorStore.getState().loadTabContent(activeTabId)
-          }
-        }
-      }
-
-      if (states.expanded) {
-        const expandedPaths = JSON.parse(states.expanded)
-        const selectedPath = states.selectedPath || null
-        await useFileTreeStore.getState().restoreTreeState(expandedPaths, selectedPath)
-      }
-
-      // After restoring tree state, reveal the active tab's path in the file tree
-      // This ensures the file tree scrolls to and loads nodes for the current tab
-      if (states.activeTabId) {
-        const editorState = useEditorStore.getState()
-        const activeTab = editorState.tabs.find((t) => t.id === states.activeTabId)
-        if (activeTab?.path) {
-          const fileTreeStore = useFileTreeStore.getState()
-          if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
-            const folder = workspaceFolders.find((f: string) => activeTab.path.startsWith(f))
-            if (folder) {
-              // Delay to ensure file tree nodes are rendered after restoreTreeState
-              setTimeout(() => fileTreeStore.revealPath(activeTab.path, folder), 100)
-            }
-          } else if (rootPath) {
-            setTimeout(() => fileTreeStore.revealPath(activeTab.path, rootPath), 100)
-          }
-        }
-      }
-
-      if (states.sidebarWidth) {
-        setSidebarWidth(Number(states.sidebarWidth))
-      }
-      if (states.rightPanelWidth) {
-        setRightPanelWidth(Number(states.rightPanelWidth))
-      }
-      if (states.editorViewMode) {
-        useUIStore.getState().setEditorViewMode(states.editorViewMode as EditorViewMode)
-      }
-
-      // Restore window size and position
-      const win = getCurrentWindow()
-      try {
-        if (states.isMaximized === 'true') {
-          await win.maximize()
-        } else if (states.isFullscreen === 'true') {
-          await win.setFullscreen(true)
-        } else {
-          if (states.windowWidth && states.windowHeight) {
-            const width = Number(states.windowWidth)
-            const height = Number(states.windowHeight)
-            if (width > 0 && height > 0) {
-              await win.setSize(new (await import('@tauri-apps/api/dpi')).LogicalSize(width, height))
-            }
-          }
-          if (states.windowX && states.windowY) {
-            const x = Number(states.windowX)
-            const y = Number(states.windowY)
-            // Validate that the position is within a reasonable screen range
-            // to prevent restoring the window to an off-screen location
-            // (e.g., after disconnecting an external monitor)
-            const screen = window.screen
-            const maxValidX = screen.availWidth
-            const maxValidY = screen.availHeight
-            const isValidPosition = !isNaN(x) && !isNaN(y) &&
-              x >= -200 && x < maxValidX &&
-              y >= -200 && y < maxValidY
-            if (isValidPosition) {
-              await win.setPosition(new (await import('@tauri-apps/api/dpi')).LogicalPosition(x, y))
-            }
-          }
-        }
-      } catch (e) {
-        console.error('Failed to restore window size:', e)
-      }
-    } catch (e) {
-      console.error('Failed to restore session state:', e)
-    }
-  }
-
-  const saveSessionStateNow = async () => {
-    try {
-      const editorState = useEditorStore.getState()
-      const fileTreeState = useFileTreeStore.getState()
-      const uiState = useUIStore.getState()
-      const editorSettingsState = useEditorSettingsStore.getState()
-
-      const fileTabs = editorState.tabs.filter(tab => tab.type !== 'diff' && tab.type !== 'conflict')
-      const tabsData = fileTabs.map(tab => ({
-        id: tab.id,
-        path: tab.path,
-        name: tab.name,
-        viewMode: tab.viewMode,
-        cursorPosition: tab.cursorPosition,
-      }))
-
-      const activeTabId = fileTabs.find(t => t.id === editorState.activeTabId)?.id || (fileTabs.length > 0 ? fileTabs[0].id : '')
-
-      // Save window size and position
-      let windowWidth = ''
-      let windowHeight = ''
-      let windowX = ''
-      let windowY = ''
-      let isMaximized = ''
-      let isFullscreen = ''
-      try {
-        const win = getCurrentWindow()
-        isMaximized = String(await win.isMaximized())
-        isFullscreen = String(await win.isFullscreen())
-        if (isMaximized !== 'true' && isFullscreen !== 'true') {
-          const size = await win.innerSize()
-          // Convert from physical to logical pixels
-          const scaleFactor = await win.scaleFactor()
-          windowWidth = String(Math.round(size.width / scaleFactor))
-          windowHeight = String(Math.round(size.height / scaleFactor))
-          const position = await win.outerPosition()
-          windowX = String(Math.round(position.x / scaleFactor))
-          windowY = String(Math.round(position.y / scaleFactor))
-        }
-      } catch (e) {
-        console.error('Failed to save window size:', e)
-      }
-
-      const updates: Record<string, string> = {
-        tabs: JSON.stringify(tabsData),
-        activeTabId,
-        expanded: JSON.stringify(Array.from(fileTreeState.expanded)),
-        selectedPath: fileTreeState.selectedPath || '',
-        sidebarWidth: String(uiState.sidebarWidth),
-        rightPanelWidth: String(uiState.rightPanelWidth),
-        editorViewMode: uiState.editorViewMode,
-        windowWidth,
-        windowHeight,
-        windowX,
-        windowY,
-        isMaximized,
-        isFullscreen,
-        editor_h1Size: String(editorSettingsState.h1Size),
-        editor_h2Size: String(editorSettingsState.h2Size),
-        editor_h3Size: String(editorSettingsState.h3Size),
-        editor_h4Size: String(editorSettingsState.h4Size),
-        editor_h5Size: String(editorSettingsState.h5Size),
-        editor_bodySize: String(editorSettingsState.bodySize),
-        editor_lineHeight: String(editorSettingsState.lineHeight),
-        editor_letterSpacing: String(editorSettingsState.letterSpacing),
-        editor_normalPaddingVertical: String(editorSettingsState.normalPaddingVertical),
-        editor_normalPaddingHorizontal: String(editorSettingsState.normalPaddingHorizontal),
-        editor_widePaddingVertical: String(editorSettingsState.widePaddingVertical),
-        editor_widePaddingHorizontal: String(editorSettingsState.widePaddingHorizontal),
-      }
-
-      await saveSessionState(updates)
-    } catch (e) {
-      console.error('Failed to save session state:', e)
-    }
-  }
-
   const renderRightPanel = () => {
     switch (rightPanelType) {
       case 'ai': return <AIView />
@@ -710,7 +537,13 @@ function App() {
                     <EditorToolbar />
                   </>
                 )}
-                <EditorView />
+                <ErrorBoundary fallback={
+                  <div className="flex items-center justify-center flex-1 text-sm text-[var(--text-muted)]">
+                    编辑器加载失败，请关闭标签页重试
+                  </div>
+                }>
+                  <EditorView />
+                </ErrorBoundary>
               </div>
             )}
           </div>

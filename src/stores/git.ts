@@ -2,7 +2,7 @@
  * Git Store - Manages Git state
  */
 import { create } from 'zustand'
-import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials } from '@/lib/tauri'
+import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, syncConflictRepoRecords, type ConflictRepoRecord } from '@/lib/tauri'
 
 export interface GitBranch {
   name: string
@@ -70,6 +70,7 @@ export interface GitState {
   repositories: GitRepository[]
   cachedRepositories: GitRepository[]
   activeRepository: string | null  // 当前选中的仓库路径
+  conflictRepos: ConflictRepoRecord[]  // 持久化的冲突仓库记录
   isGitLoading: boolean
   isPulling: boolean
   scanProgress: { current: number; total: number; message: string } | null
@@ -87,12 +88,15 @@ export interface GitState {
   updateRepositoryStatuses: (pullResults: PullResult[]) => void
   resetRepositoryStatuses: () => void
   pullAllRepos: (repos: GitRepository[]) => Promise<PullResult[]>
+  loadConflictRepos: () => Promise<void>
+  syncConflictReposFromPullResults: (pullResults: PullResult[]) => Promise<void>
 }
 
 export const useGitStore = create<GitState>((set) => ({
   repositories: [],
   cachedRepositories: [],
   activeRepository: null,
+  conflictRepos: [],
   isGitLoading: false,
   isPulling: false,
   scanProgress: null,
@@ -183,6 +187,47 @@ export const useGitStore = create<GitState>((set) => ({
       return results
     } finally {
       set({ isPulling: false })
+    }
+  },
+  loadConflictRepos: async () => {
+    try {
+      const records = await getConflictRepoRecords()
+      set({ conflictRepos: records })
+      // Also update repository statuses based on conflict records
+      set((state) => ({
+        repositories: state.repositories.map((repo) => {
+          const isConflict = records.some((r) => r.repo_path === repo.path)
+          return { ...repo, status: isConflict ? 'conflict' as RepoStatus : repo.status === 'conflict' ? 'normal' as RepoStatus : repo.status }
+        }),
+        cachedRepositories: state.cachedRepositories.map((repo) => {
+          const isConflict = records.some((r) => r.repo_path === repo.path)
+          return { ...repo, status: isConflict ? 'conflict' as RepoStatus : repo.status === 'conflict' ? 'normal' as RepoStatus : repo.status }
+        }),
+      }))
+    } catch (e) {
+      console.error('Failed to load conflict repos:', e)
+    }
+  },
+  syncConflictReposFromPullResults: async (pullResults: PullResult[]) => {
+    try {
+      // Build conflict repo list from pull results
+      const conflictEntries: [string, string, number][] = pullResults
+        .filter((r) => r.isConflict)
+        .map((r) => [r.path, r.name, 0] as [string, string, number])
+
+      // Also include existing conflict repos that weren't in this pull
+      const existingConflictPaths = new Set(conflictEntries.map(([p]) => p))
+      const { conflictRepos } = useGitStore.getState()
+      for (const record of conflictRepos) {
+        if (!existingConflictPaths.has(record.repo_path)) {
+          conflictEntries.push([record.repo_path, record.repo_name, record.conflict_file_count])
+        }
+      }
+
+      const records = await syncConflictRepoRecords(conflictEntries)
+      set({ conflictRepos: records })
+    } catch (e) {
+      console.error('Failed to sync conflict repos:', e)
     }
   },
 }))
