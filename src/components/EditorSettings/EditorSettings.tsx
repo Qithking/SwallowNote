@@ -7,6 +7,7 @@ import { useEditorSettingsStore } from '@/stores'
 import { NumberInput } from '@/components/ui/number-input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useTranslation } from 'react-i18next'
+import { Switch } from '@/components/ui/switch'
 
 function EditorSettings() {
   const { t } = useTranslation()
@@ -19,6 +20,8 @@ function EditorSettings() {
     bodySize,
     lineHeight,
     letterSpacing,
+    paragraphSpacing,
+    firstLineIndent,
     normalPaddingVertical,
     normalPaddingHorizontal,
     widePaddingVertical,
@@ -31,6 +34,8 @@ function EditorSettings() {
     setBodySize,
     setLineHeight,
     setLetterSpacing,
+    setParagraphSpacing,
+    setFirstLineIndent,
     setNormalPaddingVertical,
     setNormalPaddingHorizontal,
     setWidePaddingVertical,
@@ -175,6 +180,30 @@ function EditorSettings() {
               max={8}
               step={0.5}
               unit="px"
+            />
+          </SettingRow>
+        </Section>
+
+        {/* Paragraph Spacing */}
+        <Section title={t('editorSettings.sectionParagraphSpacing')}>
+          <SettingRow label={t('editorSettings.labelParagraphSpacing')}>
+            <NumberInput
+              value={paragraphSpacing}
+              onChange={setParagraphSpacing}
+              min={0}
+              max={48}
+              step={1}
+              unit="px"
+            />
+          </SettingRow>
+        </Section>
+
+        {/* First Line Indent */}
+        <Section title={t('editorSettings.sectionFirstLineIndent')}>
+          <SettingRow label={t('editorSettings.labelFirstLineIndent')}>
+            <Switch
+              checked={firstLineIndent}
+              onCheckedChange={setFirstLineIndent}
             />
           </SettingRow>
         </Section>

@@ -409,8 +409,22 @@ function BlockNoteInner({
     const handler = async (e: Event) => {
       if (cancelled || !editor) return
       const { text } = (e as CustomEvent).detail
+      if (!text) return
+      
       try {
-        const blocks = await editor.tryParseMarkdownToBlocks(text)
+        let blocks: PartialBlock[] = []
+        try {
+          blocks = await editor.tryParseMarkdownToBlocks(text)
+        } catch (parseError) {
+          console.warn('[MarkdownEditor] Failed to parse markdown for insert, treating as plain text:', parseError)
+          // Fallback: treat as plain text
+          const lines = text.split('\n')
+          blocks = lines.map((line: string) => ({
+            type: 'paragraph' as const,
+            content: line || undefined
+          }))
+        }
+        
         if (blocks.length > 0) {
           const currentBlock = editor.getTextCursorPosition().block
           if (Array.isArray(currentBlock.content) && currentBlock.content.length === 0) {
@@ -507,8 +521,22 @@ function BlockNoteInner({
     const handler = async (e: Event) => {
       if (cancelled || !editor) return
       const { text } = (e as CustomEvent).detail
+      if (!text) return
+      
       try {
-        const blocks = await editor.tryParseMarkdownToBlocks(text)
+        let blocks: PartialBlock[] = []
+        try {
+          blocks = await editor.tryParseMarkdownToBlocks(text)
+        } catch (parseError) {
+          console.warn('[MarkdownEditor] Failed to parse markdown for replace, treating as plain text:', parseError)
+          // Fallback: treat as plain text
+          const lines = text.split('\n')
+          blocks = lines.map((line: string) => ({
+            type: 'paragraph' as const,
+            content: line || undefined
+          }))
+        }
+        
         if (blocks.length === 0) return
 
         const tiptapEditor = (editor as any)._tiptapEditor
@@ -574,11 +602,16 @@ function BlockNoteInner({
   }, [editor, editor?.document?.length])
 
   const handleChange = async () => {
-    if (!onChange) return
-    const rawMd = await editor.blocksToMarkdownLossy(editor.document)
-    const md = compactMarkdown(rawMd)
-    lastContentRef.current = md
-    onChange(md)
+    if (!onChange || !editor) return
+    try {
+      const rawMd = await editor.blocksToMarkdownLossy(editor.document)
+      const md = compactMarkdown(rawMd)
+      lastContentRef.current = md
+      onChange(md)
+    } catch (e) {
+      console.error('[MarkdownEditor] Failed to convert blocks to markdown:', e)
+      // Don't propagate error to avoid breaking the editor
+    }
   }
 
   const blocknoteTheme = theme === 'dark' || (theme === 'system' && systemDark) ? 'dark' : 'light'
@@ -653,7 +686,6 @@ function BlockNoteInner({
 export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
   const [initialBlocks, setInitialBlocks] = useState<PartialBlock[] | null>(null)
   const [blocksKey, setBlocksKey] = useState(0)
-  const [error, setError] = useState<string | null>(null)
   const { t } = useTranslation()
   const prevContentRef = useRef(content)
   const isInternalChange = useRef(false)
@@ -676,28 +708,56 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
     }
 
     let cancelled = false
-    setError(null)
 
     const wasEmpty = !prevContentRef.current
     prevContentRef.current = content
 
     async function parseContent() {
       try {
+        // Handle empty content
+        if (!content || content.trim() === '') {
+          if (!cancelled) {
+            setInitialBlocks([{ type: 'paragraph' }])
+          }
+          return
+        }
+
         const tempEditor = BlockNoteEditor.create()
-        const blocks = await tempEditor.tryParseMarkdownToBlocks(content)
+        let blocks: PartialBlock[] = []
+        
+        try {
+          blocks = await tempEditor.tryParseMarkdownToBlocks(content)
+        } catch (parseError) {
+          console.warn('[MarkdownEditor] Markdown parsing failed, treating as plain text:', parseError)
+          // If markdown parsing fails, treat content as plain text
+          // Split by newlines and create paragraph blocks
+          const lines = content.split('\n')
+          blocks = lines.map(line => ({
+            type: 'paragraph' as const,
+            content: line || undefined
+          }))
+        }
+        
         if (cancelled) return
+        
         if (blocks && blocks.length > 0) {
           setInitialBlocks(blocks)
         } else {
           setInitialBlocks([{ type: 'paragraph' }])
         }
+        
         if (wasEmpty && content) {
           setBlocksKey((k) => k + 1)
         }
       } catch (e) {
         if (cancelled) return
         console.error('[MarkdownEditor] Failed to parse markdown:', e)
-        setError(String(e))
+        // Don't show error UI, instead show content as plain text
+        const lines = content.split('\n')
+        setInitialBlocks(lines.map(line => ({
+          type: 'paragraph' as const,
+          content: line || undefined
+        })))
       }
     }
 
@@ -705,14 +765,6 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
     parseContent()
     return () => { cancelled = true }
   }, [content])
-
-  if (error) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-red-500 p-4">
-        <p>{t('editor.loadFailed', { error })}</p>
-      </div>
-    )
-  }
 
   if (!initialBlocks) {
     return (

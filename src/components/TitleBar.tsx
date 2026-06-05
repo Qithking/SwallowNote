@@ -2,7 +2,7 @@
  * TitleBar Component - Custom window title bar
  * Styled with CSS variables for proper dark/light theme
  */
-import { Minus, Square, X, Sun, Moon, Monitor, Bot } from 'lucide-react'
+import { Minus, Square, X, Sun, Moon, Monitor, Bot, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useUIStore } from '@/stores'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 
 function TitleBar() {
-  const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode } = useUIStore()
+  const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode, sidebarVisible, setSidebarVisible } = useUIStore()
   const { switchMode } = useWorkspaceStore()
   const { t } = useTranslation()
 
@@ -112,6 +112,42 @@ function TitleBar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* Separator before window controls */}
+        <Separator orientation="vertical" className="h-4 mx-1" />
+
+        {/* Left panel toggle button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setSidebarVisible(!sidebarVisible)}
+              className="h-full px-2 flex items-center justify-center cursor-pointer"
+              style={{ color: sidebarVisible ? 'var(--text-primary)' : 'var(--text-muted)' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+            >
+              {sidebarVisible ? <PanelLeftClose size={14} /> : <PanelLeftOpen size={14} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{sidebarVisible ? t('titleBar.hideSidebar') : t('titleBar.showSidebar')}</TooltipContent>
+        </Tooltip>
+
+        {/* Right panel toggle button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setRightPanelType(rightPanelType ? null : 'ai')}
+              className="h-full px-2 flex items-center justify-center cursor-pointer"
+              style={{ color: rightPanelType ? 'var(--text-primary)' : 'var(--text-muted)' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+            >
+              {rightPanelType ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{rightPanelType ? t('titleBar.hideRightPanel') : t('titleBar.showRightPanel')}</TooltipContent>
+        </Tooltip>
+
+        {/* Window controls */}
         <div className="flex items-center h-full">
           <button
             onClick={handleMinimize}

@@ -67,7 +67,7 @@ export interface EditorState {
   removeTab: (id: string) => void
   removeTabs: (ids: string[]) => void
   setActiveTab: (id: string) => void
-  loadTabContent: (id: string) => Promise<void>
+  loadTabContent: (id: string, retryCount?: number) => Promise<void>
   updateTabContent: (id: string, content: string) => void
   updateTabDirty: (id: string, isDirty: boolean) => void
   updateTabEdited: (id: string, isEdited: boolean) => void
@@ -214,9 +214,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setActiveTab: (id) => {
     set({ activeTabId: id })
   },
-  loadTabContent: async (id) => {
+  loadTabContent: async (id, retryCount = 0) => {
     const tab = get().tabs.find((t) => t.id === id)
-    if (!tab || tab.content || tab.isLoading) return
+    // Check if tab exists and needs loading
+    // tab.content === undefined means not loaded yet
+    // tab.content === '' means loaded but empty file
+    if (!tab || tab.content !== undefined || tab.isLoading) return
     // Conflict and diff tabs don't have file content to load
     if (tab.type === 'conflict' || tab.type === 'diff') return
 
@@ -226,8 +229,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ),
     }))
 
+    const maxRetries = 2
+    const retryDelay = 500 // ms
+
+    const tryLoadContent = async (currentRetry = retryCount): Promise<string> => {
+      try {
+        return await loadFileContent(tab.path)
+      } catch (e) {
+        if (currentRetry < maxRetries) {
+          console.warn(`Failed to load tab content, retrying (${currentRetry + 1}/${maxRetries}):`, tab.path)
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          return tryLoadContent(currentRetry + 1)
+        }
+        throw e
+      }
+    }
+
     try {
-      const content = await loadFileContent(tab.path)
+      const content = await tryLoadContent()
       const cursorPosition = tab.cursorPosition || { line: 1, column: 1 }
       // Get actual file modification time from backend
       let modifiedTime = new Date().toLocaleString()
@@ -254,7 +273,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ),
       }))
     } catch (e) {
-      console.error('Failed to load tab content:', e)
+      console.error('Failed to load tab content after retries:', e)
       // Instead of closing the tab, mark it as having external change
       // This keeps the tab open and lets the user decide what to do
       set((state) => ({

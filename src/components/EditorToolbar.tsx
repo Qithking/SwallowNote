@@ -2,9 +2,9 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
-import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore } from '@/stores'
+import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
@@ -15,6 +15,7 @@ function EditorToolbar() {
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode } = useUIStore()
   const { normalPaddingVertical, normalPaddingHorizontal, widePaddingVertical, widePaddingHorizontal } = useEditorSettingsStore()
+  const { conflictRepos } = useGitStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
   const [isWide, setIsWide] = useState(noteWidth === 'wide')
@@ -129,6 +130,24 @@ function EditorToolbar() {
 
       {/* Right: Icons */}
       <div className="flex items-center shrink-0 ml-4">
+        {/* Conflict indicator - shown when file belongs to a conflict repo */}
+        {(() => {
+          const conflictRepo = conflictRepos.find((r) => path.startsWith(r.repo_path))
+          return conflictRepo ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => useEditorStore.getState().openConflictTab(conflictRepo.repo_path, conflictRepo.repo_name)}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: 'var(--color-error)' }}
+                >
+                  <GitMerge size={14} style={{ color: 'inherit' }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('editorToolbar.conflictResolve')}</TooltipContent>
+            </Tooltip>
+          ) : null
+        })()}
         {isMarkdown && (<>
           <Tooltip>
             <TooltipTrigger asChild>

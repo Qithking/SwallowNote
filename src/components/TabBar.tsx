@@ -207,22 +207,32 @@ function TabBar() {
     }
   }
 
-  const handleTabClick = async (tabId: string) => {
+  const handleTabClick = (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId)
-    if (tab && !tab.content && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
-      await useEditorStore.getState().loadTabContent(tabId)
-    }
+    if (!tab) return
+    
+    // Switch tab immediately for better UX
     setActiveTab(tabId)
     scrollToTab(tabId)
-    if (tab) {
-      if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
-        const folder = workspaceFolders.find(f => tab.path.startsWith(f))
-        if (folder) {
-          useFileTreeStore.getState().revealPath(tab.path, folder)
-        }
-      } else if (rootPath) {
-        useFileTreeStore.getState().revealPath(tab.path, rootPath)
+    
+    // Load content asynchronously after switching tab
+    // This prevents blocking the UI and avoids race conditions
+    // Check content === undefined to detect unloaded tabs (empty string is valid content)
+    if (tab.content === undefined && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
+      // Use setTimeout to ensure tab switch happens first
+      setTimeout(() => {
+        useEditorStore.getState().loadTabContent(tabId)
+      }, 0)
+    }
+    
+    // Reveal in file tree
+    if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
+      const folder = workspaceFolders.find(f => tab.path.startsWith(f))
+      if (folder) {
+        useFileTreeStore.getState().revealPath(tab.path, folder)
       }
+    } else if (rootPath) {
+      useFileTreeStore.getState().revealPath(tab.path, rootPath)
     }
   }
 

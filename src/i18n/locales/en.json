@@ -285,7 +285,11 @@
     "workspace": "Workspace",
     "themeLight": "Light",
     "themeDark": "Dark",
-    "themeSystem": "System"
+    "themeSystem": "System",
+    "hideSidebar": "Hide Sidebar",
+    "showSidebar": "Show Sidebar",
+    "hideRightPanel": "Hide Right Panel",
+    "showRightPanel": "Show Right Panel"
   },
   "dialog": {
     "saveChanges": "Save Changes",
@@ -362,7 +366,8 @@
     "copyFullPath": "Copy Full Path",
     "toggleWidth": "Toggle Editor Width",
     "contentLayout": "Content Layout Settings",
-    "externalChange": "File modified externally, click to reload"
+    "externalChange": "File modified externally, click to reload",
+    "conflictResolve": "File has conflicts, click to resolve"
   },
   "editor": {
     "untitled": "Untitled",
@@ -463,6 +468,8 @@
     "sectionFont": "Font Size",
     "sectionLineHeight": "Line Height",
     "sectionLetterSpacing": "Letter Spacing",
+    "sectionParagraphSpacing": "Paragraph Spacing",
+    "sectionFirstLineIndent": "First Line Indent",
     "sectionNormalPadding": "Normal Note Padding",
     "sectionWidePadding": "Wide Note Padding",
     "labelH1": "Heading H1",
@@ -473,6 +480,8 @@
     "labelBody": "Body Text",
     "labelLineHeight": "Line Height",
     "labelLetterSpacing": "Letter Spacing",
+    "labelParagraphSpacing": "Paragraph Spacing",
+    "labelFirstLineIndent": "First Line Indent",
     "labelPaddingTopBottom": "Top/Bottom",
     "labelPaddingLeftRight": "Left/Right"
   },

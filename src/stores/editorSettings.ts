@@ -22,6 +22,8 @@ function applyToCSS(state: Partial<EditorSettingsState>) {
   if (state.bodySize !== undefined) root.style.setProperty('--body-size', `${state.bodySize}px`)
   if (state.lineHeight !== undefined) root.style.setProperty('--line-height', String(state.lineHeight))
   if (state.letterSpacing !== undefined) root.style.setProperty('--letter-spacing', `${state.letterSpacing}px`)
+  if (state.paragraphSpacing !== undefined) root.style.setProperty('--paragraph-spacing', `${state.paragraphSpacing}px`)
+  if (state.firstLineIndent !== undefined) root.style.setProperty('--first-line-indent', state.firstLineIndent ? '2em' : '0')
 }
 
 export interface EditorSettingsState {
@@ -38,6 +40,12 @@ export interface EditorSettingsState {
   
   // Letter spacing in px (VSCode default: 0)
   letterSpacing: number
+  
+  // Paragraph spacing in px (default: 0)
+  paragraphSpacing: number
+  
+  // First line indent (default: false)
+  firstLineIndent: boolean
   
   // Padding settings for normal note (vertical/horizontal)
   normalPaddingVertical: number
@@ -56,6 +64,8 @@ export interface EditorSettingsState {
   setBodySize: (size: number) => void
   setLineHeight: (height: number) => void
   setLetterSpacing: (spacing: number) => void
+  setParagraphSpacing: (spacing: number) => void
+  setFirstLineIndent: (enabled: boolean) => void
   setNormalPaddingVertical: (padding: number) => void
   setNormalPaddingHorizontal: (padding: number) => void
   setWidePaddingVertical: (padding: number) => void
@@ -75,6 +85,8 @@ const DEFAULT_SETTINGS = {
   bodySize: 14,
   lineHeight: 1.6,
   letterSpacing: 0,
+  paragraphSpacing: 0,
+  firstLineIndent: false,
   // Padding defaults (vertical/horizontal)
   normalPaddingVertical: 30,
   normalPaddingHorizontal: 80,
@@ -102,6 +114,8 @@ function collectSettings(state: EditorSettingsState): Record<string, string> {
     editor_bodySize: String(state.bodySize),
     editor_lineHeight: String(state.lineHeight),
     editor_letterSpacing: String(state.letterSpacing),
+    editor_paragraphSpacing: String(state.paragraphSpacing),
+    editor_firstLineIndent: String(state.firstLineIndent),
     editor_normalPaddingVertical: String(state.normalPaddingVertical),
     editor_normalPaddingHorizontal: String(state.normalPaddingHorizontal),
     editor_widePaddingVertical: String(state.widePaddingVertical),
@@ -161,6 +175,18 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
     scheduleSave()
   },
   
+  setParagraphSpacing: (spacing) => {
+    set({ paragraphSpacing: spacing })
+    applyToCSS({ paragraphSpacing: spacing })
+    scheduleSave()
+  },
+  
+  setFirstLineIndent: (enabled) => {
+    set({ firstLineIndent: enabled })
+    applyToCSS({ firstLineIndent: enabled })
+    scheduleSave()
+  },
+  
   setNormalPaddingVertical: (padding) => {
     set({ normalPaddingVertical: padding })
     scheduleSave()
@@ -201,6 +227,8 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
       if (saved.editor_bodySize) partial.bodySize = Number(saved.editor_bodySize)
       if (saved.editor_lineHeight) partial.lineHeight = Number(saved.editor_lineHeight)
       if (saved.editor_letterSpacing) partial.letterSpacing = Number(saved.editor_letterSpacing)
+      if (saved.editor_paragraphSpacing) partial.paragraphSpacing = Number(saved.editor_paragraphSpacing)
+      if (saved.editor_firstLineIndent) partial.firstLineIndent = saved.editor_firstLineIndent === 'true'
       if (saved.editor_normalPaddingVertical) partial.normalPaddingVertical = Number(saved.editor_normalPaddingVertical)
       if (saved.editor_normalPaddingHorizontal) partial.normalPaddingHorizontal = Number(saved.editor_normalPaddingHorizontal)
       if (saved.editor_widePaddingVertical) partial.widePaddingVertical = Number(saved.editor_widePaddingVertical)

@@ -324,10 +324,15 @@ export function useKeyboardShortcuts() {
         const index = parseInt(e.key) - 1
         if (tabs[index]) {
           const tab = tabs[index]
-          if (!tab.content && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
-            await useEditorStore.getState().loadTabContent(tab.id)
-          }
+          // Switch tab immediately for better UX
           useEditorStore.getState().setActiveTab(tab.id)
+          // Load content asynchronously after switching tab
+          // Check content === undefined to detect unloaded tabs (empty string is valid content)
+          if (tab.content === undefined && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
+            setTimeout(() => {
+              useEditorStore.getState().loadTabContent(tab.id)
+            }, 0)
+          }
         }
         return
       }

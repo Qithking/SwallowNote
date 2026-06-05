@@ -46,12 +46,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         await saveFolderHistory(path)
       }
       const fileTreeStore = useFileTreeStore.getState()
-      await fileTreeStore.loadRoot(path)
+      
+      // Load file tree first
+      const loadSuccess = await fileTreeStore.loadRoot(path)
+      
+      // Only update state if file tree loaded successfully
+      if (!loadSuccess) {
+        throw new Error('File tree failed to load')
+      }
+      
       set({ rootPath: path, isLoading: false })
       
+      // Watch directory after successful load
       await watchDirectory(path)
     } catch (err) {
-      set({ error: `Failed to open folder: ${err}`, isLoading: false })
+      console.error('Failed to open folder:', err)
+      set({ error: `Failed to open folder: ${err}`, isLoading: false, rootPath: null })
+      // Clear file tree on error
+      const fileTreeStore = useFileTreeStore.getState()
+      fileTreeStore.clearAll()
     }
   },
   loadLastFolder: async () => {
@@ -73,6 +86,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (workspaceMode === 'workspace') {
         const workspacePath = history.find(p => p.endsWith('.swallow-workspace'))
         if (workspacePath) {
+          // Add small delay to ensure UI is ready
+          await new Promise(resolve => setTimeout(resolve, 50))
           await get().loadWorkspaceFile(workspacePath)
           await saveFolderHistory(workspacePath)
         } else {
@@ -82,6 +97,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       } else {
         const folderPath = history.find(p => !p.endsWith('.swallow-workspace'))
         if (folderPath) {
+          // Add small delay to ensure UI is ready
+          await new Promise(resolve => setTimeout(resolve, 50))
           await get().openFolder(folderPath)
         } else {
           set({ rootPath: null })
@@ -89,10 +106,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         }
       }
       
-      // 异步扫描并缓存 Git 仓库
-      scanAndCacheGitRepos()
+      // 异步扫描并缓存 Git 仓库 (延迟执行，避免与文件树加载竞争)
+      setTimeout(() => {
+        scanAndCacheGitRepos()
+      }, 500)
     } catch (err) {
       console.warn('Failed to load latest by mode:', err)
+      // Clear state on error to ensure consistent state
+      const fileTreeStore = useFileTreeStore.getState()
+      fileTreeStore.clearAll()
     }
   },
   addWorkspaceFolder: async (path: string) => {
@@ -148,23 +170,36 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const workspace = JSON.parse(content)
       
       if (workspace.folders && Array.isArray(workspace.folders)) {
+        const fileTreeStore = useFileTreeStore.getState()
+        fileTreeStore.clearAll()
+        
+        // Load file tree first before updating state
+        const loadSuccess = await fileTreeStore.addRoots(workspace.folders)
+        
+        // Verify file tree loaded successfully
+        if (!loadSuccess) {
+          throw new Error('File tree failed to load')
+        }
+        
+        fileTreeStore.clearExpanded()
+        
         set({ 
           workspaceFolders: workspace.folders,
           currentWorkspacePath: workspacePath,
           isLoading: false 
         })
         
-        const fileTreeStore = useFileTreeStore.getState()
-        fileTreeStore.clearAll()
-        await fileTreeStore.addRoots(workspace.folders)
-        fileTreeStore.clearExpanded()
-        
+        // Watch directories after successful load
         for (const folder of workspace.folders) {
           await watchDirectory(folder)
         }
       }
     } catch (err) {
-      set({ error: `Failed to load workspace: ${err}`, isLoading: false })
+      console.error('Failed to load workspace:', err)
+      set({ error: `Failed to load workspace: ${err}`, isLoading: false, workspaceFolders: [], currentWorkspacePath: null })
+      // Clear file tree on error
+      const fileTreeStore = useFileTreeStore.getState()
+      fileTreeStore.clearAll()
     }
   },
   switchMode: async (mode: WorkspaceMode) => {

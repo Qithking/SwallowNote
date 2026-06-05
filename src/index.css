@@ -84,6 +84,8 @@ body, #root {
     --body-size: 14px;
     --line-height: 1.6;
     --letter-spacing: 0px;
+    --paragraph-spacing: 0px;
+    --first-line-indent: 0;
   }
 
   .dark {
@@ -276,4 +278,21 @@ body, #root {
   font-size: var(--body-size) !important;
   line-height: var(--line-height) !important;
   letter-spacing: var(--letter-spacing) !important;
+}
+
+/* First line indent for paragraphs */
+.blocknote-editor-container .bn-block-content[data-content-type="paragraph"] > div > p,
+.blocknote-editor-container .bn-block-content[data-content-type="paragraph"] p {
+  text-indent: var(--first-line-indent, 0) !important;
+}
+
+/* Apply paragraph spacing via bn-block-outer (the block-level container)
+   so spacing appears between blocks, not inside the flex column of .bn-block */
+.blocknote-editor-container .bn-block-outer {
+  margin-bottom: var(--paragraph-spacing, 0) !important;
+}
+
+/* Remove margin from last block to avoid extra spacing at bottom */
+.blocknote-editor-container .bn-block-group > .bn-block-outer:last-child {
+  margin-bottom: 0 !important;
 }

@@ -62,13 +62,24 @@ function App() {
       const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
       const { loadSettings: loadEditorSettings } = useEditorSettingsStore.getState()
       const { loadSettings: loadUISettings } = useUIStore.getState()
+      
+      // Step 1: Initialize workspace mode first (determines folder vs workspace)
       await initMode()
-      await loadLatestByMode()
+      
+      // Step 2: Load settings in parallel (these are independent)
       await Promise.all([
-        restoreSessionState(),
         loadEditorSettings(),
         loadUISettings(),
       ])
+      
+      // Step 3: Load workspace/folder first to establish file tree
+      // This must complete before session restore to avoid race conditions
+      await loadLatestByMode()
+      
+      // Step 4: Restore session state (tabs, expanded folders, etc.)
+      // This depends on file tree being loaded first
+      await restoreSessionState()
+      
       // Sync current i18n language to the Rust backend
       const { default: i18n } = await import('i18next')
       setAppLocale(i18n.language).catch(() => {})

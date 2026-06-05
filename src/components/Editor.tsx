@@ -279,7 +279,7 @@ function WelcomeScreen() {
 }
 
 export function EditorView() {
-  const { tabs, activeTabId, updateTabContent, scrollToLine } = useEditorStore()
+  const { tabs, activeTabId, updateTabContent, scrollToLine, loadTabContent } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const scrollToLineRef = useRef(scrollToLine)
   const { t } = useTranslation()
@@ -293,6 +293,24 @@ export function EditorView() {
     window.addEventListener('scroll-to-line', handler)
     return () => window.removeEventListener('scroll-to-line', handler)
   }, [])
+
+  // Auto-load content when switching to a tab that hasn't been loaded yet
+  useEffect(() => {
+    if (!activeTab) return
+    if (activeTab.type === 'diff' || activeTab.type === 'conflict') return
+    
+    // Check if content needs to be loaded
+    // content === undefined means not loaded yet (empty string is valid content)
+    const needsLoad = activeTab.content === undefined && !activeTab.isLoading
+    
+    if (needsLoad) {
+      // Small delay to ensure UI is ready
+      const timer = setTimeout(() => {
+        loadTabContent(activeTab.id)
+      }, 50)
+      return () => clearTimeout(timer)
+    }
+  }, [activeTab?.id, activeTab?.content, activeTab?.isLoading, activeTab?.type, loadTabContent])
 
   if (!activeTab) {
     return <WelcomeScreen />

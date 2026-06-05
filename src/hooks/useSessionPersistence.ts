@@ -85,6 +85,8 @@ export function useSessionPersistence() {
         editor_bodySize: String(editorSettingsState.bodySize),
         editor_lineHeight: String(editorSettingsState.lineHeight),
         editor_letterSpacing: String(editorSettingsState.letterSpacing),
+        editor_paragraphSpacing: String(editorSettingsState.paragraphSpacing),
+        editor_firstLineIndent: String(editorSettingsState.firstLineIndent),
         editor_normalPaddingVertical: String(editorSettingsState.normalPaddingVertical),
         editor_normalPaddingHorizontal: String(editorSettingsState.normalPaddingHorizontal),
         editor_widePaddingVertical: String(editorSettingsState.widePaddingVertical),
@@ -104,6 +106,19 @@ export function useSessionPersistence() {
 
       const { workspaceMode } = useUIStore.getState()
       const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
+      
+      // Wait for file tree to be ready (non-empty nodes)
+      let waitCount = 0
+      const maxWait = 50 // Max 5 seconds (50 * 100ms)
+      while (useFileTreeStore.getState().nodes.length === 0 && waitCount < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        waitCount++
+      }
+      
+      if (useFileTreeStore.getState().nodes.length === 0) {
+        console.warn('File tree not loaded after waiting, skipping session restore')
+        return
+      }
 
       if (states.tabs) {
         const tabsData = JSON.parse(states.tabs) as Partial<EditorTab>[]
@@ -121,7 +136,7 @@ export function useSessionPersistence() {
             id: tab.id || '',
             path: tab.path || '',
             name: tab.name || '',
-            content: '',
+            content: undefined as unknown as string, // Mark as not loaded yet (will trigger auto-load)
             isDirty: false,
             isEdited: false,
             type: tab.type || 'file',
@@ -136,11 +151,15 @@ export function useSessionPersistence() {
           }))
           const activeTabId = states.activeTabId || null
           useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
+          
+          // Delay loading tab content to ensure UI is ready
           if (activeTabId) {
             const activeTab = restoredTabs.find(t => t.id === activeTabId)
             // Only load content for file tabs, not for conflict/diff tabs
             if (activeTab?.type === 'file' || !activeTab?.type) {
-              useEditorStore.getState().loadTabContent(activeTabId)
+              setTimeout(() => {
+                useEditorStore.getState().loadTabContent(activeTabId)
+              }, 100)
             }
           }
 
@@ -165,25 +184,17 @@ export function useSessionPersistence() {
         }
       }
 
-      if (states.expanded) {
-        const expandedPaths = JSON.parse(states.expanded)
-        const selectedPath = states.selectedPath || null
-        await useFileTreeStore.getState().restoreTreeState(expandedPaths, selectedPath)
-      }
-
       if (states.activeTabId) {
         const editorState = useEditorStore.getState()
         const activeTab = editorState.tabs.find((t) => t.id === states.activeTabId)
         if (activeTab?.path) {
-          const fileTreeStore = useFileTreeStore.getState()
-          if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
-            const folder = workspaceFolders.find((f: string) => activeTab.path.startsWith(f))
-            if (folder) {
-              setTimeout(() => fileTreeStore.revealPath(activeTab.path, folder), 100)
-            }
-          } else if (rootPath) {
-            setTimeout(() => fileTreeStore.revealPath(activeTab.path, rootPath), 100)
-          }
+          // Only expand the directory path for the active tab's file,
+          // not all previously expanded directories (avoid flash of expanded-then-collapsed dirs)
+          await useFileTreeStore.getState().revealPath(activeTab.path, 
+            workspaceMode === 'workspace' && workspaceFolders.length > 0
+              ? workspaceFolders.find((f: string) => activeTab.path.startsWith(f)) || rootPath!
+              : rootPath!
+          )
         }
       }
 

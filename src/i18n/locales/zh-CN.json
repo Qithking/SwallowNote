@@ -285,7 +285,11 @@
     "workspace": "工作区",
     "themeLight": "浅色",
     "themeDark": "深色",
-    "themeSystem": "系统"
+    "themeSystem": "系统",
+    "hideSidebar": "隐藏侧边栏",
+    "showSidebar": "显示侧边栏",
+    "hideRightPanel": "隐藏右侧面板",
+    "showRightPanel": "显示右侧面板"
   },
   "dialog": {
     "saveChanges": "保存更改",
@@ -362,7 +366,8 @@
     "copyFullPath": "复制完整路径",
     "toggleWidth": "切换编辑器视图宽度",
     "contentLayout": "内容排版设置",
-    "externalChange": "文件已被外部修改，点击重新加载"
+    "externalChange": "文件已被外部修改，点击重新加载",
+    "conflictResolve": "文件存在冲突，点击处理"
   },
   "editor": {
     "untitled": "未命名",
@@ -463,6 +468,8 @@
     "sectionFont": "字体大小",
     "sectionLineHeight": "行间距",
     "sectionLetterSpacing": "字间距",
+    "sectionParagraphSpacing": "段间距",
+    "sectionFirstLineIndent": "首行缩进",
     "sectionNormalPadding": "普通笔记内边距",
     "sectionWidePadding": "宽笔记内边距",
     "labelH1": "标题 H1",
@@ -473,6 +480,8 @@
     "labelBody": "正文",
     "labelLineHeight": "行距",
     "labelLetterSpacing": "字距",
+    "labelParagraphSpacing": "段距",
+    "labelFirstLineIndent": "首行缩进",
     "labelPaddingTopBottom": "上下",
     "labelPaddingLeftRight": "左右"
   },

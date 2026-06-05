@@ -28,9 +28,9 @@ export interface FileTreeState {
   setLastClickedPath: (path: string | null) => void
   clearMultiSelection: () => void
   toggleNode: (path: string) => Promise<void>
-  loadRoot: (rootPath: string) => Promise<void>
+  loadRoot: (rootPath: string, retryCount?: number) => Promise<boolean>
   addRoot: (rootPath: string) => Promise<void>
-  addRoots: (rootPaths: string[]) => Promise<void>
+  addRoots: (rootPaths: string[]) => Promise<boolean>
   removeRoot: (rootPath: string) => void
   refreshNode: (path: string) => Promise<void>
   refreshExpanded: () => Promise<void>
@@ -127,14 +127,31 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
   },
 
-  loadRoot: async (rootPath) => {
+  loadRoot: async (rootPath, retryCount = 0): Promise<boolean> => {
     if (!rootPath) {
       set({ nodes: [], expanded: new Set(), selectedPath: null })
-      return
+      return false
     }
     set({ isLoading: true })
+    
+    const maxRetries = 2
+    const retryDelay = 500 // ms
+    
+    const tryLoadDirectory = async (currentRetry = retryCount): Promise<FileNode[]> => {
+      try {
+        return await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
+      } catch (e) {
+        if (currentRetry < maxRetries) {
+          console.warn(`Failed to load root directory, retrying (${currentRetry + 1}/${maxRetries}):`, rootPath)
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          return tryLoadDirectory(currentRetry + 1)
+        }
+        throw e
+      }
+    }
+    
     try {
-      const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
+      const data = await tryLoadDirectory()
       const rootNode: FileNode = {
         id: 'root',
         name: rootPath.split(/[\\/]/).pop() || rootPath,
@@ -143,9 +160,13 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         children: data,
       }
       set({ nodes: [rootNode], expanded: new Set([rootPath]), isLoading: false })
+      return true
     } catch (e) {
-      console.error(e)
+      console.error('Failed to load root directory after retries:', e)
       set({ isLoading: false })
+      // Keep empty nodes to indicate loading failed
+      set({ nodes: [], expanded: new Set() })
+      return false
     }
   },
 
@@ -173,13 +194,13 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
   },
 
-  addRoots: async (rootPaths) => {
-    if (!rootPaths || rootPaths.length === 0) return
+  addRoots: async (rootPaths): Promise<boolean> => {
+    if (!rootPaths || rootPaths.length === 0) return false
     const { nodes, expanded } = get()
     
     // Filter out already-existing roots
     const pathsToLoad = rootPaths.filter(p => !findNodeInList(nodes, p))
-    if (pathsToLoad.length === 0) return
+    if (pathsToLoad.length === 0) return true
 
     const filterParams = getFilterParams()
 
@@ -208,14 +229,17 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
     const newNodes = [...nodes]
     const newExpanded = new Set(expanded)
+    let anySuccess = false
     for (const result of results) {
       if (result) {
         newNodes.push(result.node)
         newExpanded.add(result.path)
+        anySuccess = true
       }
     }
     
     set({ nodes: newNodes, expanded: newExpanded })
+    return anySuccess
   },
 
   removeRoot: (rootPath) => {
