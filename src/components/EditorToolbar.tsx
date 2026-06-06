@@ -145,7 +145,7 @@ function EditorToolbar() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => { console.log('[EditorToolbar] conflict icon clicked: repo_path=', conflictRepo.repo_path, 'repo_name=', conflictRepo.repo_name, 'relativeFilePath=', relativeFilePath, 'abs_path=', path); useEditorStore.getState().openConflictTab(conflictRepo.repo_path, conflictRepo.repo_name, { autoSelectFile: relativeFilePath, autoHideTree: true }) }}
+                  onClick={() => { useEditorStore.getState().openConflictTab(conflictRepo.repo_path, conflictRepo.repo_name, { autoSelectFile: relativeFilePath, autoHideTree: true }) }}
                   className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
                   style={{ color: 'var(--color-error)' }}
                 >

@@ -143,7 +143,6 @@ function buildFileTree(files: ConflictFile[]): TreeNode[] {
 }
 
 function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, initialCursorLine, autoHideTree }: ConflictResolverProps) {
-  console.log('[ConflictResolver] RENDER props:', { repoPath, initialSelectedFile, autoHideTree })
   const { t } = useTranslation()
   const { showToast } = useUIStore()
   const [conflictRepos, setConflictRepos] = useState<ConflictRepo[]>([])
@@ -240,7 +239,6 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       const currentInitialFile = initialSelectedFileRef.current
       const currentAutoHideTree = autoHideTreeRef.current
 
-      console.log('[ConflictResolver] loadConflicts: currentInitialFile=', currentInitialFile, 'initialRestoreDone=', initialRestoreDone.current, 'autoHideTree=', currentAutoHideTree, 'repos=', repos.length, 'files=', repos.flatMap(r => r.files).map(f => f.path))
       if (currentInitialFile && !initialRestoreDone.current) {
         // Auto-select initial file and expand only its parent directories
         initialRestoreDone.current = true
@@ -248,7 +246,6 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
         for (const repo of repos) {
           const file = repo.files.find(f => f.path === currentInitialFile)
           if (file) {
-            console.log('[ConflictResolver] loadConflicts: MATCHED file, selecting:', file.path)
             fileFound = true
             setSelectedFile({ repoPath: repo.path, file })
             // Only expand directories along the path to the selected file
@@ -262,7 +259,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
           }
         }
         if (!fileFound) {
-          console.warn('[ConflictResolver] loadConflicts: NO MATCH for initialFile="' + currentInitialFile + '" among conflict files:', repos.flatMap(r => r.files).map(f => f.path))
+          console.warn('[ConflictResolver] No match for initialFile="' + currentInitialFile + '" among conflict files:', repos.flatMap(r => r.files).map(f => f.path))
         }
       } else if (currentAutoHideTree) {
         // Tree is hidden, no need to expand any directories
@@ -300,7 +297,6 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
 
   // React to initialSelectedFile changes (e.g. when clicking conflict icon on an already-open tab)
   useEffect(() => {
-    console.log('[ConflictResolver] initialSelectedFile effect: initialSelectedFile=', initialSelectedFile, 'initialRestoreDone=', initialRestoreDone.current, 'conflictRepos.length=', conflictRepos.length)
     if (!initialSelectedFile || initialRestoreDone.current) return
     // Only try to select when conflict repos have been loaded
     if (conflictRepos.length === 0) return
@@ -342,7 +338,6 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
 
   // Load file content when a file is selected
   useEffect(() => {
-    console.log('[ConflictResolver] selectedFile effect: selectedFile=', selectedFile ? { repoPath: selectedFile.repoPath, path: selectedFile.file.path, abs_path: selectedFile.file.abs_path } : null)
     if (!selectedFile) {
       setLocalContent('')
       setEditedLocalContent('')
