@@ -223,7 +223,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     })
   },
   setActiveTab: (id) => {
-    set({ activeTabId: id })
+    set((state) => {
+      const prevActiveId = state.activeTabId
+      // Release content of non-active, non-dirty file tabs to save memory
+      const tabs = state.tabs.map((t) => {
+        if (t.id === prevActiveId && t.id !== id && !t.isDirty && t.type !== 'diff' && t.type !== 'conflict' && t.content !== undefined) {
+          return { ...t, content: undefined as unknown as string, isLoading: false }
+        }
+        return t
+      })
+      return { tabs, activeTabId: id }
+    })
   },
   loadTabContent: async (id, retryCount = 0) => {
     const tab = get().tabs.find((t) => t.id === id)

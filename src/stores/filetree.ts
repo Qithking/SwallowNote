@@ -93,12 +93,22 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   clearMultiSelection: () => set({ multiSelectedPaths: new Set() }),
 
   toggleNode: async (path) => {
-    const { expanded } = get()
+    const { expanded, nodes: currentNodes } = get()
     const newExpanded = new Set(expanded)
 
     if (newExpanded.has(path)) {
       newExpanded.delete(path)
-      set({ expanded: newExpanded })
+      // Release children of collapsed directories to save memory
+      // Children will be reloaded on next expand
+      const node = findNodeInList(currentNodes, path)
+      if (node && node.isDirectory && node.children && node.children.length > 0) {
+        set({
+          expanded: newExpanded,
+          nodes: updateNodesWithChildren(currentNodes, path, []),
+        })
+      } else {
+        set({ expanded: newExpanded })
+      }
       return
     }
 

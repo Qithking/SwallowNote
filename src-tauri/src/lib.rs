@@ -198,48 +198,8 @@ pub fn run() {
 
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
 
-            let ai_holder = app.handle().state::<commands::ai::SharedAiProxyState>().inner().clone();
-            let db = app.handle().state::<db::Database>().inner();
-            let ai_settings = {
-                let conn = db.conn.lock().unwrap();
-                let mut stmt = conn.prepare("SELECT key, value FROM session_state WHERE key LIKE 'settings.ai%'").unwrap();
-                let rows: std::collections::HashMap<String, String> = stmt.query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                }).unwrap().filter_map(|r| r.ok()).collect();
-                drop(stmt);
-                drop(conn);
-
-                let get = |key: &str| rows.get(key).cloned().unwrap_or_default();
-                crate::ai_proxy::AiSettings {
-                    provider: get("settings.aiProvider"),
-                    api_key: {
-                        let encrypted = get("settings.aiApiKey");
-                        if !encrypted.is_empty() {
-                            crate::ai_proxy::crypto::decrypt_api_key(&encrypted).unwrap_or_default()
-                        } else {
-                            String::new()
-                        }
-                    },
-                    base_url: get("settings.aiBaseUrl"),
-                    model: get("settings.aiModel"),
-                    port: get("settings.aiPort").parse::<u16>().unwrap_or(4017),
-                }
-            };
-
-            if !ai_settings.provider.is_empty() {
-                let holder = ai_holder.clone();
-                tauri::async_runtime::spawn(async move {
-                    match crate::ai_proxy::server::start_ai_proxy(ai_settings).await {
-                        Ok(server) => {
-                            let mut guard = holder.server.lock().unwrap();
-                            *guard = Some(server);
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to start AI proxy: {}", e);
-                        }
-                    }
-                });
-            }
+            // AI proxy is no longer auto-started on launch to save memory.
+            // It will be started on-demand when the user opens the AI panel.
 
             let show_item = MenuItemBuilder::with_id("show", crate::i18n::t("tray.showWindow")).build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", crate::i18n::t("tray.quit")).build(app)?;

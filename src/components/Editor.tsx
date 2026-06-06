@@ -2,14 +2,14 @@
  * Editor Component - Main editor area
  * Shows the content of the active tab with appropriate editor
  */
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore } from '@/stores'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
-import { MindMapEditor } from './editors/MindMapEditor'
-import DiffViewer from './DiffViewer/DiffViewer'
-import ConflictResolver from './DiffViewer/ConflictResolver'
+const MindMapEditor = lazy(() => import('./editors/MindMapEditor').then(m => ({ default: m.MindMapEditor })))
+const DiffViewer = lazy(() => import('./DiffViewer/DiffViewer'))
+const ConflictResolver = lazy(() => import('./DiffViewer/ConflictResolver'))
 import { FileCode, FolderOpen, FileText, Clock, GitFork, ArrowRight, Layers } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { useTranslation } from 'react-i18next'
@@ -320,7 +320,9 @@ export function EditorView() {
   if (activeTab.type === 'diff') {
     return (
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        <DiffViewer diffContent={activeTab.diffContent || ''} />
+        <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
+          <DiffViewer diffContent={activeTab.diffContent || ''} />
+        </Suspense>
       </div>
     )
   }
@@ -329,13 +331,15 @@ export function EditorView() {
   if (activeTab.type === 'conflict' && activeTab.conflictRepoPath && activeTab.conflictRepoName) {
     return (
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        <ConflictResolver
-          repoPath={activeTab.conflictRepoPath}
-          repoName={activeTab.conflictRepoName}
-          initialSelectedFile={activeTab.conflictSelectedFile}
-          initialCursorLine={activeTab.conflictCursorLine}
-          autoHideTree={activeTab.conflictAutoHideTree}
-        />
+        <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
+          <ConflictResolver
+            repoPath={activeTab.conflictRepoPath}
+            repoName={activeTab.conflictRepoName}
+            initialSelectedFile={activeTab.conflictSelectedFile}
+            initialCursorLine={activeTab.conflictCursorLine}
+            autoHideTree={activeTab.conflictAutoHideTree}
+          />
+        </Suspense>
       </div>
     )
   }
@@ -394,11 +398,13 @@ export function EditorView() {
 
       {fileType === 'mindmap' && (
         <div className="flex-1 flex overflow-hidden">
-          <MindMapEditor
-            key={activeTab.id}
-            content={activeTab.content}
-            onChange={handleContentChange}
-          />
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
+            <MindMapEditor
+              key={activeTab.id}
+              content={activeTab.content}
+              onChange={handleContentChange}
+            />
+          </Suspense>
         </div>
       )}
     </div>

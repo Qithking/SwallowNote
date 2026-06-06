@@ -43,6 +43,8 @@ function formatTimeStr(timeStr: string): string {
 
 function AIView() {
   const { t } = useTranslation()
+  // Maximum number of messages kept in memory to prevent unbounded growth
+  const MAX_IN_MEMORY_MESSAGES = 100
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [inputValue, setInputValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -138,6 +140,16 @@ function AIView() {
       }
     }
   }, [messages, scrollToBottom])
+
+  // Trim in-memory messages when they exceed the limit to prevent unbounded memory growth
+  useEffect(() => {
+    if (messages.length <= MAX_IN_MEMORY_MESSAGES) return
+    // Don't trim during active streaming to avoid disrupting the response
+    if (isLoading) return
+    // Keep the most recent messages, discard older ones
+    const trimmed = messages.slice(messages.length - MAX_IN_MEMORY_MESSAGES)
+    setMessages(trimmed)
+  }, [messages.length, isLoading])
 
   useEffect(() => {
     // If no active model or active model not in list, set default model

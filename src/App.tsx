@@ -1,4 +1,5 @@
 import '@/i18n'
+import { lazy, Suspense } from 'react'
 import { TitleBar } from '@/components/TitleBar'
 import { ActivityBar } from '@/components/ActivityBar'
 import { Sidebar } from '@/components/Sidebar'
@@ -6,10 +7,10 @@ import { TabBar } from '@/components/TabBar'
 import { EditorToolbar } from '@/components/EditorToolbar'
 import { EditorView } from '@/components/Editor'
 import { SettingsView } from '@/components/Settings/SettingsView'
-import { AIView } from '@/components/AI/AIView'
-import { DirectoryView } from '@/components/Directory/DirectoryView'
-import { HistoryView } from '@/components/History/HistoryView'
-import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
+const AIView = lazy(() => import('@/components/AI/AIView').then(m => ({ default: m.AIView })))
+const DirectoryView = lazy(() => import('@/components/Directory/DirectoryView').then(m => ({ default: m.DirectoryView })))
+const HistoryView = lazy(() => import('@/components/History/HistoryView').then(m => ({ default: m.HistoryView })))
+const EditorSettings = lazy(() => import('@/components/EditorSettings/EditorSettings').then(m => ({ default: m.EditorSettings })))
 import { StatusBar } from '@/components/StatusBar'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useGitStore } from '@/stores'
@@ -473,10 +474,10 @@ function App() {
 
   const renderRightPanel = () => {
     switch (rightPanelType) {
-      case 'ai': return <AIView />
-      case 'directory': return <DirectoryView />
-      case 'history': return <HistoryView visible={true} />
-      case 'editorSettings': return <EditorSettings />
+      case 'ai': return <Suspense fallback={null}><AIView /></Suspense>
+      case 'directory': return <Suspense fallback={null}><DirectoryView /></Suspense>
+      case 'history': return <Suspense fallback={null}><HistoryView visible={true} /></Suspense>
+      case 'editorSettings': return <Suspense fallback={null}><EditorSettings /></Suspense>
       default: return null
     }
   }

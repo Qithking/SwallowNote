@@ -16,7 +16,16 @@ pub struct Database {
 pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     let db_path = app_data_dir.join("swallownote.db");
     let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)?;
-    
+
+    // Enable WAL mode for better concurrent read performance and lower memory usage
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    // Reduce memory usage by limiting the WAL auto-checkpoint threshold
+    conn.pragma_update(None, "wal_autocheckpoint", 1000)?;
+    // Enable memory-mapped I/O for faster reads (64MB limit)
+    conn.pragma_update(None, "mmap_size", 67108864)?;
+    // Reduce page cache size to limit memory usage (2MB)
+    conn.pragma_update(None, "cache_size", -2000)?;
+
     // folder_history table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS folder_history (
