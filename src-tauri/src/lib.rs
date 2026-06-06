@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)] // objc macro generates cfg(cargo-clippy) internally
 mod ai_proxy;
 mod commands;
 mod db;
@@ -6,13 +7,12 @@ mod plugins;
 mod services;
 
 use plugins::mac_rounded_corners;
-use db::Database;
 use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, RunEvent,
+    AppHandle, Manager,
 };
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -31,6 +31,7 @@ fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
 
 /// Inner implementation for setting Dock icon visibility
 #[cfg(target_os = "macos")]
+#[allow(deprecated, unexpected_cfgs)]
 fn set_dock_icon_visibility_inner(visible: bool) -> Result<(), String> {
     use objc::{msg_send, sel, sel_impl, runtime::Class};
     let result = std::panic::catch_unwind(|| unsafe {

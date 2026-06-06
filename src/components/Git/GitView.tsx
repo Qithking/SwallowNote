@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { useGitStore, GitRepository, mapRepoInfosToRepositories } from '@/stores/git'
+import { useGitStore, GitRepository, mapRepoInfosToRepositories, PullResult } from '@/stores/git'
 import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitForcePushWithCredentials, gitCredentialSave, gitCredentialGet, gitForcePush, gitForcePull } from '@/lib/tauri'
 import {
   DropdownMenu,
@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWorkspaceStore, useUIStore, useFileTreeStore, useEditorStore } from '@/stores'
+import type { GitState } from '@/stores/git'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
@@ -282,8 +283,7 @@ function CommitSection({
           failCount++
           errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
           conflictPaths.push(repo.path)
-          // Auto-open conflict resolution tab
-          useEditorStore.getState().openConflictTab(repo.path, repo.name)
+          // Do NOT auto-open conflict tab — user must click conflict icon or repo to open
         } else {
           failCount++
           errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
@@ -549,14 +549,14 @@ function RepositoryItem({
 }
 
 const GitView = memo(function GitView() {
-  const repositories = useGitStore((s) => s.repositories)
-  const setRepositories = useGitStore((s) => s.setRepositories)
-  const setCachedRepositories = useGitStore((s) => s.setCachedRepositories)
-  const scanProgress = useGitStore((s) => s.scanProgress)
-  const pullAllRepos = useGitStore((s) => s.pullAllRepos)
-  const updateRepositoryStatuses = useGitStore((s) => s.updateRepositoryStatuses)
-  const resetRepositoryStatuses = useGitStore((s) => s.resetRepositoryStatuses)
-  const loadConflictRepos = useGitStore((s) => s.loadConflictRepos)
+  const repositories = useGitStore((s: GitState) => s.repositories)
+  const setRepositories = useGitStore((s: GitState) => s.setRepositories)
+  const setCachedRepositories = useGitStore((s: GitState) => s.setCachedRepositories)
+  const scanProgress = useGitStore((s: GitState) => s.scanProgress)
+  const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
+  const updateRepositoryStatuses = useGitStore((s: GitState) => s.updateRepositoryStatuses)
+  const resetRepositoryStatuses = useGitStore((s: GitState) => s.resetRepositoryStatuses)
+  const loadConflictRepos = useGitStore((s: GitState) => s.loadConflictRepos)
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode, showToast } = useUIStore()
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
@@ -601,8 +601,8 @@ const GitView = memo(function GitView() {
 
         const storeRepos = mapRepoInfosToRepositories(allRepos)
         const prevRepos = useGitStore.getState().repositories
-        const mergedRepos = storeRepos.map(repo => {
-          const prev = prevRepos.find(r => r.path === repo.path)
+        const mergedRepos = storeRepos.map((repo: GitRepository) => {
+          const prev = prevRepos.find((r: GitRepository) => r.path === repo.path)
           if (prev && prev.status !== 'normal') {
             return { ...repo, status: prev.status }
           }
@@ -634,10 +634,10 @@ const GitView = memo(function GitView() {
     if (repositories.length === 0) return
 
     const reposToPull = selectedRepos.length > 0
-      ? repositories.filter(r => selectedRepos.includes(r.path))
+      ? repositories.filter((r: GitRepository) => selectedRepos.includes(r.path))
       : repositories
 
-    const reposWithRemote = reposToPull.filter(r => r.remoteUrl)
+    const reposWithRemote = reposToPull.filter((r: GitRepository) => r.remoteUrl)
     if (reposWithRemote.length === 0) {
       showToast(t('git.noReposToSync'), 'info')
       return
@@ -651,9 +651,9 @@ const GitView = memo(function GitView() {
 
     try {
       const results = await pullAllRepos(reposWithRemote)
-      const succeeded = results.filter(r => r.success).length
-      const failed = results.filter(r => !r.success && !r.isConflict).length
-      const conflicted = results.filter(r => r.isConflict).length
+      const succeeded = results.filter((r: PullResult) => r.success).length
+      const failed = results.filter((r: PullResult) => !r.success && !r.isConflict).length
+      const conflicted = results.filter((r: PullResult) => r.isConflict).length
 
       // Update repository statuses based on pull results
       updateRepositoryStatuses(results)
@@ -673,16 +673,10 @@ const GitView = memo(function GitView() {
 
       // Consolidate toast messages: show one summary toast instead of per-repo toasts
       if (conflicted > 0) {
-        const conflictNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
+        const conflictNames = results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.name).join(', ')
         showToast(t('git.pullConflict', { repos: conflictNames }), 'error')
         
-        // Auto-open conflict resolution tabs for conflicted repos
-        const editorStore = useEditorStore.getState()
-        for (const result of results) {
-          if (result.isConflict) {
-            editorStore.openConflictTab(result.path, result.name)
-          }
-        }
+        // Do NOT auto-open conflict tabs — user must click conflict icon or repo to open
 
         // Sync conflict repos to database
         const gitStore = useGitStore.getState()
@@ -705,6 +699,9 @@ const GitView = memo(function GitView() {
       ? (workspaceFolders || [])
       : (rootPath ? [rootPath] : [])
 
+    // Save previous repos BEFORE clearing to preserve conflict/error status
+    const prevRepos = useGitStore.getState().repositories
+
     setRepositories([])
     setSelectedRepos([])
 
@@ -724,9 +721,8 @@ const GitView = memo(function GitView() {
       const allRepos = results.flat()
 
       const storeRepos = mapRepoInfosToRepositories(allRepos)
-      const prevRepos = useGitStore.getState().repositories
-      const mergedRepos = storeRepos.map(repo => {
-        const prev = prevRepos.find(r => r.path === repo.path)
+      const mergedRepos = storeRepos.map((repo: GitRepository) => {
+        const prev = prevRepos.find((r: GitRepository) => r.path === repo.path)
         if (prev && prev.status !== 'normal') {
           return { ...repo, status: prev.status }
         }
@@ -734,6 +730,9 @@ const GitView = memo(function GitView() {
       })
       setRepositories(mergedRepos)
       setCachedRepositories(mergedRepos)
+
+      // Reload conflict repos from database to ensure conflict status is accurate
+      await loadConflictRepos()
     } catch (e) {
       console.error('Failed to refresh repos:', e)
     }
@@ -801,7 +800,7 @@ const GitView = memo(function GitView() {
           </div>
         ) : (
           <div className="space-y-1">
-            {repositories.map((repo) => (
+            {repositories.map((repo: GitRepository) => (
               <RepositoryItem 
                 key={repo.path} 
                 repo={repo}

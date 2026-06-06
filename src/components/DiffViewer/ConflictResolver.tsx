@@ -47,6 +47,7 @@ import {
   ConflictFile,
 } from '@/lib/tauri'
 import { useUIStore, useGitStore, useFileTreeStore, useEditorStore } from '@/stores'
+import type { GitRepository } from '@/stores/git'
 
 interface ConflictRepo {
   path: string
@@ -61,6 +62,8 @@ interface ConflictResolverProps {
   initialSelectedFile?: string
   /** Cursor line number to restore in the local editor (for session restore) */
   initialCursorLine?: number
+  /** Whether to auto-hide the conflict file tree on mount */
+  autoHideTree?: boolean
 }
 
 // ---- Tree node types for the file tree ----
@@ -139,7 +142,7 @@ function buildFileTree(files: ConflictFile[]): TreeNode[] {
   return sortNodes(root)
 }
 
-function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, initialCursorLine }: ConflictResolverProps) {
+function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, initialCursorLine, autoHideTree }: ConflictResolverProps) {
   const { t } = useTranslation()
   const { showToast } = useUIStore()
   const [conflictRepos, setConflictRepos] = useState<ConflictRepo[]>([])
@@ -156,7 +159,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
   // Content version key to ensure SplitDiffViewer remounts when content source changes
   const [contentVersion, setContentVersion] = useState(0)
   // Whether the conflict file tree panel is visible
-  const [isTreeVisible, setIsTreeVisible] = useState(true)
+  const [isTreeVisible, setIsTreeVisible] = useState(!autoHideTree)
   // Track whether initial file restore has been attempted
   const initialRestoreDone = useRef(false)
   // Current cursor line in the local editor (tracked for session persistence)
@@ -174,8 +177,8 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     try {
       const gitStore = useGitStore.getState()
       const conflictPaths = gitStore.repositories
-        .filter(r => r.status === 'conflict')
-        .map(r => r.path)
+        .filter((r: GitRepository) => r.status === 'conflict')
+        .map((r: GitRepository) => r.path)
 
       // Also check the current repoPath if not in the list
       if (!conflictPaths.includes(repoPath)) {
@@ -188,7 +191,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
         try {
           const files = await gitGetConflictFiles(path)
           if (files.length > 0) {
-            const repo = gitStore.repositories.find(r => r.path === path)
+            const repo = gitStore.repositories.find((r: GitRepository) => r.path === path)
             const name = repo?.name || path.split('/').pop() || path
             repos.push({ path, name, files })
           } else {
@@ -266,6 +269,23 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
   useEffect(() => {
     loadConflicts()
   }, [loadConflicts])
+
+  // React to initialSelectedFile changes (e.g. when clicking conflict icon on an already-open tab)
+  useEffect(() => {
+    if (!initialSelectedFile) return
+    const fileToSelect = conflictRepos
+      .flatMap(r => r.files)
+      .find(f => f.path === initialSelectedFile)
+    if (fileToSelect) {
+      const repo = conflictRepos.find(r => r.files.includes(fileToSelect))
+      if (repo) {
+        setSelectedFile({ repoPath: repo.path, file: fileToSelect })
+        if (autoHideTree) {
+          setIsTreeVisible(false)
+        }
+      }
+    }
+  }, [initialSelectedFile, conflictRepos, autoHideTree])
 
   // Sync selected file and cursor line to the editor store for session persistence
   useEffect(() => {
@@ -454,7 +474,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     await loadConflicts()
 
     const gitStore = useGitStore.getState()
-    const repo = gitStore.repositories.find(r => r.path === selectedFile!.repoPath)
+    const repo = gitStore.repositories.find((r: GitRepository) => r.path === selectedFile!.repoPath)
     if (repo && repo.status === 'normal') {
       const fileTreeStore = useFileTreeStore.getState()
       fileTreeStore.refreshExpanded()
@@ -464,7 +484,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
 
     // Check if the repo still has conflicts and update the conflict record
     const updatedRepos = useGitStore.getState().repositories
-    const stillConflicted = updatedRepos.some(r => r.status === 'conflict')
+    const stillConflicted = updatedRepos.some((r: GitRepository) => r.status === 'conflict')
     if (!stillConflicted) {
       // All conflicts resolved — remove the conflict repo record
       try {

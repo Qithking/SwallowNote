@@ -4,7 +4,6 @@ pub mod server;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +37,7 @@ pub struct AiSettingsUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
@@ -45,6 +45,7 @@ pub struct ChatRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,

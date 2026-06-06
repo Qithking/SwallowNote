@@ -5,6 +5,7 @@
 import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore } from '@/stores'
+import type { ConflictRepoRecord } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
@@ -15,7 +16,7 @@ function EditorToolbar() {
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode } = useUIStore()
   const { normalPaddingVertical, normalPaddingHorizontal, widePaddingVertical, widePaddingHorizontal } = useEditorSettingsStore()
-  const { conflictRepos } = useGitStore()
+  const { conflictFilesMap, conflictRepos } = useGitStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
   const [isWide, setIsWide] = useState(noteWidth === 'wide')
@@ -130,14 +131,21 @@ function EditorToolbar() {
 
       {/* Right: Icons */}
       <div className="flex items-center shrink-0 ml-4">
-        {/* Conflict indicator - shown when file belongs to a conflict repo */}
+        {/* Conflict indicator - only shown when the file is actually a conflict file */}
         {(() => {
-          const conflictRepo = conflictRepos.find((r) => path.startsWith(r.repo_path))
+          const conflictFiles = conflictRepos
+            .filter((r: ConflictRepoRecord) => path.startsWith(r.repo_path))
+            .flatMap((r: ConflictRepoRecord) => conflictFilesMap[r.repo_path] || [])
+          const isConflict = conflictFiles.includes(path)
+          if (!isConflict) return null
+          const conflictRepo = conflictRepos.find((r: ConflictRepoRecord) => path.startsWith(r.repo_path))
+          // Compute the relative file path within the repo for auto-selection
+          const relativeFilePath = conflictRepo ? path.substring(conflictRepo.repo_path.length + 1) : undefined
           return conflictRepo ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => useEditorStore.getState().openConflictTab(conflictRepo.repo_path, conflictRepo.repo_name)}
+                  onClick={() => useEditorStore.getState().openConflictTab(conflictRepo.repo_path, conflictRepo.repo_name, { autoSelectFile: relativeFilePath, autoHideTree: true })}
                   className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
                   style={{ color: 'var(--color-error)' }}
                 >

@@ -2,7 +2,7 @@
  * Git Store - Manages Git state
  */
 import { create } from 'zustand'
-import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, syncConflictRepoRecords, type ConflictRepoRecord } from '@/lib/tauri'
+import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, syncConflictRepoRecords, gitGetConflictFiles, type ConflictRepoRecord } from '@/lib/tauri'
 
 export interface GitBranch {
   name: string
@@ -71,6 +71,7 @@ export interface GitState {
   cachedRepositories: GitRepository[]
   activeRepository: string | null  // 当前选中的仓库路径
   conflictRepos: ConflictRepoRecord[]  // 持久化的冲突仓库记录
+  conflictFilesMap: Record<string, string[]>  // 冲突仓库的冲突文件绝对路径映射 (repo_path -> [abs_path, ...])
   isGitLoading: boolean
   isPulling: boolean
   scanProgress: { current: number; total: number; message: string } | null
@@ -90,6 +91,8 @@ export interface GitState {
   pullAllRepos: (repos: GitRepository[]) => Promise<PullResult[]>
   loadConflictRepos: () => Promise<void>
   syncConflictReposFromPullResults: (pullResults: PullResult[]) => Promise<void>
+  /** Check if a file path is a conflict file by comparing against cached conflict file lists */
+  isConflictFile: (filePath: string) => { isConflict: boolean; repoPath: string; repoName: string } | null
 }
 
 export const useGitStore = create<GitState>((set) => ({
@@ -97,6 +100,7 @@ export const useGitStore = create<GitState>((set) => ({
   cachedRepositories: [],
   activeRepository: null,
   conflictRepos: [],
+  conflictFilesMap: {},
   isGitLoading: false,
   isPulling: false,
   scanProgress: null,
@@ -192,7 +196,18 @@ export const useGitStore = create<GitState>((set) => ({
   loadConflictRepos: async () => {
     try {
       const records = await getConflictRepoRecords()
-      set({ conflictRepos: records })
+      // Load conflict files for each conflict repo
+      const newConflictFilesMap: Record<string, string[]> = {}
+      await Promise.all(records.map(async (record) => {
+        try {
+          const files = await gitGetConflictFiles(record.repo_path)
+          newConflictFilesMap[record.repo_path] = files.map((f) => f.abs_path)
+        } catch {
+          // If we can't get conflict files for a repo, skip it
+          newConflictFilesMap[record.repo_path] = []
+        }
+      }))
+      set({ conflictRepos: records, conflictFilesMap: newConflictFilesMap })
       // Also update repository statuses based on conflict records
       set((state) => ({
         repositories: state.repositories.map((repo) => {
@@ -225,9 +240,31 @@ export const useGitStore = create<GitState>((set) => ({
       }
 
       const records = await syncConflictRepoRecords(conflictEntries)
-      set({ conflictRepos: records })
+
+      // Load conflict files for each conflict repo
+      const newConflictFilesMap: Record<string, string[]> = {}
+      await Promise.all(records.map(async (record) => {
+        try {
+          const files = await gitGetConflictFiles(record.repo_path)
+          newConflictFilesMap[record.repo_path] = files.map((f) => f.abs_path)
+        } catch {
+          newConflictFilesMap[record.repo_path] = []
+        }
+      }))
+
+      set({ conflictRepos: records, conflictFilesMap: newConflictFilesMap })
     } catch (e) {
       console.error('Failed to sync conflict repos:', e)
     }
+  },
+  isConflictFile: (filePath: string): { isConflict: boolean; repoPath: string; repoName: string } | null => {
+    const { conflictRepos, conflictFilesMap } = useGitStore.getState()
+    for (const repo of conflictRepos) {
+      const conflictFiles = conflictFilesMap[repo.repo_path]
+      if (conflictFiles && conflictFiles.includes(filePath)) {
+        return { isConflict: true, repoPath: repo.repo_path, repoName: repo.repo_name }
+      }
+    }
+    return null
   },
 }))

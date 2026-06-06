@@ -24,6 +24,7 @@ import {
   GitFork,
 } from 'lucide-react'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGitStore } from '@/stores'
+import type { GitRepository } from '@/stores/git'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { deleteFile } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
@@ -101,7 +102,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   const isRootFolder = workspaceMode === 'workspace' && workspaceFolders.includes(node.path)
 
   // 检查节点是否在 git 仓库中
-  const isInGitRepo = repositories.some(repo => {
+  const isInGitRepo = repositories.some((repo: GitRepository) => {
     // 节点路径等于仓库路径，或节点路径在仓库路径下
     return node.path === repo.path || node.path.startsWith(repo.path + '/')
   })

@@ -6,7 +6,7 @@ use axum::{
     },
     Json,
 };
-use futures::stream::{BoxStream, StreamExt};
+use futures::stream::StreamExt;
 use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -40,7 +40,7 @@ pub async fn chat_handler(
 
     let msg_id = uuid::Uuid::new_v4().to_string();
 
-    let (url, mut payload, auth_header) = match settings.provider.as_str() {
+    let (url, payload, auth_header) = match settings.provider.as_str() {
         "anthropic" => {
             let url = format!("{}/messages", base_url);
             let messages: Vec<Value> = messages_val

@@ -12,6 +12,7 @@ struct FileWatcherState {
 }
 
 impl FileWatcherState {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self {
             debouncer: None,
@@ -30,7 +31,7 @@ pub fn init_watcher(app_handle: AppHandle) {
 
     let app_handle_clone = app_handle.clone();
 
-    let mut debouncer = new_debouncer(
+    let debouncer = new_debouncer(
         Duration::from_millis(500),
         None,
         move |res: DebounceEventResult| {

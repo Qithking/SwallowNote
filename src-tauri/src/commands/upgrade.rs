@@ -54,6 +54,7 @@ pub struct DownloadComplete {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct DownloadError {
     pub message: String,
 }
@@ -248,7 +249,7 @@ pub fn get_download_dir() -> String {
 /// On Windows:
 /// Falls back to opening the installer (user handles the rest)
 #[tauri::command]
-pub async fn install_and_restart(app: AppHandle, dmg_path: String) -> Result<(), String> {
+pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let dmg = PathBuf::from(&dmg_path);
@@ -443,7 +444,6 @@ pub async fn install_and_restart(app: AppHandle, dmg_path: String) -> Result<(),
     #[cfg(not(target_os = "macos"))]
     {
         // On non-macOS platforms, fall back to just opening the installer
-        let _ = app;
         open_installer(dmg_path).await
     }
 }

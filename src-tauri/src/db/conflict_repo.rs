@@ -92,6 +92,7 @@ pub fn get_all_conflict_repos(db: &Database) -> Result<Vec<ConflictRepoRecord>> 
 }
 
 /// Clear all conflict repo records (e.g., on session cleanup)
+#[allow(dead_code)]
 pub fn clear_all_conflict_repos(db: &Database) -> Result<()> {
     let conn = db.conn.lock().unwrap();
     conn.execute("DELETE FROM conflict_repos", [])?;

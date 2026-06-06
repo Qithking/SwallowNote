@@ -62,7 +62,9 @@ pub struct SearchRequest {
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub use_regex: bool,
+    #[allow(dead_code)]
     pub include_files: Option<String>,  // Glob pattern for files to include
+    #[allow(dead_code)]
     pub exclude_files: Option<String>,  // Glob pattern for files to exclude
 }
 

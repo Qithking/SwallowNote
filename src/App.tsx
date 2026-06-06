@@ -13,6 +13,8 @@ import { EditorSettings } from '@/components/EditorSettings/EditorSettings'
 import { StatusBar } from '@/components/StatusBar'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useGitStore } from '@/stores'
+import type { UIState, EditorState, GitState, PullResult } from '@/stores'
+import type { GitRepository } from '@/stores/git'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
 import { useSessionPersistence } from '@/hooks/useSessionPersistence'
 import { TooltipProvider } from '@/components'
@@ -31,19 +33,19 @@ function App() {
   useTheme()
   useKeyboardShortcuts()
   const { t } = useTranslation()
-  const settingsPanelVisible = useUIStore((s) => s.settingsPanelVisible)
-  const rightPanelType = useUIStore((s) => s.rightPanelType)
-  const sidebarWidth = useUIStore((s) => s.sidebarWidth)
-  const rightPanelWidth = useUIStore((s) => s.rightPanelWidth)
-  const sidebarVisible = useUIStore((s) => s.sidebarVisible)
-  const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
-  const setRightPanelWidth = useUIStore((s) => s.setRightPanelWidth)
-  const syncInterval = useUIStore((s) => s.syncInterval)
-  const autoSyncPush = useUIStore((s) => s.autoSyncPush)
-  const sidebarView = useUIStore((s) => s.sidebarView)
-  const tabs = useEditorStore((s) => s.tabs)
-  const cachedRepositories = useGitStore((s) => s.cachedRepositories)
-  const pullAllRepos = useGitStore((s) => s.pullAllRepos)
+  const settingsPanelVisible = useUIStore((s: UIState) => s.settingsPanelVisible)
+  const rightPanelType = useUIStore((s: UIState) => s.rightPanelType)
+  const sidebarWidth = useUIStore((s: UIState) => s.sidebarWidth)
+  const rightPanelWidth = useUIStore((s: UIState) => s.rightPanelWidth)
+  const sidebarVisible = useUIStore((s: UIState) => s.sidebarVisible)
+  const setSidebarWidth = useUIStore((s: UIState) => s.setSidebarWidth)
+  const setRightPanelWidth = useUIStore((s: UIState) => s.setRightPanelWidth)
+  const syncInterval = useUIStore((s: UIState) => s.syncInterval)
+  const autoSyncPush = useUIStore((s: UIState) => s.autoSyncPush)
+  const sidebarView = useUIStore((s: UIState) => s.sidebarView)
+  const tabs = useEditorStore((s: EditorState) => s.tabs)
+  const cachedRepositories = useGitStore((s: GitState) => s.cachedRepositories)
+  const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
   const [isDraggingRight, setIsDraggingRight] = useState(false)
   const [isHoveringLeft, setIsHoveringLeft] = useState(false)
@@ -242,17 +244,17 @@ function App() {
       try {
         // Step 1: Always pull first
         const results = await pullAllReposRef.current(repos)
-        const succeeded = results.filter(r => r.success).length
-        const failed = results.filter(r => !r.success && !r.isConflict).length
-        const conflicted = results.filter(r => r.isConflict).length
+        const succeeded = results.filter((r: PullResult) => r.success).length
+        const failed = results.filter((r: PullResult) => !r.success && !r.isConflict).length
+        const conflicted = results.filter((r: PullResult) => r.isConflict).length
 
         // Step 2: If autoSyncPush is enabled, commit and push repos with uncommitted changes
         // Skip repos that are in conflict state (detected in pull step)
         let pushSucceeded = 0
         let pushFailed = 0
         if (autoSyncPushRef.current) {
-          const conflictedPaths = new Set(results.filter(r => r.isConflict).map(r => r.path))
-          const reposWithChanges = repos.filter(r => r.hasUncommittedChanges && r.remoteUrl && !conflictedPaths.has(r.path))
+          const conflictedPaths = new Set(results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.path))
+          const reposWithChanges = repos.filter((r: GitRepository) => r.hasUncommittedChanges && r.remoteUrl && !conflictedPaths.has(r.path))
           if (reposWithChanges.length > 0) {
             const { gitCommitAndPush, gitCredentialGet, gitPushWithCredentials } = await import('@/lib/tauri')
             for (const repo of reposWithChanges) {
@@ -312,18 +314,10 @@ function App() {
         }
         // Only show one consolidated toast for conflicts
         if (conflicted > 0) {
-          const repoNames = results.filter(r => r.isConflict).map(r => r.name).join(', ')
+          const repoNames = results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.name).join(', ')
           toast.warning(t('git.pullConflict', { repos: repoNames }))
           
-          // Auto-open conflict resolution tabs for conflicted repos
-          const { useEditorStore } = await import('@/stores')
-          const editorStore = useEditorStore.getState()
-          for (const result of results) {
-            if (result.isConflict) {
-              editorStore.openConflictTab(result.path, result.name)
-            }
-          }
-
+          // Do NOT auto-open conflict tabs — user must click conflict icon or repo to open
           // Sync conflict repos to database for persistence
           await gitStore.syncConflictReposFromPullResults(results)
         }

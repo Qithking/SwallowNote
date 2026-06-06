@@ -50,6 +50,8 @@ export interface EditorTab {
   // For conflict tabs: conflict info
   conflictRepoPath?: string
   conflictRepoName?: string
+  // For conflict tabs: whether to auto-hide the file tree on open
+  conflictAutoHideTree?: boolean
   // For conflict tabs: the currently selected conflict file (relative path within repo)
   conflictSelectedFile?: string
   // For conflict tabs: cursor line number in the local editor
@@ -63,7 +65,7 @@ export interface EditorState {
   savingPaths: Set<string>
   addTab: (tab: EditorTab) => void
   openDiffTab: (filePath: string, commitHash: string, commitMessage: string) => Promise<void>
-  openConflictTab: (repoPath: string, repoName: string) => void
+  openConflictTab: (repoPath: string, repoName: string, options?: { autoSelectFile?: string; autoHideTree?: boolean }) => void
   removeTab: (id: string) => void
   removeTabs: (ids: string[]) => void
   setActiveTab: (id: string) => void
@@ -157,13 +159,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     })
   },
-  openConflictTab: (repoPath: string, repoName: string) => {
+  openConflictTab: (repoPath: string, repoName: string, options?: { autoSelectFile?: string; autoHideTree?: boolean }) => {
     const conflictTabId = `conflict-${repoPath}`
     
     set((state) => {
       const existing = state.tabs.find((t) => t.id === conflictTabId)
       if (existing) {
-        return { activeTabId: existing.id }
+        // If tab already exists, update auto-hide and auto-select if provided
+        const updatedTab = { ...existing }
+        if (options?.autoHideTree !== undefined) updatedTab.conflictAutoHideTree = options.autoHideTree
+        if (options?.autoSelectFile !== undefined) updatedTab.conflictSelectedFile = options.autoSelectFile
+        return {
+          tabs: state.tabs.map((t) => t.id === conflictTabId ? updatedTab : t),
+          activeTabId: conflictTabId,
+        }
       }
       
       const newTab: EditorTab = {
@@ -176,6 +185,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         type: 'conflict',
         conflictRepoPath: repoPath,
         conflictRepoName: repoName,
+        conflictAutoHideTree: options?.autoHideTree ?? false,
+        conflictSelectedFile: options?.autoSelectFile,
         viewMode: 'source',
       }
       
@@ -467,6 +478,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
                 viewMode: tab.viewMode || 'source',
                 conflictRepoPath: tab.conflictRepoPath,
                 conflictRepoName: tab.conflictRepoName,
+                conflictAutoHideTree: tab.conflictAutoHideTree ?? false,
                 conflictSelectedFile: tab.conflictSelectedFile,
                 conflictCursorLine: tab.conflictCursorLine,
               })

@@ -334,6 +334,7 @@ export function EditorView() {
           repoName={activeTab.conflictRepoName}
           initialSelectedFile={activeTab.conflictSelectedFile}
           initialCursorLine={activeTab.conflictCursorLine}
+          autoHideTree={activeTab.conflictAutoHideTree}
         />
       </div>
     )
