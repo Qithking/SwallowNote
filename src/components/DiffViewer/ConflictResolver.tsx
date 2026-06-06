@@ -162,6 +162,12 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
   const [isTreeVisible, setIsTreeVisible] = useState(!autoHideTree)
   // Track whether initial file restore has been attempted
   const initialRestoreDone = useRef(false)
+  // Ref to latest initialSelectedFile so loadConflicts callback always reads the current value
+  const initialSelectedFileRef = useRef(initialSelectedFile)
+  initialSelectedFileRef.current = initialSelectedFile
+  // Ref to latest autoHideTree so loadConflicts callback always reads the current value
+  const autoHideTreeRef = useRef(autoHideTree)
+  autoHideTreeRef.current = autoHideTree
   // Current cursor line in the local editor (tracked for session persistence)
   const [cursorLine, setCursorLine] = useState<number | undefined>(initialCursorLine)
 
@@ -229,24 +235,38 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       // Auto-expand all repos with conflicts
       setExpandedRepos(new Set(repos.map(r => r.path)))
 
-      // Auto-expand all directories in the tree
-      const allDirs = new Set<string>()
-      for (const repo of repos) {
-        const tree = buildFileTree(repo.files)
-        collectAllDirs(tree, '', allDirs)
-      }
-      setExpandedDirs(allDirs)
+      // Read latest values from refs (avoids stale closures)
+      const currentInitialFile = initialSelectedFileRef.current
+      const currentAutoHideTree = autoHideTreeRef.current
 
-      // Auto-select initial file for session restore
-      if (initialSelectedFile && !initialRestoreDone.current) {
+      if (currentInitialFile && !initialRestoreDone.current) {
+        // Auto-select initial file and expand only its parent directories
         initialRestoreDone.current = true
         for (const repo of repos) {
-          const file = repo.files.find(f => f.path === initialSelectedFile)
+          const file = repo.files.find(f => f.path === currentInitialFile)
           if (file) {
             setSelectedFile({ repoPath: repo.path, file })
+            // Only expand directories along the path to the selected file
+            const parts = file.path.split('/')
+            const dirsToExpand = new Set<string>()
+            for (let i = 1; i < parts.length; i++) {
+              dirsToExpand.add(parts.slice(0, i).join('/'))
+            }
+            setExpandedDirs(dirsToExpand)
             break
           }
         }
+      } else if (currentAutoHideTree) {
+        // Tree is hidden, no need to expand any directories
+        setExpandedDirs(new Set())
+      } else {
+        // Auto-expand all directories in the tree
+        const allDirs = new Set<string>()
+        for (const repo of repos) {
+          const tree = buildFileTree(repo.files)
+          collectAllDirs(tree, '', allDirs)
+        }
+        setExpandedDirs(allDirs)
       }
     } catch (e) {
       console.error('Failed to load conflicts:', e)
@@ -272,14 +292,24 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
 
   // React to initialSelectedFile changes (e.g. when clicking conflict icon on an already-open tab)
   useEffect(() => {
-    if (!initialSelectedFile) return
+    if (!initialSelectedFile || initialRestoreDone.current) return
+    // Only try to select when conflict repos have been loaded
+    if (conflictRepos.length === 0) return
     const fileToSelect = conflictRepos
       .flatMap(r => r.files)
       .find(f => f.path === initialSelectedFile)
     if (fileToSelect) {
+      initialRestoreDone.current = true
       const repo = conflictRepos.find(r => r.files.includes(fileToSelect))
       if (repo) {
         setSelectedFile({ repoPath: repo.path, file: fileToSelect })
+        // Expand only parent directories of the selected file
+        const parts = fileToSelect.path.split('/')
+        const dirsToExpand = new Set<string>()
+        for (let i = 1; i < parts.length; i++) {
+          dirsToExpand.add(parts.slice(0, i).join('/'))
+        }
+        setExpandedDirs(dirsToExpand)
         if (autoHideTree) {
           setIsTreeVisible(false)
         }
