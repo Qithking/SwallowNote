@@ -75,6 +75,14 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // When a second instance is launched, focus the existing window
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+                show_dock_icon();
+            }
+        }))
         .invoke_handler(tauri::generate_handler![
             greet,
             commands::file::path_exists,
