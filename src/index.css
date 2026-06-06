@@ -66,6 +66,9 @@ body, #root {
     --activity-activeBorder: var(--tab-activeBorderTop);
     --accent-hover: #1a8ae8;
 
+    /* App window shadow */
+    --shadow-app: 0 1px 4px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.02);
+
     /* Theme color for UI accents (default blue) */
     --theme-color: hsl(221.2, 83.2%, 53.3%);
     --theme-color-hover: hsl(221.2, 83.2%, 60%);
@@ -139,6 +142,9 @@ body, #root {
     --activity-inactive: var(--text-muted);
     --activity-activeBorder: var(--tab-activeBorderTop);
     --accent-hover: #1a8ae8;
+
+    /* App window shadow */
+    --shadow-app: 0 1px 4px rgba(0, 0, 0, 0.35), 0 4px 16px rgba(0, 0, 0, 0.2), 0 12px 32px rgba(0, 0, 0, 0.06);
 
     /* Theme color for UI accents (default blue) */
     --theme-color: hsl(217.2, 91.2%, 59.8%);

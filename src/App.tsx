@@ -490,10 +490,11 @@ function App() {
   return (
     <TooltipProvider>
       <div
-        className="h-screen w-screen flex flex-col overflow-hidden p-1"
-        style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
+        className="h-screen w-screen flex flex-col p-[6px]"
+        style={{ background: 'transparent', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
         onContextMenu={handleContextMenu}
       >
+        <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))', boxShadow: 'var(--shadow-app)' }}>
         {/* Title Bar */}
         <TitleBar />
 
@@ -646,6 +647,7 @@ function App() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        </div>
       </div>
     </TooltipProvider>
   )
