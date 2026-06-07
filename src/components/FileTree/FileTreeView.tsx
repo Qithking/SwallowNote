@@ -130,9 +130,9 @@ const TreeNodeItem = memo(function TreeNodeItem({
         <span className="w-[14px] shrink-0" />
       )}
       {node.isDirectory ? (
-        <Folder size={12} className="text-[#666666]" />
+        <Folder size={12} className="text-[#666666] shrink-0" />
       ) : (
-        getFileIcon(node.name)
+        <span className="shrink-0 flex items-center justify-center w-3 h-3">{getFileIcon(node.name)}</span>
       )}
       {isEditing ? (
         <input
