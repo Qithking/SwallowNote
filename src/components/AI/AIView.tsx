@@ -13,6 +13,7 @@ import {
   ClipboardPaste,
   PenLine,
   Replace,
+  FilePlus,
 } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Button } from '@/components/ui/button'
@@ -24,7 +25,7 @@ import { useUIStore, useEditorStore, useWorkspaceStore } from '@/stores'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { getAiProxyUrl } from '@/lib/ai'
 import { loadFileContent } from '@/lib/api'
-import { restartAiProxy, saveAiMessage, loadAiMessages, loadAiRolePrompts, type AiRolePrompt } from '@/lib/tauri'
+import { restartAiProxy, saveAiMessage, loadAiMessages, loadAiRolePrompts, writeFile, createFile, type AiRolePrompt } from '@/lib/tauri'
 
 function getMessageText(message: { parts?: Array<{ type: string; text?: string }> }): string {
   if (!message.parts) return ''
@@ -299,6 +300,28 @@ function AIView() {
     setTimeout(() => setCopiedId(null), 2000)
   }
 
+  const handleSaveAsNewFile = async (content: string) => {
+    const activeTab = editorTabs.find((t) => t.id === editorActiveTabId)
+    if (!activeTab?.path) return
+    // Get directory of the active tab file
+    const dirPath = activeTab.path.includes('/') ? activeTab.path.substring(0, activeTab.path.lastIndexOf('/')) : ''
+    if (!dirPath) return
+    // Generate file name with yyyyMMddHHmmsss format
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const fileName = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${String(now.getSeconds()).padStart(3, '0')}`
+    const fullPath = `${dirPath}/${fileName}.md`
+    try {
+      await createFile(fullPath, false)
+      await writeFile(fullPath, content)
+      // Refresh file tree
+      const { useFileTreeStore } = await import('@/stores/filetree')
+      await useFileTreeStore.getState().refreshExpanded()
+    } catch (e) {
+      console.error('Failed to save as new file:', e)
+    }
+  }
+
   // Track pending user timestamps: maps a snapshot of messages.length at send time to the timestamp
   const pendingUserTimestampsByCount = useRef<Map<number, string>>(new Map())
 
@@ -547,7 +570,8 @@ function AIView() {
         </div>
       </div>
 
-      <ScrollArea ref={scrollAreaRef} className="flex-1 p-3 space-y-4">
+      <ScrollArea ref={scrollAreaRef} className="flex-1 p-3">
+        <div className="py-[5px]">
         {!isConfigured ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Sparkles size={32} className="mb-3 opacity-50" />
@@ -594,7 +618,7 @@ function AIView() {
                 >
                   <div
                     className={cn(
-                      'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
+                      'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-md',
                       message.role === 'user' ? 'bg-primary/20 text-foreground' : 'bg-accent'
                     )}
                   >
@@ -606,7 +630,7 @@ function AIView() {
                   </div>
                   <div
                     className={cn(
-                      'p-3 rounded-lg overflow-hidden',
+                      'p-3 rounded-lg overflow-hidden shadow-md',
                       message.role === 'user'
                         ? 'bg-primary/15 text-foreground max-w-[85%]'
                         : 'bg-accent max-w-[85%]'
@@ -620,9 +644,29 @@ function AIView() {
                       <p className="text-xs whitespace-pre-wrap break-words">{displayText}</p>
                     )}
                     {message.role === 'user' && messageTimestamps[message.id] && (
-                      <p className="text-[10px] text-muted-foreground mt-1 text-right">
-                        {formatTimeStr(messageTimestamps[message.id])}
-                      </p>
+                      <div className="flex items-center justify-between gap-1 mt-1">
+                        <span />
+                        <div className="flex items-center gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                onClick={() => handleCopy(text, message.id)}
+                                className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
+                              >
+                                {copiedId === message.id ? (
+                                  <Check size={12} />
+                                ) : (
+                                  <ClipboardPaste size={12} />
+                                )}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t('ai.copyContent')}</TooltipContent>
+                          </Tooltip>
+                          <span className="text-[10px] text-muted-foreground">
+                            {formatTimeStr(messageTimestamps[message.id])}
+                          </span>
+                        </div>
+                      </div>
                     )}
                     {message.role === 'assistant' && text && (
                       <div className="flex items-center justify-end gap-1 mt-2">
@@ -663,6 +707,17 @@ function AIView() {
                           </TooltipTrigger>
                           <TooltipContent>{t('ai.copyContent')}</TooltipContent>
                         </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => handleSaveAsNewFile(text)}
+                              className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
+                            >
+                              <FilePlus size={12} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('ai.saveAsNewFile')}</TooltipContent>
+                        </Tooltip>
                       </div>
                     )}
                   </div>
@@ -676,10 +731,10 @@ function AIView() {
           return !lastMsg || lastMsg.role !== 'assistant' || !getMessageText(lastMsg)
         })() && (
           <div className="flex gap-3 mt-4">
-            <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center shadow-md">
               <Bot size={14} />
             </div>
-            <div className="max-w-[85%] p-3 rounded-lg bg-accent">
+            <div className="max-w-[85%] p-3 rounded-lg bg-accent shadow-md">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" />
                 <span className="text-xs">{t('ai.thinking')}</span>
@@ -693,6 +748,7 @@ function AIView() {
           </div>
         )}
         <div ref={messagesEndRef} />
+        </div>
       </ScrollArea>
 
       <div className="p-3 ">

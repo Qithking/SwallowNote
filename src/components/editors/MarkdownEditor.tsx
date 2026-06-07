@@ -603,22 +603,18 @@ function BlockNoteInner({
     }
   }
 
-  const blocknoteTheme = {
-    light: {
-      colors: {
-        editor: {
-          background: 'transparent',
-        },
-      },
-    },
-    dark: {
-      colors: {
-        editor: {
-          background: 'transparent',
-        },
-      },
-    },
-  }
+  const themeSetting = useUIStore((state) => state.theme)
+  const [systemIsDark, setSystemIsDark] = useState(
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = (e: MediaQueryListEvent) => setSystemIsDark(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  const isAppDark = themeSetting === 'dark' || (themeSetting === 'system' && systemIsDark)
+  const blocknoteTheme = isAppDark ? 'dark' as const : 'light' as const
 
 
   // Methods for the context menu

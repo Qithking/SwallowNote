@@ -252,6 +252,7 @@
     "insertAtCursor": "插入光标",
     "replaceContent": "替换",
     "copyContent": "复制",
+    "saveAsNewFile": "保存为新文件",
     "role": {
       "continue_writing": "续写",
       "polish": "润色",

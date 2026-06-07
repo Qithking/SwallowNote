@@ -238,6 +238,7 @@ body, #root {
   color: var(--text-primary);
 }
 .bn-editor{
+  background-color: transparent;
   color: var(--text-primary);
 }
 .blocknote-editor-container [data-radix-scroll-area-viewport]{  

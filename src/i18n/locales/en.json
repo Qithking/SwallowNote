@@ -252,6 +252,7 @@
     "insertAtCursor": "Insert at Cursor",
     "replaceContent": "Replace",
     "copyContent": "Copy",
+    "saveAsNewFile": "Save as New File",
     "role": {
       "continue_writing": "Continue Writing",
       "polish": "Polish",
