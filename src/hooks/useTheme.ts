@@ -78,6 +78,10 @@ function buildCssVars(
     add('--text-primary', colors.textColor)
     add('--border-color', colors.borderColor)
     add('--popover', hexToHSLString(colors.tooltipColor))
+    // Tab colors
+    add('--tab-bg', 'transparent')
+    add('--tab-active-bg', 'transparent')
+    add('--tab-activeBorder', 'transparent')
   } else {
     const { h, s, l } = hexToHSL(themeColor)
     const primaryL = isDark ? Math.min(l + 6, 80) : l
@@ -167,6 +171,10 @@ export function useTheme() {
       root.style.setProperty('--text-primary', colors.textColor)
       root.style.setProperty('--border-color', colors.borderColor)
       root.style.setProperty('--popover', hexToHSLString(colors.tooltipColor))
+      // Tab colors: tab bar bg is transparent, matches content bg
+      root.style.setProperty('--tab-bg', 'transparent')
+      root.style.setProperty('--tab-active-bg', 'transparent')
+      root.style.setProperty('--tab-activeBorder', 'transparent')
     } else {
       const { h, s, l } = hexToHSL(themeColor)
       const primaryL = isDark ? Math.min(l + 6, 80) : l

@@ -238,13 +238,13 @@ function TabBar() {
 
   if (tabs.length === 0) {
     return (
-      <div className="h-10 flex items-center bg-[var(--tab-bg)]">
+      <div className="h-10 flex items-center bg-[var(--tab-bg)] border-b border-[var(--border-color)]">
       </div>
     )
   }
 
   return (
-    <div className="h-10 flex items-center bg-[var(--tab-bg)]">
+    <div className="h-10 flex items-center bg-[var(--tab-bg)] border-b border-[var(--border-color)]">
       {/* Left scroll button - only show when overflowing */}
       {isOverflowing && (
         <button
@@ -286,13 +286,14 @@ function TabBar() {
                     else tabRefs.current.delete(tab.id)
                   }}
                   onClick={() => handleTabClick(tab.id)}
+                  style={{background:isActive?'var(--bg-secondary-gradient, var(--bg-secondary))': undefined}}
                   className={cn(
                     "group relative flex items-center h-10 px-3 cursor-pointer select-none shrink-0",
-                    "text-sm border-r border-[var(--tab-border)] min-w-0",
+                    "text-sm border-r border-[var(--border-color)] min-w-0",
                     "transition-colors duration-75",
                     isActive
-                      ? "bg-[var(--tab-active-bg)] text-[var(--text-primary)] shadow-[inset_0_1px_0_var(--tab-activeBorderTop)]"
-                      : "border-b border-[var(--border-color)] bg-transparent text-[var(--text-muted)] hover:bg-[var(--tab-hover-bg)] hover:text-[var(--text-secondary)]"
+                      ? "bg-[var(--bg-secondary)] text-[var(--text-primary)] mb-[-1px] shadow-[inset_0_1px_0_var(--tab-activeBorderTop)]" 
+                      : "bg-transparent text-[var(--text-muted)] hover:bg-[var(--tab-hover-bg)] hover:text-[var(--text-secondary)]"
                   )}
                 >
                   {/* Status dot - 编辑过才显示圆点 */}

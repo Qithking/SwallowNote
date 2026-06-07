@@ -76,12 +76,12 @@
     --status-bg: #005fb8;
     --status-fg: #ffffff;
     
-    --tab-bg: #F8F8F9;
-    --tab-active-bg: #ffffff;
+    --tab-bg: color-mix(in srgb, var(--bg-secondary) 85%, #ffffff);
+    --tab-active-bg: transparent;
     --tab-hover-bg: rgba(0, 0, 0, 0.04);
     --tab-border: #e5e5e5;
     --tab-activeBorderTop: #005fb8;
-    --tab-activeBorder: #ffffff;
+    --tab-activeBorder: transparent;
     
     --sidebar-header: transparent;
     --activity-bg: transparent;
@@ -161,12 +161,12 @@
     --status-bg: #0078d4;
     --status-fg: #ffffff;
     
-    --tab-bg: #2d2d2d;
-    --tab-active-bg: #1e1e1e;
+    --tab-bg: color-mix(in srgb, var(--bg-secondary) 80%, #000000);
+    --tab-active-bg: transparent;
     --tab-hover-bg: #2a2d2e;
     --tab-border: #252526;
     --tab-activeBorderTop: #0078d4;
-    --tab-activeBorder: #1e1e1e;
+    --tab-activeBorder: transparent;
     
     --sidebar-header: #2d2d2d;
     --activity-bg: #333333;

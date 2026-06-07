@@ -242,7 +242,7 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
   }, [filename])
 
   useEffect(() => {
-    if (viewRef.current) {
+    if (viewRef.current && content !== undefined) {
       const currentContent = viewRef.current.state.doc.toString()
       if (content !== currentContent) {
         // Preserve cursor position when updating content from external changes

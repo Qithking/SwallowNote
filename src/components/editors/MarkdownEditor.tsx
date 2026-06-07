@@ -37,12 +37,8 @@ function BlockNoteInner({
   blocks: PartialBlock[]
   onChange?: (content: string) => void
 }) {
-  const theme = useUIStore((state) => state.theme)
   const uploadPath = useUIStore((state) => state.uploadPath)
   const { rootPath } = useWorkspaceStore()
-  const [systemDark, setSystemDark] = useState(
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-  )
   const { tabs, activeTabId } = useEditorStore()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
@@ -55,13 +51,6 @@ function BlockNoteInner({
   const editorContainerRef = useRef<HTMLDivElement>(null)
   // Cache the last onChange result so getFullContent can return it synchronously
   const lastContentRef = useRef<string>('')
-
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches)
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
 
   useEffect(() => {
     if (noteWidth !== 'wide') return
@@ -614,7 +603,22 @@ function BlockNoteInner({
     }
   }
 
-  const blocknoteTheme = theme === 'dark' || (theme === 'system' && systemDark) ? 'dark' : 'light'
+  const blocknoteTheme = {
+    light: {
+      colors: {
+        editor: {
+          background: 'transparent',
+        },
+      },
+    },
+    dark: {
+      colors: {
+        editor: {
+          background: 'transparent',
+        },
+      },
+    },
+  }
 
 
   // Methods for the context menu

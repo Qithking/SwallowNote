@@ -50,12 +50,12 @@ body, #root {
     --text-link: #006ab1;
     --border-color: #e5e5e5;
     --border-light: #f0f0f0;
-    --tab-bg: #F8F8F9;
-    --tab-active-bg: #ffffff;
+    --tab-bg: color-mix(in srgb, var(--bg-secondary) 85%, #ffffff);
+    --tab-active-bg: transparent;
     --tab-hover-bg: rgba(0, 0, 0, 0.04);
     --tab-border: #e5e5e5;
     --tab-activeBorderTop: #005fb8;
-    --tab-activeBorder: #ffffff;
+    --tab-activeBorder: transparent;
     --status-bg: #005fb8;
     --status-fg: #ffffff;
     --sidebar-header: transparent;
@@ -127,12 +127,12 @@ body, #root {
     --text-link: #4fc1ff;
     --border-color: #454545;
     --border-light: #333333;
-    --tab-bg: #2d2d2d;
-    --tab-active-bg: #1e1e1e;
+    --tab-bg: color-mix(in srgb, var(--bg-secondary) 80%, #000000);
+    --tab-active-bg: transparent;
     --tab-hover-bg: #2a2d2e;
     --tab-border: #252526;
     --tab-activeBorderTop: #0078d4;
-    --tab-activeBorder: #1e1e1e;
+    --tab-activeBorder: transparent;
     --status-bg: #0078d4;
     --status-fg: #ffffff;
     --sidebar-header: #2d2d2d;
@@ -235,6 +235,10 @@ body, #root {
 /* ---- BlockNote Editor ---- */
 .dark>.bn-editor{
   background-color: transparent;
+  color: var(--text-primary);
+}
+.bn-editor{
+  color: var(--text-primary);
 }
 .blocknote-editor-container [data-radix-scroll-area-viewport]{  
   padding:30px 30px;
