@@ -300,6 +300,18 @@ function CommitSection({
     if (conflictPaths.length > 0 || errorPaths.length > 0) {
       onStatusUpdate(conflictPaths, errorPaths)
     }
+
+    // Sync conflict repos to database for persistence (same as handlePull)
+    if (conflictPaths.length > 0) {
+      const gitStore = useGitStore.getState()
+      const conflictPullResults: PullResult[] = conflictPaths.map(p => ({
+        path: p,
+        name: allRepos.find(r => r.path === p)?.name || '',
+        success: false,
+        isConflict: true,
+      }))
+      await gitStore.syncConflictReposFromPullResults(conflictPullResults)
+    }
     
     if (failCount === 0) {
       if (successCount > 0 && !credentialDialog.open) {
@@ -555,7 +567,6 @@ const GitView = memo(function GitView() {
   const scanProgress = useGitStore((s: GitState) => s.scanProgress)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const updateRepositoryStatuses = useGitStore((s: GitState) => s.updateRepositoryStatuses)
-  const resetRepositoryStatuses = useGitStore((s: GitState) => s.resetRepositoryStatuses)
   const loadConflictRepos = useGitStore((s: GitState) => s.loadConflictRepos)
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const { workspaceMode, showToast } = useUIStore()
@@ -644,8 +655,8 @@ const GitView = memo(function GitView() {
     }
 
     setIsPullingRepos(true)
-    // Reset statuses before pulling
-    resetRepositoryStatuses()
+    // Don't reset all statuses — only update repos that were actually pulled.
+    // resetRepositoryStatuses() would clear conflict states of repos not in this pull.
     const gitStore = useGitStore.getState()
     gitStore.setSyncStatus({ isSyncing: true })
 
