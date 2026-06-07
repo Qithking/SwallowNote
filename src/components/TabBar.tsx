@@ -292,7 +292,7 @@ function TabBar() {
                     "text-sm border-r border-[var(--border-color)] min-w-0",
                     "transition-colors duration-75",
                     isActive
-                      ? "bg-[var(--bg-secondary)] text-[var(--text-primary)] mb-[-1px] shadow-[inset_0_1px_0_var(--tab-activeBorderTop)]" 
+                      ? "bg-[var(--bg-secondary)] text-[var(--text-primary)] h-[41px] shadow-[inset_0_2px_0_var(--tab-activeBorderTop)]" 
                       : "bg-transparent text-[var(--text-muted)] hover:bg-[var(--tab-hover-bg)] hover:text-[var(--text-secondary)]"
                   )}
                 >
