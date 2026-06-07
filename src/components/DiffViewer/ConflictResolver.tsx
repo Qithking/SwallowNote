@@ -43,6 +43,7 @@ import {
   gitResolveConflictFile,
   gitSaveConflictFileContent,
   removeConflictRepoRecord,
+  checkAndUpdateConflictRepo,
   readFile,
   ConflictFile,
 } from '@/lib/tauri'
@@ -521,18 +522,23 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
 
     setSelectedFile(null)
 
-    // Check if the repo still has conflicts and update the conflict record
+    // Check if the CURRENT repo still has conflicts
     const updatedRepos = useGitStore.getState().repositories
-    const stillConflicted = updatedRepos.some((r: GitRepository) => r.status === 'conflict')
-    if (!stillConflicted) {
-      // All conflicts resolved — remove the conflict repo record
+    const currentRepo = updatedRepos.find((r: GitRepository) => r.path === repoPath)
+    const currentRepoStillConflicted = currentRepo?.status === 'conflict'
+
+    if (!currentRepoStillConflicted) {
+      // Current repo's conflicts are all resolved — remove its DB record
       try {
         await removeConflictRepoRecord(repoPath)
-        await useGitStore.getState().loadConflictRepos()
       } catch (e) {
         console.error('Failed to remove conflict repo record:', e)
       }
 
+      // Reload conflict repos to update badge and state
+      await useGitStore.getState().loadConflictRepos()
+
+      // Close the conflict tab for this repo
       const { useEditorStore } = await import('@/stores')
       const conflictTabId = `conflict-${repoPath}`
       const editorStore = useEditorStore.getState()
@@ -543,7 +549,13 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
         }, 1500)
       }
     } else {
-      // Some conflicts still exist — reload conflict repos to update file counts
+      // Current repo still has unresolved conflicts — update DB record with latest file count
+      try {
+        const repoName = currentRepo?.name || repoPath.split('/').pop() || repoPath
+        await checkAndUpdateConflictRepo(repoPath, repoName)
+      } catch (e) {
+        console.error('Failed to update conflict repo record:', e)
+      }
       await useGitStore.getState().loadConflictRepos()
     }
   }

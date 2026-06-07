@@ -2,7 +2,7 @@
  * Git Store - Manages Git state
  */
 import { create } from 'zustand'
-import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, syncConflictRepoRecords, gitGetConflictFiles, type ConflictRepoRecord } from '@/lib/tauri'
+import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, removeConflictRepoRecord, syncConflictRepoRecords, gitGetConflictFiles, type ConflictRepoRecord } from '@/lib/tauri'
 
 export interface GitBranch {
   name: string
@@ -196,26 +196,47 @@ export const useGitStore = create<GitState>((set) => ({
   loadConflictRepos: async () => {
     try {
       const records = await getConflictRepoRecords()
-      // Load conflict files for each conflict repo
+      // Load conflict files for each conflict repo and clean up stale records
       const newConflictFilesMap: Record<string, string[]> = {}
+      const staleRepoPaths: string[] = []
       await Promise.all(records.map(async (record) => {
         try {
           const files = await gitGetConflictFiles(record.repo_path)
-          newConflictFilesMap[record.repo_path] = files.map((f) => f.abs_path)
+          if (files.length > 0) {
+            newConflictFilesMap[record.repo_path] = files.map((f) => f.abs_path)
+          } else {
+            // No actual conflict files — mark for cleanup
+            staleRepoPaths.push(record.repo_path)
+            newConflictFilesMap[record.repo_path] = []
+          }
         } catch {
           // If we can't get conflict files for a repo, skip it
           newConflictFilesMap[record.repo_path] = []
         }
       }))
-      set({ conflictRepos: records, conflictFilesMap: newConflictFilesMap })
-      // Also update repository statuses based on conflict records
+
+      // Remove stale DB records (repos with no actual conflict files)
+      if (staleRepoPaths.length > 0) {
+        await Promise.all(staleRepoPaths.map(async (path) => {
+          try {
+            await removeConflictRepoRecord(path)
+          } catch {
+            // Ignore removal errors
+          }
+        }))
+      }
+
+      // Filter out stale records from the list
+      const validRecords = records.filter((r) => !staleRepoPaths.includes(r.repo_path))
+      set({ conflictRepos: validRecords, conflictFilesMap: newConflictFilesMap })
+      // Also update repository statuses based on valid conflict records
       set((state) => ({
         repositories: state.repositories.map((repo) => {
-          const isConflict = records.some((r) => r.repo_path === repo.path)
+          const isConflict = validRecords.some((r) => r.repo_path === repo.path)
           return { ...repo, status: isConflict ? 'conflict' as RepoStatus : repo.status === 'conflict' ? 'normal' as RepoStatus : repo.status }
         }),
         cachedRepositories: state.cachedRepositories.map((repo) => {
-          const isConflict = records.some((r) => r.repo_path === repo.path)
+          const isConflict = validRecords.some((r) => r.repo_path === repo.path)
           return { ...repo, status: isConflict ? 'conflict' as RepoStatus : repo.status === 'conflict' ? 'normal' as RepoStatus : repo.status }
         }),
       }))

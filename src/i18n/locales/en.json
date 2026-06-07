@@ -86,6 +86,8 @@
 "sync.uploadPath": "Upload Path",
     "sync.uploadPath.desc": "Storage path for uploaded files in BlockNote editor. Variables: $folder (file directory), $rootPath (root directory), $userRootPath (user home)",
     "sync.uploadPath.placeholder": "Default: file directory, e.g. $folder/images",
+    "sync.showConflictBadge": "Show Conflict Badge",
+    "sync.showConflictBadge.desc": "When conflict repos exist, display the count as a badge on the Git icon in the sidebar",
     "ai.provider": "AI Provider",
     "ai.provider.desc": "Select AI service provider, different providers support different models",
     "ai.apiKey": "API Key",

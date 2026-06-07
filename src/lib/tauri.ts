@@ -484,6 +484,7 @@ export interface AppSettings {
   aiModels: string
   activeAiModelId: string
   defaultAiModelId: string
+  showConflictBadge: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -513,6 +514,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     aiModels: get('aiModels', '[]'),
     activeAiModelId: get('activeAiModelId', ''),
     defaultAiModelId: get('defaultAiModelId', ''),
+    showConflictBadge: get('showConflictBadge', 'true'),
   }
 }
 

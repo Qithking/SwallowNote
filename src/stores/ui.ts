@@ -127,6 +127,7 @@ export interface UIState {
   syncInterval: number
   autoSyncPush: boolean
   uploadPath: string
+  showConflictBadge: boolean
   aiProvider: string
   aiApiKey: string
   aiApiKeyDecrypted: string
@@ -170,6 +171,7 @@ export interface UIState {
   setSyncInterval: (interval: number) => void
   setAutoSyncPush: (value: boolean) => void
   setUploadPath: (path: string) => void
+  setShowConflictBadge: (value: boolean) => void
   setAiProvider: (provider: string) => void
   setAiApiKey: (key: string) => Promise<void>
   setAiBaseUrl: (url: string) => void
@@ -222,6 +224,7 @@ export const useUIStore = create<UIState>((set) => ({
   syncInterval: 10,
   autoSyncPush: false,
   uploadPath: '',
+  showConflictBadge: true,
   aiProvider: '',
   aiApiKey: '',
   aiApiKeyDecrypted: '',
@@ -339,6 +342,10 @@ export const useUIStore = create<UIState>((set) => ({
   setUploadPath: (path: string) => {
     set({ uploadPath: path })
     saveAppSettings({ uploadPath: path })
+  },
+  setShowConflictBadge: (value: boolean) => {
+    set({ showConflictBadge: value })
+    saveAppSettings({ showConflictBadge: String(value) })
   },
   setAiProvider: (provider: string) => {
     set({ aiProvider: provider })
@@ -590,6 +597,7 @@ export const useUIStore = create<UIState>((set) => ({
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
         autoSyncPush: s.autoSyncPush === 'true',
         uploadPath: s.uploadPath || '',
+        showConflictBadge: s.showConflictBadge !== 'false', // default true
         aiProvider: s.aiProvider || '',
         aiApiKey: s.aiApiKey || '',
         aiApiKeyDecrypted: '',

@@ -75,6 +75,7 @@ function SettingsView() {
     syncInterval, setSyncInterval,
     autoSyncPush, setAutoSyncPush,
     uploadPath, setUploadPath,
+    showConflictBadge, setShowConflictBadge,
     aiPort, setAiPort,
     aiModels, activeAiModelId, defaultAiModelId,
     addAiModel, removeAiModel, setActiveAiModel, setDefaultAiModel, updateAiModelApiKey,
@@ -296,6 +297,11 @@ function SettingsView() {
                         value={uploadPath}
                         onChange={(e) => setUploadPath(e.target.value)}
                       />
+                    </SettingRow>
+                  </div>
+                  <div className="px-4">
+                    <SettingRow label={t('settings.sync.showConflictBadge')} desc={t('settings.sync.showConflictBadge.desc')}>
+                      <Switch checked={showConflictBadge} onCheckedChange={setShowConflictBadge} />
                     </SettingRow>
                   </div>
                 </CardContent>

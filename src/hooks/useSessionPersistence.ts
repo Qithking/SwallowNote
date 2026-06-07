@@ -152,6 +152,16 @@ export function useSessionPersistence() {
             wordCount: tab.wordCount,
           }))
           const activeTabId = states.activeTabId || null
+
+          // Load conflict repos into the git store BEFORE restoring tabs,
+          // so ConflictResolver can find conflict data when it mounts
+          try {
+            const { useGitStore } = await import('@/stores')
+            await useGitStore.getState().loadConflictRepos()
+          } catch (e) {
+            console.error('Failed to load conflict repos before restore:', e)
+          }
+
           useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
           
           // Delay loading tab content to ensure UI is ready
@@ -177,9 +187,6 @@ export function useSessionPersistence() {
                 editorStore.removeTab(tab.id)
               }
             }
-            // Also load conflict repos into the git store
-            const { useGitStore } = await import('@/stores')
-            useGitStore.getState().loadConflictRepos()
           } catch (e) {
             console.error('Failed to validate conflict tabs during restore:', e)
           }

@@ -86,6 +86,8 @@
 "sync.uploadPath": "文件上传路径",
     "sync.uploadPath.desc": "BlockNote 编辑器上传文件的存储路径，支持变量：$folder（文件所在目录）、$rootPath（根目录）、$userRootPath（用户主目录）",
     "sync.uploadPath.placeholder": "默认文件所在目录，如：$folder/images",
+    "sync.showConflictBadge": "显示冲突仓库徽标",
+    "sync.showConflictBadge.desc": "当存在冲突仓库时，在侧边栏 Git 图标右上角显示冲突仓库数量",
     "ai.provider": "AI 服务商",
     "ai.provider.desc": "选择 AI 服务提供商，不同服务商支持不同的模型",
     "ai.apiKey": "API Key",
