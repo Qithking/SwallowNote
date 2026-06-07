@@ -35,6 +35,7 @@ import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { getProviderById, getProvidersByCategory, AiProviderCategory } from '@/lib/ai'
 import { testAiModel, restartAiProxy, loadAiRolePrompts, addAiRolePrompt, deleteAiRolePrompt, updateAiRolePrompt, updateAiRolePromptName, resetAiRolePrompt, type AiRolePrompt } from '@/lib/tauri'
 import { ShortcutRecorder } from './ShortcutRecorder'
+import { GradientEditor } from './GradientEditor'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -455,25 +456,23 @@ function SettingsView() {
                                         </button>
                                       )}
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="text"
-                                        value={colors[field.gradientKey] || ''}
-                                        onChange={(e) => updateCustomThemeColor(activeTheme.id, customThemeTab, field.gradientKey!, e.target.value)}
+                                    {colors[field.gradientKey] ? (
+                                      <GradientEditor
+                                        value={colors[field.gradientKey]!}
+                                        onChange={(v) => updateCustomThemeColor(activeTheme.id, customThemeTab, field.gradientKey!, v)}
                                         disabled={activeTheme.isBuiltIn}
-                                        placeholder="linear-gradient(135deg, #a, #b)"
-                                        className={cn(
-                                          'flex-1 h-6 px-2 text-[10px] rounded border border-border bg-background font-mono',
-                                          activeTheme.isBuiltIn && 'opacity-50 cursor-not-allowed'
-                                        )}
                                       />
-                                      {colors[field.gradientKey] && (
-                                        <div
-                                          className="w-7 h-6 rounded border border-border shrink-0"
-                                          style={{ background: colors[field.gradientKey] }}
-                                        />
-                                      )}
-                                    </div>
+                                    ) : (
+                                      !activeTheme.isBuiltIn && (
+                                        <button
+                                          className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                                          onClick={() => updateCustomThemeColor(activeTheme.id, customThemeTab, field.gradientKey!, `linear-gradient(135deg, ${colors[field.key]} 0%, ${colors[field.key]} 100%)`)}
+                                        >
+                                          <Plus size={10} />
+                                          设置渐变
+                                        </button>
+                                      )
+                                    )}
                                   </div>
                                 )}
                               </div>
