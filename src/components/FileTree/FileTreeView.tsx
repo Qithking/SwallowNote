@@ -6,7 +6,7 @@
  * 工具函数来自 @/lib/utils/treeUtils
  */
 import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
-import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, GitFork, FileText } from 'lucide-react'
+import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
@@ -33,13 +33,37 @@ interface FlattenedNode {
 }
 
 // 将嵌套的文件树扁平化为列表
-function flattenNodes(nodes: FileNode[], expanded: Set<string>, depth = 0): FlattenedNode[] {
+function flattenNodes(
+  nodes: FileNode[],
+  expanded: Set<string>,
+  newItem: { parentPath: string; type: string; name: string } | null,
+  depth = 0
+): FlattenedNode[] {
   const result: FlattenedNode[] = []
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i]
     result.push({ node, depth, isLastInParent: i === nodes.length - 1 })
     if (node.isDirectory && expanded.has(node.path) && node.children) {
-      result.push(...flattenNodes(node.children, expanded, depth + 1))
+      result.push(...flattenNodes(node.children, expanded, newItem, depth + 1))
+      // 在子节点末尾添加新增输入框虚拟节点
+      if (newItem && newItem.parentPath === node.path) {
+        result.push({
+          node: { id: 'new-item', name: newItem.name, path: 'new-item', isDirectory: false },
+          depth: depth + 1,
+          isLastInParent: true,
+        })
+      }
+    }
+  }
+  // 根目录未展开或子节点为空时，新增输入框作为根节点的虚拟子节点
+  if (depth === 0 && newItem) {
+    const rootNode = nodes.find(n => n.path === newItem.parentPath)
+    if (rootNode && (!expanded.has(rootNode.path) || !rootNode.children || rootNode.children.length === 0)) {
+      result.push({
+        node: { id: 'new-item', name: newItem.name, path: 'new-item', isDirectory: false },
+        depth: 1,
+        isLastInParent: true,
+      })
     }
   }
   return result
@@ -49,7 +73,6 @@ function flattenNodes(nodes: FileNode[], expanded: Set<string>, depth = 0): Flat
 const TreeNodeItem = memo(function TreeNodeItem({
   node,
   depth,
-  isNewItemNode,
   isEditing,
   isSelected,
   isMultiSelected,
@@ -77,7 +100,6 @@ const TreeNodeItem = memo(function TreeNodeItem({
 }: {
   node: FileNode
   depth: number
-  isNewItemNode: boolean
   isEditing: boolean
   isSelected: boolean
   isMultiSelected: boolean
@@ -103,6 +125,38 @@ const TreeNodeItem = memo(function TreeNodeItem({
   setEditingName: (name: string) => void
   setNewItem: (item: { type: 'file' | 'folder' | 'mindmap'; parentPath: string; name: string } | null) => void
 }) {
+  // 新增输入框虚拟节点
+  if (node.id === 'new-item' && newItem) {
+    return (
+      <div
+        className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
+        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+      >
+        <span className="w-[14px]" />
+        {newItem.type === 'folder' ? (
+          <Folder size={12} className="text-[#666666]" />
+        ) : newItem.type === 'mindmap' ? (
+          getFileIcon(newItem.name || 'newfile.smm')
+        ) : (
+          getFileIcon(newItem.name || 'newfile')
+        )}
+        <input
+          ref={inputRef}
+          type="text"
+          className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-xs text-[var(--text-primary)]"
+          value={newItem.name}
+          onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+          onBlur={onFinishNewItem}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); onFinishNewItem() }
+            else if (e.key === 'Escape') { onCancelNewItem() }
+          }}
+        />
+      </div>
+    )
+  }
+
+  // 正常节点
   const nodeContent = (
     <div
       data-path={node.path}
@@ -172,33 +226,6 @@ const TreeNodeItem = memo(function TreeNodeItem({
       >
         {nodeContent}
       </TreeNodeContextMenu>
-      {isNewItemNode && newItem && (
-        <div
-          className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
-          style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
-        >
-          <span className="w-[14px]" />
-          {newItem.type === 'folder' ? (
-            <Folder size={12} className="text-[#666666]" />
-          ) : newItem.type === 'mindmap' ? (
-            getFileIcon(newItem.name || 'newfile.smm')
-          ) : (
-            getFileIcon(newItem.name || 'newfile')
-          )}
-          <input
-            ref={inputRef}
-            type="text"
-            className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-xs text-[var(--text-primary)]"
-            value={newItem.name}
-            onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
-            onBlur={onFinishNewItem}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); onFinishNewItem() }
-              else if (e.key === 'Escape') { onCancelNewItem() }
-            }}
-          />
-        </div>
-      )}
     </div>
   )
 })
@@ -345,15 +372,10 @@ export const FileTreeView = memo(function FileTreeView() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedPath, nodes, customShortcuts, handleStartEdit, handleDeleteSelected])
 
-  const handleNewItemKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') { e.preventDefault(); handleFinishNewItem() }
-    else if (e.key === 'Escape') { handleCancelNewItem() }
-  }
-
   const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath, nodes)?.isDirectory ?? false) : false
 
   // 扁平化节点用于虚拟化
-  const flattenedNodes = useMemo(() => flattenNodes(nodes, expanded), [nodes, expanded])
+  const flattenedNodes = useMemo(() => flattenNodes(nodes, expanded, newItem), [nodes, expanded, newItem])
 
   // 虚拟化配置
   const parentRef = useRef<HTMLDivElement>(null)
@@ -431,7 +453,6 @@ export const FileTreeView = memo(function FileTreeView() {
             >
               {virtualItems.map((virtualItem) => {
                 const { node, depth } = flattenedNodes[virtualItem.index]
-                const isNewItemNode = newItem?.parentPath === node.path
                 return (
                   <div
                     key={node.path}
@@ -447,7 +468,6 @@ export const FileTreeView = memo(function FileTreeView() {
                     <TreeNodeItem
                       node={node}
                       depth={depth}
-                      isNewItemNode={isNewItemNode}
                       isEditing={editingPath === node.path}
                       isSelected={node.path === selectedPath}
                       isMultiSelected={multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1}
@@ -477,30 +497,6 @@ export const FileTreeView = memo(function FileTreeView() {
                 )
               })}
             </div>
-            {newItem && nodes.length === 1 && nodes[0].children?.length === 0 && (
-              <div
-                className="flex items-center h-[22px] gap-1 text-xs text-[var(--text-secondary)]"
-                style={{ paddingLeft: `${12 + 8}px` }}
-              >
-                <span className="w-[14px]" />
-                {newItem.type === 'folder' ? (
-                  <Folder size={12} className="text-[#666666]" />
-                ) : newItem.type === 'mindmap' ? (
-                  <GitFork size={12} style={{ color: '#a97bff' }} />
-                ) : (
-                  <FileText size={12} style={{ color: '#569cd6' }} />
-                )}
-                <input
-                  ref={inputRef}
-                  type="text"
-                  className="flex-1 h-[18px] px-1 min-w-[80px] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded outline-none text-xs text-[var(--text-primary)]"
-                  value={newItem.name}
-                  onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
-                  onBlur={handleFinishNewItem}
-                  onKeyDown={handleNewItemKeyDown}
-                />
-              </div>
-            )}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
