@@ -56,6 +56,8 @@ function App() {
   const [showLoadErrorDialog, setShowLoadErrorDialog] = useState(false)
   const [failedTabInfo, setFailedTabInfo] = useState<{ id: string; path: string; name: string } | null>(null)
   const pendingCloseRef = useRef(false)
+  // 防止 Radix AlertDialog 的 onOpenChange 在 Save/Discard 点击后干扰关闭流程
+  const actionTakenRef = useRef(false)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
   const { saveSessionStateNow, restoreSessionState } = useSessionPersistence()
@@ -346,12 +348,12 @@ function App() {
   }, [syncInterval, t])
 
   const handleSaveAndClose = async () => {
-    // Capture close intent BEFORE the dialog's onOpenChange(false) fires
-    // handleCancelClose() and resets pendingCloseRef.
+    // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose
+    actionTakenRef.current = true
     const shouldClose = pendingCloseRef.current
     setShowSaveDialog(false)
     pendingCloseRef.current = false
-    if (!shouldClose) return
+    if (!shouldClose) { actionTakenRef.current = false; return }
     await useEditorStore.getState().saveAllDirtyTabs()
     const win = getCurrentWindow()
     await saveSessionStateNow()
@@ -363,15 +365,16 @@ function App() {
     } else {
       await win.destroy()
     }
+    actionTakenRef.current = false
   }
 
   const handleDiscardAndClose = async () => {
-    // Capture close intent BEFORE the dialog's onOpenChange(false) fires
-    // handleCancelClose() and resets pendingCloseRef.
+    // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose
+    actionTakenRef.current = true
     const shouldClose = pendingCloseRef.current
     setShowSaveDialog(false)
     pendingCloseRef.current = false
-    if (!shouldClose) return
+    if (!shouldClose) { actionTakenRef.current = false; return }
     useEditorStore.getState().resetDirtyTabs()
     const win = getCurrentWindow()
     await saveSessionStateNow()
@@ -383,9 +386,12 @@ function App() {
     } else {
       await win.destroy()
     }
+    actionTakenRef.current = false
   }
 
   const handleCancelClose = () => {
+    // 如果用户已点击保存或放弃，跳过取消逻辑
+    if (actionTakenRef.current) return
     setShowSaveDialog(false)
     pendingCloseRef.current = false
   }
@@ -491,7 +497,7 @@ function App() {
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
   const handleContextMenu = useCallback((_e: React.MouseEvent) => {
-    //_e.preventDefault()
+    _e.preventDefault()
   }, [])
 
   return (
