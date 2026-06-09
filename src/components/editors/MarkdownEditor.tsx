@@ -25,6 +25,11 @@ import {
   transformKatexBlocks,
   KATEX_BLOCK_TYPE,
 } from './katexBlockSpec'
+import {
+  MarkmapBlockSpec,
+  transformMarkmapBlocks,
+  MARKMAP_BLOCK_TYPE,
+} from './markmapBlockSpec'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -86,6 +91,7 @@ function BlockNoteInner({
       ...defaultBlockSpecs,
       mermaidBlock: MermaidBlockSpec(),
       katexBlock: KatexBlockSpec(),
+      markmapBlock: MarkmapBlockSpec(),
     } as any,
   })
 
@@ -425,6 +431,8 @@ function BlockNoteInner({
           blocks = transformMermaidBlocks(blocks) as PartialBlock[]
           // Transform math code blocks to katex blocks
           blocks = transformKatexBlocks(blocks) as PartialBlock[]
+          // Transform markmap code blocks to markmap blocks
+          blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
           console.warn('[MarkdownEditor] Failed to parse markdown for insert, treating as plain text:', parseError)
           // Fallback: treat as plain text
@@ -541,6 +549,8 @@ function BlockNoteInner({
           blocks = transformMermaidBlocks(blocks) as PartialBlock[]
           // Transform math code blocks to katex blocks
           blocks = transformKatexBlocks(blocks) as PartialBlock[]
+          // Transform markmap code blocks to markmap blocks
+          blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
           console.warn('[MarkdownEditor] Failed to parse markdown for replace, treating as plain text:', parseError)
           // Fallback: treat as plain text
@@ -652,6 +662,24 @@ function BlockNoteInner({
             type: 'codeBlock',
             props: { language: katexProps.display !== false ? 'math' : 'math-inline' },
             content: [{ type: 'text', text: formula }],
+          }
+        }
+        if (block.type === MARKMAP_BLOCK_TYPE) {
+          const props = block.props || {}
+          let diagram = props.diagram || ''
+          const w = props.width || 0
+          const h = props.height || 0
+          const s = props.scale || 0
+          if (w > 0 || h > 0 || s > 0) {
+            const meta = JSON.stringify({ width: w, height: h, scale: s })
+            diagram = diagram.replace(/<!--\s*markmap-meta:.*?-->\s*\n?/g, '')
+            diagram = `<!-- markmap-meta:${meta} -->\n${diagram}`
+          }
+          return {
+            ...block,
+            type: 'codeBlock',
+            props: { language: 'markmap' },
+            content: [{ type: 'text', text: diagram }],
           }
         }
         return block
@@ -905,7 +933,99 @@ function BlockNoteInner({
       onItemClick: () => insertKatexBlock(tpl.formula, tpl.display),
     }))
 
-    const allItems = [...defaultItems, ...mermaidItems, ...katexItems]
+    // Helper to insert a markmap block
+    const insertMarkmapBlock = (diagram: string) => {
+      const newBlock = {
+        type: MARKMAP_BLOCK_TYPE,
+        props: {
+          source: `\`\`\`markmap\n${diagram}\`\`\``,
+          diagram,
+        },
+      } as any
+
+      const currentBlock = editor.getTextCursorPosition().block
+      if (Array.isArray(currentBlock.content) && currentBlock.content.length === 0) {
+        editor.updateBlock(currentBlock, newBlock)
+      } else {
+        editor.insertBlocks([newBlock], currentBlock.id, 'after')
+      }
+    }
+
+    // Markmap mindmap templates
+    const markmapTemplates = [
+      {
+        title: 'Markmap',
+        subtext: 'Project breakdown mindmap',
+        aliases: ['markmap', 'mindmap', '思维导图', '脑图', 'project', 'plan'],
+        diagram: `# Project Plan
+## Planning
+- Goals
+- Timeline
+- Resources
+## Design
+- Wireframes
+- UI Design
+- UX Review
+## Development
+- Backend
+- Frontend
+- Testing
+## Launch
+- Marketing
+- Release
+- Feedback
+`,
+      },
+      {
+        title: 'Markmap — Todo',
+        subtext: 'Todo list mindmap',
+        aliases: ['markmap-todo', 'todo', '待办', 'task', 'checklist'],
+        diagram: `# Tasks
+## Today
+- [ ] High priority task
+- [ ] Review pull requests
+- [ ] Reply to emails
+## This Week
+- [ ] Finish feature A
+- [ ] Write documentation
+- [ ] Plan next sprint
+## Backlog
+- [ ] Refactor module B
+- [ ] Explore new tech
+`,
+      },
+      {
+        title: 'Markmap — Study',
+        subtext: 'Study plan mindmap',
+        aliases: ['markmap-study', 'study', '学习', '学习计划', 'learn', 'notes'],
+        diagram: `# Study Plan
+## Foundations
+### Concepts
+### Principles
+## Advanced
+### Patterns
+### Best Practices
+## Practice
+### Exercises
+### Projects
+## Resources
+### Books
+### Videos
+### Articles
+`,
+      },
+    ]
+
+    const markmapItems = markmapTemplates.map(tpl => ({
+      title: tpl.title,
+      icon: <Network size={18} />,
+      subtext: tpl.subtext,
+      group: 'Markmap',
+      aliases: tpl.aliases,
+      onItemClick: () => insertMarkmapBlock(tpl.diagram),
+    }))
+
+    const allItems = [...defaultItems, ...mermaidItems, ...katexItems, ...markmapItems]
     
     // Filter items by query
     const lowerQuery = query.toLowerCase()
@@ -992,6 +1112,8 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
           blocks = transformMermaidBlocks(blocks) as PartialBlock[]
           // Transform math code blocks to katex blocks
           blocks = transformKatexBlocks(blocks) as PartialBlock[]
+          // Transform markmap code blocks to markmap blocks
+          blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
           console.warn('[MarkdownEditor] Markdown parsing failed, treating as plain text:', parseError)
           // If markdown parsing fails, treat content as plain text

@@ -485,7 +485,7 @@ function App() {
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
   const handleContextMenu = useCallback((_e: React.MouseEvent) => {
-    _e.preventDefault()
+    //_e.preventDefault()
   }, [])
 
   return (
