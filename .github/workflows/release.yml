@@ -31,16 +31,27 @@ jobs:
 
       - name: Set Node.js memory limit (macOS)
         if: matrix.platform == 'macos-15'
-        run: echo "NODE_OPTIONS=--max-old-space-size=6144" >> $GITHUB_ENV
+        run: |
+          echo "NODE_OPTIONS<<EOF" >> $GITHUB_ENV
+          echo "--max-old-space-size=6144" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Set Node.js memory limit (Linux)
         if: matrix.platform == 'ubuntu-22.04'
-        run: echo "NODE_OPTIONS=--max-old-space-size=4096" >> $GITHUB_ENV
+        run: |
+          echo "NODE_OPTIONS<<EOF" >> $GITHUB_ENV
+          echo "--max-old-space-size=4096" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Set Node.js memory limit (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
-        run: echo "NODE_OPTIONS=--max-old-space-size=4096" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        run: |
+          @"
+          NODE_OPTIONS<<EOF
+          --max-old-space-size=4096
+          EOF
+          "@ | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install Dependencies
         run: npm ci
@@ -98,7 +109,6 @@ jobs:
           npx tauri build --target universal-apple-darwin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_OPTIONS: "--max-old-space-size=6144"
 
       - name: Install NSIS (Windows)
         if: matrix.platform == 'windows-latest'
@@ -115,7 +125,6 @@ jobs:
           npx tauri build --target x86_64-pc-windows-msvc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_OPTIONS: "--max-old-space-size=4096"
 
       - name: Rename MSI to remove locale (Windows)
         if: matrix.platform == 'windows-latest'

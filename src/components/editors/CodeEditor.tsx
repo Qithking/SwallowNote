@@ -4,6 +4,11 @@
  * Supports a wide range of programming languages via:
  * - Native CodeMirror 6 language packages (@codemirror/lang-*)
  * - Legacy StreamLanguage modes (@codemirror/legacy-modes)
+ *
+ * Language modules are loaded on-demand to reduce initial bundle size.
+ * Commonly used languages (JS, TS, Python, HTML, CSS, JSON, Markdown, etc.)
+ * are statically imported for instant availability. Less common languages
+ * are dynamically imported when first needed.
  */
 import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, basicSetup } from 'codemirror'
@@ -11,7 +16,7 @@ import { EditorView as CMView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { StreamLanguage } from '@codemirror/language'
 
-// Native CodeMirror 6 language packages
+// Statically import commonly used native CodeMirror 6 language packages
 import { javascript } from '@codemirror/lang-javascript'
 import { python } from '@codemirror/lang-python'
 import { html } from '@codemirror/lang-html'
@@ -27,35 +32,11 @@ import { go } from '@codemirror/lang-go'
 import { php } from '@codemirror/lang-php'
 import { java } from '@codemirror/lang-java'
 
-// Legacy StreamLanguage modes
+// Statically import commonly used legacy StreamLanguage modes
 import { swift } from '@codemirror/legacy-modes/mode/swift'
 import { ruby } from '@codemirror/legacy-modes/mode/ruby'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { csharp, kotlin, scala, dart, objectiveC, objectiveCpp } from '@codemirror/legacy-modes/mode/clike'
-import { lua } from '@codemirror/legacy-modes/mode/lua'
-import { perl } from '@codemirror/legacy-modes/mode/perl'
-import { r } from '@codemirror/legacy-modes/mode/r'
-import { toml } from '@codemirror/legacy-modes/mode/toml'
-import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
-import { diff } from '@codemirror/legacy-modes/mode/diff'
-import { protobuf } from '@codemirror/legacy-modes/mode/protobuf'
-import { powerShell } from '@codemirror/legacy-modes/mode/powershell'
-import { haskell } from '@codemirror/legacy-modes/mode/haskell'
-import { clojure } from '@codemirror/legacy-modes/mode/clojure'
-import { erlang } from '@codemirror/legacy-modes/mode/erlang'
-import { julia } from '@codemirror/legacy-modes/mode/julia'
-import { fSharp } from '@codemirror/legacy-modes/mode/mllike'
-import { oCaml } from '@codemirror/legacy-modes/mode/mllike'
-import { pascal } from '@codemirror/legacy-modes/mode/pascal'
-import { cmake } from '@codemirror/legacy-modes/mode/cmake'
-import { nginx } from '@codemirror/legacy-modes/mode/nginx'
-import { pug } from '@codemirror/legacy-modes/mode/pug'
-import { tcl } from '@codemirror/legacy-modes/mode/tcl'
-import { vb } from '@codemirror/legacy-modes/mode/vb'
-import { puppet } from '@codemirror/legacy-modes/mode/puppet'
-import { gas, gasArm } from '@codemirror/legacy-modes/mode/gas'
-import { properties } from '@codemirror/legacy-modes/mode/properties'
-import { groovy } from '@codemirror/legacy-modes/mode/groovy'
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -74,8 +55,18 @@ function streamLang(parser: any): any {
   return StreamLanguage.define(parser)
 }
 
+// Cache for dynamically loaded language extensions to avoid re-importing
+const dynamicExtensionCache = new Map<string, any>()
+
+/**
+ * Language extension registry.
+ *
+ * Commonly used languages are statically imported and available immediately.
+ * Less common languages are loaded on-demand via dynamic import() — the first
+ * use triggers a network request, subsequent uses return the cached extension.
+ */
 const languageExtensions: Record<string, () => any> = {
-  // Native CodeMirror 6 packages
+  // ── Native CodeMirror 6 packages (statically imported) ──
   javascript: () => javascript({ jsx: true, typescript: false }),
   typescript: () => javascript({ jsx: false, typescript: true }),
   html: () => html(),
@@ -94,7 +85,7 @@ const languageExtensions: Record<string, () => any> = {
   cpp: () => cpp(),
   vue: () => html(),
 
-  // Legacy StreamLanguage modes
+  // ── Commonly used legacy StreamLanguage modes (statically imported) ──
   swift: () => streamLang(swift),
   ruby: () => streamLang(ruby),
   shell: () => streamLang(shell),
@@ -104,37 +95,69 @@ const languageExtensions: Record<string, () => any> = {
   dart: () => streamLang(dart),
   objectivec: () => streamLang(objectiveC),
   objectivecpp: () => streamLang(objectiveCpp),
-  lua: () => streamLang(lua),
-  perl: () => streamLang(perl),
-  r: () => streamLang(r),
-  toml: () => streamLang(toml),
-  dockerfile: () => streamLang(dockerFile),
-  diff: () => streamLang(diff),
-  protobuf: () => streamLang(protobuf),
-  powershell: () => streamLang(powerShell),
-  haskell: () => streamLang(haskell),
-  clojure: () => streamLang(clojure),
-  erlang: () => streamLang(erlang),
-  julia: () => streamLang(julia),
-  fsharp: () => streamLang(fSharp),
-  ocaml: () => streamLang(oCaml),
-  pascal: () => streamLang(pascal),
-  cmake: () => streamLang(cmake),
-  nginx: () => streamLang(nginx),
-  pug: () => streamLang(pug),
-  tcl: () => streamLang(tcl),
-  vb: () => streamLang(vb),
-  puppet: () => streamLang(puppet),
-  gas: () => streamLang(gas),
-  gasarm: () => streamLang(gasArm),
+
+  // ── Less common legacy modes (dynamically imported on first use) ──
+  lua: () => import('@codemirror/legacy-modes/mode/lua').then(m => streamLang(m.lua)),
+  perl: () => import('@codemirror/legacy-modes/mode/perl').then(m => streamLang(m.perl)),
+  r: () => import('@codemirror/legacy-modes/mode/r').then(m => streamLang(m.r)),
+  toml: () => import('@codemirror/legacy-modes/mode/toml').then(m => streamLang(m.toml)),
+  dockerfile: () => import('@codemirror/legacy-modes/mode/dockerfile').then(m => streamLang(m.dockerFile)),
+  diff: () => import('@codemirror/legacy-modes/mode/diff').then(m => streamLang(m.diff)),
+  protobuf: () => import('@codemirror/legacy-modes/mode/protobuf').then(m => streamLang(m.protobuf)),
+  powershell: () => import('@codemirror/legacy-modes/mode/powershell').then(m => streamLang(m.powerShell)),
+  haskell: () => import('@codemirror/legacy-modes/mode/haskell').then(m => streamLang(m.haskell)),
+  clojure: () => import('@codemirror/legacy-modes/mode/clojure').then(m => streamLang(m.clojure)),
+  erlang: () => import('@codemirror/legacy-modes/mode/erlang').then(m => streamLang(m.erlang)),
+  julia: () => import('@codemirror/legacy-modes/mode/julia').then(m => streamLang(m.julia)),
+  fsharp: () => import('@codemirror/legacy-modes/mode/mllike').then(m => streamLang(m.fSharp)),
+  ocaml: () => import('@codemirror/legacy-modes/mode/mllike').then(m => streamLang(m.oCaml)),
+  pascal: () => import('@codemirror/legacy-modes/mode/pascal').then(m => streamLang(m.pascal)),
+  cmake: () => import('@codemirror/legacy-modes/mode/cmake').then(m => streamLang(m.cmake)),
+  nginx: () => import('@codemirror/legacy-modes/mode/nginx').then(m => streamLang(m.nginx)),
+  pug: () => import('@codemirror/legacy-modes/mode/pug').then(m => streamLang(m.pug)),
+  tcl: () => import('@codemirror/legacy-modes/mode/tcl').then(m => streamLang(m.tcl)),
+  vb: () => import('@codemirror/legacy-modes/mode/vb').then(m => streamLang(m.vb)),
+  puppet: () => import('@codemirror/legacy-modes/mode/puppet').then(m => streamLang(m.puppet)),
+  gas: () => import('@codemirror/legacy-modes/mode/gas').then(m => streamLang(m.gas)),
+  gasarm: () => import('@codemirror/legacy-modes/mode/gas').then(m => streamLang(m.gasArm)),
+  properties: () => import('@codemirror/legacy-modes/mode/properties').then(m => streamLang(m.properties)),
+  groovy: () => import('@codemirror/legacy-modes/mode/groovy').then(m => streamLang(m.groovy)),
   shader: () => streamLang(csharp), // Approximate highlighting for shaders
-  properties: () => streamLang(properties),
   elixir: () => streamLang(ruby),  // Approximate: Elixir syntax is similar to Ruby
-  groovy: () => streamLang(groovy),
   graphql: () => [],  // No dedicated mode, fall back to plain text
   makefile: () => [], // No dedicated mode, fall back to plain text
   bat: () => [],      // No dedicated mode, fall back to plain text
   text: () => [],
+}
+
+/**
+ * Resolve the language extension for a given language key.
+ * Returns the extension synchronously if it's statically imported,
+ * or a Promise for dynamically imported extensions.
+ * Caches dynamic imports to avoid re-fetching.
+ */
+function resolveLanguageExtension(lang: string): any | Promise<any> {
+  const getter = languageExtensions[lang]
+  if (!getter) return []
+
+  // Check cache first
+  if (dynamicExtensionCache.has(lang)) {
+    return dynamicExtensionCache.get(lang)!
+  }
+
+  const result = getter()
+
+  // If the result is a Promise (dynamic import), cache it when resolved
+  if (result instanceof Promise) {
+    result.then((ext: any) => {
+      dynamicExtensionCache.set(lang, ext)
+    }).catch(() => {
+      // Remove from cache if import failed so it can be retried
+      dynamicExtensionCache.delete(lang)
+    })
+  }
+
+  return result
 }
 
 export function CodeEditor({ content, filename, onChange, className = '' }: CodeEditorProps) {
@@ -145,9 +168,6 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
     if (!viewRef.current) return
     try {
       const line = viewRef.current.state.doc.line(Math.min(lineNumber, viewRef.current.state.doc.lines))
-      viewRef.current.dispatch({
-        effects: EditorView.scrollIntoView(line.from, { y: 'center' })
-      })
       viewRef.current.dispatch({
         selection: { anchor: line.from },
         effects: EditorView.scrollIntoView(line.from, { y: 'center' })
@@ -213,31 +233,44 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
     if (!editorRef.current) return
 
     const language = getCodeMirrorLanguage(filename)
-    const langExt = languageExtensions[language] || (() => [])
+    const langResult = resolveLanguageExtension(language)
 
-    const state = EditorState.create({
-      doc: content,
-      extensions: [
-        basicSetup,
-        langExt(),
-        CMView.lineWrapping,
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            onChange?.(update.state.doc.toString())
-          }
-        }),
-      ],
-    })
+    // Helper: create the CodeMirror editor with the given language extension
+    const createEditor = (langExt: any) => {
+      if (!editorRef.current) return
 
-    const view = new EditorView({
-      state,
-      parent: editorRef.current,
-    })
+      const state = EditorState.create({
+        doc: content,
+        extensions: [
+          basicSetup,
+          langExt,
+          CMView.lineWrapping,
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              onChange?.(update.state.doc.toString())
+            }
+          }),
+        ],
+      })
 
-    viewRef.current = view
+      const view = new EditorView({
+        state,
+        parent: editorRef.current,
+      })
+
+      viewRef.current = view
+    }
+
+    // If the language extension is a Promise (dynamic import), wait for it
+    if (langResult instanceof Promise) {
+      langResult.then((ext: any) => createEditor(ext)).catch(() => createEditor([]))
+    } else {
+      createEditor(langResult)
+    }
 
     return () => {
-      view.destroy()
+      viewRef.current?.destroy()
+      viewRef.current = null
     }
   }, [filename])
 

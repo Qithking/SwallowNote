@@ -316,7 +316,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tabs: state.tabs.map((t) => {
         if (t.id !== id) return t
         // 只有内容真正变化时才标记为 dirty
-        if (t.content === content) return t
+        // Note: t.content can be undefined (not loaded yet) while content might be '' (empty file)
+        // Treat undefined and '' as equivalent to avoid falsely marking empty files as dirty
+        const currentNormalized = t.content ?? ''
+        const newNormalized = content ?? ''
+        if (currentNormalized === newNormalized) return t
         return { ...t, content, isDirty: true, isEdited: true }
       }),
     })),

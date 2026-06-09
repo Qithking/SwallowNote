@@ -864,6 +864,34 @@ export const useUIStore = create<UIState>((set) => ({
           }))
         aiModels = [...missing, ...aiModels]
       } catch { /* ignore */ }
+      // Batch decrypt all API keys concurrently BEFORE setting state,
+      // so that models are available with decrypted keys in a single set() call.
+      // This avoids a window where components read empty _decryptedApiKey.
+      const decryptEntries = aiModels
+        .filter((m) => m.apiKey)
+        .map((m) => decryptApiKey(m.apiKey!).then((decrypted) => ({ id: m.id, decrypted })).catch(() => null))
+      const decryptResults = await Promise.all(decryptEntries)
+      const decryptedMap = new Map<string, string>()
+      for (const result of decryptResults) {
+        if (result) decryptedMap.set(result.id, result.decrypted)
+      }
+      // Apply decrypted keys to models
+      const aiModelsWithDecrypted = decryptedMap.size > 0
+        ? aiModels.map((am) =>
+            decryptedMap.has(am.id) ? { ...am, _decryptedApiKey: decryptedMap.get(am.id) } : am
+          )
+        : aiModels
+
+      // Decrypt legacy single-model API key
+      let aiApiKeyDecrypted = ''
+      if (s.aiApiKey && s.aiProvider) {
+        try {
+          aiApiKeyDecrypted = await decryptApiKey(s.aiApiKey)
+        } catch {
+          aiApiKeyDecrypted = ''
+        }
+      }
+
       set({
         theme: s.theme as Theme,
         themeColor: s.themeColor,
@@ -880,42 +908,17 @@ export const useUIStore = create<UIState>((set) => ({
         showConflictBadge: s.showConflictBadge !== 'false', // default true
         aiProvider: s.aiProvider || '',
         aiApiKey: s.aiApiKey || '',
-        aiApiKeyDecrypted: '',
+        aiApiKeyDecrypted,
         aiBaseUrl: s.aiBaseUrl || '',
         aiModel: s.aiModel || '',
         aiPort: s.aiPort ? Number(s.aiPort) : 4017,
-        aiModels,
-        activeAiModelId: s.activeAiModelId || (aiModels.length > 0 ? aiModels[0].id : ''),
+        aiModels: aiModelsWithDecrypted,
+        activeAiModelId: s.activeAiModelId || (aiModelsWithDecrypted.length > 0 ? aiModelsWithDecrypted[0].id : ''),
         defaultAiModelId: s.defaultAiModelId || '',
         customThemes,
         activeLightCustomThemeId: s.activeLightCustomThemeId || 'builtin-light',
         activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',
       })
-
-      if (s.aiApiKey && s.aiProvider) {
-        try {
-          const decrypted = await decryptApiKey(s.aiApiKey)
-          set({ aiApiKeyDecrypted: decrypted })
-        } catch {
-          set({ aiApiKeyDecrypted: '' })
-        }
-      }
-      // Batch decrypt all API keys concurrently to avoid N sequential re-renders
-      const decryptEntries = aiModels
-        .filter((m) => m.apiKey)
-        .map((m) => decryptApiKey(m.apiKey!).then((decrypted) => ({ id: m.id, decrypted })).catch(() => null))
-      const decryptResults = await Promise.all(decryptEntries)
-      const decryptedMap = new Map<string, string>()
-      for (const result of decryptResults) {
-        if (result) decryptedMap.set(result.id, result.decrypted)
-      }
-      if (decryptedMap.size > 0) {
-        set((state) => ({
-          aiModels: state.aiModels.map((am) =>
-            decryptedMap.has(am.id) ? { ...am, _decryptedApiKey: decryptedMap.get(am.id) } : am
-          ),
-        }))
-      }
     } catch {
       // DB not ready, use defaults
     }

@@ -336,7 +336,7 @@ function App() {
     }, 5000)
 
     // Set up periodic sync
-    const intervalMs = syncIntervalRef.current * 60 * 1000
+    const intervalMs = syncInterval * 60 * 1000
     const intervalId = setInterval(() => {
       doSync()
     }, intervalMs)

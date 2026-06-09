@@ -4,7 +4,7 @@
  * Note: This component is keyed by activeTab.id in Editor.tsx,
  * so it remounts on tab switch — no need to watch content changes.
  */
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { BlockNoteEditor, PartialBlock, createCodeBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
 import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react'
@@ -83,17 +83,19 @@ function BlockNoteInner({
   // codeBlock from @blocknote/code-block provides syntax highlighting via Shiki
   // In newer versions, we need to create the code block spec using createCodeBlockSpec
   // Using type assertion to resolve shiki types conflict
-  const codeBlock = createCodeBlockSpec(codeBlockOptions as any)
+  // Memoized via useMemo to avoid recreating on every render
+  const codeBlock = useMemo(() => createCodeBlockSpec(codeBlockOptions as any), [])
 
   // Create a custom schema that includes the default blocks plus the mermaid block
-  const schema = BlockNoteSchema.create({
+  // Memoized via useMemo to avoid recreating on every render
+  const schema = useMemo(() => BlockNoteSchema.create({
     blockSpecs: {
       ...defaultBlockSpecs,
       mermaidBlock: MermaidBlockSpec(),
       katexBlock: KatexBlockSpec(),
       markmapBlock: MarkmapBlockSpec(),
     } as any,
-  })
+  }), [])
 
   const resolveUploadDir = async (): Promise<string> => {
     const filePath = activeTab?.path || ''
@@ -271,14 +273,23 @@ function BlockNoteInner({
       return defaultPasteHandler()
     }
 
-    // Try reading system clipboard file paths asynchronously.
+    // Check if clipboard has text content — if so, delegate to default handler immediately
+    // and skip the async file-path check to avoid race conditions where both text and file
+    // blocks get inserted when the system clipboard contains both file paths and text.
+    const hasText = event.clipboardData?.types?.includes('text/plain') ||
+                    event.clipboardData?.types?.includes('text/html')
+    if (hasText) {
+      return defaultPasteHandler()
+    }
+
+    // No text or Files in WebView clipboard — try reading system clipboard file paths asynchronously.
     // This handles the case where user copies a file in Finder (Cmd+C) and pastes here (Cmd+V).
     // The WebView clipboard won't contain Files type for cross-app file copy on macOS,
     // so we need to ask the Tauri backend to read the system clipboard directly.
     readClipboardFilePaths()
       .then((filePaths) => {
         if (filePaths.length > 0) {
-          // System clipboard has file paths → insert as file blocks (suppress default text paste)
+          // System clipboard has file paths → insert as file blocks
           filePaths.forEach((sourcePath) => {
             try {
               const fileBlockType = getFileBlockType(sourcePath)
@@ -317,14 +328,12 @@ function BlockNoteInner({
             }
           })
         }
-        // If no file paths found, do nothing — defaultPasteHandler was already called below
+        // If no file paths found, do nothing — nothing to paste
       })
       .catch(() => {})
 
-    // Always delegate to defaultPasteHandler for normal text/HTML/markdown paste.
-    // The async file-path check above only inserts additional blocks when files are detected;
-    // it does not interfere with standard paste behavior.
-    return defaultPasteHandler()
+    // Return undefined to indicate we handled the paste asynchronously (no default paste)
+    return undefined
   }
 
   const editor = useCreateBlockNote({
@@ -609,23 +618,7 @@ function BlockNoteInner({
     }
   }, [editor])
 
-  // 编辑器就绪后发送目录数据
-  useEffect(() => {
-    if (!editor || !editor.document) return
-
-    try {
-      const entryTitle = activeTab?.name.replace(/\.md$/i, '') || t('editor.untitled')
-      const toc = buildTableOfContents(entryTitle, editor.document)
-
-      window.dispatchEvent(new CustomEvent('block-editor-ready', {
-        detail: { toc, isBlockNote: true }
-      }))
-    } catch (error) {
-      console.error('Error building table of contents:', error)
-    }
-  }, [editor, editor?.document?.length])
-
-  const handleChange = async () => {
+  const handleChange = useCallback(async () => {
     if (!onChange || !editor) return
     try {
       // Custom serialization for mermaid blocks
@@ -692,7 +685,28 @@ function BlockNoteInner({
       console.error('[MarkdownEditor] Failed to convert blocks to markdown:', e)
       // Don't propagate error to avoid breaking the editor
     }
-  }
+  }, [onChange, editor])
+
+  // 编辑器就绪后发送目录数据
+  // Use handleChange as the trigger: every content change should update the TOC.
+  // Relying on editor?.document?.length is unreliable because:
+  //   - It uses optional chaining which produces `undefined` when editor/document is not ready,
+  //     and React skips updates when the dependency value hasn't changed (undefined -> undefined).
+  //   - Document length doesn't change when text within existing blocks is modified.
+  useEffect(() => {
+    if (!editor || !editor.document) return
+
+    try {
+      const entryTitle = activeTab?.name.replace(/\.md$/i, '') || t('editor.untitled')
+      const toc = buildTableOfContents(entryTitle, editor.document)
+
+      window.dispatchEvent(new CustomEvent('block-editor-ready', {
+        detail: { toc, isBlockNote: true }
+      }))
+    } catch (error) {
+      console.error('Error building table of contents:', error)
+    }
+  }, [editor, handleChange, activeTab?.name, t])
 
   const themeSetting = useUIStore((state) => state.theme)
   const [systemIsDark, setSystemIsDark] = useState(
