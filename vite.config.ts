@@ -39,17 +39,19 @@ export default defineConfig({
         // and improve caching — unchanged vendor chunks don't need re-downloading
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('mermaid')) return 'vendor-mermaid'
-            if (id.includes('shiki')) return 'vendor-shiki'
+            // Merge shiki + mantine into blocknote chunk — they have circular imports:
+            //   shiki <-> blocknote (code-block depends on @shikijs/*)
+            //   blocknote <-> mantine (@blocknote/mantine imports @mantine/core)
+            if (id.includes('blocknote') || id.includes('shiki') || id.includes('@shikijs') || id.includes('@mantine')) return 'vendor-blocknote'
+            // Merge mermaid into markmap chunk — they share d3/d3-zoom which creates a circular split:
+            //   markmap-view -> d3 -> d3-zoom <- mermaid
+            if (id.includes('markmap') || id.includes('d3-zoom') || id.includes('mermaid')) return 'vendor-markmap'
             if (id.includes('katex')) return 'vendor-katex'
-            if (id.includes('markmap') || id.includes('d3-zoom')) return 'vendor-markmap'
             if (id.includes('simple-mind-map')) return 'vendor-mindmap'
             if (id.includes('codemirror') || id.includes('@codemirror')) return 'vendor-codemirror'
-            if (id.includes('blocknote')) return 'vendor-blocknote'
             if (id.includes('@radix-ui')) return 'vendor-radix'
             if (id.includes('react-dom')) return 'vendor-react'
             if (id.includes('lucide-react')) return 'vendor-lucide'
-            if (id.includes('@mantine')) return 'vendor-mantine'
             if (id.includes('ai-sdk') || id.includes('@ai-sdk')) return 'vendor-ai'
           }
         },
