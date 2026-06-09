@@ -323,9 +323,9 @@ function TabBar() {
                 </div>
               </ContextMenuTrigger>
               <ContextMenuContent
-                className="min-w-[180px]"
+                className="min-w-[160px]"
                 style={{
-                  background: 'var(--bg-primary)',
+                  background: 'var(--bg-secondary)',
                   border: '1px solid var(--border-color)',
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
                 }}
@@ -335,7 +335,7 @@ function TabBar() {
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
                 >
-                  <X size={12} className="mr-2" />
+                  <X size={12} />
                   <span>{t('tabs.close')}</span>
                 </ContextMenuItem>
                 {hasOtherTabs && (
@@ -344,7 +344,7 @@ function TabBar() {
                     style={{ color: 'var(--text-secondary)' }}
                     className="cursor-pointer"
                   >
-                    <X size={12} className="mr-2" />
+                    <X size={12} />
                     <span>{t('tabs.closeOthers')}</span>
                   </ContextMenuItem>
                 )}
@@ -354,7 +354,7 @@ function TabBar() {
                     style={{ color: 'var(--text-secondary)' }}
                     className="cursor-pointer"
                   >
-                    <X size={12} className="mr-2" />
+                    <X size={12} />
                     <span>{t('tabBar.closeRightTabs')}</span>
                   </ContextMenuItem>
                 )}
@@ -366,7 +366,7 @@ function TabBar() {
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
                 >
-                  <FileText size={12} className="mr-2" />
+                  <FileText size={12} />
                   <span>{t('tabBar.copyPath')}</span>
                 </ContextMenuItem>
                 <ContextMenuItem
@@ -374,7 +374,7 @@ function TabBar() {
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
                 >
-                  <FileText size={12} className="mr-2" />
+                  <FileText size={12} />
                   <span>{t('tabBar.copyRelativePath')}</span>
                 </ContextMenuItem>
                 <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
@@ -383,7 +383,7 @@ function TabBar() {
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
                 >
-                  <FileText size={12} className="mr-2" />
+                  <FileText size={12} />
                   <span>{t('tabBar.showInExplorer')}</span>
                 </ContextMenuItem>
               </ContextMenuContent>
