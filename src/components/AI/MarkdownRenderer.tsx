@@ -22,15 +22,26 @@ function getHighlighter() {
   if (cachedHighlighter) return Promise.resolve(cachedHighlighter)
   if (!highlighterPromise) {
     highlighterPromise = import('shiki').then(async (shiki) => {
+      // Only load themes upfront; languages are loaded on-demand
       const hl = await shiki.createHighlighter({
         themes: ['github-dark', 'github-light'],
-        langs: ['javascript', 'typescript', 'python', 'rust', 'css', 'html', 'json', 'bash', 'sql', 'yaml', 'xml', 'go', 'java', 'c', 'cpp'],
+        langs: [],
       })
       cachedHighlighter = hl
       return hl
     })
   }
   return highlighterPromise
+}
+
+/** Load a language grammar on demand */
+async function ensureLang(hl: any, lang: string): Promise<void> {
+  if (hl.getLoadedLanguages().includes(lang)) return
+  try {
+    await hl.loadLanguage(lang)
+  } catch {
+    // Language not available, ignore
+  }
 }
 
 const LANG_ALIASES: Record<string, string> = {
@@ -50,6 +61,9 @@ const SHIKI_LANGS = new Set([
   'javascript', 'typescript', 'python', 'rust', 'css', 'html', 'json',
   'bash', 'sql', 'yaml', 'xml', 'go', 'java', 'c', 'cpp',
   'js', 'ts', 'py', 'sh', 'shell', 'yml',
+  // Additional common languages supported via dynamic loading
+  'jsx', 'tsx', 'markdown', 'diff', 'toml', 'dockerfile', 'lua',
+  'ruby', 'php', 'swift', 'kotlin', 'scala', 'r', 'perl',
 ])
 
 /** Code block with shiki syntax highlighting */
@@ -59,13 +73,16 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
 
   useEffect(() => {
     let cancelled = false
-    if (SHIKI_LANGS.has(language.toLowerCase())) {
+    const normalizedLang = normalizeLang(language)
+    if (SHIKI_LANGS.has(language.toLowerCase()) || SHIKI_LANGS.has(normalizedLang)) {
       getHighlighter()
-        .then((hl) => {
+        .then(async (hl) => {
+          if (cancelled) return
+          await ensureLang(hl, normalizedLang)
           if (cancelled) return
           try {
             const result = hl.codeToHtml(code, {
-              lang: normalizeLang(language),
+              lang: normalizedLang,
               themes: { dark: 'github-dark', light: 'github-light' },
             })
             setHtml(result)
