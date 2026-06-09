@@ -10,7 +10,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { Code2, Maximize2, GripVertical, GripHorizontal } from 'lucide-react'
+import { Code2, Maximize2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -18,6 +18,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useBlockResize } from '@/hooks/useBlockResize'
+import { BlockResizeHandles } from './BlockResizeHandles'
 
 interface KatexBlockEditorProps {
   source: string
@@ -34,14 +36,6 @@ interface RenderState {
   display: boolean
   html: string
   error: string | null
-}
-
-interface ResizeState {
-  handleUsed: 'left' | 'right' | 'bottom' | 'corner'
-  initialWidth: number
-  initialHeight: number
-  initialClientX: number
-  initialClientY: number
 }
 
 function renderKatex(formula: string, display: boolean): { html: string; error: string | null } {
@@ -67,88 +61,15 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(formula)
   
-  // Resize state (block mode only)
-  const [resizeState, setResizeState] = useState<ResizeState | undefined>(undefined)
-  const [currentWidth, setCurrentWidth] = useState<number>(width || 0)
-  const [currentHeight, setCurrentHeight] = useState<number>(height || 0)
-  // Use refs to track latest values for the mouseup handler
-  const currentWidthRef = useRef(currentWidth)
-  const currentHeightRef = useRef(currentHeight)
+  // Resize state (block mode only, unified hook)
   const containerRef = useRef<HTMLDivElement>(null)
-
-  // Keep refs in sync with state
-  useEffect(() => {
-    currentWidthRef.current = currentWidth
-  }, [currentWidth])
-  useEffect(() => {
-    currentHeightRef.current = currentHeight
-  }, [currentHeight])
-
-  // Sync props changes
-  useEffect(() => {
-    if (width && width !== currentWidthRef.current) setCurrentWidth(width)
-  }, [width])
-  useEffect(() => {
-    if (height && height !== currentHeightRef.current) setCurrentHeight(height)
-  }, [height])
-
-  // Handle resize drag (block mode only)
-  useEffect(() => {
-    if (!resizeState || !display) return
-
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-      const maxWidth = editor?.domElement?.firstElementChild?.clientWidth || 1200
-
-      if (resizeState.handleUsed === 'left' || resizeState.handleUsed === 'right' || resizeState.handleUsed === 'corner') {
-        let newWidth: number
-        if (resizeState.handleUsed === 'left') {
-          newWidth = resizeState.initialWidth + (resizeState.initialClientX - clientX)
-        } else {
-          newWidth = resizeState.initialWidth + (clientX - resizeState.initialClientX)
-        }
-        setCurrentWidth(Math.min(Math.max(newWidth, 200), maxWidth))
-      }
-
-      if (resizeState.handleUsed === 'bottom' || resizeState.handleUsed === 'corner') {
-        const newHeight = resizeState.initialHeight + (clientY - resizeState.initialClientY)
-        setCurrentHeight(Math.min(Math.max(newHeight, 80), 600))
-      }
-    }
-
-    const handleMouseUp = () => {
-      setResizeState(undefined)
-      // Use refs to get the latest values
-      editor?.updateBlock(block, { props: { width: currentWidthRef.current, height: currentHeightRef.current } })
-    }
-
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('touchmove', handleMouseMove)
-    window.addEventListener('touchend', handleMouseUp)
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      window.removeEventListener('touchmove', handleMouseMove)
-      window.removeEventListener('touchend', handleMouseUp)
-    }
-  }, [resizeState, display, editor, block])
-
-  const startResize = useCallback((handle: ResizeState['handleUsed'], e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-    setResizeState({
-      handleUsed: handle,
-      initialWidth: currentWidth,
-      initialHeight: currentHeight,
-      initialClientX: clientX,
-      initialClientY: clientY,
-    })
-  }, [currentWidth, currentHeight])
+  const { currentWidth, currentHeight, startResize } = useBlockResize({
+    initialWidth: width,
+    initialHeight: height,
+    editor,
+    block,
+    containerRef,
+  })
 
   // Re-render when the formula or display mode changes
   useEffect(() => {
@@ -318,37 +239,7 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
 
       {/* Resize handles - only for block mode */}
       {display && editor?.isEditable && (
-        <>
-          {/* Right resize handle */}
-          <div
-            className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-12 flex items-center justify-center cursor-ew-resize opacity-0 group-hover/katex:opacity-100 transition-opacity hover:bg-primary/10 rounded-l"
-            onMouseDown={(e) => startResize('right', e)}
-            onTouchStart={(e) => startResize('right', e)}
-            title="拖动调整宽度"
-          >
-            <GripVertical className="w-3 h-3 text-muted-foreground" />
-          </div>
-          {/* Bottom resize handle */}
-          <div
-            className="absolute bottom-0 left-1/2 -translate-x-1/2 h-4 w-12 flex items-center justify-center cursor-ns-resize opacity-0 group-hover/katex:opacity-100 transition-opacity hover:bg-primary/10 rounded-t"
-            onMouseDown={(e) => startResize('bottom', e)}
-            onTouchStart={(e) => startResize('bottom', e)}
-            title="拖动调整高度"
-          >
-            <GripHorizontal className="w-3 h-3 text-muted-foreground" />
-          </div>
-          {/* Corner resize handle */}
-          <div
-            className="absolute right-0 bottom-0 w-6 h-6 flex items-center justify-center cursor-nwse-resize opacity-0 group-hover/katex:opacity-100 transition-opacity hover:bg-primary/10 rounded-tl"
-            onMouseDown={(e) => startResize('corner', e)}
-            onTouchStart={(e) => startResize('corner', e)}
-            title="拖动调整宽高"
-          >
-            <svg width="10" height="10" viewBox="0 0 10 10" className="text-muted-foreground">
-              <path d="M1 9L9 1M5 9L9 5M9 9L9 9" stroke="currentColor" strokeWidth="1.5" fill="none" />
-            </svg>
-          </div>
-        </>
+        <BlockResizeHandles onStartResize={startResize} groupHoverClass="group-hover/katex" />
       )}
 
       {/* Inline editor */}

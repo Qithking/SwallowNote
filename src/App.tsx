@@ -346,36 +346,42 @@ function App() {
   }, [syncInterval, t])
 
   const handleSaveAndClose = async () => {
+    // Capture close intent BEFORE the dialog's onOpenChange(false) fires
+    // handleCancelClose() and resets pendingCloseRef.
+    const shouldClose = pendingCloseRef.current
     setShowSaveDialog(false)
+    pendingCloseRef.current = false
+    if (!shouldClose) return
     await useEditorStore.getState().saveAllDirtyTabs()
-    if (pendingCloseRef.current) {
-      const win = getCurrentWindow()
-      await saveSessionStateNow()
-      const { closeWithoutExit } = useUIStore.getState()
-      if (closeWithoutExit) {
-        await win.hide()
-        const { setDockIconVisibility } = await import('@/lib/tauri')
-        setDockIconVisibility(false).catch(() => {})
-      } else {
-        await win.destroy()
-      }
+    const win = getCurrentWindow()
+    await saveSessionStateNow()
+    const { closeWithoutExit } = useUIStore.getState()
+    if (closeWithoutExit) {
+      await win.hide()
+      const { setDockIconVisibility } = await import('@/lib/tauri')
+      setDockIconVisibility(false).catch(() => {})
+    } else {
+      await win.destroy()
     }
   }
 
   const handleDiscardAndClose = async () => {
+    // Capture close intent BEFORE the dialog's onOpenChange(false) fires
+    // handleCancelClose() and resets pendingCloseRef.
+    const shouldClose = pendingCloseRef.current
     setShowSaveDialog(false)
+    pendingCloseRef.current = false
+    if (!shouldClose) return
     useEditorStore.getState().resetDirtyTabs()
-    if (pendingCloseRef.current) {
-      const win = getCurrentWindow()
-      await saveSessionStateNow()
-      const { closeWithoutExit } = useUIStore.getState()
-      if (closeWithoutExit) {
-        await win.hide()
-        const { setDockIconVisibility } = await import('@/lib/tauri')
-        setDockIconVisibility(false).catch(() => {})
-      } else {
-        await win.destroy()
-      }
+    const win = getCurrentWindow()
+    await saveSessionStateNow()
+    const { closeWithoutExit } = useUIStore.getState()
+    if (closeWithoutExit) {
+      await win.hide()
+      const { setDockIconVisibility } = await import('@/lib/tauri')
+      setDockIconVisibility(false).catch(() => {})
+    } else {
+      await win.destroy()
     }
   }
 

@@ -3,8 +3,8 @@
  * Renders Mermaid diagrams in BlockNote editor.
  * Adapted from tolaria's MermaidDiagram component.
  */
-import { useEffect, useId, useMemo, useState, useRef, useLayoutEffect, useCallback } from 'react'
-import { Maximize2, GripVertical, GripHorizontal } from 'lucide-react'
+import { useEffect, useId, useMemo, useState, useRef, useLayoutEffect } from 'react'
+import { Maximize2 } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useBlockResize } from '@/hooks/useBlockResize'
+import { BlockResizeHandles } from './BlockResizeHandles'
 
 type MermaidApi = typeof import('mermaid')['default']
 
@@ -22,14 +24,6 @@ interface MermaidBlockEditorProps {
   height: number
   block: any
   editor: any
-}
-
-interface ResizeState {
-  handleUsed: 'left' | 'right' | 'bottom' | 'corner'
-  initialWidth: number
-  initialHeight: number
-  initialClientX: number
-  initialClientY: number
 }
 
 interface RenderState {
@@ -155,86 +149,15 @@ export function MermaidBlockEditor({ diagram, source, width, height, block, edit
   const renderId = useMemo(() => renderIdFromReactId(reactId), [reactId])
   const [state, setState] = useState<RenderState>({ diagram: '', svg: '', error: false })
   
-  // Resize state
-  const [resizeState, setResizeState] = useState<ResizeState | undefined>(undefined)
-  const [currentWidth, setCurrentWidth] = useState<number>(width || 0)
-  const [currentHeight, setCurrentHeight] = useState<number>(height || 0)
-  // Refs to track latest values for use in event handlers (avoid stale closures)
-  const currentWidthRef = useRef(currentWidth)
-  const currentHeightRef = useRef(currentHeight)
+  // Resize state (unified hook)
   const containerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => { currentWidthRef.current = currentWidth }, [currentWidth])
-  useEffect(() => { currentHeightRef.current = currentHeight }, [currentHeight])
-
-  // Sync props changes
-  useEffect(() => {
-    if (width && width !== currentWidthRef.current) setCurrentWidth(width)
-  }, [width])
-  useEffect(() => {
-    if (height && height !== currentHeightRef.current) setCurrentHeight(height)
-  }, [height])
-
-  // Handle resize drag
-  useEffect(() => {
-    if (!resizeState) return
-
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-      const maxWidth = editor?.domElement?.firstElementChild?.clientWidth || 1200
-
-      if (resizeState.handleUsed === 'left' || resizeState.handleUsed === 'right' || resizeState.handleUsed === 'corner') {
-        let newWidth: number
-        if (resizeState.handleUsed === 'left') {
-          newWidth = resizeState.initialWidth + (resizeState.initialClientX - clientX)
-        } else {
-          newWidth = resizeState.initialWidth + (clientX - resizeState.initialClientX)
-        }
-        setCurrentWidth(Math.min(Math.max(newWidth, 200), maxWidth))
-      }
-
-      if (resizeState.handleUsed === 'bottom' || resizeState.handleUsed === 'corner') {
-        const newHeight = resizeState.initialHeight + (clientY - resizeState.initialClientY)
-        setCurrentHeight(Math.min(Math.max(newHeight, 120), 800))
-      }
-    }
-
-    const handleMouseUp = () => {
-      setResizeState(undefined)
-      editor?.updateBlock(block, { props: { width: currentWidthRef.current, height: currentHeightRef.current } })
-    }
-
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('touchmove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('touchend', handleMouseUp)
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('touchmove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      window.removeEventListener('touchend', handleMouseUp)
-    }
-  }, [resizeState, editor, block])
-
-  const getInitialSize = useCallback(() => ({
-    initialWidth: currentWidth || containerRef.current?.clientWidth || 400,
-    initialHeight: currentHeight || containerRef.current?.clientHeight || 300,
-  }), [currentWidth, currentHeight])
-
-  const handleMouseDown = useCallback((handle: ResizeState['handleUsed']) => (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault()
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-    const size = getInitialSize()
-    setResizeState({
-      handleUsed: handle,
-      ...size,
-      initialClientX: clientX,
-      initialClientY: clientY,
-    })
-  }, [getInitialSize])
+  const { currentWidth, currentHeight, startResize } = useBlockResize({
+    initialWidth: width,
+    initialHeight: height,
+    editor,
+    block,
+    containerRef,
+  })
 
   useEffect(() => {
     let active = true
@@ -314,44 +237,7 @@ export function MermaidBlockEditor({ diagram, source, width, height, block, edit
 
       {/* Resize handles */}
       {editor?.isEditable && (
-        <>
-          {/* Left resize handle */}
-          <div
-            className="absolute left-0 top-0 h-full w-2 cursor-ew-resize opacity-0 group-hover/mermaid:opacity-100 transition-opacity bg-primary/20 hover:bg-primary/40 flex items-center justify-center"
-            onMouseDown={handleMouseDown('left')}
-            onTouchStart={handleMouseDown('left')}
-          >
-            <GripVertical className="w-3 h-3 text-primary/60 rotate-90" />
-          </div>
-          {/* Right resize handle */}
-          <div
-            className="absolute right-0 top-0 h-full w-2 cursor-ew-resize opacity-0 group-hover/mermaid:opacity-100 transition-opacity bg-primary/20 hover:bg-primary/40 flex items-center justify-center"
-            onMouseDown={handleMouseDown('right')}
-            onTouchStart={handleMouseDown('right')}
-          >
-            <GripVertical className="w-3 h-3 text-primary/60 rotate-90" />
-          </div>
-          {/* Bottom resize handle */}
-          <div
-            className="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize opacity-0 group-hover/mermaid:opacity-100 transition-opacity bg-primary/20 hover:bg-primary/40 flex items-center justify-center"
-            onMouseDown={handleMouseDown('bottom')}
-            onTouchStart={handleMouseDown('bottom')}
-          >
-            <GripHorizontal className="w-3 h-3 text-primary/60" />
-          </div>
-          {/* Corner resize handle (bottom-right) */}
-          <div
-            className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize opacity-0 group-hover/mermaid:opacity-100 transition-opacity bg-primary/30 hover:bg-primary/50 rounded-tl-sm flex items-center justify-center"
-            onMouseDown={handleMouseDown('corner')}
-            onTouchStart={handleMouseDown('corner')}
-          >
-            <svg className="w-2.5 h-2.5 text-primary/60" viewBox="0 0 10 10" fill="currentColor">
-              <circle cx="8" cy="8" r="1.2" />
-              <circle cx="4" cy="8" r="1.2" />
-              <circle cx="8" cy="4" r="1.2" />
-            </svg>
-          </div>
-        </>
+        <BlockResizeHandles onStartResize={startResize} groupHoverClass="group-hover/mermaid" />
       )}
     </figure>
   )

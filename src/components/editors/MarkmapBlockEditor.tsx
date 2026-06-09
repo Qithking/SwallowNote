@@ -2,7 +2,7 @@
  * MarkmapBlockEditor Component
  * Renders Markmap mindmaps in BlockNote editor.
  */
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Maximize2 } from 'lucide-react'
 import {
   Dialog,
@@ -11,6 +11,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useBlockResize } from '@/hooks/useBlockResize'
+import { BlockResizeHandles } from './BlockResizeHandles'
 
 interface MarkmapBlockEditorProps {
   diagram: string
@@ -20,14 +22,6 @@ interface MarkmapBlockEditorProps {
   scale: number
   block: any
   editor: any
-}
-
-interface ResizeState {
-  handleUsed: 'left' | 'right' | 'bottom' | 'corner'
-  initialWidth: number
-  initialHeight: number
-  initialClientX: number
-  initialClientY: number
 }
 
 type MarkmapInstance = {
@@ -48,23 +42,14 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
   const [hasError, setHasError] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
 
-  // Resize state
-  const [resizeState, setResizeState] = useState<ResizeState | undefined>(undefined)
-  const [currentWidth, setCurrentWidth] = useState<number>(width || 0)
-  const [currentHeight, setCurrentHeight] = useState<number>(height || 0)
-  const currentWidthRef = useRef(currentWidth)
-  const currentHeightRef = useRef(currentHeight)
-
-  useEffect(() => { currentWidthRef.current = currentWidth }, [currentWidth])
-  useEffect(() => { currentHeightRef.current = currentHeight }, [currentHeight])
-
-  // Sync props changes
-  useEffect(() => {
-    if (width && width !== currentWidthRef.current) setCurrentWidth(width)
-  }, [width])
-  useEffect(() => {
-    if (height && height !== currentHeightRef.current) setCurrentHeight(height)
-  }, [height])
+  // Resize state (unified hook)
+  const { currentWidth, currentHeight, currentWidthRef, currentHeightRef, startResize } = useBlockResize({
+    initialWidth: width,
+    initialHeight: height,
+    editor,
+    block,
+    containerRef,
+  })
 
   // Render markmap into inline svg
   useEffect(() => {
@@ -221,67 +206,6 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
     }
   }, [dialogOpen])
 
-  // Handle resize drag
-  useEffect(() => {
-    if (!resizeState) return
-
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-      const maxWidth = editor?.domElement?.firstElementChild?.clientWidth || 1200
-
-      if (resizeState.handleUsed === 'left' || resizeState.handleUsed === 'right' || resizeState.handleUsed === 'corner') {
-        let newWidth: number
-        if (resizeState.handleUsed === 'left') {
-          newWidth = resizeState.initialWidth + (resizeState.initialClientX - clientX)
-        } else {
-          newWidth = resizeState.initialWidth + (clientX - resizeState.initialClientX)
-        }
-        setCurrentWidth(Math.min(Math.max(newWidth, 240), maxWidth))
-      }
-
-      if (resizeState.handleUsed === 'bottom' || resizeState.handleUsed === 'corner') {
-        const newHeight = resizeState.initialHeight + (clientY - resizeState.initialClientY)
-        setCurrentHeight(Math.min(Math.max(newHeight, 160), 800))
-      }
-    }
-
-    const handleMouseUp = () => {
-      setResizeState(undefined)
-      editor?.updateBlock(block, { props: { width: currentWidthRef.current, height: currentHeightRef.current } })
-    }
-
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('touchmove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('touchend', handleMouseUp)
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('touchmove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      window.removeEventListener('touchend', handleMouseUp)
-    }
-  }, [resizeState, editor, block])
-
-  const getInitialSize = useCallback(() => ({
-    initialWidth: currentWidth || containerRef.current?.clientWidth || 480,
-    initialHeight: currentHeight || containerRef.current?.clientHeight || 320,
-  }), [currentWidth, currentHeight])
-
-  const handleMouseDown = useCallback((handle: ResizeState['handleUsed']) => (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault()
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-    const size = getInitialSize()
-    setResizeState({
-      handleUsed: handle,
-      ...size,
-      initialClientX: clientX,
-      initialClientY: clientY,
-    })
-  }, [getInitialSize])
-
   // Error or empty: show source fallback
   if (!diagram.trim() || hasError) {
     return (
@@ -337,30 +261,9 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       />
 
       {/* Resize handles */}
-      <div
-        className="absolute top-1/2 -translate-y-1/2 left-0 w-1.5 h-8 cursor-ew-resize opacity-0 group-hover/markmap:opacity-100 transition-opacity bg-border hover:bg-primary/50 rounded-r"
-        onMouseDown={handleMouseDown('left')}
-        onTouchStart={handleMouseDown('left')}
-        title="拖拽调整宽度"
-      />
-      <div
-        className="absolute top-1/2 -translate-y-1/2 right-0 w-1.5 h-8 cursor-ew-resize opacity-0 group-hover/markmap:opacity-100 transition-opacity bg-border hover:bg-primary/50 rounded-l"
-        onMouseDown={handleMouseDown('right')}
-        onTouchStart={handleMouseDown('right')}
-        title="拖拽调整宽度"
-      />
-      <div
-        className="absolute bottom-0 left-1/2 -translate-x-1/2 h-1.5 w-8 cursor-ns-resize opacity-0 group-hover/markmap:opacity-100 transition-opacity bg-border hover:bg-primary/50 rounded-t"
-        onMouseDown={handleMouseDown('bottom')}
-        onTouchStart={handleMouseDown('bottom')}
-        title="拖拽调整高度"
-      />
-      <div
-        className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize opacity-0 group-hover/markmap:opacity-100 transition-opacity"
-        onMouseDown={handleMouseDown('corner')}
-        onTouchStart={handleMouseDown('corner')}
-        title="拖拽调整尺寸"
-      />
+      {editor?.isEditable && (
+        <BlockResizeHandles onStartResize={startResize} groupHoverClass="group-hover/markmap" />
+      )}
     </figure>
   )
 }
