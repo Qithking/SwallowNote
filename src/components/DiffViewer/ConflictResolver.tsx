@@ -145,7 +145,7 @@ function buildFileTree(files: ConflictFile[]): TreeNode[] {
 
 function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, initialCursorLine, autoHideTree }: ConflictResolverProps) {
   const { t } = useTranslation()
-  const { showToast } = useUIStore()
+  const showToast = useUIStore((s) => s.showToast)
   const [conflictRepos, setConflictRepos] = useState<ConflictRepo[]>([])
   const [selectedFile, setSelectedFile] = useState<{ repoPath: string; file: ConflictFile } | null>(null)
   const [localContent, setLocalContent] = useState<string>('')

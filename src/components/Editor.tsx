@@ -107,7 +107,8 @@ function RecentFileItem({ path, onClick }: { path: string; onClick: () => void }
 
 function WelcomeScreen() {
   const { t } = useTranslation()
-  const { customShortcuts, workspaceMode } = useUIStore()
+  const customShortcuts = useUIStore((s) => s.customShortcuts)
+  const workspaceMode = useUIStore((s) => s.workspaceMode)
   const [recentPaths, setRecentPaths] = useState<string[]>([])
 
   // Use the imported app icon URL (Vite static asset)
@@ -279,7 +280,11 @@ function WelcomeScreen() {
 }
 
 export function EditorView() {
-  const { tabs, activeTabId, updateTabContent, scrollToLine, loadTabContent } = useEditorStore()
+  const tabs = useEditorStore((s) => s.tabs)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const updateTabContent = useEditorStore((s) => s.updateTabContent)
+  const scrollToLine = useEditorStore((s) => s.scrollToLine)
+  const loadTabContent = useEditorStore((s) => s.loadTabContent)
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const scrollToLineRef = useRef(scrollToLine)
   const { t } = useTranslation()

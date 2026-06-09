@@ -21,7 +21,13 @@ const activityKeyMap: Record<string, string> = {
 }
 
 function ActivityBar() {
-  const { sidebarView, setSidebarView, sidebarVisible, toggleSidebar, settingsPanelVisible, setSettingsPanelVisible, showConflictBadge } = useUIStore()
+  const sidebarView = useUIStore((s) => s.sidebarView)
+  const setSidebarView = useUIStore((s) => s.setSidebarView)
+  const sidebarVisible = useUIStore((s) => s.sidebarVisible)
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar)
+  const settingsPanelVisible = useUIStore((s) => s.settingsPanelVisible)
+  const setSettingsPanelVisible = useUIStore((s) => s.setSettingsPanelVisible)
+  const showConflictBadge = useUIStore((s) => s.showConflictBadge)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
   const { t } = useTranslation()
 

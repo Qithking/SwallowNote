@@ -12,9 +12,15 @@ import { invoke } from '@tauri-apps/api/core'
 import { updateNodesWithChildren, findNodeByPath } from '@/lib/utils/treeUtils'
 
 export function useFileTreeDragDrop(nodes: FileNode[]) {
-  const { showAllFiles, markdownOnly, showToast } = useUIStore()
-  const { expanded, toggleNode, setNodes, setSelectedPath, clearMultiSelection,
-    multiSelectedPaths } = useFileTreeStore()
+  const showAllFiles = useUIStore((s) => s.showAllFiles)
+  const markdownOnly = useUIStore((s) => s.markdownOnly)
+  const showToast = useUIStore((s) => s.showToast)
+  const expanded = useFileTreeStore((s) => s.expanded)
+  const toggleNode = useFileTreeStore((s) => s.toggleNode)
+  const setNodes = useFileTreeStore((s) => s.setNodes)
+  const setSelectedPath = useFileTreeStore((s) => s.setSelectedPath)
+  const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
+  const multiSelectedPaths = useFileTreeStore((s) => s.multiSelectedPaths)
   const { t } = useTranslation()
 
   const [dragOverPath, setDragOverPath] = useState<string | null>(null)

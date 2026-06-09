@@ -54,8 +54,17 @@ function findNodeInList(list: FileNode[], path: string): FileNode | null {
 
 function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
-    if (n.path === path) return { ...n, children, isLoading: false }
-    if (n.children) return { ...n, children: updateNodesWithChildren(n.children, path, children) }
+    if (n.path === path) {
+      // Skip creating a new object if children reference is already the same
+      if (n.children === children && !n.isLoading) return n
+      return { ...n, children, isLoading: false }
+    }
+    if (n.children) {
+      const updatedChildren = updateNodesWithChildren(n.children, path, children)
+      // Skip creating a new object if no child was actually updated
+      if (updatedChildren === n.children) return n
+      return { ...n, children: updatedChildren }
+    }
     return n
   })
 }

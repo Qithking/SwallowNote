@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type FileNode, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { openFolderDialog, openWorkspaceDialog, createFile } from '@/lib/tauri'
@@ -217,13 +217,20 @@ async function handleOpenExplorer() {
 }
 
 export function useKeyboardShortcuts() {
-  const {
-    toggleCommandPalette,
-    toggleSearchPanel,
-    toggleSidebar,
-    setSidebarView,
-  } = useUIStore()
-  const { tabs, activeTabId, removeTab } = useEditorStore()
+  const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette)
+  const toggleSearchPanel = useUIStore((s) => s.toggleSearchPanel)
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar)
+  const setSidebarView = useUIStore((s) => s.setSidebarView)
+
+  // Use refs for tabs to avoid re-binding the keydown listener on every tab change.
+  // This prevents excessive listener teardown/setup which causes GC pressure.
+  const tabsRef = useRef(useEditorStore.getState().tabs)
+  useEffect(() => {
+    const unsub = useEditorStore.subscribe((state) => {
+      tabsRef.current = state.tabs
+    })
+    return unsub
+  }, [])
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
@@ -322,8 +329,8 @@ export function useKeyboardShortcuts() {
       if (isMod && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         const index = parseInt(e.key) - 1
-        if (tabs[index]) {
-          const tab = tabs[index]
+        if (tabsRef.current[index]) {
+          const tab = tabsRef.current[index]
           // Switch tab immediately for better UX
           useEditorStore.getState().setActiveTab(tab.id)
           // Load content asynchronously after switching tab
@@ -361,8 +368,5 @@ export function useKeyboardShortcuts() {
     toggleSearchPanel,
     toggleSidebar,
     setSidebarView,
-    tabs,
-    activeTabId,
-    removeTab,
   ])
 }

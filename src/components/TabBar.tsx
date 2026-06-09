@@ -2,7 +2,7 @@
  * TabBar Component - Editor tabs management
  * Shows file tabs with dirty/saved status indicators
  */
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react'
 import {
   ContextMenu,
@@ -20,8 +20,8 @@ import { useTranslation } from 'react-i18next'
 function TabBar() {
   const { tabs, activeTabId, setActiveTab, removeTab } = useEditorStore()
   const { rootPath, workspaceFolders } = useWorkspaceStore()
-  const { workspaceMode } = useUIStore()
-  const { showToast } = useUIStore()
+  const workspaceMode = useUIStore((s) => s.workspaceMode)
+  const showToast = useUIStore((s) => s.showToast)
   const { t } = useTranslation()
   const scrollRef = useRef<HTMLDivElement>(null)
   const tabRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -99,13 +99,13 @@ function TabBar() {
     }
   }
 
-  const checkScroll = () => {
+  const checkScroll = useCallback(() => {
     if (!scrollRef.current) return
     const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current
     setCanScrollLeft(scrollLeft > 0)
     setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 1)
     setIsOverflowing(scrollWidth > clientWidth)
-  }
+  }, [])
 
   useEffect(() => {
     checkScroll()
@@ -120,7 +120,7 @@ function TabBar() {
       }
       window.removeEventListener('resize', checkScroll)
     }
-  }, [tabs])
+  }, [tabs, checkScroll])
 
   // Click outside to close more menu
   useEffect(() => {

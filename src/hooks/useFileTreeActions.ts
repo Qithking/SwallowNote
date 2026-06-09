@@ -23,11 +23,20 @@ export interface NewItemState {
 }
 
 export function useFileTreeActions() {
-  const { rootPath } = useWorkspaceStore()
-  const { updateTabPath } = useEditorStore()
-  const { showAllFiles, markdownOnly, showToast } = useUIStore()
-  const { nodes, expanded, selectedPath, toggleNode, setNodes, setSelectedPath,
-    multiSelectedPaths, setLastClickedPath, clearMultiSelection } = useFileTreeStore()
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const updateTabPath = useEditorStore((s) => s.updateTabPath)
+  const showAllFiles = useUIStore((s) => s.showAllFiles)
+  const markdownOnly = useUIStore((s) => s.markdownOnly)
+  const showToast = useUIStore((s) => s.showToast)
+  const nodes = useFileTreeStore((s) => s.nodes)
+  const expanded = useFileTreeStore((s) => s.expanded)
+  const selectedPath = useFileTreeStore((s) => s.selectedPath)
+  const toggleNode = useFileTreeStore((s) => s.toggleNode)
+  const setNodes = useFileTreeStore((s) => s.setNodes)
+  const setSelectedPath = useFileTreeStore((s) => s.setSelectedPath)
+  const multiSelectedPaths = useFileTreeStore((s) => s.multiSelectedPaths)
+  const setLastClickedPath = useFileTreeStore((s) => s.setLastClickedPath)
+  const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
   const { t } = useTranslation()
 
   const inputRef = useRef<HTMLInputElement>(null)

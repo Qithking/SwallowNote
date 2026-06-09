@@ -366,7 +366,7 @@ function RepositoryItem({
   onRefresh: () => void
 }) {
   const { t } = useTranslation()
-  const { showToast } = useUIStore()
+  const showToast = useUIStore((s) => s.showToast)
   const [isForceAction, setIsForceAction] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'forcePush' | 'forcePull' | null>(null)
 
@@ -569,7 +569,8 @@ const GitView = memo(function GitView() {
   const updateRepositoryStatuses = useGitStore((s: GitState) => s.updateRepositoryStatuses)
   const loadConflictRepos = useGitStore((s: GitState) => s.loadConflictRepos)
   const { rootPath, workspaceFolders } = useWorkspaceStore()
-  const { workspaceMode, showToast } = useUIStore()
+  const workspaceMode = useUIStore((s) => s.workspaceMode)
+  const showToast = useUIStore((s) => s.showToast)
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [isPullingRepos, setIsPullingRepos] = useState(false)
   const { t } = useTranslation()

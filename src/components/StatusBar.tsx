@@ -27,9 +27,9 @@ type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-
 const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000 // 1 hour in ms
 
 function StatusBar() {
-  const { showToast } = useUIStore()
-  const { autoCheckUpdate } = useUIStore()
-  const { syncStatus } = useGitStore()
+  const showToast = useUIStore((s) => s.showToast)
+  const autoCheckUpdate = useUIStore((s) => s.autoCheckUpdate)
+  const syncStatus = useGitStore((s) => s.syncStatus)
   const { t } = useTranslation()
   const [currentVersion] = useState(packageJson.version)
   const [latestVersion, setLatestVersion] = useState<string | null>(null)

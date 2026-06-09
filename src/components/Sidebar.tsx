@@ -9,7 +9,7 @@ import { SettingsView } from './Settings/SettingsView'
 import { useUIStore } from '@/stores'
 
 function Sidebar() {
-  const { sidebarView } = useUIStore()
+  const sidebarView = useUIStore((s) => s.sidebarView)
 
   return (
     <div className="flex flex-col h-full">
