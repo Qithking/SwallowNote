@@ -12,7 +12,7 @@ jobs:
   build:
     name: release
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         platform: [macos-15, windows-latest, ubuntu-22.04]
 
