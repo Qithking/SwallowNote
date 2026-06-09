@@ -33,6 +33,10 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari13',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // Reduce memory pressure during CI builds with many modules (6000+)
+    chunkSizeWarningLimit: 1000,
+    // Let Node.js GC more aggressively to avoid OOM on memory-constrained runners
+    reportCompressedSize: false,
     rollupOptions: {
       output: {
         // Split large dependencies into separate chunks to reduce per-chunk memory usage
