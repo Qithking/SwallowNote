@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   build:
+    name: release
     strategy:
       fail-fast: false
       matrix:
@@ -163,6 +164,7 @@ jobs:
           retention-days: 7
 
   release:
+    name: release
     needs: build
     runs-on: ubuntu-22.04
     steps:
