@@ -5,9 +5,9 @@
  * so it remounts on tab switch — no need to watch content changes.
  */
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { BlockNoteEditor, PartialBlock, createCodeBlockSpec } from '@blocknote/core'
+import { BlockNoteEditor, PartialBlock, createCodeBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
-import { useCreateBlockNote } from '@blocknote/react'
+import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react'
 import { codeBlockOptions } from '@blocknote/code-block'
 import { TextSelection } from 'prosemirror-state'
 import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
@@ -17,7 +17,14 @@ import { buildTableOfContents } from '@/utils/tableOfContents'
 import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile } from '@/lib/tauri'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
+import { Network, Sigma } from 'lucide-react'
 import { EditorContextMenu } from './EditorContextMenu'
+import { MermaidBlockSpec, transformMermaidBlocks, MERMAID_BLOCK_TYPE } from './mermaidBlockSpec'
+import {
+  KatexBlockSpec,
+  transformKatexBlocks,
+  KATEX_BLOCK_TYPE,
+} from './katexBlockSpec'
 import '@blocknote/mantine/style.css'
 
 interface MarkdownEditorProps {
@@ -72,6 +79,15 @@ function BlockNoteInner({
   // In newer versions, we need to create the code block spec using createCodeBlockSpec
   // Using type assertion to resolve shiki types conflict
   const codeBlock = createCodeBlockSpec(codeBlockOptions as any)
+
+  // Create a custom schema that includes the default blocks plus the mermaid block
+  const schema = BlockNoteSchema.create({
+    blockSpecs: {
+      ...defaultBlockSpecs,
+      mermaidBlock: MermaidBlockSpec(),
+      katexBlock: KatexBlockSpec(),
+    } as any,
+  })
 
   const resolveUploadDir = async (): Promise<string> => {
     const filePath = activeTab?.path || ''
@@ -307,6 +323,7 @@ function BlockNoteInner({
 
   const editor = useCreateBlockNote({
     initialContent: blocks,
+    schema,
     codeBlock,
     uploadFile,
     resolveFileUrl,
@@ -403,7 +420,11 @@ function BlockNoteInner({
       try {
         let blocks: PartialBlock[] = []
         try {
-          blocks = await editor.tryParseMarkdownToBlocks(text)
+          blocks = await editor.tryParseMarkdownToBlocks(text) as unknown as PartialBlock[]
+          // Transform mermaid code blocks to mermaid blocks
+          blocks = transformMermaidBlocks(blocks) as PartialBlock[]
+          // Transform math code blocks to katex blocks
+          blocks = transformKatexBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
           console.warn('[MarkdownEditor] Failed to parse markdown for insert, treating as plain text:', parseError)
           // Fallback: treat as plain text
@@ -515,7 +536,11 @@ function BlockNoteInner({
       try {
         let blocks: PartialBlock[] = []
         try {
-          blocks = await editor.tryParseMarkdownToBlocks(text)
+          blocks = await editor.tryParseMarkdownToBlocks(text) as unknown as PartialBlock[]
+          // Transform mermaid code blocks to mermaid blocks
+          blocks = transformMermaidBlocks(blocks) as PartialBlock[]
+          // Transform math code blocks to katex blocks
+          blocks = transformKatexBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
           console.warn('[MarkdownEditor] Failed to parse markdown for replace, treating as plain text:', parseError)
           // Fallback: treat as plain text
@@ -593,7 +618,45 @@ function BlockNoteInner({
   const handleChange = async () => {
     if (!onChange || !editor) return
     try {
-      const rawMd = await editor.blocksToMarkdownLossy(editor.document)
+      // Custom serialization for mermaid blocks
+      const document = (editor.document as any[]).map((block: any) => {
+        if (block.type === MERMAID_BLOCK_TYPE) {
+          const props = block.props || {}
+          const diagram = props.diagram || ''
+          // Embed width/height as HTML comment in diagram content for persistence
+          const w = props.width || 0
+          const h = props.height || 0
+          let content = diagram
+          if (w > 0 || h > 0) {
+            const meta = JSON.stringify({ width: w, height: h })
+            // Remove any existing meta comment first
+            content = diagram.replace(/<!--\s*mermaid-meta:.*?-->\s*\n?/g, '')
+            content = `<!-- mermaid-meta:${meta} -->\n${content}`
+          }
+          return {
+            ...block,
+            type: 'codeBlock',
+            props: { language: 'mermaid' },
+            content: [{ type: 'text', text: content }],
+          }
+        }
+        if (block.type === KATEX_BLOCK_TYPE) {
+          const katexProps = block.props as { formula?: string; display?: boolean; width?: number; height?: number }
+          // Embed width/height in the formula as HTML comment if set
+          let formula = katexProps.formula || ''
+          if (katexProps.width && katexProps.height) {
+            formula = `<!-- katex-meta:{"width":${katexProps.width},"height":${katexProps.height}} -->\n${formula}`
+          }
+          return {
+            ...block,
+            type: 'codeBlock',
+            props: { language: katexProps.display !== false ? 'math' : 'math-inline' },
+            content: [{ type: 'text', text: formula }],
+          }
+        }
+        return block
+      })
+      const rawMd = await editor.blocksToMarkdownLossy(document as typeof editor.document)
       const md = compactMarkdown(rawMd)
       lastContentRef.current = md
       onChange(md)
@@ -658,8 +721,200 @@ function BlockNoteInner({
       if (tiptapEditor) {
         return tiptapEditor.state.doc.textContent || ''
       }
+    // eslint-disable-next-line no-empty
     } catch {}
     return ''
+  }, [editor])
+
+  // Custom slash menu items: default items + Mermaid diagram templates
+  const getCustomSlashMenuItems = useCallback(async (query: string) => {
+    const defaultItems = getDefaultReactSlashMenuItems(editor)
+    
+    // Helper to insert a mermaid block
+    const insertMermaidBlock = (diagram: string) => {
+      const newBlock = {
+        type: MERMAID_BLOCK_TYPE,
+        props: {
+          source: `\`\`\`mermaid\n${diagram}\`\`\``,
+          diagram,
+        },
+      } as any
+
+      const currentBlock = editor.getTextCursorPosition().block
+      if (Array.isArray(currentBlock.content) && currentBlock.content.length === 0) {
+        editor.updateBlock(currentBlock, newBlock)
+      } else {
+        editor.insertBlocks([newBlock], currentBlock.id, 'after')
+      }
+    }
+
+    // Mermaid diagram templates
+    const mermaidTemplates = [
+      {
+        title: 'Mermaid',
+        subtext: 'Flowchart diagram',
+        aliases: ['mermaid', 'diagram', 'chart', '图表', '流程图'],
+        diagram: `graph TD\n    A[Start] --> B{Decision?}\n    B -->|Yes| C[OK]\n    B -->|No| D[Cancel]\n`,
+      },
+      {
+        title: 'Mermaid Sequence',
+        subtext: 'Sequence diagram',
+        aliases: ['sequence', '时序图', 'sequenceDiagram'],
+        diagram: `sequenceDiagram\n    participant Alice\n    participant Bob\n    Alice->>Bob: Hello Bob!\n    Bob-->>Alice: Hi Alice!\n`,
+      },
+      {
+        title: 'Mermaid Gantt',
+        subtext: 'Gantt chart',
+        aliases: ['gantt', '甘特图', 'project', 'schedule'],
+        diagram: `gantt
+    title Project Schedule
+    dateFormat YYYY-MM-DD
+    axisFormat %m/%d
+    section Phase 1
+    Task 1 :a1, 2024-01-01, 7d
+    Task 2 :after a1, 5d
+    section Phase 2
+    Task 3 :2024-01-15, 10d
+`,
+      },
+      {
+        title: 'Mermaid Class',
+        subtext: 'Class diagram',
+        aliases: ['class', '类图', 'classDiagram', 'oop'],
+        diagram: `classDiagram\n    class Animal {\n        +String name\n        +makeSound()\n    }\n    class Dog {\n        +fetch()\n    }\n    Animal <|-- Dog\n`,
+      },
+      {
+        title: 'Mermaid State',
+        subtext: 'State diagram',
+        aliases: ['state', '状态图', 'stateDiagram'],
+        diagram: `stateDiagram-v2\n    [*] --> Idle\n    Idle --> Processing : submit\n    Processing --> Success : ok\n    Processing --> Error : fail\n    Success --> [*]\n    Error --> Idle : retry\n`,
+      },
+      {
+        title: 'Mermaid ER',
+        subtext: 'Entity relationship diagram',
+        aliases: ['er', 'erDiagram', '实体关系图', 'database', 'db'],
+        diagram: `erDiagram\n    USER ||--o{ ORDER : places\n    ORDER ||--|{ LINE-ITEM : contains\n    USER {\n        int id\n        string name\n    }\n`,
+      },
+      {
+        title: 'Mermaid Pie',
+        subtext: 'Pie chart',
+        aliases: ['pie', '饼图', 'pieChart', 'percentage'],
+        diagram: `pie title Distribution\n    "Category A" : 40\n    "Category B" : 30\n    "Category C" : 20\n    "Category D" : 10\n`,
+      },
+      {
+        title: 'Mermaid Mindmap',
+        subtext: 'Mind map',
+        aliases: ['mindmap', '思维导图', 'brainstorm'],
+        diagram: `mindmap\n  root((Topic))\n    Branch A\n      Leaf 1\n      Leaf 2\n    Branch B\n      Leaf 3\n      Leaf 4\n`,
+      },
+      {
+        title: 'Mermaid Journey',
+        subtext: 'User journey map',
+        aliases: ['journey', '用户旅程图', 'userjourney'],
+        diagram: `journey\n    title User Journey\n    section Discovery\n      Search for product: 5: Customer\n      Find product page: 4: Customer\n    section Purchase\n      Add to cart: 5: Customer\n      Checkout: 3: Customer\n`,
+      },
+      {
+        title: 'Mermaid Timeline',
+        subtext: 'Timeline diagram',
+        aliases: ['timeline', '时间线', 'history'],
+        diagram: `timeline\n    title History\n    section Period 1\n        2020 : Event A\n        2021 : Event B\n    section Period 2\n        2022 : Event C\n        2023 : Event D\n`,
+      },
+    ]
+
+    const mermaidItems = mermaidTemplates.map(tpl => ({
+      title: tpl.title,
+      icon: <Network size={18} />,
+      subtext: tpl.subtext,
+      group: 'MerMaid',
+      aliases: tpl.aliases,
+      onItemClick: () => insertMermaidBlock(tpl.diagram),
+    }))
+
+    // Helper to insert a katex block
+    const insertKatexBlock = (formula: string, display: boolean) => {
+      const language = display ? 'math' : 'math-inline'
+      const newBlock = {
+        type: KATEX_BLOCK_TYPE,
+        props: {
+          source: `\`\`\`${language}\n${formula}\n\`\`\``,
+          formula,
+          display,
+        },
+      } as any
+
+      const currentBlock = editor.getTextCursorPosition().block
+      if (Array.isArray(currentBlock.content) && currentBlock.content.length === 0) {
+        editor.updateBlock(currentBlock, newBlock)
+      } else {
+        editor.insertBlocks([newBlock], currentBlock.id, 'after')
+      }
+    }
+
+    // KaTeX math formula templates
+    const katexTemplates = [
+      {
+        title: 'Math (Block)',
+        subtext: 'Block-level LaTeX formula',
+        aliases: ['math', 'katex', 'latex', '公式', '数学', '块级公式', 'equation', 'formula'],
+        formula: `E = mc^2`,
+        display: true,
+      },
+      {
+        title: 'Math (Inline)',
+        subtext: 'Inline LaTeX formula',
+        aliases: ['math-inline', 'katex-inline', 'latex-inline', '行内公式', 'inline math'],
+        formula: `E = mc^2`,
+        display: false,
+      },
+      {
+        title: 'Math — Quadratic',
+        subtext: 'Quadratic formula',
+        aliases: ['quadratic', '一元二次方程', '求根公式'],
+        formula: `x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}`,
+        display: true,
+      },
+      {
+        title: 'Math — Sum',
+        subtext: 'Summation formula',
+        aliases: ['sum', '求和', 'sigma'],
+        formula: `\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}`,
+        display: true,
+      },
+      {
+        title: 'Math — Integral',
+        subtext: 'Definite integral',
+        aliases: ['integral', '积分', 'calculus'],
+        formula: `\\int_{a}^{b} f(x)\\,dx = F(b) - F(a)`,
+        display: true,
+      },
+      {
+        title: 'Math — Matrix',
+        subtext: '2x2 matrix',
+        aliases: ['matrix', '矩阵', 'linear algebra'],
+        formula: `A = \\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}`,
+        display: true,
+      },
+    ]
+
+    const katexItems = katexTemplates.map(tpl => ({
+      title: tpl.title,
+      icon: <Sigma size={18} />,
+      subtext: tpl.subtext,
+      group: 'Katex',
+      aliases: tpl.aliases,
+      onItemClick: () => insertKatexBlock(tpl.formula, tpl.display),
+    }))
+
+    const allItems = [...defaultItems, ...mermaidItems, ...katexItems]
+    
+    // Filter items by query
+    const lowerQuery = query.toLowerCase()
+    return allItems.filter((item) => {
+      const titleMatch = item.title.toLowerCase().includes(lowerQuery)
+      const subtextMatch = item.subtext?.toLowerCase().includes(lowerQuery) ?? false
+      const aliasMatch = item.aliases?.some((alias: string) => alias.toLowerCase().includes(lowerQuery)) ?? false
+      return titleMatch || subtextMatch || aliasMatch
+    })
   }, [editor])
 
   return (
@@ -675,7 +930,13 @@ function BlockNoteInner({
               editor={editor}
               theme={blocknoteTheme}
               onChange={handleChange}
-            />
+              slashMenu={false}
+            >
+              <SuggestionMenuController
+                triggerCharacter="/"
+                getItems={getCustomSlashMenuItems}
+              />
+            </BlockNoteView>
           </div>
         </ScrollArea>
       </div>
@@ -727,6 +988,10 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
         
         try {
           blocks = await tempEditor.tryParseMarkdownToBlocks(content)
+          // Transform mermaid code blocks to mermaid blocks
+          blocks = transformMermaidBlocks(blocks) as PartialBlock[]
+          // Transform math code blocks to katex blocks
+          blocks = transformKatexBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
           console.warn('[MarkdownEditor] Markdown parsing failed, treating as plain text:', parseError)
           // If markdown parsing fails, treat content as plain text

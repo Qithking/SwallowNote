@@ -7,7 +7,12 @@
 import { useState, useEffect, memo, useCallback } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { Copy, Check } from 'lucide-react'
+import { MermaidBlock } from './MermaidBlock'
+import { MathBlock } from './MathBlock'
 
 /** Lazy-loaded shiki highlighter singleton */
 let highlighterPromise: Promise<any> | null = null
@@ -38,7 +43,8 @@ function normalizeLang(lang: string): string {
 }
 
 /** Module-level constant to avoid re-creating the plugins array on every render */
-const REMARK_PLUGINS = [remarkGfm]
+const REMARK_PLUGINS = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS = [rehypeKatex]
 
 const SHIKI_LANGS = new Set([
   'javascript', 'typescript', 'python', 'rust', 'css', 'html', 'json',
@@ -151,6 +157,16 @@ const MARKDOWN_COMPONENTS: Components = {
       return <InlineCode>{children}</InlineCode>
     }
 
+    // Handle Mermaid diagrams
+    if (match && match[1].toLowerCase() === 'mermaid') {
+      return <MermaidBlock diagram={codeStr} />
+    }
+
+    // Handle KaTeX math formulas (code block syntax)
+    if (match && (match[1].toLowerCase() === 'math' || match[1].toLowerCase() === 'math-inline')) {
+      return <MathBlock formula={codeStr} display={match[1].toLowerCase() === 'math'} />
+    }
+
     return <CodeBlock code={codeStr} language={match ? match[1] : 'text'} />
   },
   pre: ({ children }) => <>{children}</>,
@@ -189,6 +205,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content }: Mark
     <div className="ai-markdown-content text-xs leading-relaxed">
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         components={MARKDOWN_COMPONENTS}
       >
         {content}
