@@ -36,6 +36,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Split large dependencies into separate chunks to reduce per-chunk memory usage
+        // and improve caching — unchanged vendor chunks don't need re-downloading
         manualChunks(id) {
           if (id.includes('node_modules')) {
             if (id.includes('mermaid')) return 'vendor-mermaid'
@@ -45,6 +46,11 @@ export default defineConfig({
             if (id.includes('simple-mind-map')) return 'vendor-mindmap'
             if (id.includes('codemirror') || id.includes('@codemirror')) return 'vendor-codemirror'
             if (id.includes('blocknote')) return 'vendor-blocknote'
+            if (id.includes('@radix-ui')) return 'vendor-radix'
+            if (id.includes('react-dom')) return 'vendor-react'
+            if (id.includes('lucide-react')) return 'vendor-lucide'
+            if (id.includes('@mantine')) return 'vendor-mantine'
+            if (id.includes('ai-sdk') || id.includes('@ai-sdk')) return 'vendor-ai'
           }
         },
       },

@@ -32,11 +32,8 @@ import { go } from '@codemirror/lang-go'
 import { php } from '@codemirror/lang-php'
 import { java } from '@codemirror/lang-java'
 
-// Statically import commonly used legacy StreamLanguage modes
-import { swift } from '@codemirror/legacy-modes/mode/swift'
-import { ruby } from '@codemirror/legacy-modes/mode/ruby'
-import { shell } from '@codemirror/legacy-modes/mode/shell'
-import { csharp, kotlin, scala, dart, objectiveC, objectiveCpp } from '@codemirror/legacy-modes/mode/clike'
+// Legacy StreamLanguage modes — all dynamically imported to reduce bundle size
+// Only the registry entries are defined here; actual imports happen on first use.
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -85,16 +82,16 @@ const languageExtensions: Record<string, () => any> = {
   cpp: () => cpp(),
   vue: () => html(),
 
-  // ── Commonly used legacy StreamLanguage modes (statically imported) ──
-  swift: () => streamLang(swift),
-  ruby: () => streamLang(ruby),
-  shell: () => streamLang(shell),
-  csharp: () => streamLang(csharp),
-  kotlin: () => streamLang(kotlin),
-  scala: () => streamLang(scala),
-  dart: () => streamLang(dart),
-  objectivec: () => streamLang(objectiveC),
-  objectivecpp: () => streamLang(objectiveCpp),
+  // ── Commonly used legacy StreamLanguage modes (dynamically imported) ──
+  swift: () => import('@codemirror/legacy-modes/mode/swift').then(m => streamLang(m.swift)),
+  ruby: () => import('@codemirror/legacy-modes/mode/ruby').then(m => streamLang(m.ruby)),
+  shell: () => import('@codemirror/legacy-modes/mode/shell').then(m => streamLang(m.shell)),
+  csharp: () => import('@codemirror/legacy-modes/mode/clike').then(m => streamLang(m.csharp)),
+  kotlin: () => import('@codemirror/legacy-modes/mode/clike').then(m => streamLang(m.kotlin)),
+  scala: () => import('@codemirror/legacy-modes/mode/clike').then(m => streamLang(m.scala)),
+  dart: () => import('@codemirror/legacy-modes/mode/clike').then(m => streamLang(m.dart)),
+  objectivec: () => import('@codemirror/legacy-modes/mode/clike').then(m => streamLang(m.objectiveC)),
+  objectivecpp: () => import('@codemirror/legacy-modes/mode/clike').then(m => streamLang(m.objectiveCpp)),
 
   // ── Less common legacy modes (dynamically imported on first use) ──
   lua: () => import('@codemirror/legacy-modes/mode/lua').then(m => streamLang(m.lua)),
@@ -122,8 +119,8 @@ const languageExtensions: Record<string, () => any> = {
   gasarm: () => import('@codemirror/legacy-modes/mode/gas').then(m => streamLang(m.gasArm)),
   properties: () => import('@codemirror/legacy-modes/mode/properties').then(m => streamLang(m.properties)),
   groovy: () => import('@codemirror/legacy-modes/mode/groovy').then(m => streamLang(m.groovy)),
-  shader: () => streamLang(csharp), // Approximate highlighting for shaders
-  elixir: () => streamLang(ruby),  // Approximate: Elixir syntax is similar to Ruby
+  shader: () => import('@codemirror/legacy-modes/mode/clike').then(m => streamLang(m.csharp)), // Approximate highlighting for shaders
+  elixir: () => import('@codemirror/legacy-modes/mode/ruby').then(m => streamLang(m.ruby)),  // Approximate: Elixir syntax is similar to Ruby
   graphql: () => [],  // No dedicated mode, fall back to plain text
   makefile: () => [], // No dedicated mode, fall back to plain text
   bat: () => [],      // No dedicated mode, fall back to plain text

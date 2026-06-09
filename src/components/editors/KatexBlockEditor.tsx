@@ -8,7 +8,6 @@
  * Supports width/height resizing via drag handles (block mode only).
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
-import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { Code2, Maximize2 } from 'lucide-react'
 import {
@@ -38,26 +37,35 @@ interface RenderState {
   error: string | null
 }
 
-function renderKatex(formula: string, display: boolean): { html: string; error: string | null } {
-  try {
-    const html = katex.renderToString(formula, {
-      displayMode: display,
-      throwOnError: false,
-      output: 'html',
-      strict: 'ignore',
-      trust: false,
-    })
-    return { html, error: null }
-  } catch (e) {
-    return { html: '', error: e instanceof Error ? e.message : String(e) }
+// Lazy-load katex to reduce initial bundle size — only imported when a KaTeX block is rendered
+let katexModule: typeof import('katex') | null = null
+async function getKatex() {
+  if (!katexModule) {
+    katexModule = await import('katex')
   }
+  return katexModule.default
+}
+
+function renderKatex(formula: string, display: boolean): Promise<{ html: string; error: string | null }> {
+  return getKatex().then((katex) => {
+    try {
+      const html = katex.renderToString(formula, {
+        displayMode: display,
+        throwOnError: false,
+        output: 'html',
+        strict: 'ignore',
+        trust: false,
+      })
+      return { html, error: null }
+    } catch (e) {
+      return { html: '', error: e instanceof Error ? e.message : String(e) }
+    }
+  }).catch(() => ({ html: '', error: 'Failed to load KaTeX' }))
 }
 
 export function KatexBlockEditor({ source, formula, display, width, height, block, editor }: KatexBlockEditorProps) {
-  const [state, setState] = useState<RenderState>(() => {
-    const initial = renderKatex(formula, display)
-    return { formula, display, ...initial }
-  })
+  const [state, setState] = useState<RenderState>({ formula, display, html: '', error: null })
+  const [isLoading, setIsLoading] = useState(true)
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(formula)
   
@@ -73,8 +81,15 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
 
   // Re-render when the formula or display mode changes
   useEffect(() => {
-    const next = renderKatex(formula, display)
-    setState({ formula, display, ...next })
+    let cancelled = false
+    setIsLoading(true)
+    renderKatex(formula, display).then((result) => {
+      if (!cancelled) {
+        setState({ formula, display, ...result })
+        setIsLoading(false)
+      }
+    })
+    return () => { cancelled = true }
   }, [formula, display])
 
   const handleStartEdit = useCallback(() => {
@@ -110,7 +125,7 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
   const fallbackSource = source || `\`\`\`${display ? 'math' : 'math-inline'}\n${formula}\n\`\`\``
 
   // Error or empty formula: show source fallback with an edit button
-  if (!formula.trim() || state.error) {
+  if (!formula.trim() || state.error || isLoading) {
     return (
       <figure
         className="katex-block-editor katex-block-editor--error my-2 rounded-md overflow-hidden border border-border/50 bg-black/[0.02] dark:bg-white/[0.02]"

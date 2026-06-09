@@ -5,7 +5,31 @@
  * language is rendered as a KaTeX formula.
  */
 import { useEffect, useState } from 'react'
-import katex from 'katex'
+// Lazy-load katex to reduce initial bundle size
+let katexModule: typeof import('katex') | null = null
+async function getKatex() {
+  if (!katexModule) {
+    katexModule = await import('katex')
+  }
+  return katexModule.default
+}
+
+function renderFormula(formula: string, display: boolean): Promise<{ html: string; error: boolean }> {
+  return getKatex().then((katex) => {
+    try {
+      const html = katex.renderToString(formula, {
+        displayMode: display,
+        throwOnError: false,
+        output: 'html',
+        strict: 'ignore',
+        trust: false,
+      })
+      return { html, error: false }
+    } catch {
+      return { html: '', error: true }
+    }
+  }).catch(() => ({ html: '', error: true }))
+}
 
 interface MathBlockProps {
   formula: string
@@ -17,30 +41,24 @@ interface RenderState {
   error: boolean
 }
 
-function renderFormula(formula: string, display: boolean): { html: string; error: boolean } {
-  try {
-    const html = katex.renderToString(formula, {
-      displayMode: display,
-      throwOnError: false,
-      output: 'html',
-      strict: 'ignore',
-      trust: false,
-    })
-    return { html, error: false }
-  } catch {
-    return { html: '', error: true }
-  }
-}
-
 export function MathBlock({ formula, display }: MathBlockProps) {
-  const [state, setState] = useState<RenderState>(() => renderFormula(formula, display))
+  const [state, setState] = useState<RenderState>({ html: '', error: false })
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    setState(renderFormula(formula, display))
+    let cancelled = false
+    setIsLoading(true)
+    renderFormula(formula, display).then((result) => {
+      if (!cancelled) {
+        setState(result)
+        setIsLoading(false)
+      }
+    })
+    return () => { cancelled = true }
   }, [formula, display])
 
   // Error or empty: show source fallback
-  if (!formula.trim() || state.error) {
+  if (!formula.trim() || state.error || isLoading) {
     return (
       <div className="my-2 rounded-md overflow-hidden border border-border/50 bg-black/[0.02] dark:bg-white/[0.02]">
         <div className="flex items-center px-3 py-1 text-[10px] text-muted-foreground bg-black/5 dark:bg-white/5">
