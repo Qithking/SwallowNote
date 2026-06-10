@@ -9,6 +9,7 @@
 | 文档 | 简介 |
 | --- | --- |
 | [plugin-system/README.md](plugin-system/README.md) | 插件系统总览与架构 |
+| [plugin-system/DEVELOPER_GUIDE.md](plugin-system/DEVELOPER_GUIDE.md) | **完整开发指南**（推荐主入口） |
 | [plugin-system/quickstart.md](plugin-system/quickstart.md) | 5 分钟上手：第一个插件 |
 | [plugin-system/manifest.md](plugin-system/manifest.md) | manifest 字段说明 |
 | [plugin-system/lifecycle.md](plugin-system/lifecycle.md) | 生命周期钩子 |

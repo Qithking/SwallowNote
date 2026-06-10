@@ -1,5 +1,7 @@
 # 插件系统总览
 
+> **第一次看？** 请先读 [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) —— 一份从头到尾不遗漏任何要点的完整开发指南。
+
 SwallowNote 插件系统允许第三方代码扩展编辑器面板、订阅宿主事件、持久化数据、为右键菜单贡献条目、调用 Rust 后端。所有能力都通过一个零依赖的 JavaScript 入口文件（`index.js` 或 `index.tsx`）暴露。
 
 ## 能力矩阵

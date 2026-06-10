@@ -3,33 +3,47 @@
  *
  * This file is a complete, runnable plugin manifest. It exists as a
  * reference for plugin authors and as a smoke test for the host's
- * lifecycle / event / storage APIs.
+ * lifecycle / event / storage / context-menu APIs.
  *
- * What it demonstrates:
- *  - Lifecycle hooks:      onLoad, onUnload, onMount, onUnmount
- *  - Event subscription:   usePluginEvent for note:change
- *  - Persistent storage:   usePluginStorage for `viewMode` preference
- *  - The 4 event sources that drive its UI
+ * What it demonstrates
+ * --------------------
+ *  - Lifecycle hooks (all 8):
+ *      onLoad / onUnload / onEnable / onDisable
+ *      onMount / onUnmount / onActivate / onDeactivate
+ *  - Event subscription: `usePluginEvent` for `note:change` / `note:open`
+ *  - Persistent storage: `usePluginStorage` for the `viewMode` preference
+ *    and `store.get` / `store.set` for the install-time `installedAt` stamp
+ *  - Context menu registration on the editor / tab surfaces
+ *  - Settings dialog re-using the same storage hook as the main panel
+ *  - Permission declaration matching the runtime APIs the plugin touches
+ *  - `isActive` prop usage to reflect the active/inactive panel state
  *
- * To install: copy this file plus a `manifest.json` into a folder
- * under the plugins dir, then click "Install from folder" in the
- * plugin manager.
+ * To install
+ * ----------
+ * Option A – from a folder:
+ *   1. Copy this file plus a `manifest.json` into a folder under the
+ *      plugins dir, then click "Install from folder" in the plugin
+ *      manager.
+ * Option B – inline (dev only):
+ *   1. Import this file's default export from the host's dev
+ *      bootstrap and pass it to `usePluginStore.getState().setPlugins`
+ *      for hot-reload testing.
  *
  * The `react-refresh/only-export-components` rule is disabled for
  * this file because plugin manifests export both a component and a
  * metadata object – that's the contract, not a HMR footgun.
  */
 /* eslint-disable react-refresh/only-export-components */
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
-import { pluginEventBus, getPluginStorage } from '@/lib/plugin-host'
+import { pluginEventBus, getPluginStorage, buildPluginContext } from '@/lib/plugin-host'
 import { usePluginStorage, usePluginEvent } from '@/lib/plugin-hooks'
 import { registerContextMenu, unregisterContextMenu } from '@/lib/plugin-menu'
 
 // ─── Panel component ──────────────────────────────────────────────────────────
 
 function RecentNotesPanel(panel: PluginPanelProps): ReactNode {
-  const { close, pluginId } = panel
+  const { close, pluginId, isActive } = panel
   // Persisted UI preference: 'list' | 'count'. Survives app restart.
   const [viewMode, setViewMode] = usePluginStorage<'list' | 'count'>(panel, 'viewMode', 'count')
   // In-memory counter that ticks on every note:change event.
@@ -49,7 +63,19 @@ function RecentNotesPanel(panel: PluginPanelProps): ReactNode {
   return (
     <div className="p-4 text-sm">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-semibold">Recent Notes</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold">Recent Notes</h2>
+          {/* Reflect the active state so plugin authors can show
+              e.g. a recording dot while the panel is in front. */}
+          <span
+            className={
+              isActive
+                ? 'inline-block w-1.5 h-1.5 rounded-full bg-emerald-500'
+                : 'inline-block w-1.5 h-1.5 rounded-full bg-muted-foreground/40'
+            }
+            title={isActive ? 'Active' : 'Inactive'}
+          />
+        </div>
         <button
           type="button"
           onClick={close}
@@ -111,14 +137,28 @@ function RecentIcon({ size = 18 }: { size?: number }): ReactNode {
  */
 function RecentNotesSettings(panel: PluginPanelProps): ReactNode {
   const { close, pluginId } = panel
-  const store = getPluginStorage(pluginId)
   const [installedAt, setInstalledAt] = useState<string | null>(null)
+  // Same `viewMode` key as the main panel — settings and main panel
+  // share state through the host's plugin-scoped storage.
   const [viewMode, setViewMode] = usePluginStorage<'list' | 'count'>(panel, 'viewMode', 'count')
 
-  useState(() => {
-    void store.get<string>('installedAt').then((v) => setInstalledAt(v))
-    return null
-  })
+  // Read `installedAt` lazily via the host's storage API. The
+  // previous version used `useState(() => …)` and returned `null`
+  // from the init function, which is invalid for `useState` and
+  // caused the read to be skipped on remount. A `useEffect` with a
+  // cancellation flag is the correct pattern for one-shot async
+  // hydration of a `useState` slot.
+  useEffect(() => {
+    let cancelled = false
+    const store = getPluginStorage(pluginId)
+    void store.get<string>('installedAt').then((v) => {
+      if (cancelled) return
+      setInstalledAt(v)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [pluginId])
 
   return (
     <div className="p-4 text-sm space-y-4">
@@ -169,6 +209,12 @@ function RecentNotesSettings(panel: PluginPanelProps): ReactNode {
  * one-time initialization that doesn't need a panel. The host gives
  * us a PluginContext – we use it to grab our plugin-scoped storage
  * and seed a default value.
+ *
+ * NOTE: Build the `PluginContext` argument that the host normally
+ * passes in for production hooks. For this *in-tree* sample we use
+ * the same `buildPluginContext` helper the host itself uses so the
+ * semantics are 1:1. (`invokeBackend` will throw from a hook,
+ * which is by design — see `plugin-host.ts` for the rationale.)
  */
 async function onLoad(context: { pluginId: string }): Promise<void> {
   const store = getPluginStorage(context.pluginId)
@@ -212,6 +258,25 @@ function onUnload(context: { pluginId: string }): void {
 }
 
 /**
+ * onEnable fires when the plugin transitions from disabled →
+ * enabled. Subscribe to long-lived event streams or spin up
+ * background work that should pause while the plugin is off.
+ */
+function onEnable(context: { pluginId: string }): void {
+  // For this example we just log; the host's health monitor
+  // surfaces any plugin that logs >N errors/min after enable.
+  console.debug(`[recent-notes] enabled (pluginId=${context.pluginId})`)
+}
+
+/**
+ * onDisable fires on the enabled → disabled edge. Unsubscribe from
+ * anything `onEnable` set up so a disabled plugin stays quiet.
+ */
+function onDisable(context: { pluginId: string }): void {
+  console.debug(`[recent-notes] disabled (pluginId=${context.pluginId})`)
+}
+
+/**
  * onMount fires every time the panel component mounts. We could
  * pre-fetch heavy data here, but for this example we just log.
  */
@@ -230,13 +295,32 @@ function onUnmount(): void {
   // Storage is already serialized; nothing extra to do.
 }
 
+/**
+ * onActivate fires when the panel becomes the visible/active one.
+ * The host also passes `isActive` through panel props for
+ * per-render state, but lifecycle hooks are the right place for
+ * "side effects on focus" (start animations, refresh charts…).
+ */
+function onActivate(context: { pluginId: string }): void {
+  console.debug(`[recent-notes] activated (pluginId=${context.pluginId})`)
+}
+
+/**
+ * onDeactivate fires when the panel stops being the visible/active
+ * one. Mirror image of `onActivate` – pause animations, drop
+ * in-flight fetches, etc.
+ */
+function onDeactivate(context: { pluginId: string }): void {
+  console.debug(`[recent-notes] deactivated (pluginId=${context.pluginId})`)
+}
+
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
 const manifest: PluginDefinition = {
   id: 'com.example.recent-notes',
   name: 'Recent Notes Counter',
   description: 'Counts how many notes you opened or edited in this session.',
-  version: '0.1.0',
+  version: '0.2.0',
   author: 'SwallowNote Team',
   publishedAt: '2026-06-10',
   iconPosition: 'sidebar',
@@ -251,17 +335,26 @@ const manifest: PluginDefinition = {
   settings: RecentNotesSettings,
   pluginPath: '', // Filled in by the loader at install time.
   hasBackend: false,
-  permissions: [],
+  // Declare exactly the permissions the runtime APIs we touch
+  // require. The host's permission guard throws
+  // `PluginPermissionDeniedError` if any of these are missing, so
+  // the manifest MUST stay in sync with the code below.
+  permissions: ['storage', 'events', 'context-menu'],
   hooks: {
     onLoad,
     onUnload,
+    onEnable,
+    onDisable,
     onMount,
     onUnmount,
+    onActivate,
+    onDeactivate,
   },
 }
 
 export default manifest
 
-// Re-export the panel for the host so it can mount the same module
-// reference in tests without going through the loader.
-export { RecentNotesPanel }
+// Re-export the panel and the context builder for tests / hot-reload
+// so consumers can mount the same module reference without going
+// through the loader.
+export { RecentNotesPanel, buildPluginContext }
