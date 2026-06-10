@@ -9,7 +9,7 @@
  * State lives in `usePluginMarketStore` (Zustand) so the install
  * state survives navigation away from the marketplace tab.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, RefreshCw, X, Store, Download, CheckCircle2, AlertCircle, Package, Tag } from 'lucide-react'
 import { usePluginMarketStore, usePluginStore } from '@/stores'
@@ -35,8 +35,46 @@ function PluginMarketView() {
   const setSearchQuery = usePluginMarketStore((s) => s.setSearchQuery)
   const tagFilter = usePluginMarketStore((s) => s.tagFilter)
   const toggleTag = usePluginMarketStore((s) => s.toggleTag)
-  const allTags = usePluginMarketStore((s) => s.allTags())
-  const filteredEntries = usePluginMarketStore((s) => s.filteredEntries())
+  // Derive `allTags` and `filteredEntries` in the component via
+  // `useMemo`. Calling store methods directly through the selector
+  // — `usePluginMarketStore((s) => s.allTags())` — is a classic
+  // Zustand footgun: `allTags()` returns a freshly-sorted `Array`
+  // on every call, so `Object.is(prev, next)` is always `false`,
+  // React re-renders, the selector runs again, the array is a
+  // different reference, React re-renders … in a tight loop. The
+  // browser keeps redrawing, the click event for the market card
+  // never gets a chance to dispatch, and the UI appears to hang
+  // on click. Subscribe to the underlying `index` (stable
+  // reference between refetches) and `searchQuery` / `tagFilter`
+  // (string / string[] — stable references between user edits)
+  // and recompute the derived list with `useMemo`, so a click on
+  // a card only re-renders the component when the underlying
+  // inputs actually change.
+  const allTags = useMemo(() => {
+    const idx = index
+    if (!idx) return []
+    const set = new Set<string>()
+    for (const p of idx.plugins) {
+      for (const t of p.tags) set.add(t)
+    }
+    return Array.from(set).sort()
+  }, [index])
+  const filteredEntries = useMemo(() => {
+    if (!index) return []
+    const q = searchQuery.trim().toLowerCase()
+    return index.plugins.filter((p) => {
+      if (tagFilter.length > 0 && !tagFilter.every((t) => p.tags.includes(t))) {
+        return false
+      }
+      if (!q) return true
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        p.tags.some((t) => t.toLowerCase().includes(q))
+      )
+    })
+  }, [index, searchQuery, tagFilter])
   const updates = usePluginMarketStore((s) => s.updates)
   const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
   const localVersionFor = usePluginMarketStore((s) => s.localVersionFor)
