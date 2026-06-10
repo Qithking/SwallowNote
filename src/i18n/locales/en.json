@@ -749,6 +749,8 @@
     "toggleFailed": "Failed to toggle plugin",
     "refresh": "Refresh",
     "installing": "Installing...",
+    "settings": "Plugin Settings",
+    "permissions": "Plugin Permissions",
     "iconPosition": {
       "sidebar": "Sidebar",
       "editorToolbar": "Editor Toolbar",

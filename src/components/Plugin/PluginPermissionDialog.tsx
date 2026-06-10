@@ -72,7 +72,7 @@ export function PluginPermissionDialog({
 
       onGrant?.(selectedPermissions)
       onClose()
-    } catch (err) {
+    } catch {
       setError('Failed to save permissions')
     } finally {
       setIsSubmitting(false)

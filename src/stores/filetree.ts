@@ -41,7 +41,7 @@ export interface FileTreeState {
   collapseAllExceptPath: (filePath: string, rootPath?: string) => void
 }
 
-function findNodeInList(list: FileNode[], path: string): FileNode | null {
+export function findNodeInList(list: FileNode[], path: string): FileNode | null {
   for (const n of list) {
     if (n.path === path) return n
     if (n.children) {
@@ -52,7 +52,7 @@ function findNodeInList(list: FileNode[], path: string): FileNode | null {
   return null
 }
 
-function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
+export function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
     if (n.path === path) {
       // Skip creating a new object if children reference is already the same
@@ -70,7 +70,7 @@ function updateNodesWithChildren(list: FileNode[], path: string, children: FileN
 }
 
 /** Mark a specific node as loading (or not loading) without touching children */
-function setNodeLoading(list: FileNode[], path: string, loading: boolean): FileNode[] {
+export function setNodeLoading(list: FileNode[], path: string, loading: boolean): FileNode[] {
   return list.map((n) => {
     if (n.path === path) return { ...n, isLoading: loading }
     if (n.children) return { ...n, children: setNodeLoading(n.children, path, loading) }

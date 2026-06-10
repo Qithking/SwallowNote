@@ -126,6 +126,11 @@ const manifest: PluginManifest = {
   enabled: true,
   icon: CounterIcon,
   panel: CounterPanel,
+
+  // Storage is the only host capability this sample needs; the
+  // `storage` permission is what the user will be asked to grant at
+  // install time.
+  permissions: ['storage'],
 }
 
 export default manifest

@@ -128,6 +128,23 @@ export interface ContextMenuItem {
 
 export type ContextMenuRegistry = Record<ContextMenuLocation, ContextMenuItem[]>
 
+/**
+ * Plugin permission types. The host's grant model has a fixed
+ * catalog of permissions (see `PLUGIN_PERMISSIONS` in
+ * `src/types/plugin.ts`). Mirror them here so a manifest declared
+ * with the SDK has the same set available to the type-checker.
+ */
+export type PluginPermission =
+  | 'storage'
+  | 'events'
+  | 'context-menu'
+  | 'backend'
+  | 'filesystem-read'
+  | 'filesystem-write'
+  | 'network'
+  | 'clipboard'
+  | 'notifications'
+
 /** The props passed to a panel / settings component. Field order
  *  matches the host's `PluginPanelProps`: action → state → identity. */
 export interface PluginPanelProps {
@@ -163,6 +180,16 @@ export interface PluginManifest {
   icon: ComponentType<{ size?: number }>
   panel: ComponentType<PluginPanelProps>
   settings?: ComponentType<PluginPanelProps>
+  /**
+   * Permissions this plugin needs from the host. Listed values must
+   * match `PluginPermission`; the host shows the user a grant/revoke
+   * dialog at install time and re-checks on every protected call.
+   * A plugin that omits this field gets a default of `[]` – the
+   * panel still loads, but any feature that needs `storage`,
+   * `events`, `backend`, etc. will throw `PluginPermissionDeniedError`
+   * until the user grants them.
+   */
+  permissions?: PluginPermission[]
   // ── Lifecycle hooks (all optional, all flat) ──────────────────────────
   onLoad?: PluginLifecycleHook
   onUnload?: PluginLifecycleHook
@@ -606,8 +633,19 @@ export function usePluginEvent<E extends PluginEvent>(
   const { events } = panel
 
   useEffect(() => {
-    return events.on(event, ((payload) => handlerRef.current(payload)) as PluginEventHandler<E>)
-  }, [event, events])
+    // Stash the pluginId on the wrapper so the host's bus can
+    // enforce the `events` permission. The host's `events.on()` reads
+    // `__pluginId` from the handler and throws
+    // `PluginPermissionDeniedError` if the plugin hasn't been granted
+    // the `events` permission. Without this tag a plugin that
+    // declares no `events` permission would still be able to
+    // subscribe through this hook – bypassing the runtime sandbox.
+    const wrapped = ((payload: PluginEventPayloadMap[E]) => {
+      handlerRef.current(payload)
+    }) as PluginEventHandler<E> & { __pluginId?: string }
+    wrapped.__pluginId = panel.pluginId
+    return events.on(event, wrapped as PluginEventHandler<E>)
+  }, [event, events, panel.pluginId])
 }
 
 /** Subscribe to multiple events with a unified callback. */
@@ -626,13 +664,20 @@ export function usePluginEvents<E extends PluginEvent>(
   handlerRef.current = handler
 
   useEffect(() => {
-    const unsubs = events.map((evt) =>
-      bus.on(evt, ((payload) => handlerRef.current(evt, payload)) as PluginEventHandler<typeof evt>)
-    )
+    // Tag each wrapper with the panel's pluginId so the host's bus
+    // can enforce the `events` permission. See the note on
+    // `usePluginEvent` above.
+    const unsubs = events.map((evt) => {
+      const wrapped = ((payload: PluginEventPayloadMap[typeof evt]) => {
+        handlerRef.current(evt, payload)
+      }) as PluginEventHandler<typeof evt> & { __pluginId?: string }
+      wrapped.__pluginId = panel.pluginId
+      return bus.on(evt, wrapped as PluginEventHandler<typeof evt>)
+    })
     return () => {
       for (const u of unsubs) u()
     }
-  }, [bus, events])
+  }, [bus, events, panel.pluginId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

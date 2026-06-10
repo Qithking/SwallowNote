@@ -98,9 +98,16 @@ function App() {
       const { usePluginStore } = await import('@/stores/plugin')
       scanPlugins()
         .then(loadAllPlugins)
-        .then((defs) => {
+        .then(async (defs) => {
           usePluginStore.getState().setPlugins(defs)
           usePluginStore.getState().setLoaded(true)
+          // Hydrate the in-memory permission guard from localStorage
+          // now that we know the full installed-plugin set. The guard
+          // is what the event bus, storage, and backend IPC consult
+          // synchronously on every operation, so it must be ready
+          // before the user can trigger a protected action.
+          const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
+          await hydratePermissionGuard(defs.map((d) => d.id))
         })
         .catch((err) => {
           console.error('[App] Failed to load plugins on startup:', err)

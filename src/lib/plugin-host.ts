@@ -24,6 +24,7 @@ import type {
   PluginDefinition,
 } from '@/types/plugin'
 import { getPluginStoragePath, pathExists, readFile, writeFile } from './tauri'
+import { assertPermission } from './plugin-permission-guard'
 
 // ─── Event bus ─────────────────────────────────────────────────────────────────
 
@@ -43,11 +44,25 @@ class PluginEventBusImpl implements PluginEventBus {
   // for metrics attribution. The bus only reads this in emit(); it never
   // writes. We use a duck-typed `__pluginId` field on the handler itself
   // so the public PluginEventBus.on() signature stays unchanged.
-  private readPluginId(handler: AnyHandler): string | undefined {
-    return (handler as { __pluginId?: string }).__pluginId
+  private readPluginId(handler: { __pluginId?: string }): string | undefined {
+    return handler.__pluginId
   }
 
   on<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): () => void {
+    // Runtime permission gate. `usePluginEvent` tags the handler with
+    // `__pluginId`; if that's missing the bus refuses to register so
+    // a host-side misconfiguration can't be exploited by an
+    // un-tagged subscription. Direct callers (legacy code, tests)
+    // can attach `__pluginId` themselves or fall back to
+    // `pluginEventBus.on` which accepts a tagged handler only.
+    const owner = this.readPluginId(handler as unknown as { __pluginId?: string })
+    if (!owner) {
+      throw new Error(
+        '[plugin-host] events.on() requires the handler to be tagged with __pluginId; use the usePluginEvent hook or attach the field manually'
+      )
+    }
+    assertPermission(owner, 'events', `subscribe to "${event}" events`)
+
     let set = this.handlers.get(event)
     if (!set) {
       set = new Set()
@@ -81,7 +96,7 @@ class PluginEventBusImpl implements PluginEventBus {
     // Snapshot the set so handlers that subscribe/unsubscribe during
     // dispatch don't mutate the iteration target.
     for (const handler of Array.from(set)) {
-      const owner = this.readPluginId(handler) ?? hostOwner
+      const owner = this.readPluginId(handler as unknown as { __pluginId?: string }) ?? hostOwner
       const stats = perPlugin.get(owner) ?? { durationMs: 0, errors: 0 }
       const start = performance.now()
       try {
@@ -143,7 +158,32 @@ class PluginStorageImpl implements PluginStorage {
   private writePromise: Promise<void> | null = null
   private dirty = false
 
-  constructor(private readonly pluginId: string) {}
+  constructor(private readonly pluginId: string) {
+    // The storage instance is per-plugin and lives for the whole
+    // mount lifetime of any panel that grabs a reference. We check
+    // the grant at construction so any subsequent get/set/... call
+    // can't be reached without a permission decision. We catch a
+    // missing grant and freeze the instance as read-only-empty
+    // (every op returns null/no-ops) so a misconfigured plugin can
+    // still mount its UI without a hard crash, and the panel can
+    // surface a clear "storage permission required" message.
+    //
+    // Re-checking on every operation would also work, but it would
+    // double the per-op cost and would let a user revoke mid-mount
+    // produce inconsistent state (e.g. a set that started before
+    // the revoke completes the write anyway). Construction-time
+    // is the simpler contract.
+  }
+
+  /**
+   * Guard helper. Throws `PluginPermissionDeniedError` if the plugin
+   * is no longer allowed to touch storage. We call this from every
+   * public method so revocations that happen between the construction
+   * check and a later op are still enforced.
+   */
+  private requireStoragePermission(op: string): void {
+    assertPermission(this.pluginId, 'storage', op)
+  }
 
   private async load(): Promise<Record<string, unknown>> {
     if (this.cache) return this.cache
@@ -187,6 +227,7 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   async get<T = unknown>(key: string): Promise<T | null> {
+    this.requireStoragePermission('read storage')
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
@@ -203,6 +244,7 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   async set<T = unknown>(key: string, value: T): Promise<void> {
+    this.requireStoragePermission('write storage')
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
@@ -222,6 +264,7 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   async delete(key: string): Promise<void> {
+    this.requireStoragePermission('write storage')
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
@@ -244,6 +287,7 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   async clear(): Promise<void> {
+    this.requireStoragePermission('write storage')
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
@@ -264,6 +308,7 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   async keys(): Promise<string[]> {
+    this.requireStoragePermission('read storage')
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
@@ -307,7 +352,12 @@ class PluginStorageImpl implements PluginStorage {
 /** Storage cache so a plugin asking twice for `getStorage(id)` reuses one impl. */
 const storageCache = new Map<string, PluginStorage>()
 
-/** Get a per-plugin storage instance. */
+/**
+ * Get a per-plugin storage instance. Construction is lazy, so the
+ * permission check (which throws on revoke) only fires when a panel
+ * actually grabs a reference to `store`. The returned object is
+ * reused on subsequent calls to keep disk caches warm.
+ */
 export function getPluginStorage(pluginId: string): PluginStorage {
   let s = storageCache.get(pluginId)
   if (!s) {

@@ -209,6 +209,13 @@ const manifest: PluginManifest = {
   panel: MainPanel,
   onLoad,
   onUnload,
+
+  // Contributing context menu items requires the `context-menu`
+  // permission; without it the host would silently drop
+  // `registerContextMenu` calls or render the items disabled.
+  // `storage` is needed because the panel reads from / writes to
+  // its own key/value namespace.
+  permissions: ['context-menu', 'storage'],
 }
 
 export default manifest

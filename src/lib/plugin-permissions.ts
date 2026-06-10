@@ -1,10 +1,20 @@
 /**
  * Plugin Permission Manager
- * 
+ *
  * Handles permission checking, granting, and audit logging.
+ *
+ * Persistence layout in `window.localStorage`:
+ *   - `plugin_permissions_<pluginId>`: JSON of `PluginPermissionStatus[]`
+ *   - `plugin_audit_log`:               JSON of `PermissionAuditLogEntry[]`
+ *
+ * The in-memory permission guard (`./plugin-permission-guard.ts`) is
+ * what the event bus, storage, and backend IPC consult on the hot
+ * path. We mirror every grant/revoke there so the UI and the host
+ * can never disagree about whether a permission is granted.
  */
 
 import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
+import { setGranted, clearGranted } from './plugin-permission-guard'
 
 // Storage keys
 const PERMISSIONS_KEY = 'plugin_permissions'
@@ -32,7 +42,7 @@ export async function grantPluginPermissions(
   permissions: PluginPermission[]
 ): Promise<void> {
   const current = await getPluginPermissions(pluginId)
-  
+
   const updated = permissions.map((p) => {
     const existing = current.find((s) => s.permission === p)
     return {
@@ -41,11 +51,20 @@ export async function grantPluginPermissions(
       requested: existing?.requested ?? true,
     }
   })
-  
+
   await window.localStorage.setItem(`${PERMISSIONS_KEY}_${pluginId}`, JSON.stringify(updated))
-  
+
   // Log the grant action
   await logPermissionAction(pluginId, 'grant', permissions)
+
+  // Mirror to the in-memory guard. We compute the full granted set
+  // (existing grants ∪ new grants) so we never accidentally revoke
+  // a previously-granted permission that wasn't part of this call.
+  const merged = new Set<PluginPermission>(updated.map((s) => s.permission))
+  for (const s of current) {
+    if (s.granted) merged.add(s.permission)
+  }
+  setGranted(pluginId, Array.from(merged))
 }
 
 /**
@@ -56,16 +75,20 @@ export async function revokePluginPermissions(
   permissions: PluginPermission[]
 ): Promise<void> {
   const current = await getPluginPermissions(pluginId)
-  
+
   const updated = current.map((status) => ({
     ...status,
     granted: permissions.includes(status.permission) ? false : status.granted,
   }))
-  
+
   await window.localStorage.setItem(`${PERMISSIONS_KEY}_${pluginId}`, JSON.stringify(updated))
-  
+
   // Log the revoke action
   await logPermissionAction(pluginId, 'revoke', permissions)
+
+  // Mirror to the in-memory guard with the post-revoke granted set.
+  const remaining = updated.filter((s) => s.granted).map((s) => s.permission)
+  setGranted(pluginId, remaining)
 }
 
 /**
@@ -188,4 +211,35 @@ export async function getPermissionAuditLogs(): Promise<PermissionAuditLogEntry[
  */
 export async function clearPermissionAuditLogs(): Promise<void> {
   await window.localStorage.removeItem(AUDIT_LOG_KEY)
+}
+
+/**
+ * Drop a plugin's permissions from both the disk store and the
+ * in-memory guard. Called on uninstall. The localStorage key is
+ * deleted (not zeroed) so the next install of a plugin with the
+ * same id starts from a clean slate.
+ */
+export async function dropPluginPermissions(pluginId: string): Promise<void> {
+  await window.localStorage.removeItem(`${PERMISSIONS_KEY}_${pluginId}`)
+  clearGranted(pluginId)
+}
+
+/**
+ * Seed the in-memory guard from localStorage. Called on app start so
+ * the host services (event bus, storage, backend) can run a
+ * synchronous permission check on the first user action without
+ * waiting on the next grant/revoke.
+ *
+ * `pluginIds` is the list of installed plugin ids; we need it because
+ * localStorage is a flat key/value store with no listing query that
+ * doesn't depend on the `Object.keys` order.
+ */
+export async function hydratePermissionGuard(pluginIds: string[]): Promise<void> {
+  for (const id of pluginIds) {
+    const status = await getPluginPermissions(id)
+    const granted = status.filter((s) => s.granted).map((s) => s.permission)
+    if (granted.length > 0) {
+      setGranted(id, granted)
+    }
+  }
 }

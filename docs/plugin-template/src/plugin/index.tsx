@@ -125,6 +125,22 @@ const manifest: PluginManifest = {
   onUnmount: () => console.log('[plugin] onUnmount'),
   onActivate: () => console.log('[plugin] onActivate'),
   onDeactivate: () => console.log('[plugin] onDeactivate'),
+
+  // Permissions your plugin needs. The host shows a grant/revoke
+  // dialog at install time and re-checks on every protected
+  // operation. Drop what you don't use; a user is more likely to
+  // install a plugin that only asks for `storage` than one that
+  // demands `network` + `filesystem-write` + `clipboard`.
+  //
+  // Available values (see `PLUGIN_PERMISSIONS` in the SDK):
+  //   'storage' | 'events' | 'context-menu' | 'backend'
+  //   'filesystem-read' | 'filesystem-write' | 'network'
+  //   'clipboard' | 'notifications'
+  //
+  // Note: this template uses `usePluginEvent('note:open', ...)` to
+  // listen for host events, so `events` is required in addition to
+  // `storage`. Remove `events` if you stop calling any event hook.
+  permissions: ['storage', 'events'],
 }
 
 export default manifest

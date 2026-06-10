@@ -42,6 +42,39 @@
 | `pluginPath` | `string` | **由 loader 填充**，留空即可。 |
 | `hooks` | `object` | 生命周期钩子（见 [lifecycle.md](./lifecycle.md)） |
 | `settings` | `ComponentType<PluginPanelProps> \| ReactNode` | 可选设置组件（见 [settings.md](./settings.md)） |
+| `permissions` | `PluginPermission[]` | 声明插件需要的权限（见下方） |
+
+## 权限字段（`permissions`）
+
+插件在 `manifest.permissions` 中**声明**所需权限，宿主在安装/首次使用时弹窗授权，运行时由沙箱强制执行。
+
+| 取值 | 含义 | 何时被检查 |
+| --- | --- | --- |
+| `'storage'` | 持久化键值存储 | `store.get / set / delete / clear / keys` 全部调用 |
+| `'events'` | 订阅宿主事件 | `events.on('note:open', ...)` 等订阅时 |
+| `'context-menu'` | 贡献右键菜单项 | `registerContextMenu(...)` 注册时 |
+| `'backend'` | 调用 Rust 后端 | `invokeBackend('cmd', args)` 调用时 |
+| `'filesystem-read'` | 读文件 | 未来 FS API 启用时 |
+| `'filesystem-write'` | 写文件 | 未来 FS API 启用时 |
+| `'network'` | 网络请求 | 未来 net API 启用时 |
+| `'clipboard'` | 剪贴板读写 | 未来 clipboard API 启用时 |
+| `'notifications'` | 系统通知 | 未来 notifications API 启用时 |
+
+```typescript
+const manifest: PluginManifest = {
+  id: 'com.example.recent-notes',
+  // ...
+  permissions: ['storage', 'events', 'context-menu'],
+}
+```
+
+**最佳实践**：
+
+- **最小权限原则**：只声明实际用到的权限。一个只用 `usePluginStorage` 的插件不要声明 `events`。
+- **运行时检查**：`events.on` 内部会读取 handler 上的 `__pluginId` 字段并查询 `assertPermission(pluginId, 'events', ...)`，未授权时抛 `PluginPermissionDeniedError`。
+- **撤销即时生效**：用户在插件管理页撤销某条权限后，下一次 `store.get / events.on` 等调用立即报错，无需重启宿主。
+
+> **SDK 集成**：`usePluginEvent` / `usePluginEvents` 在订阅时会自动给 handler 打 `__pluginId` 标签，宿主总线据此执行权限检查。`usePluginStorage` / `registerContextMenu` 同样在内部走宿主 `assertPermission`，无需插件作者额外处理。
 
 ## 完整 manifest 示例
 

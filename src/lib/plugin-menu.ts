@@ -21,6 +21,7 @@ import type {
   ContextMenuLocation,
   ContextMenuRegistry,
 } from '@/types/plugin'
+import { assertPermission } from './plugin-permission-guard'
 
 /** Internal storage: per-plugin array of items, plus a flat by-location cache. */
 class ContextMenuRegistryImpl {
@@ -36,8 +37,14 @@ class ContextMenuRegistryImpl {
   /**
    * Add a menu item. The owning plugin id is stamped onto the item so
    * we can clean up later without the caller having to track it.
+   *
+   * Throws `PluginPermissionDeniedError` if the plugin doesn't have
+   * the `context-menu` grant. We re-check on every call (rather than
+   * trusting the `onLoad` snapshot) so a user revoking the permission
+   * mid-session immediately stops the plugin from adding new items.
    */
   register(pluginId: string, item: ContextMenuItem): void {
+    assertPermission(pluginId, 'context-menu', `register context menu item "${item.id}"`)
     // Replace any previous item with the same id (same plugin) so a
     // re-register (e.g. after manifest reload) doesn't duplicate.
     this.unregister(pluginId, item.id)

@@ -5,6 +5,7 @@ import { type ComponentType, type ReactNode } from 'react'
 import type { SidebarView, RightPanelType } from '@/stores'
 import type { ContentPosition, PluginPanelProps } from '@/types/plugin'
 import { getPluginStorage, pluginEventBus } from './plugin-host'
+import { assertPermission } from './plugin-permission-guard'
 
 /**
  * Detect whether `value` is a React component-like (function/class component,
@@ -150,6 +151,12 @@ export function createPluginPanelProps(
     // as a graceful-degradation path (e.g. show "backend unavailable"
     // UI) rather than crashing.
     invokeBackend: async (command: string, args?: Record<string, unknown>) => {
+      // Backend IPC is opt-in. The Rust host would happily spawn a
+      // subprocess for any plugin that calls this, but we cut the
+      // call short here so a plugin without the `backend` grant
+      // gets a synchronous-style error rather than a confusing
+      // "plugin backend not found" deep in the host.
+      assertPermission(pluginId, 'backend', `invoke backend command "${command}"`)
       const { invoke } = await import('@tauri-apps/api/core')
       const start = performance.now()
       let success = true

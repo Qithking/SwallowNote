@@ -219,6 +219,13 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     // onUnload so the plugin's own tear-down logic can't see stale
     // items referenced by id.
     clearPluginMenuItems(id)
+    // Drop the plugin's persisted permissions (localStorage key +
+    // in-memory guard). We do this last so a revoke UI that is
+    // observing the plugin's grants still has a coherent snapshot
+    // until the unregister call returns.
+    void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
+      void dropPluginPermissions(id)
+    })
   },
 
   setPluginEnabled: (id, enabled) => {

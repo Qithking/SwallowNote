@@ -163,6 +163,10 @@ const manifest: PluginManifest = {
   enabled: true,
   icon: EventIcon,
   panel: EventListenerPanel,
+
+  // Subscribing to host events requires the `events` permission;
+  // without it `panel.events.on()` would throw on first subscribe.
+  permissions: ['events'],
 }
 
 export default manifest

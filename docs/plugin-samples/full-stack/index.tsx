@@ -327,6 +327,13 @@ const manifest: PluginManifest = {
   settings: RecentSettings,
   onLoad,
   onUnload,
+
+  // This sample is the kitchen-sink plugin. It needs every
+  // permission a plugin can ask for: storage for the recent-notes
+  // list, events for live note:change, context-menu for the
+  // right-click entries, and so on. In a real plugin you'd
+  // minimize this set to only what the panel actually uses.
+  permissions: ['storage', 'events', 'context-menu'],
 }
 
 export default manifest

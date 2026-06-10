@@ -5,8 +5,8 @@
  * Lower section: Plugin card list
  * Header: Refresh + Diagnostics buttons
  */
-import { useState, useCallback } from 'react'
-import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon, Activity } from 'lucide-react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
+import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon, Activity, Shield } from 'lucide-react'
 import { usePluginStore } from '@/stores'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
@@ -27,7 +27,9 @@ import {
 } from '@/components/ui/dialog'
 import { PluginPanelHost } from './PluginPanelHost'
 import { PluginDiagnosticsPanel } from './PluginDiagnosticsPanel'
-import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
+import { PluginPermissionDialog } from './PluginPermissionDialog'
+import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
+import type { PluginDefinition, PluginPanelProps, PluginPermission } from '@/types/plugin'
 
 function PluginManagerView() {
   const { t } = useTranslation()
@@ -46,6 +48,21 @@ function PluginManagerView() {
   // and refreshes on its own interval, so we don't need to pass
   // anything through props.
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  // Permission dialog target. Same pattern as settingsPlugin: we keep
+  // the full reference so a concurrent uninstall can't take the
+  // plugin out from under the dialog.
+  const [permissionsPlugin, setPermissionsPlugin] = useState<PluginDefinition | null>(null)
+  // Permissions-to-grant queue. When the install flow finishes
+  // extracting a plugin package, we open the dialog with the
+  // declared permissions and let the user opt in/out before any
+  // grant hits localStorage. The pending state survives across
+  // re-renders so the toast on `handleUpload` doesn't race the
+  // dialog open.
+  const [pendingPermissionGrant, setPendingPermissionGrant] = useState<{
+    pluginId: string
+    pluginName: string
+    requested: PluginPermission[]
+  } | null>(null)
 
   /**
    * Build the props passed to a plugin's settings component. The
@@ -99,14 +116,50 @@ function PluginManagerView() {
       const meta = await installPlugin(zipPath)
       toast.success(t('plugin.installSuccess', { name: meta.name }))
 
-      // Reload all plugins
+      // Reload all plugins so the new one is registered in the
+      // store, then run the install-time permission flow. The
+      // permission dialog must be opened *after* the plugin is in
+      // the registry, because the user might want to inspect the
+      // version/description in the list while deciding which
+      // permissions to grant.
       await handleReload()
+      const installed = usePluginStore
+        .getState()
+        .plugins.find((p) => p.id === meta.id)
+      if (installed && installed.permissions.length > 0) {
+        // Initialize the per-plugin status so the dialog has a
+        // baseline (currently nothing is granted) before the user
+        // makes their selection.
+        await initializePluginPermissions(installed.id, installed.permissions)
+        setPendingPermissionGrant({
+          pluginId: installed.id,
+          pluginName: installed.name,
+          requested: installed.permissions,
+        })
+      }
     } catch (err) {
       toast.error(t('plugin.installFailed'), { description: String(err) })
     } finally {
       setIsUploading(false)
     }
   }, [t, handleReload])
+
+  /**
+   * Open the permission dialog for an installed plugin from the
+   * "Permissions" button on the card. Unlike the install-time flow
+   * we don't pre-fill the request list – we show whatever the
+   * manifest declared plus any extras the user has already
+   * granted, so they can revoke at will.
+   */
+  const openPermissions = useCallback(async (plugin: PluginDefinition) => {
+    setPermissionsPlugin(plugin)
+    // Make sure the localStorage entry exists even for a plugin
+    // that was installed before the install-flow integration. The
+    // dialog falls back to the in-memory `currentStatus` when
+    // localStorage is empty, but creating the entry here means
+    // revoke persists on close.
+    await initializePluginPermissions(plugin.id, plugin.permissions)
+  }, [])
 
   const handleUninstall = useCallback(async (plugin: PluginDefinition) => {
     try {
@@ -278,6 +331,21 @@ function PluginManagerView() {
                           <SettingsIcon size={14} />
                         </Button>
                       )}
+                      {/* Permissions button. We show this whenever the
+                          plugin declares any permissions; without a
+                          declared list the dialog would have nothing
+                          to display, so we hide the entry point. */}
+                      {plugin.permissions.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-7 h-7"
+                          title={t('plugin.permissions')}
+                          onClick={() => openPermissions(plugin)}
+                        >
+                          <Shield size={14} />
+                        </Button>
+                      )}
                       <Switch
                         checked={plugin.enabled}
                         onCheckedChange={(checked) => handleToggleEnabled(plugin, checked)}
@@ -349,7 +417,101 @@ function PluginManagerView() {
           <PluginDiagnosticsPanel />
         </DialogContent>
       </Dialog>
+
+      {/* Permission dialog – install-time flow. We open it the moment
+          the user finishes installing a plugin, pre-seeded with the
+          permissions declared in its manifest. The dialog itself does
+          the grant/revoke through `plugin-permissions.ts`; we just
+          host the modal and clear the pending state on close. */}
+      <PermissionDialogMount
+        open={pendingPermissionGrant !== null}
+        plugin={pendingPermissionGrant}
+        onClose={() => setPendingPermissionGrant(null)}
+      />
+
+      {/* Permission dialog – per-plugin card flow. Same component, but
+          opened from the Permissions button on a card. We pass the
+          plugin reference and let the dialog fetch the current
+          status asynchronously. */}
+      <PermissionDialogMount
+        open={permissionsPlugin !== null}
+        plugin={permissionsPlugin}
+        onClose={() => setPermissionsPlugin(null)}
+      />
     </div>
+  )
+}
+
+/**
+ * Async-host wrapper around `PluginPermissionDialog`. The dialog
+ * needs the current `PluginPermissionStatus[]` to render the
+ * "currently granted" state, so we have to fetch it before the
+ * dialog can mount. Doing it inside the dialog itself would force
+ * the dialog to be a controlled component with extra internal
+ * state; lifting the fetch into a tiny wrapper keeps the dialog
+ * purely declarative.
+ */
+function PermissionDialogMount({
+  open,
+  plugin,
+  onClose,
+}: {
+  open: boolean
+  plugin: PluginDefinition | { pluginId: string; pluginName: string; requested: PluginPermission[] } | null
+  onClose: () => void
+}) {
+  // Normalize the input shape. The install flow gives us a small
+  // struct with `pluginId` / `pluginName` / `requested`; the
+  // per-card flow gives us a PluginDefinition with `id` / `name` /
+  // `permissions`. Mapping both to a single shape lets the dialog
+  // stay agnostic of which entry point opened it. Wrapped in
+  // useMemo so the resulting object identity is stable for the
+  // useEffect deps below (otherwise the effect would re-fire on
+  // every render of the parent).
+  const normalized = useMemo(() => {
+    if (plugin == null) return null
+    if ('pluginId' in plugin) {
+      return {
+        pluginId: plugin.pluginId,
+        pluginName: plugin.pluginName,
+        requested: plugin.requested,
+      }
+    }
+    return {
+      pluginId: plugin.id,
+      pluginName: plugin.name,
+      // Per-card flow: include permissions the user has manually
+      // granted in the past so they can revoke them.
+      requested: plugin.permissions,
+    }
+  }, [plugin])
+
+  const [status, setStatus] = useState<import('@/types/plugin').PluginPermissionStatus[]>([])
+
+  useEffect(() => {
+    if (!open || !normalized) {
+      setStatus([])
+      return
+    }
+    let cancelled = false
+    void getPluginPermissions(normalized.pluginId).then((s) => {
+      if (cancelled) return
+      setStatus(s)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, normalized])
+
+  if (!open || !normalized) return null
+  return (
+    <PluginPermissionDialog
+      pluginId={normalized.pluginId}
+      pluginName={normalized.pluginName}
+      permissions={normalized.requested}
+      currentStatus={status}
+      onClose={onClose}
+    />
   )
 }
 

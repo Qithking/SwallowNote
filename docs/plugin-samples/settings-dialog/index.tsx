@@ -155,6 +155,10 @@ const manifest: PluginManifest = {
   // shows a gear button. Clicking it opens a modal hosting this
   // component with the same props as the main panel.
   settings: SettingsDialog,
+
+  // The settings dialog persists user choices through plugin
+  // storage; the host gates the store behind the `storage` grant.
+  permissions: ['storage'],
 }
 
 export default manifest
