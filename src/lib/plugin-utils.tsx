@@ -140,12 +140,15 @@ export function createPluginPanelProps(
     pluginId,
     isActive,
     close,
-    // TODO: Backend IPC layer is not yet implemented on the Rust side
-    // (see `src-tauri/src/commands/plugin.rs` invoke_plugin entry and
-    // `.work/执行文档.md` 2026-06-10 design doc). This call will return
-    // "command not found" until invoke_plugin is implemented. Plugins
-    // should treat this as a graceful-degradation path (e.g. show
-    // "backend unavailable" UI) rather than crashing.
+    // The Rust host spawns a per-plugin backend subprocess on the
+    // first call and keeps it alive for subsequent calls. Wire
+    // protocol: line-delimited JSON-RPC 2.0 over stdin/stdout. See
+    // `src-tauri/src/commands/plugin_invoke.rs` for the host side and
+    // `docs/plugin-system/backend.md` for plugin author guidance. If
+    // the plugin has no `backend/` directory, the host returns
+    // "plugin backend not found" which the panel can catch and treat
+    // as a graceful-degradation path (e.g. show "backend unavailable"
+    // UI) rather than crashing.
     invokeBackend: async (command: string, args?: Record<string, unknown>) => {
       const { invoke } = await import('@tauri-apps/api/core')
       const start = performance.now()
@@ -156,12 +159,7 @@ export function createPluginPanelProps(
       } catch (err) {
         success = false
         errorMsg = String(err)
-        // Surface a clearer error to the panel so the user knows the
-        // backend layer is not yet wired up, instead of a raw tauri
-        // "command not found" string.
-        throw new Error(
-          `Plugin backend IPC not implemented yet (plugin_id=${pluginId}, command=${command}): ${String(err)}`,
-        )
+        throw err
       } finally {
         // Record backend metrics for the diagnostics panel. Lazy-import
         // the telemetry module so this file stays free of a hard

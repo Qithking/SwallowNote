@@ -6,6 +6,7 @@ pub mod file;
 pub mod git;
 pub mod folder_history;
 pub mod plugin;
+pub mod plugin_invoke;
 pub mod session_state;
 pub mod upgrade;
 

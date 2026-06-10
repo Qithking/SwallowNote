@@ -1,14 +1,16 @@
 /**
  * Rust backend commands for plugin management.
  *
- * - scan_plugins:      Scan the plugins directory and return metadata for each plugin
- * - install_plugin:    Install a plugin from a .zip file
- * - uninstall_plugin:  Remove a plugin directory
- * - invoke_plugin:     [TODO] Invoke a command on a plugin's Rust backend.
- *                      Planned architecture: subprocess + JSON-RPC over stdin/stdout.
- *                      See `.work/执行文档.md` 2026-06-10 entry for design details.
- *                      Until implemented, the TS-side `invokeBackend` in
- *                      `src/lib/plugin-utils.tsx` will receive "command not found".
+ * - scan_plugins:           Scan the plugins directory and return metadata
+ * - install_plugin:         Install a plugin from a .zip file
+ * - uninstall_plugin:       Remove a plugin directory
+ * - toggle_plugin_enabled:  Toggle a plugin's enabled marker
+ * - get_plugin_storage_path: Resolve a plugin's storage.json path
+ *
+ * The companion `plugin_invoke` module implements the JSON-RPC
+ * subprocess layer that powers `panel.invokeBackend(...)` on the
+ * frontend. The TS side calls into it via
+ * `invoke('plugin_<id>_<cmd>', args)`.
  */
 
 use serde::{Deserialize, Serialize};

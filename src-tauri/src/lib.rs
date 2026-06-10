@@ -180,6 +180,7 @@ pub fn run() {
             commands::plugin::uninstall_plugin,
             commands::plugin::toggle_plugin_enabled,
             commands::plugin::get_plugin_storage_path,
+            commands::plugin_invoke::invoke_plugin,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
@@ -202,6 +203,11 @@ pub fn run() {
             services::file_watcher::init_watcher(app_handle.clone());
 
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
+            // Per-plugin backend subprocess state. See
+            // `commands/plugin_invoke.rs` for the design. The map is
+            // empty at startup; child processes are spawned lazily
+            // on the first `invoke_plugin` call for a given plugin.
+            app.handle().manage(commands::plugin_invoke::new_shared_plugin_process_state());
 
             // AI proxy is no longer auto-started on launch to save memory.
             // It will be started on-demand when the user opens the AI panel.
