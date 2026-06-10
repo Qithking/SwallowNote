@@ -11,8 +11,14 @@
  * subprocess layer that powers `panel.invokeBackend(...)` on the
  * frontend. The TS side calls into it via
  * `invoke('plugin_<id>_<cmd>', args)`.
+ *
+ * All five commands above return `Result<_, PluginError>` — the
+ * `Display` impl produces the same human-readable string the previous
+ * `Result<_, String>` returned, so the TS-side `err.message` contract
+ * is preserved. See [`crate::commands::error::PluginError`].
  */
 
+use crate::commands::error::PluginError;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -63,20 +69,20 @@ fn parse_manifest_from_index_js(index_js_path: &PathBuf) -> Option<PluginMetadat
 }
 
 #[tauri::command]
-pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRust>, String> {
+pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRust>, PluginError> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
 
     let plugins_root = plugins_dir(&app_data_dir);
 
     // Ensure plugins directory exists
-    fs::create_dir_all(&plugins_root).map_err(|e| format!("Failed to create plugins dir: {}", e))?;
+    fs::create_dir_all(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to create plugins dir: {}", e)))?;
 
     let mut plugins = Vec::new();
 
-    let entries = fs::read_dir(&plugins_root).map_err(|e| format!("Failed to read plugins dir: {}", e))?;
+    let entries = fs::read_dir(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to read plugins dir: {}", e)))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -131,14 +137,14 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
 pub fn install_plugin(
     app_handle: tauri::AppHandle,
     zip_path: String,
-) -> Result<PluginMetadataRust, String> {
+) -> Result<PluginMetadataRust, PluginError> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
 
     let plugins_root = plugins_dir(&app_data_dir);
-    fs::create_dir_all(&plugins_root).map_err(|e| format!("Failed to create plugins dir: {}", e))?;
+    fs::create_dir_all(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to create plugins dir: {}", e)))?;
 
     // Determine the plugin id from the top-level directory in the zip
     // or from the zip filename
@@ -153,7 +159,7 @@ pub fn install_plugin(
     // Remove existing plugin if it exists
     if plugin_dir.exists() {
         fs::remove_dir_all(&plugin_dir)
-            .map_err(|e| format!("Failed to remove existing plugin: {}", e))?;
+            .map_err(|e| PluginError::Io(format!("Failed to remove existing plugin: {}", e)))?;
     }
 
     // Pre-extract validation: walk every entry's name and reject anything
@@ -167,31 +173,31 @@ pub fn install_plugin(
     // same handle for extract. This avoids a redundant File::open and any
     // platform-specific double-handle races (e.g. Windows share-mode).
     let mut archive = zip::ZipArchive::new(fs::File::open(&zip_path)
-        .map_err(|e| format!("Failed to open zip file: {}", e))?)
-        .map_err(|e| format!("Failed to read zip archive: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to open zip file: {}", e)))?)
+        .map_err(|e| PluginError::Io(format!("Failed to read zip archive: {}", e)))?;
     for i in 0..archive.len() {
         let entry = archive
             .by_index(i)
-            .map_err(|e| format!("Failed to read zip entry {}: {}", i, e))?;
+            .map_err(|e| PluginError::Io(format!("Failed to read zip entry {}: {}", i, e)))?;
         let enclosed = entry
             .enclosed_name()
-            .ok_or_else(|| "Security: zip entry has unsafe name".to_string())?;
+            .ok_or_else(|| PluginError::Security("Security: zip entry has unsafe name".to_string()))?;
         let candidate = plugin_dir.join(enclosed);
         // Reject absolute paths or anything escaping plugin_dir.
         if candidate
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir))
         {
-            return Err(format!(
+            return Err(PluginError::Security(format!(
                 "Security: zip entry '{}' contains parent-dir reference",
                 entry.name()
-            ));
+            )));
         }
         if !candidate.starts_with(&plugin_dir) {
-            return Err(format!(
+            return Err(PluginError::Security(format!(
                 "Security: zip entry '{}' escapes plugin dir",
                 entry.name()
-            ));
+            )));
         }
         // Reject symlinks (Unix external-attribute high nibble = 0120000).
         // zip stores symlink targets as the file content; on extract the
@@ -200,10 +206,10 @@ pub fn install_plugin(
         // to /etc or ~. We refuse to extract any entry that's not a
         // regular file or directory.
         if entry.is_symlink() {
-            return Err(format!(
+            return Err(PluginError::Security(format!(
                 "Security: zip entry '{}' is a symlink (forbidden)",
                 entry.name()
-            ));
+            )));
         }
     }
 
@@ -211,12 +217,12 @@ pub fn install_plugin(
     if let Err(e) = archive.extract(&plugin_dir) {
         // Clean up any partial extraction before propagating the error.
         let _ = fs::remove_dir_all(&plugin_dir);
-        return Err(format!("Failed to extract zip: {}", e));
+        return Err(PluginError::Io(format!("Failed to extract zip: {}", e)));
     }
 
     // If the zip contained a single top-level directory, flatten it
     let entries: Vec<_> = fs::read_dir(&plugin_dir)
-        .map_err(|e| format!("Failed to read extracted dir: {}", e))?
+        .map_err(|e| PluginError::Io(format!("Failed to read extracted dir: {}", e)))?
         .filter_map(|e| e.ok())
         .collect();
 
@@ -225,19 +231,19 @@ pub fn install_plugin(
         // Move contents up
         let temp_dir = plugin_dir.with_extension("_tmp");
         fs::rename(&inner_dir, &temp_dir)
-            .map_err(|e| format!("Failed to move inner dir: {}", e))?;
-        for entry in fs::read_dir(&temp_dir).map_err(|e| format!("Failed to read temp dir: {}", e))?.flatten() {
+            .map_err(|e| PluginError::Io(format!("Failed to move inner dir: {}", e)))?;
+        for entry in fs::read_dir(&temp_dir).map_err(|e| PluginError::Io(format!("Failed to read temp dir: {}", e)))?.flatten() {
             let dest = plugin_dir.join(entry.file_name());
-            fs::rename(entry.path(), dest).map_err(|e| format!("Failed to move file: {}", e))?;
+            fs::rename(entry.path(), dest).map_err(|e| PluginError::Io(format!("Failed to move file: {}", e)))?;
         }
-        fs::remove_dir_all(&temp_dir).map_err(|e| format!("Failed to remove temp dir: {}", e))?;
+        fs::remove_dir_all(&temp_dir).map_err(|e| PluginError::Io(format!("Failed to remove temp dir: {}", e)))?;
     }
 
     // Verify index.js exists
     let index_js = plugin_dir.join("index.js");
     if !index_js.exists() {
         fs::remove_dir_all(&plugin_dir).ok();
-        return Err("Plugin package must contain an index.js file".to_string());
+        return Err(PluginError::InvalidInput("Plugin package must contain an index.js file".to_string()));
     }
 
     let has_backend = plugin_dir.join("backend").exists();
@@ -264,32 +270,32 @@ pub fn install_plugin(
 }
 
 #[tauri::command]
-pub fn uninstall_plugin(app_handle: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
+pub fn uninstall_plugin(app_handle: tauri::AppHandle, plugin_id: String) -> Result<(), PluginError> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
 
     let plugins_root = plugins_dir(&app_data_dir);
     let plugin_dir = plugins_root.join(&plugin_id);
 
     if !plugin_dir.exists() {
-        return Err(format!("Plugin '{}' not found", plugin_id));
+        return Err(PluginError::NotFound(format!("Plugin '{}' not found", plugin_id)));
     }
 
     // Security check: ensure we're only deleting within the plugins directory
     let canonical_plugins = plugins_root
         .canonicalize()
-        .map_err(|e| format!("Failed to resolve plugins path: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to resolve plugins path: {}", e)))?;
     let canonical_plugin = plugin_dir
         .canonicalize()
-        .map_err(|e| format!("Failed to resolve plugin path: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to resolve plugin path: {}", e)))?;
 
     if !canonical_plugin.starts_with(&canonical_plugins) {
-        return Err("Security: attempted to delete outside plugins directory".to_string());
+        return Err(PluginError::Security("Security: attempted to delete outside plugins directory".to_string()));
     }
 
-    fs::remove_dir_all(&plugin_dir).map_err(|e| format!("Failed to remove plugin: {}", e))?;
+    fs::remove_dir_all(&plugin_dir).map_err(|e| PluginError::Io(format!("Failed to remove plugin: {}", e)))?;
 
     Ok(())
 }
@@ -299,11 +305,11 @@ pub fn toggle_plugin_enabled(
     app_handle: tauri::AppHandle,
     plugin_id: String,
     enabled: bool,
-) -> Result<(), String> {
+) -> Result<(), PluginError> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
 
     let plugins_root = plugins_dir(&app_data_dir);
     let plugin_dir = plugins_root.join(&plugin_id);
@@ -312,11 +318,11 @@ pub fn toggle_plugin_enabled(
     if enabled {
         // Remove the disabled marker
         if disabled_marker.exists() {
-            fs::remove_file(&disabled_marker).map_err(|e| format!("Failed to enable plugin: {}", e))?;
+            fs::remove_file(&disabled_marker).map_err(|e| PluginError::Io(format!("Failed to enable plugin: {}", e)))?;
         }
     } else {
         // Create the disabled marker
-        fs::write(&disabled_marker, "").map_err(|e| format!("Failed to disable plugin: {}", e))?;
+        fs::write(&disabled_marker, "").map_err(|e| PluginError::Io(format!("Failed to disable plugin: {}", e)))?;
     }
 
     Ok(())
@@ -334,11 +340,11 @@ pub fn toggle_plugin_enabled(
 pub fn get_plugin_storage_path(
     app_handle: tauri::AppHandle,
     plugin_id: String,
-) -> Result<String, String> {
+) -> Result<String, PluginError> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
     let plugin_storage = plugins_dir(&app_data_dir)
         .join(&plugin_id)
         .join("storage.json");

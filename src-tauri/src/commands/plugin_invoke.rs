@@ -45,12 +45,15 @@
  * Error model
  * ===========
  *
- * Plugin errors ({"error":{...}}) are returned to the frontend as
- * `Err(String)` so the TS-side `invokeBackend` wrapper can surface them
- * verbatim. We do NOT use Tauri command Result variants for plugin
- * errors because the host has no way to know which JSON-RPC error code
- * is "expected" – every plugin defines its own.
+ * The `invoke_plugin` command returns `Result<Value, PluginError>` so
+ * the IPC surface uses the same categorical error type as the rest of
+ * the `plugin_*` family (see [`crate::commands::error::PluginError`]).
+ * The `Display` impl produces the same human-readable string the
+ * previous `Result<Value, String>` returned, so the TypeScript-side
+ * `err.message` seen by `panel.invokeBackend` callers does not
+ * change.
  */
+use crate::commands::error::PluginError;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -76,8 +79,10 @@ type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>;
 struct JsonRpcResponse {
     /// JSON-RPC `id` so we can route to the right oneshot.
     id: u64,
-    /// Decoded body, already split into result / error.
-    body: Result<Value, String>,
+    /// Decoded body, already split into result / error. Wrapped in
+    /// `PluginError` so the categorical type matches what
+    /// `invoke_plugin` returns to the frontend.
+    body: Result<Value, PluginError>,
 }
 
 impl JsonRpcResponse {
@@ -87,14 +92,14 @@ impl JsonRpcResponse {
         if let Some(err) = v.get("error") {
             // Mirror the JSON-RPC error shape so the plugin can return
             // a meaningful message. We don't surface the `code` to the
-            // TS side because Tauri commands only carry a String.
+            // TS side because the IPC layer only carries a string.
             let message = err
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("plugin error");
             Some(Self {
                 id,
-                body: Err(message.to_string()),
+                body: Err(PluginError::JsonRpc(message.to_string())),
             })
         } else if v.get("result").is_some() {
             // A JSON-RPC response must have exactly one of `result`
@@ -200,9 +205,9 @@ fn resolve_backend_binary(plugin_id: &str, plugin_path: &str) -> Option<PathBuf>
 async fn spawn_plugin_process(
     plugin_id: String,
     plugin_path: String,
-) -> Result<Arc<PluginProcess>, String> {
+) -> Result<Arc<PluginProcess>, PluginError> {
     let binary = resolve_backend_binary(&plugin_id, &plugin_path)
-        .ok_or_else(|| format!("plugin backend not found (plugin_id={})", plugin_id))?;
+        .ok_or_else(|| PluginError::NotFound(format!("plugin backend not found (plugin_id={})", plugin_id)))?;
 
     let mut cmd = build_command(binary.to_string_lossy().as_ref());
     // Pass the plugin id as the only argument so the child can sanity-
@@ -212,20 +217,20 @@ async fn spawn_plugin_process(
 
     let mut child: Child = cmd
         .spawn()
-        .map_err(|e| format!("failed to spawn plugin backend ({}): {}", binary.display(), e))?;
+        .map_err(|e| PluginError::Process(format!("failed to spawn plugin backend ({}): {}", binary.display(), e)))?;
 
     let stdin = child
         .stdin
         .take()
-        .ok_or_else(|| "plugin backend stdin unavailable".to_string())?;
+        .ok_or_else(|| PluginError::Process("plugin backend stdin unavailable".to_string()))?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "plugin backend stdout unavailable".to_string())?;
+        .ok_or_else(|| PluginError::Process("plugin backend stdout unavailable".to_string()))?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| "plugin backend stderr unavailable".to_string())?;
+        .ok_or_else(|| PluginError::Process("plugin backend stderr unavailable".to_string()))?;
 
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
 
@@ -268,10 +273,10 @@ async fn spawn_plugin_process(
                     for (_, tx) in map.drain() {
                         let _ = tx.send(JsonRpcResponse {
                             id: 0,
-                            body: Err(format!(
+                            body: Err(PluginError::Process(format!(
                                 "plugin backend exited unexpectedly (plugin_id={})",
                                 plugin_id_for_reader
-                            )),
+                            ))),
                         });
                     }
                     break;
@@ -317,7 +322,7 @@ async fn get_or_spawn(
     state: &SharedPluginProcessState,
     plugin_id: &str,
     app_data_dir: &Path,
-) -> Result<Arc<PluginProcess>, String> {
+) -> Result<Arc<PluginProcess>, PluginError> {
     let mut guard = state.lock().await;
     if let Some(existing) = guard.get(plugin_id).cloned() {
         // If the child is already dead (try_wait returns Some status
@@ -348,6 +353,13 @@ async fn get_or_spawn(
 ///   { plugin_id, command, args? }
 /// We extract `plugin_id` and `command` from the JSON-RPC envelope
 /// style and pass the rest as `args`.
+///
+/// Returns `Result<Value, PluginError>` — the error categories are
+/// `InvalidInput` (empty plugin_id / command), `Io` (app data dir
+/// lookup), `NotFound` (backend binary), `Process` (spawn / pipes /
+/// EOF / stdin write / flush), `JsonRpc` (request encoding,
+/// channel closed, plugin-reported error) and `Timeout` (no response
+/// within `INVOKE_TIMEOUT`).
 #[tauri::command]
 pub async fn invoke_plugin(
     app_handle: AppHandle,
@@ -355,18 +367,18 @@ pub async fn invoke_plugin(
     plugin_id: String,
     command: String,
     args: Option<Value>,
-) -> Result<Value, String> {
+) -> Result<Value, PluginError> {
     if plugin_id.is_empty() {
-        return Err("plugin_id is required".to_string());
+        return Err(PluginError::InvalidInput("plugin_id is required".to_string()));
     }
     if command.is_empty() {
-        return Err("command is required".to_string());
+        return Err(PluginError::InvalidInput("command is required".to_string()));
     }
 
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+        .map_err(|e| PluginError::Io(format!("Failed to resolve app data dir: {}", e)))?;
 
     let proc = get_or_spawn(state.inner(), &plugin_id, &app_data_dir).await?;
 
@@ -378,7 +390,7 @@ pub async fn invoke_plugin(
         "params": args.unwrap_or(Value::Null),
     });
     let mut serialized = serde_json::to_string(&request)
-        .map_err(|e| format!("failed to encode JSON-RPC request: {}", e))?;
+        .map_err(|e| PluginError::JsonRpc(format!("failed to encode JSON-RPC request: {}", e)))?;
     serialized.push('\n');
 
     // Register the pending oneshot before writing so the reader task
@@ -401,21 +413,21 @@ pub async fn invoke_plugin(
                     // anything else left behind.
                     let mut pending = proc.pending.lock().await;
                     pending.remove(&id);
-                    return Err(format!("failed to write to plugin stdin: {}", e));
+                    return Err(PluginError::Process(format!("failed to write to plugin stdin: {}", e)));
                 }
                 if let Err(e) = s.flush().await {
                     let mut pending = proc.pending.lock().await;
                     pending.remove(&id);
-                    return Err(format!("failed to flush plugin stdin: {}", e));
+                    return Err(PluginError::Process(format!("failed to flush plugin stdin: {}", e)));
                 }
             }
             None => {
                 let mut pending = proc.pending.lock().await;
                 pending.remove(&id);
-                return Err(format!(
+                return Err(PluginError::Process(format!(
                     "plugin backend stdin closed (plugin_id={})",
                     proc.plugin_id
-                ));
+                )));
             }
         }
     }
@@ -428,7 +440,7 @@ pub async fn invoke_plugin(
             // The reader task sent and the channel was consumed; this
             // branch is unreachable in practice because we own the
             // sender. Treat as a plugin error just in case.
-            return Err("plugin response channel closed".to_string());
+            return Err(PluginError::JsonRpc("plugin response channel closed".to_string()));
         }
         Err(_elapsed) => {
             // Timeout: remove the pending entry so the reader task
@@ -436,12 +448,11 @@ pub async fn invoke_plugin(
             // will fail silently when (if) a late response arrives.
             let mut pending = proc.pending.lock().await;
             pending.remove(&id);
-            return Err(format!(
-                "plugin backend timed out after {}s (plugin_id={}, command={})",
-                INVOKE_TIMEOUT.as_secs(),
-                proc.plugin_id,
-                command
-            ));
+            return Err(PluginError::Timeout {
+                secs: INVOKE_TIMEOUT.as_secs(),
+                plugin_id: proc.plugin_id.clone(),
+                command,
+            });
         }
     };
 
@@ -467,7 +478,7 @@ mod tests {
         )
         .expect("parse");
         assert_eq!(r.id, 7);
-        assert_eq!(r.body.unwrap_err(), "method not found");
+        assert_eq!(r.body.unwrap_err().to_string(), "method not found");
     }
 
     #[test]

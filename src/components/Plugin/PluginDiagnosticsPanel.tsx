@@ -150,10 +150,10 @@ export function PluginDiagnosticsPanel() {
       {/* Content */}
       <div>
         {activeTab === 'overview' && <OverviewTab metrics={metrics} />}
-        {activeTab === 'events' && <MetricsTable records={getEventMetrics()} type="event" />}
-        {activeTab === 'storage' && <MetricsTable records={getStorageMetrics()} type="storage" />}
-        {activeTab === 'hooks' && <MetricsTable records={getHookMetrics()} type="hook" />}
-        {activeTab === 'backend' && <MetricsTable records={getBackendMetrics()} type="backend" />}
+        {activeTab === 'events' && <MetricsTable records={getEventMetrics()} tabKey="Events" />}
+        {activeTab === 'storage' && <MetricsTable records={getStorageMetrics()} tabKey="Storage" />}
+        {activeTab === 'hooks' && <MetricsTable records={getHookMetrics()} tabKey="Hooks" />}
+        {activeTab === 'backend' && <MetricsTable records={getBackendMetrics()} tabKey="Backend" />}
       </div>
     </div>
   )
@@ -254,12 +254,21 @@ type MetricRecord =
   | ReturnType<typeof getHookMetrics>[number]
   | ReturnType<typeof getBackendMetrics>[number]
 
-function MetricsTable({ records, type }: { records: readonly MetricRecord[]; type: 'event' | 'storage' | 'hook' | 'backend' }) {
+/**
+ * `tabKey` matches the suffix of the `plugin.diagnostics.tab*`
+ * translation key (Events / Storage / Hooks / Backend) so the empty
+ * state can reuse the **localized** tab name instead of the raw
+ * English type. The "名称" column still shows the plugin-defined
+ * data value (event name, operation, hook name, command) unchanged.
+ */
+type MetricsTabKey = 'Events' | 'Storage' | 'Hooks' | 'Backend'
+
+function MetricsTable({ records, tabKey }: { records: readonly MetricRecord[]; tabKey: MetricsTabKey }) {
   const { t } = useTranslation()
   if (records.length === 0) {
     return (
       <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
-        <p>{t('plugin.diagnostics.tableEmpty', { type })}</p>
+        <p>{t('plugin.diagnostics.tableEmpty', { type: t(`plugin.diagnostics.tab${tabKey}`) })}</p>
       </div>
     )
   }
