@@ -29,7 +29,8 @@
  */
 import { Suspense, useEffect, useRef, type ReactNode } from 'react'
 import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
-import { buildPluginContext, runLifecycleHook } from '@/lib/plugin-host'
+import { buildPluginContext } from '@/lib/plugin-host'
+import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
 import { PluginErrorBoundary } from './PluginErrorBoundary'
 import { recordPluginCrash, resetPluginCrashCount } from '@/lib/plugin-health'
 
@@ -58,9 +59,9 @@ export function PluginPanelHost({
   // the host crashes mid-render.
   useEffect(() => {
     const ctx = buildPluginContext(plugin)
-    void runLifecycleHook(plugin.hooks?.onMount, ctx, 'onMount')
+    void runPluginLifecycleHook(plugin, plugin.hooks?.onMount, ctx, 'onMount')
     return () => {
-      void runLifecycleHook(plugin.hooks?.onUnmount, ctx, 'onUnmount')
+      void runPluginLifecycleHook(plugin, plugin.hooks?.onUnmount, ctx, 'onUnmount')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugin.id])
@@ -73,16 +74,16 @@ export function PluginPanelHost({
   useEffect(() => {
     const ctx = buildPluginContext(plugin)
     if (isActive && !wasActiveRef.current) {
-      void runLifecycleHook(plugin.hooks?.onActivate, ctx, 'onActivate')
+      void runPluginLifecycleHook(plugin, plugin.hooks?.onActivate, ctx, 'onActivate')
     } else if (!isActive && wasActiveRef.current) {
-      void runLifecycleHook(plugin.hooks?.onDeactivate, ctx, 'onDeactivate')
+      void runPluginLifecycleHook(plugin, plugin.hooks?.onDeactivate, ctx, 'onDeactivate')
     }
     wasActiveRef.current = isActive
     return () => {
       // Final cleanup: if the host unmounts while active, fire
       // onDeactivate so the plugin can flush any pending state.
       if (wasActiveRef.current) {
-        void runLifecycleHook(plugin.hooks?.onDeactivate, ctx, 'onDeactivate')
+        void runPluginLifecycleHook(plugin, plugin.hooks?.onDeactivate, ctx, 'onDeactivate')
         wasActiveRef.current = false
       }
     }

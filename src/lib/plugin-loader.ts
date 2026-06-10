@@ -40,6 +40,19 @@ export function rustMetaToPluginMeta(meta: PluginMetadataRust): PluginMetadata {
  * We use a dynamic import with the Tauri asset protocol to load them.
  */
 export async function loadPluginModule(pluginPath: string): Promise<PluginManifest | null> {
+  const { manifest } = await loadPluginModuleWithRef(pluginPath)
+  return manifest
+}
+
+/**
+ * Internal: load a plugin module and return both the manifest and
+ * the raw dynamic-import result. The raw module is needed by
+ * `loadPluginFromPath` so it can attach `__pluginModule` to the
+ * definition (used by the host takeover layer to call `setHost`).
+ */
+async function loadPluginModuleWithRef(
+  pluginPath: string
+): Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null }> {
   try {
     const { convertFileSrc } = await import('@tauri-apps/api/core')
     const indexJsUrl = convertFileSrc(`${pluginPath}/index.js`)
@@ -47,28 +60,55 @@ export async function loadPluginModule(pluginPath: string): Promise<PluginManife
     // Dynamic import of the plugin module
     // Use a cache-busting query param to ensure fresh load during HMR
     const cacheBuster = `?v=${Date.now()}`
-    const module = await import(/* @vite-ignore */ `${indexJsUrl}${cacheBuster}`)
-    return module.default || module.manifest || null
+    const module = (await import(/* @vite-ignore */ `${indexJsUrl}${cacheBuster}`)) as Record<string, unknown>
+    const manifest = (module.default || module.manifest || null) as PluginManifest | null
+    return { manifest, module }
   } catch (err) {
     console.error(`[PluginLoader] Failed to load plugin from ${pluginPath}:`, err)
-    return null
+    return { manifest: null, module: null }
   }
+}
+
+/**
+ * Stash the dynamic-import result on a definition as a non-
+ * enumerable field. The host takeover layer uses this to call
+ * `setHost` on the plugin's bundled SDK at hook-fire time
+ * (see `plugin-host-takeover.ts`).
+ *
+ * We use `Object.defineProperty` with `enumerable: false` so
+ * the field doesn't show up in JSON.stringify(definition) or
+ * spread-copies that consumers might take. Vite's IIFE bundle
+ * exposes the plugin's SDK `setHost` as a top-level property
+ * only if the entry file re-exports it; without the re-export
+ * the takeover is silently skipped and the hook runs against
+ * the SDK's in-process stubs.
+ */
+function attachPluginModule(
+  def: PluginDefinition,
+  module: Record<string, unknown> | null
+): void {
+  if (!module) return
+  Object.defineProperty(def, '__pluginModule', {
+    value: module,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  })
 }
 
 /**
  * Load a single plugin from a path. Used for hot reload.
  */
 export async function loadPluginFromPath(pluginPath: string): Promise<PluginDefinition | null> {
-  const manifest = await loadPluginModule(pluginPath)
-  
+  const { manifest, module } = await loadPluginModuleWithRef(pluginPath)
   if (!manifest) {
     return null
   }
 
   // Extract plugin ID from manifest or path
   const pluginId = manifest.id || extractPluginIdFromPath(pluginPath)
-  
-  return {
+
+  const def = {
     id: pluginId,
     name: manifest.name,
     description: manifest.description || '',
@@ -96,6 +136,9 @@ export async function loadPluginFromPath(pluginPath: string): Promise<PluginDefi
       onDeactivate: manifest.onDeactivate,
     },
   } satisfies PluginDefinition
+
+  attachPluginModule(def, module)
+  return def
 }
 
 /**
@@ -121,10 +164,10 @@ export async function loadAllPlugins(
   // null, so the UI always shows an entry for every discovered plugin.
   const results = await Promise.all(
     rustMetas.map(async (meta) => {
-      const manifest = await loadPluginModule(meta.plugin_path)
+      const { manifest, module } = await loadPluginModuleWithRef(meta.plugin_path)
 
       if (manifest) {
-        return {
+        const def = {
           id: meta.id,
           name: manifest.name || meta.name,
           description: manifest.description || meta.description,
@@ -163,6 +206,8 @@ export async function loadAllPlugins(
             onDeactivate: manifest.onDeactivate,
           },
         } satisfies PluginDefinition
+        attachPluginModule(def, module)
+        return def
       }
       // Plugin without a valid manifest - create a placeholder
       return {

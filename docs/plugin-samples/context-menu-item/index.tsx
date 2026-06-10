@@ -27,8 +27,15 @@ import {
   registerContextMenu,
   unregisterContextMenu,
   getStubMenuRegistry,
+  usePluginStorage,
 } from '@swallow-note/plugin-sdk'
-import { usePluginStorage } from '@swallow-note/plugin-sdk'
+// Re-export `setHost` so the host can install its real
+// implementations on this bundle before firing lifecycle hooks.
+// This is critical for this sample: `registerContextMenu` must
+// reach the host's permission-checked `pluginMenuRegistry`
+// rather than the SDK's stub, otherwise our menu items would
+// silently bypass the `context-menu` grant check.
+export { setHost } from '@swallow-note/plugin-sdk'
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 

@@ -298,7 +298,7 @@ function createStubStorage(pluginId: string): PluginStorage {
 const storageCache = new Map<string, PluginStorage>()
 
 export function getPluginStorage(pluginId: string): PluginStorage {
-  const override = hostOverrides.getPluginStorage?.(pluginId)
+  const override = currentHostOverrides().getPluginStorage?.(pluginId)
   if (override) return override
   let s = storageCache.get(pluginId)
   if (!s) {
@@ -440,17 +440,17 @@ class StubMenuRegistry {
 const stubMenuRegistry = new StubMenuRegistry()
 
 export function registerContextMenu(pluginId: string, item: ContextMenuItem): void {
-  hostOverrides.registerContextMenu?.(pluginId, item) ??
+  currentHostOverrides().registerContextMenu?.(pluginId, item) ??
     stubMenuRegistry.register(pluginId, item)
 }
 
 export function unregisterContextMenu(pluginId: string, itemId: string): void {
-  hostOverrides.unregisterContextMenu?.(pluginId, itemId) ??
+  currentHostOverrides().unregisterContextMenu?.(pluginId, itemId) ??
     stubMenuRegistry.unregister(pluginId, itemId)
 }
 
 export function clearPluginMenuItems(pluginId: string): void {
-  hostOverrides.clearPluginMenuItems?.(pluginId) ?? stubMenuRegistry.clearPlugin(pluginId)
+  currentHostOverrides().clearPluginMenuItems?.(pluginId) ?? stubMenuRegistry.clearPlugin(pluginId)
 }
 
 export function getContextMenuItems(
@@ -458,7 +458,7 @@ export function getContextMenuItems(
   ctx: ContextMenuContext
 ): ContextMenuItem[] {
   return (
-    hostOverrides.getContextMenuItems?.(location, ctx) ??
+    currentHostOverrides().getContextMenuItems?.(location, ctx) ??
     stubMenuRegistry.query(location, ctx)
   )
 }
@@ -483,7 +483,8 @@ export function buildPluginContext(plugin: Pick<PluginDefinition, 'id' | 'plugin
     pluginPath: plugin.pluginPath,
     invokeBackend: async (cmd: string, args?: Record<string, unknown>) => {
       // In standalone mode, return a friendly stub.
-      if (hostOverrides.invokeBackend) return hostOverrides.invokeBackend(cmd, args)
+      const hostInvoke = currentHostOverrides().invokeBackend
+      if (hostInvoke) return hostInvoke(cmd, args)
       console.warn(`[plugin-sdk] invokeBackend(${cmd}) called in standalone mode; returning null`)
       return null
     },
@@ -505,7 +506,7 @@ export async function runLifecycleHook(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Host overrides – SwallowNote calls `setHost(...)` once at startup
+//  Host overrides – SwallowNote calls `setHost(...)` once per plugin
 // ═══════════════════════════════════════════════════════════════════════════
 
 export interface HostOverrides {
@@ -530,7 +531,35 @@ export interface HostOverrides {
   emit?: <E extends PluginEvent>(event: E, payload: PluginEventPayloadMap[E]) => void
 }
 
-const hostOverrides: HostOverrides = {}
+/**
+ * Stack of active host overrides. Each `setHost` call pushes a new
+ * layer; the returned `restore` callback pops **only the layer
+ * created by that call** (matched by a unique token), so
+ * restore order is independent of push order. This is what lets
+ * the host fire multiple plugins' hooks concurrently – plugin A's
+ * `setHost(A)` and plugin B's `setHost(B)` are independent, and
+ * whichever hook finishes first can clean up its own layer
+ * without disturbing the others.
+ *
+ * We keep each layer's merged overrides precomputed (no `Object.assign`
+ * on a shared `hostOverrides` singleton) so popping is O(stack depth)
+ * and the previous layer's identity stays stable for the duration
+ * of the layer's lifetime.
+ */
+interface HostOverrideLayer {
+  overrides: HostOverrides
+  token: number
+}
+const hostOverridesStack: HostOverrideLayer[] = []
+let nextHostToken = 0
+
+/** Read the currently-active merged overrides (top of the stack). */
+function currentHostOverrides(): HostOverrides {
+  const top = hostOverridesStack[hostOverridesStack.length - 1]
+  return top ? top.overrides : EMPTY_HOST_OVERRIDES
+}
+
+const EMPTY_HOST_OVERRIDES: HostOverrides = Object.freeze({}) as HostOverrides
 
 /**
  * Internal helper: dispatch an event through the host if a
@@ -538,7 +567,7 @@ const hostOverrides: HostOverrides = {}
  * stub bus. Used by the per-event emit helpers below.
  */
 function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPayloadMap[E]): void {
-  const hostEmit = hostOverrides.emit
+  const hostEmit = currentHostOverrides().emit
   if (hostEmit) {
     try {
       hostEmit(event, payload)
@@ -553,22 +582,54 @@ function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPaylo
 
 /**
  * Replace the stub implementations with real ones provided by the
- * host. The host calls this once during plugin load, then restores
- * the previous overrides on unload (so test environments can
- * nest). Plugins never call this directly.
+ * host. The host calls this once per plugin (typically just before
+ * firing a lifecycle hook), then calls the returned `restore` to
+ * pop the layer (typically in a `finally`).
  *
- * Note: we deliberately do **not** mutate `pluginEventBus` in place
- * – the public type `PluginEventBus` no longer exposes `emit` and
- * we don't want a hot-reloaded host to leave a stale binding on
- * the export. Emit goes through `hostOverrides.emit`; subscriptions
- * on `pluginEventBus` resolve via the dynamic lookup in
- * `dispatchEmit` and the `usePluginEvent` hook (which always reads
- * `panel.events`).
+ * The SDK supports **arbitrary-order restore** because each
+ * `setHost` call gets a unique token and `restore` matches by
+ * that token rather than relying on a `previous` snapshot. This
+ * is what makes concurrent hook fires safe – plugin A can pop its
+ * own layer while plugin B's layer is still active.
+ *
+ * Plugins should not call this directly. Bundlers that tree-shake
+ * unused exports must keep `setHost` reachable: the host needs to
+ * call it on the plugin bundle, so plugin authors must
+ * `export { setHost } from '@swallow-note/plugin-sdk'` from their
+ * entry file.
  */
 export function setHost(overrides: HostOverrides): () => void {
-  const previous: HostOverrides = { ...hostOverrides }
-  Object.assign(hostOverrides, overrides)
-  return () => setHost(previous)
+  const token = nextHostToken++
+  // Merge the new overrides on top of whatever's currently active.
+  // We compute a fresh object so the layer is independent of the
+  // stack below it – popping this layer doesn't mutate the prior
+  // layer's overrides.
+  const merged: HostOverrides = { ...currentHostOverrides(), ...overrides }
+  hostOverridesStack.push({ overrides: merged, token })
+  return () => {
+    // Walk top-down so a restore of an inner layer doesn't skip over
+    // a still-active outer layer in O(n) time. Tokens are unique so
+    // the lookup terminates in at most stack-depth iterations.
+    for (let i = hostOverridesStack.length - 1; i >= 0; i--) {
+      if (hostOverridesStack[i].token === token) {
+        hostOverridesStack.splice(i, 1)
+        return
+      }
+    }
+    // No matching layer: the caller invoked `restore` twice. We
+    // swallow it rather than throw because a host that double-fires
+    // a finally block shouldn't break the world.
+  }
+}
+
+/**
+ * Pop every active host override. The host should rarely need this –
+ * the per-layer `restore` from `setHost` is the right tool – but
+ * the helper is useful for tests that want to reset state between
+ * cases without tracking individual tokens.
+ */
+export function clearHost(): void {
+  hostOverridesStack.length = 0
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

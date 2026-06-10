@@ -33,6 +33,12 @@ import {
   registerContextMenu,
   unregisterContextMenu,
 } from '@swallow-note/plugin-sdk'
+// Re-export `setHost` so the host can install its real
+// implementations on this bundle before firing lifecycle hooks.
+// This sample exercises every protected call (storage, events,
+// context-menu), so the takeover is what actually wires the
+// permission checks around them at runtime.
+export { setHost } from '@swallow-note/plugin-sdk'
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
 

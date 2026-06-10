@@ -14,6 +14,14 @@
  * source tree at build time.
  */
 import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+// Re-export `setHost` so the host can install its real
+// implementations (with permission checks) before firing our
+// lifecycle hooks. Without this re-export the bundler's
+// tree-shaker would drop the symbol from the IIFE bundle and
+// the host would silently fall back to the SDK's stubs. The
+// re-export makes `setHost` reachable from the entry, which
+// keeps it in the bundle.
+export { setHost } from '@swallow-note/plugin-sdk'
 
 // ─── Icon (sidebar trigger) ────────────────────────────────────────────────────
 

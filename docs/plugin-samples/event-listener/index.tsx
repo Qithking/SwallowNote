@@ -14,6 +14,10 @@ import type {
   PluginPanelProps,
 } from '@swallow-note/plugin-sdk'
 import { usePluginEvents } from '@swallow-note/plugin-sdk'
+// Re-export `setHost` so the host can install its real
+// implementations on this bundle before firing lifecycle hooks.
+// See `hello-world` for the rationale.
+export { setHost } from '@swallow-note/plugin-sdk'
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 
