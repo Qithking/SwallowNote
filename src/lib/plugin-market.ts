@@ -27,9 +27,10 @@ import type {
   PluginIndex,
   PluginIndexEntry,
   PluginUpdateInfo,
+  PluginVersionInfo,
 } from '@/types/plugin'
+import type { PluginMetadataRust } from './tauri'
 
-const INDEX_CACHE_KEY = 'swallow-plugin-market:index'
 const ZIP_STORE_NAME = 'plugin-zips'
 const INDEX_DB = 'swallow-plugin-market'
 const INDEX_DB_VERSION = 1
@@ -246,6 +247,39 @@ function normaliseVersion(raw: any) {
   }
 }
 
+/**
+ * Normalise one `PluginUpdateInfo` row from the host's wire shape
+ * (snake_case — see `src-tauri/src/commands/plugin.rs::PluginUpdateInfo`)
+ * to the camelCase shape consumed by the UI. The Rust serde default
+ * is snake_case, so `local_version` arrives as `local_version` over
+ * IPC; without this the store's `localVersion` reads would all be
+ * `undefined` and the "Update available" badge would never fire.
+ */
+function normaliseUpdate(raw: any): PluginUpdateInfo {
+  return {
+    id: raw.id ?? '',
+    localVersion: raw.local_version ?? '',
+    remoteVersion: raw.remote_version ?? '',
+    sha256: raw.sha256 ?? '',
+  }
+}
+
+/**
+ * Normalise one `PluginVersionInfo` row from the host's wire shape
+ * (snake_case — see `src-tauri/src/commands/plugin.rs::PluginVersionInfo`)
+ * to the camelCase shape consumed by the UI. Without this, `isActive`
+ * is always `undefined` and the rollback dialog's "current" badge
+ * never lights up.
+ */
+function normalisePluginVersion(raw: any): PluginVersionInfo {
+  return {
+    version: raw.version ?? '',
+    isActive: raw.is_active ?? false,
+    sizeBytes: typeof raw.size_bytes === 'number' ? raw.size_bytes : 0,
+    installedAt: raw.installed_at ?? '',
+  }
+}
+
 // ─── Tauri command wrappers ───────────────────────────────────────────────────
 
 import { invoke } from '@tauri-apps/api/core'
@@ -255,6 +289,11 @@ import { invoke } from '@tauri-apps/api/core'
  * downloaded. The host re-runs SHA-256 + signature verification on
  * the bytes we send — never trust the frontend to have validated
  * anything.
+ *
+ * Returns the freshly-installed `PluginMetadataRust` from the host
+ * so the caller (e.g. the marketplace detail dialog) can read the
+ * id, name, declared permissions, etc. without re-scanning the
+ * plugins directory.
  */
 export async function installPluginFromBytes(args: {
   pluginId: string
@@ -263,8 +302,8 @@ export async function installPluginFromBytes(args: {
   sha256: string
   pubkeyB64: string
   signatureB64: string
-}) {
-  return invoke('install_plugin_from_bytes', {
+}): Promise<PluginMetadataRust> {
+  return invoke<PluginMetadataRust>('install_plugin_from_bytes', {
     pluginId: args.pluginId,
     version: args.version,
     bytes: Array.from(new Uint8Array(args.bytes)),
@@ -275,20 +314,22 @@ export async function installPluginFromBytes(args: {
 }
 
 export async function checkPluginUpdates(repoUrl: string): Promise<PluginUpdateInfo[]> {
-  return invoke('check_plugin_updates', { repoUrl })
+  const raw = await invoke<unknown>('check_plugin_updates', { repoUrl })
+  return Array.isArray(raw) ? raw.map(normaliseUpdate) : []
 }
 
-export async function rollbackPlugin(pluginId: string, version: string) {
-  return invoke('rollback_plugin', { pluginId, version })
+/**
+ * Swap the active version of a previously-installed plugin. Returns
+ * the metadata of the now-active version so the caller can read the
+ * id / name / declared permissions without a separate scan.
+ */
+export async function rollbackPlugin(pluginId: string, version: string): Promise<PluginMetadataRust> {
+  return invoke<PluginMetadataRust>('rollback_plugin', { pluginId, version })
 }
 
-export async function listPluginVersions(pluginId: string) {
-  return invoke<Array<{
-    version: string
-    isActive: boolean
-    sizeBytes: number
-    installedAt: string
-  }>>('list_plugin_versions', { pluginId })
+export async function listPluginVersions(pluginId: string): Promise<PluginVersionInfo[]> {
+  const raw = await invoke<unknown>('list_plugin_versions', { pluginId })
+  return Array.isArray(raw) ? raw.map(normalisePluginVersion) : []
 }
 
 // ─── In-memory index cache (per repo URL) ─────────────────────────────────────
@@ -320,7 +361,3 @@ export function invalidateIndexCache(url?: string): void {
     inMemoryIndexCache.clear()
   }
 }
-
-// Suppress lint warning for the unused constant above — it's exported
-// for the (small) chance another module wants to inspect the key.
-export const __INDEX_CACHE_KEY__ = INDEX_CACHE_KEY

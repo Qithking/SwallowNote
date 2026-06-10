@@ -12,14 +12,16 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, RefreshCw, X, Store, Download, CheckCircle2, AlertCircle, Package, Tag } from 'lucide-react'
-import { toast } from 'sonner'
-import { usePluginMarketStore } from '@/stores'
+import { usePluginMarketStore, usePluginStore } from '@/stores'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { PluginMarketDetail } from './PluginMarketDetail'
-import type { PluginIndexEntry } from '@/types/plugin'
+import { PluginPermissionDialog } from './PluginPermissionDialog'
+import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
+import type { PluginIndexEntry, PluginPermission, PluginPermissionStatus } from '@/types/plugin'
+import type { PluginMetadataRust } from '@/lib/tauri'
 
 function PluginMarketView() {
   const { t } = useTranslation()
@@ -41,6 +43,85 @@ function PluginMarketView() {
 
   const [draftUrl, setDraftUrl] = useState(repoUrl)
   const [detailEntry, setDetailEntry] = useState<PluginIndexEntry | null>(null)
+  // Post-install permission grant queue. The marketplace install path
+  // runs the same flow as the user-upload path in `PluginManagerView`:
+  // the host writes the plugin, we re-scan / re-load so the entry
+  // appears in the registry, and *then* we open the permission dialog
+  // pre-seeded with the plugin's declared permission list. Without
+  // this step a marketplace-installed plugin with declared
+  // permissions would auto-activate with no grants and a user
+  // revoke would be impossible until the user discovered the
+  // per-card "Permissions" button by trial and error.
+  //
+  // The dialog mounting follows the same async-host wrapper pattern
+  // as `PluginManagerView.PermissionDialogMount`: the dialog needs
+  // the current `PluginPermissionStatus[]` from localStorage, so we
+  // fetch it before opening the modal.
+  const [pendingPermissionGrant, setPendingPermissionGrant] = useState<{
+    pluginId: string
+    pluginName: string
+    requested: PluginPermission[]
+  } | null>(null)
+
+  // Permission dialog async-host. Mirrors the same wrapper in
+  // `PluginManagerView` so we can stay declarative about when the
+  // dialog mounts.
+  const [permissionStatus, setPermissionStatus] = useState<PluginPermissionStatus[]>([])
+  useEffect(() => {
+    if (!pendingPermissionGrant) {
+      setPermissionStatus([])
+      return
+    }
+    let cancelled = false
+    void getPluginPermissions(pendingPermissionGrant.pluginId).then((s) => {
+      if (cancelled) return
+      setPermissionStatus(s)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [pendingPermissionGrant])
+
+  /**
+   * Invoked by `PluginMarketDetail` after a successful install or
+   * update. The detail dialog closes before the permission dialog
+   * opens so the two don't stack and the user always lands on the
+   * permission question. If the installed plugin declares no
+   * permissions, the toast is the only post-install affordance —
+   * mirroring the upload flow's no-permissions short-circuit.
+   */
+  const handleInstalled = (meta: PluginMetadataRust) => {
+    setDetailEntry(null)
+    // Defer the dialog open one tick so React can finish unmounting
+    // the detail dialog (focus traps / portals) before the new
+    // dialog mounts. Without the defer, the new dialog inherits the
+    // previous one as its trigger element and Radix logs a warning.
+    queueMicrotask(() => {
+      void (async () => {
+        const installed = usePluginStore
+          .getState()
+          .plugins.find((p) => p.id === meta.id)
+        const requested =
+          installed?.permissions ?? []
+        if (requested.length === 0) return
+        await initializePluginPermissions(meta.id, requested)
+        setPendingPermissionGrant({
+          pluginId: meta.id,
+          pluginName: meta.name || meta.id,
+          requested,
+        })
+      })()
+    })
+  }
+
+  // Keep `draftUrl` in sync if the store URL changes elsewhere
+  // (e.g. via `setRepoUrl` from a future "reset to default" action,
+  // or hot-reload of the persisted value). Without this the input
+  // could show a stale value while the actual fetch targets the
+  // updated URL — leading to UI state and fetch state disagreeing.
+  useEffect(() => {
+    setDraftUrl(repoUrl)
+  }, [repoUrl])
 
   // On first mount and whenever the repo URL changes, kick off a
   // fetch + an update check. The update check depends on the host
@@ -222,6 +303,22 @@ function PluginMarketView() {
           index={index}
           localVersion={localVersionFor(detailEntry.id) ?? null}
           onClose={() => setDetailEntry(null)}
+          onInstalled={handleInstalled}
+        />
+      )}
+
+      {/* Post-install permission dialog. Mirrors the install-time
+          flow in `PluginManagerView` so marketplace installs and
+          user uploads land in the same place. `pendingPermissionGrant`
+          carries the install-time state; the dialog itself handles
+          the grant / revoke through `plugin-permissions.ts`. */}
+      {pendingPermissionGrant && (
+        <PluginPermissionDialog
+          pluginId={pendingPermissionGrant.pluginId}
+          pluginName={pendingPermissionGrant.pluginName}
+          permissions={pendingPermissionGrant.requested}
+          currentStatus={permissionStatus}
+          onClose={() => setPendingPermissionGrant(null)}
         />
       )}
     </div>
@@ -293,7 +390,9 @@ function PluginMarketCard({
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{entry.name}</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>
+            {entry.name || t('plugin.market.unknownName', { defaultValue: '未命名插件' })}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono, monospace)' }}>
             {entry.id}
           </div>
@@ -310,7 +409,7 @@ function PluginMarketCard({
           overflow: 'hidden',
         }}
       >
-        {entry.description}
+        {entry.description || t('plugin.market.noDescription', { defaultValue: '暂无描述' })}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <Badge variant="outline" style={{ fontSize: 10 }}>
@@ -340,11 +439,12 @@ function InstallStatus({
   isUpdateAvailable: boolean
   isFresh: boolean
 }) {
+  const { t } = useTranslation()
   if (isUpdateAvailable) {
     return (
       <Badge style={{ background: 'var(--accent, #4f46e5)', color: 'white' }}>
         <Download size={10} />
-        Update
+        {t('plugin.market.badgeUpdate', { defaultValue: 'Update' })}
       </Badge>
     )
   }
@@ -352,7 +452,7 @@ function InstallStatus({
     return (
       <Badge variant="secondary">
         <CheckCircle2 size={10} />
-        Installed
+        {t('plugin.market.badgeInstalled', { defaultValue: 'Installed' })}
       </Badge>
     )
   }
@@ -360,17 +460,11 @@ function InstallStatus({
     return (
       <Badge variant="outline">
         <Download size={10} />
-        Install
+        {t('plugin.market.badgeInstall', { defaultValue: 'Install' })}
       </Badge>
     )
   }
   return null
 }
-
-// Suppress unused warning for the `toast` import — we keep it here
-// for the future when the install flow wants to surface a non-error
-// status (e.g. "already installed"). It also keeps the bundle
-// consistent with the rest of the app.
-void toast
 
 export { PluginMarketView }

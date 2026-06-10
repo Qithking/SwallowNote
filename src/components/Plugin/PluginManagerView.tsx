@@ -19,7 +19,7 @@
  */
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon, Activity, Shield, Store, List } from 'lucide-react'
-import { usePluginStore } from '@/stores'
+import { usePluginStore, useUIStore } from '@/stores'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { renderPluginIcon } from '@/lib/plugin-utils'
@@ -189,11 +189,25 @@ function PluginManagerView() {
   const handleUninstall = useCallback(async (plugin: PluginDefinition) => {
     try {
       await uninstallPlugin(plugin.id)
-      // Unregister first so the synchronous UI cleanup in the store
-      // (sidebarView/rightPanelType/settingsPanelVisible) happens before
-      // we re-scan. Otherwise a full-panel plugin that was active would
-      // briefly flash its view during handleReload.
-      usePluginStore.getState().unregisterPlugin(plugin.id)
+      // Synchronously clear any UI state that references the
+      // removed plugin so the user doesn't see a stale view during
+      // the async handleReload below. We *don't* call
+      // `unregisterPlugin` here because `handleReload` → `setPlugins`
+      // will diff the old list against the freshly-scanned list and
+      // fire onUnload + resource cleanup for the removed plugin.
+      // Calling `unregisterPlugin` *before* `setPlugins` would cause
+      // a double onUnload (once from unregisterPlugin, once from
+      // setPlugins's diff), and the second onUnload would run on a
+      // plugin reference whose storage/menu/permissions have already
+      // been dropped.
+      const ui = useUIStore.getState()
+      if (ui.sidebarView === `plugin:${plugin.id}`) {
+        ui.setSidebarView('explorer')
+        if (ui.settingsPanelVisible) ui.setSettingsPanelVisible(false)
+      }
+      if (ui.rightPanelType === `plugin:${plugin.id}`) {
+        ui.setRightPanelType(null)
+      }
       toast.success(t('plugin.uninstallSuccess', { name: plugin.name }))
       await handleReload()
     } catch (err) {

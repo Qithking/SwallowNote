@@ -792,6 +792,23 @@
       "colDuration": "耗时",
       "colStatus": "状态"
     },
+    "error": {
+      "title": "插件错误",
+      "description": "插件 {{id}} 发生错误，无法正常显示。",
+      "viewDetails": "查看错误详情",
+      "retry": "重试",
+      "disable": "禁用插件"
+    },
+    "permission": {
+      "title": "插件权限",
+      "warning": "这些权限将允许插件访问相应功能，你可以稍后在插件管理中修改。",
+      "revoking": "将被撤销",
+      "cancel": "取消",
+      "save": "保存更改",
+      "saving": "保存中…",
+      "noDescription": "暂无描述",
+      "saveFailed": "保存权限失败"
+    },
     "market": {
       "tabManage": "已安装",
       "tabMarket": "插件市场",
@@ -808,13 +825,19 @@
       "installed": "已安装 {{name}} v{{version}}",
       "rolledBack": "已回滚到 {{version}}",
       "unknownAuthor": "未知作者",
+      "unknownName": "未命名插件",
+      "noDescription": "暂无描述",
       "dependencies": "依赖",
       "versionHistory": "版本历史",
       "localVersions": "已安装版本",
+      "active": "当前",
       "rollback": "回滚",
       "install": "安装",
       "updateTo": "更新到 v{{version}}",
-      "upToDate": "已是最新"
+      "upToDate": "已是最新",
+      "badgeUpdate": "更新",
+      "badgeInstalled": "已安装",
+      "badgeInstall": "安装"
     }
   }
 }

@@ -43,23 +43,34 @@ export async function grantPluginPermissions(
 ): Promise<void> {
   const current = await getPluginPermissions(pluginId)
 
-  const updated = permissions.map((p) => {
-    const existing = current.find((s) => s.permission === p)
-    return {
+  // Merge: keep every existing grant untouched and add the new
+  // permissions as `granted: true`. The previous implementation
+  // built `updated` solely from the incoming `permissions` arg,
+  // which silently *discarded* any pre-existing grants the plugin
+  // already had. A single `grant(id, ['events'])` would demote the
+  // plugin from N grants down to 1, and the in-memory guard (which
+  // already computed the merged set in the post-call block) would
+  // disagree with localStorage until the next page reload
+  // re-hydrated the truncated list.
+  const byName = new Map<string, PluginPermissionStatus>(
+    current.map((s) => [s.permission, s] as const),
+  )
+  for (const p of permissions) {
+    const existing = byName.get(p)
+    byName.set(p, {
       permission: p,
       granted: true,
       requested: existing?.requested ?? true,
-    }
-  })
+    })
+  }
+  const updated = Array.from(byName.values())
 
   await window.localStorage.setItem(`${PERMISSIONS_KEY}_${pluginId}`, JSON.stringify(updated))
 
   // Log the grant action
   await logPermissionAction(pluginId, 'grant', permissions)
 
-  // Mirror to the in-memory guard. We compute the full granted set
-  // (existing grants ∪ new grants) so we never accidentally revoke
-  // a previously-granted permission that wasn't part of this call.
+  // Mirror to the in-memory guard with the post-merge granted set.
   const merged = new Set<PluginPermission>(updated.map((s) => s.permission))
   for (const s of current) {
     if (s.granted) merged.add(s.permission)

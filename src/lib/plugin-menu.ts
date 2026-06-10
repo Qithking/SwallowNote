@@ -63,16 +63,24 @@ class ContextMenuRegistryImpl {
     if (!list) return
     const idx = list.findIndex((it) => it.id === itemId)
     if (idx < 0) return
-    list.splice(idx, 1)
+    const [removed] = list.splice(idx, 1)
     if (list.length === 0) this.byPlugin.delete(pluginId)
-    this.rebuildIndex()
+    // Incrementally drop the item from each location's index instead
+    // of rebuilding the whole `byLocation` map. The previous
+    // `rebuildIndex` was O(n_total) per call; in steady state a
+    // plugin re-registering its handful of menu items on every
+    // manifest reload would trigger n_total work each time.
+    this.deindexItem(removed)
   }
 
   /** Drop every contribution owned by a given plugin. */
   clearPlugin(pluginId: string): void {
-    if (!this.byPlugin.has(pluginId)) return
+    const list = this.byPlugin.get(pluginId)
+    if (!list) return
+    // De-index every owned item before dropping the plugin entry so
+    // the `byLocation` cache stays in sync without a full rebuild.
+    for (const item of list) this.deindexItem(item)
     this.byPlugin.delete(pluginId)
-    this.rebuildIndex()
   }
 
   /**
@@ -110,12 +118,25 @@ class ContextMenuRegistryImpl {
     }
   }
 
-  private rebuildIndex(): void {
-    for (const loc of Object.keys(this.byLocation) as ContextMenuLocation[]) {
-      this.byLocation[loc] = []
-    }
-    for (const items of this.byPlugin.values()) {
-      for (const item of items) this.indexItem(item)
+  /**
+   * Mirror of `indexItem`: remove `item` from every location's
+   * index. Because `indexItem` only appends and we use object
+   * identity to locate the exact entry, an O(k) `indexOf` per
+   * location is enough — and `k` is bounded by the number of items
+   * the owning plugin registered, which is normally tiny.
+   */
+  private deindexItem(item: ContextMenuItem): void {
+    const locations: ContextMenuLocation[] = item.locations ?? [
+      'fileTree',
+      'fileTreeEmpty',
+      'editor',
+      'tab',
+      'tabBarEmpty',
+    ]
+    for (const loc of locations) {
+      const list = this.byLocation[loc]
+      const idx = list.indexOf(item)
+      if (idx >= 0) list.splice(idx, 1)
     }
   }
 }

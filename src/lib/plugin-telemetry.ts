@@ -135,10 +135,15 @@ export function recordStorageMetric(
     storageMetrics.shift()
   }
   
-  // Update storage size tracking
+  // Update storage size tracking. The host now passes a signed
+  // `dataSize` for `set` (new − old) so an overwrite of a 100-byte
+  // value with a 30-byte value reports −70 instead of double-
+  // counting +30. The tracker treats any value as the size delta
+  // to apply — positive for growth, negative for shrinkage — and
+  // clamps to 0 to defend against metric drift.
   if (success && operation === 'set') {
     const current = pluginStorageSize.get(pluginId) ?? 0
-    pluginStorageSize.set(pluginId, current + dataSize)
+    pluginStorageSize.set(pluginId, Math.max(0, current + dataSize))
   } else if (success && operation === 'delete') {
     const current = pluginStorageSize.get(pluginId) ?? 0
     pluginStorageSize.set(pluginId, Math.max(0, current - dataSize))

@@ -21,6 +21,7 @@ import {
   checkPluginUpdates,
   invalidateIndexCache,
 } from '@/lib/plugin-market'
+import { usePluginStore } from './plugin'
 
 const REPO_URL_STORAGE_KEY = 'swallow-plugin-market:repo-url'
 const DEFAULT_REPO_URL = ''
@@ -168,7 +169,14 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
   },
 
   localVersionFor: (id) => {
+    // Prefer the host's update info (it tracks the *active* semver,
+    // not just any version on disk). Fall back to the local plugin
+    // store so a plugin that's installed and up-to-date — and
+    // therefore absent from the `updates` list — still resolves
+    // correctly. Without the fallback the marketplace card flips
+    // to "Install" for a plugin the user has already installed.
     const u = get().updates.find((x) => x.id === id)
-    return u?.localVersion || undefined
+    if (u?.localVersion) return u.localVersion
+    return usePluginStore.getState().plugins.find((p) => p.id === id)?.version
   },
 }))

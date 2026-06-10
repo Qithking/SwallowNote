@@ -1,14 +1,31 @@
 /**
  * PluginPermissionDialog - Permission grant/revoke dialog
- * 
- * Displays permissions requested by a plugin and allows user to grant/revoke them.
+ *
+ * Displays permissions requested by a plugin and lets the user
+ * grant/revoke them. The dialog is rendered with the project's
+ * shadcn `Dialog` primitives so it picks up the same backdrop,
+ * animation, and Esc-to-close behavior as every other dialog in
+ * the app.
+ *
+ * The visible UI is a function component so we can use the
+ * `useTranslation` hook (class components can't, and wrapping the
+ * export in `withTranslation` would force the consumer to change).
  */
-
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Shield, Check, AlertTriangle } from 'lucide-react'
 import type { PluginPermission, PluginPermissionStatus, PermissionInfo } from '@/types/plugin'
 import { PLUGIN_PERMISSIONS } from '@/types/plugin'
 import { grantPluginPermissions, revokePluginPermissions } from '@/lib/plugin-permissions'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 interface PluginPermissionDialogProps {
   pluginId: string
@@ -27,6 +44,7 @@ export function PluginPermissionDialog({
   onClose,
   onGrant,
 }: PluginPermissionDialogProps) {
+  const { t } = useTranslation()
   const [selectedPermissions, setSelectedPermissions] = useState<PluginPermission[]>(
     permissions.filter((p) => {
       const status = currentStatus.find((s) => s.permission === p)
@@ -73,7 +91,7 @@ export function PluginPermissionDialog({
       onGrant?.(selectedPermissions)
       onClose()
     } catch {
-      setError('Failed to save permissions')
+      setError(t('plugin.permission.saveFailed'))
     } finally {
       setIsSubmitting(false)
     }
@@ -86,67 +104,34 @@ export function PluginPermissionDialog({
   })
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0, 0, 0, 0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: 'var(--bg-primary, #fff)',
-          borderRadius: 12,
-          width: '90%',
-          maxWidth: 480,
-          maxHeight: '80vh',
-          overflowY: 'auto',
-          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            padding: 20,
-            borderBottom: '1px solid var(--border-color)',
-          }}
-        >
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              background: 'var(--accent-color, #6366f1)',
-              borderRadius: 8,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Shield size={20} style={{ color: 'white' }} />
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent style={{ maxWidth: 480 }}>
+        <DialogHeader>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                background: 'var(--accent-color, #6366f1)',
+                borderRadius: 8,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Shield size={20} style={{ color: 'white' }} />
+            </div>
+            <div>
+              <DialogTitle>{t('plugin.permission.title')}</DialogTitle>
+              <DialogDescription>{pluginName}</DialogDescription>
+            </div>
           </div>
-          <div>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>
-              Plugin Permissions
-            </h2>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-              {pluginName}
-            </p>
-          </div>
-        </div>
+        </DialogHeader>
 
-        {/* Warning */}
         <div
           style={{
-            margin: 16,
+            marginTop: 12,
             padding: 12,
             background: 'rgba(251, 191, 36, 0.1)',
             border: '1px solid rgba(251, 191, 36, 0.3)',
@@ -155,22 +140,20 @@ export function PluginPermissionDialog({
             gap: 8,
           }}
         >
-          <AlertTriangle size={16} style={{ color: '#f59e0b', flexShrink: 0 }} />
+          <AlertTriangle size={16} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 1 }} />
           <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>
-            These permissions allow the plugin to access certain features. You can
-            change these settings later in the plugin manager.
+            {t('plugin.permission.warning')}
           </p>
         </div>
 
-        {/* Permissions list */}
-        <div style={{ padding: '0 16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
           {permissions.map((permission) => {
             const info = getPermissionInfo(permission)
             const isSelected = selectedPermissions.includes(permission)
             const currentStatusItem = currentStatus.find((s) => s.permission === permission)
 
             return (
-              <div
+              <button
                 key={permission}
                 onClick={() => togglePermission(permission)}
                 style={{
@@ -178,11 +161,13 @@ export function PluginPermissionDialog({
                   alignItems: 'center',
                   gap: 12,
                   padding: 12,
-                  marginBottom: 8,
                   background: isSelected ? 'var(--accent-color, #6366f1)' : 'var(--bg-secondary, #f5f5f7)',
+                  border: '1px solid transparent',
                   borderRadius: 8,
                   cursor: 'pointer',
                   transition: 'background 0.2s',
+                  textAlign: 'left',
+                  color: isSelected ? 'white' : 'var(--text-primary)',
                 }}
               >
                 <div
@@ -194,6 +179,7 @@ export function PluginPermissionDialog({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    flexShrink: 0,
                   }}
                 >
                   {isSelected && <Check size={14} style={{ color: 'white' }} />}
@@ -202,8 +188,13 @@ export function PluginPermissionDialog({
                   <div style={{ fontSize: 14, fontWeight: 500 }}>
                     {info?.name ?? permission}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    {info?.description ?? 'No description'}
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: isSelected ? 'rgba(255,255,255,0.85)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    {info?.description ?? t('plugin.permission.noDescription')}
                   </div>
                 </div>
                 {currentStatusItem?.granted && !isSelected && (
@@ -214,25 +205,25 @@ export function PluginPermissionDialog({
                       borderRadius: 4,
                       fontSize: 11,
                       color: '#ef4444',
+                      flexShrink: 0,
                     }}
                   >
-                    Will be revoked
+                    {t('plugin.permission.revoking')}
                   </div>
                 )}
-              </div>
+              </button>
             )
           })}
         </div>
 
-        {/* Error */}
         {error && (
           <div
             style={{
-              margin: 16,
-              padding: 12,
+              marginTop: 12,
+              padding: 8,
               background: 'rgba(239, 68, 68, 0.1)',
               border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: 8,
+              borderRadius: 4,
               color: '#ef4444',
               fontSize: 13,
             }}
@@ -241,50 +232,20 @@ export function PluginPermissionDialog({
           </div>
         )}
 
-        {/* Actions */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 12,
-            padding: 16,
-            borderTop: '1px solid var(--border-color)',
-          }}
-        >
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1,
-              padding: '10px 16px',
-              border: '1px solid var(--border-color)',
-              borderRadius: 8,
-              background: 'transparent',
-              color: 'var(--text-primary)',
-              fontSize: 14,
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
+        <DialogFooter style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting} style={{ flex: 1 }}>
+            {t('plugin.permission.cancel')}
+          </Button>
+          <Button
             onClick={handleSubmit}
             disabled={isSubmitting || !hasChanges}
-            style={{
-              flex: 1,
-              padding: '10px 16px',
-              border: 'none',
-              borderRadius: 8,
-              background: hasChanges ? 'var(--accent-color, #6366f1)' : '#ccc',
-              color: 'white',
-              fontSize: 14,
-              cursor: hasChanges ? 'pointer' : 'not-allowed',
-              opacity: isSubmitting ? 0.7 : 1,
-            }}
+            style={{ flex: 1 }}
           >
-            {isSubmitting ? 'Saving...' : 'Save Changes'}
-          </button>
-        </div>
-      </div>
-    </div>
+            {isSubmitting ? t('plugin.permission.saving') : t('plugin.permission.save')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

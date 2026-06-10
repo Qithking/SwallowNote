@@ -70,15 +70,28 @@ export function getPluginCrashCount(pluginId: string): number {
 }
 
 /**
- * Manually disable a plugin via store action.
+ * Manually disable a plugin via store action + Rust-side persistence.
+ * Both paths are needed so the disabled state survives a restart:
+ *   1. Frontend store: marks the plugin disabled in Zustand so the
+ *      UI updates immediately and `onDisable` lifecycle hook fires.
+ *   2. Backend: writes the `.disabled` marker on disk via Tauri IPC
+ *      so the change persists across app restarts.
  */
 function disablePlugin(pluginId: string): void {
   try {
     const pluginStore = usePluginStore.getState()
     pluginStore.setPluginEnabled(pluginId, false)
   } catch (err) {
-    console.error(`[plugin-health] Failed to disable plugin "${pluginId}":`, err)
+    console.error(`[plugin-health] Failed to disable plugin "${pluginId}" in store:`, err)
   }
+  // Persist the disabled state to disk so it survives a restart.
+  // Dynamic import avoids a circular dep at module-evaluation time
+  // (plugin-health → tauri → plugin-host → plugin-health).
+  void import('@/lib/tauri').then(({ togglePluginEnabled }) => {
+    void togglePluginEnabled(pluginId, false)
+  }).catch((err) => {
+    console.error(`[plugin-health] Failed to persist disable for plugin "${pluginId}":`, err)
+  })
 }
 
 /**

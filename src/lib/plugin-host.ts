@@ -76,8 +76,33 @@ class PluginEventBusImpl implements PluginEventBus {
     }
   }
 
-  off<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void {
-    this.handlers.get(event)?.delete(handler as AnyHandler)
+  /**
+   * Unsubscribe a handler. `expectedPluginId` is optional but
+   * recommended: when supplied, the bus only removes the handler if
+   * its `__pluginId` tag matches. This closes a low-probability
+   * cross-plugin removal race where one plugin could pass another
+   * plugin's reference into `off` and silently break the second
+   * plugin's subscriptions (the `__pluginId` tag is duck-typed and
+   * not protected by the type system).
+   */
+  off<E extends PluginEvent>(
+    event: E,
+    handler: PluginEventHandler<E>,
+    expectedPluginId?: string,
+  ): void {
+    const set = this.handlers.get(event)
+    if (!set) return
+    if (expectedPluginId !== undefined) {
+      const owner = this.readPluginId(handler as unknown as { __pluginId?: string })
+      if (owner !== expectedPluginId) {
+        // Refuse to remove a handler that doesn't belong to the
+        // caller. Returning silently (rather than throwing) keeps
+        // the bus call-site symmetric with the no-op behaviour
+        // when a handler is simply not registered.
+        return
+      }
+    }
+    set.delete(handler as AnyHandler)
   }
 
   /**
@@ -157,6 +182,14 @@ class PluginStorageImpl implements PluginStorage {
   private loadPromise: Promise<Record<string, unknown>> | null = null
   private writePromise: Promise<void> | null = null
   private dirty = false
+  /**
+   * Monotonic counter incremented on every mutation. Captured at the
+   * start of `doFlush` so the write-completion check can tell
+   * "nothing happened during the write" (count matches) from
+   * "a concurrent `set` landed" (count advanced). See
+   * [`PluginStorageImpl.doFlush`] for the matching consumption site.
+   */
+  private mutationCount = 0
 
   constructor(private readonly pluginId: string) {
     // The storage instance is per-plugin and lives for the whole
@@ -209,14 +242,57 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   private async flush(): Promise<void> {
-    if (!this.dirty) return
-    if (this.writePromise) return this.writePromise
+    // Drain the in-flight write first (if any), then re-check the
+    // dirty flag. Concurrent callsites like
+    //   await set('a', 1)
+    //   await set('b', 2)
+    // would otherwise race: the first `set` captures `cache = {a:1}`
+    // into its `JSON.stringify`, the second `set` synchronously
+    // mutates the cache to `{a:1, b:2}` and then awaits the same
+    // writePromise — but that promise's body has *already* snapshotted
+    // the cache without `b`. After it resolves the second `set`
+    // resolves too, the dirty flag is cleared, and `b` is silently
+    // lost. The post-write dirty recheck forces a follow-up flush
+    // whenever a new mutation landed during the in-flight write.
+    if (this.writePromise) {
+      try {
+        await this.writePromise
+      } catch {
+        /* errors are already logged in doFlush */
+      }
+      if (this.dirty) {
+        return this.doFlush()
+      }
+      return
+    }
+    return this.doFlush()
+  }
+
+  private async doFlush(): Promise<void> {
+    if (!this.cache) return
+    // Snapshot the cache and the mutation count synchronously, *before*
+    // any await, so a concurrent `set` that lands during the write can
+    // be detected at write-completion time. The original implementation
+    // read `this.cache` lazily inside the async IIFE, which captured
+    // whatever was on the cache at the moment `JSON.stringify` was
+    // called — usually before concurrent set()s had a chance to run,
+    // but not always. Snapshotting the object reference up front gives
+    // a stable target for the JSON.stringify call and lets us reason
+    // about "what was on disk before any await" cleanly.
+    const dataToWrite = this.cache
+    const capturedCount = this.mutationCount
     this.writePromise = (async () => {
       try {
-        if (!this.cache) return
         const path = await getPluginStoragePath(this.pluginId)
-        await writeFile(path, JSON.stringify(this.cache, null, 2))
-        this.dirty = false
+        await writeFile(path, JSON.stringify(dataToWrite, null, 2))
+        // Only clear `dirty` if no new mutation has landed since
+        // we took the snapshot. If a concurrent set() flipped
+        // mutationCount past `capturedCount`, the cache now
+        // contains data not on disk and we must keep dirty=true
+        // so the next flush() picks it up.
+        if (this.mutationCount === capturedCount) {
+          this.dirty = false
+        }
       } catch (err) {
         console.error(`[plugin-host] failed to persist storage for ${this.pluginId}:`, err)
       } finally {
@@ -248,18 +324,30 @@ class PluginStorageImpl implements PluginStorage {
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
+    // Capture the old value's size *before* overwriting so the
+    // telemetry delta is correct. Reading `this.cache[key]` after
+    // `data[key] = value` would always return the new value,
+    // making oldSize === newSize and the delta always zero.
+    const oldSize = this.estimateSize(this.cache ? this.cache[key] : undefined)
     try {
       const data = await this.load()
       data[key] = value
       this.dirty = true
+      // Bump the mutation count so a concurrent in-flight write
+      // (started before this set landed) can detect "I'm writing
+      // stale data; the next flush should pick up the new value"
+      // at completion time.
+      this.mutationCount++
       await this.flush()
     } catch (err) {
       success = false
       errorMsg = String(err)
       throw err
     } finally {
-      const dataSize = this.estimateSize(value)
-      this.recordMetric('set', 1, dataSize, performance.now() - start, success, errorMsg)
+      // Pass the *delta* of new − old, so the size tracker subtracts
+      // the old value's size when the same key is overwritten.
+      const newSize = this.estimateSize(value)
+      this.recordMetric('set', 1, newSize - oldSize, performance.now() - start, success, errorMsg)
     }
   }
 
@@ -275,6 +363,7 @@ class PluginStorageImpl implements PluginStorage {
         dataSize = this.estimateSize(data[key])
         delete data[key]
         this.dirty = true
+        this.mutationCount++
         await this.flush()
       }
     } catch (err) {
@@ -297,6 +386,7 @@ class PluginStorageImpl implements PluginStorage {
       dataSize = this.estimateSize(data)
       this.cache = {}
       this.dirty = true
+      this.mutationCount++
       await this.flush()
     } catch (err) {
       success = false

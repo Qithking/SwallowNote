@@ -788,101 +788,15 @@ export async function togglePluginEnabled(pluginId: string, enabled: boolean): P
   return await invoke('toggle_plugin_enabled', { pluginId, enabled })
 }
 
-// ─── Marketplace (Phase 9.2) ─────────────────────────────────────────────────
-
-export interface PluginIndexEntryWire {
-  id: string
-  name: string
-  version: string
-  description: string
-  author: string
-  icon?: string
-  tags: string[]
-  download_url: string
-  sha256: string
-  signature_b64: string
-  pubkey_b64: string
-  versions: Array<{
-    version: string
-    download_url: string
-    sha256: string
-    changelog: string
-    published_at: string
-  }>
-  dependencies: string[]
-}
-
-export interface PluginIndexWire {
-  schema_version: number
-  updated_at: string
-  pubkey_b64: string
-  plugins: PluginIndexEntryWire[]
-}
-
-export interface PluginUpdateInfoWire {
-  id: string
-  local_version: string
-  remote_version: string
-  sha256: string
-}
-
-export interface PluginVersionInfoWire {
-  version: string
-  is_active: boolean
-  size_bytes: number
-  installed_at: string
-}
-
 /**
- * Install a plugin from raw zip bytes after verifying SHA-256 +
- * ed25519 signature on the host. `bytes` is a plain `number[]` so
- * Tauri's IPC serializer can move it across without `ArrayBuffer`
- * polyfills.
+ * Kill the backend child process for `pluginId` (if any) and forget
+ * the entry. Returns `true` if a live process was killed, `false` if
+ * no entry existed. Call this *before* `uninstallPlugin` to ensure
+ * the OS releases any open file handles on the plugin directory —
+ * the uninstall command does this for you, but in pathological
+ * cases (e.g. a wedged backend) the explicit kill is the only way
+ * to make progress.
  */
-export async function installPluginFromBytes(args: {
-  pluginId: string
-  version: string
-  bytes: number[]
-  sha256: string
-  pubkeyB64: string
-  signatureB64: string
-}): Promise<PluginMetadataRust> {
-  return await invoke('install_plugin_from_bytes', {
-    pluginId: args.pluginId,
-    version: args.version,
-    bytes: args.bytes,
-    sha256: args.sha256,
-    pubkeyB64: args.pubkeyB64,
-    signatureB64: args.signatureB64,
-  })
-}
-
-export async function checkPluginUpdates(repoUrl: string): Promise<PluginUpdateInfoWire[]> {
-  return await invoke('check_plugin_updates', { repoUrl })
-}
-
-export async function updatePlugin(args: {
-  pluginId: string
-  version: string
-  bytes: number[]
-  sha256: string
-  pubkeyB64: string
-  signatureB64: string
-}): Promise<PluginMetadataRust> {
-  return await invoke('update_plugin', {
-    pluginId: args.pluginId,
-    version: args.version,
-    bytes: args.bytes,
-    sha256: args.sha256,
-    pubkeyB64: args.pubkeyB64,
-    signatureB64: args.signatureB64,
-  })
-}
-
-export async function rollbackPlugin(pluginId: string, version: string): Promise<PluginMetadataRust> {
-  return await invoke('rollback_plugin', { pluginId, version })
-}
-
-export async function listPluginVersions(pluginId: string): Promise<PluginVersionInfoWire[]> {
-  return await invoke('list_plugin_versions', { pluginId })
+export async function killPlugin(pluginId: string): Promise<boolean> {
+  return await invoke<boolean>('kill_plugin', { pluginId })
 }

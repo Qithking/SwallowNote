@@ -459,6 +459,77 @@ pub async fn invoke_plugin(
     response.body
 }
 
+/// Kill the backend child process for `plugin_id` (if any) and
+/// forget the entry. After this call, the next `invoke_plugin` will
+/// lazily spawn a fresh process — useful for clean uninstalls and
+/// for plugins whose backend has wedged. Returns `true` if a live
+/// process was killed, `false` if no entry existed.
+pub async fn kill_plugin_backend(
+    state: &SharedPluginProcessState,
+    plugin_id: &str,
+) -> Result<bool, PluginError> {
+    // We deliberately validate the id here too, even though the only
+    // call site (the `kill_plugin` Tauri command) does the same check.
+    // Defending at this layer means callers wiring this function up
+    // from Rust unit tests or future commands can't accidentally
+    // bypass the path-traversal guard.
+    if plugin_id.is_empty() || plugin_id.len() > 128
+        || plugin_id == "." || plugin_id == ".."
+    {
+        return Err(PluginError::InvalidInput(format!(
+            "plugin id {:?} is invalid",
+            plugin_id
+        )));
+    }
+    for c in plugin_id.chars() {
+        let ok = c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-';
+        if !ok {
+            return Err(PluginError::InvalidInput(format!(
+                "plugin id {:?} contains illegal character {:?}",
+                plugin_id, c
+            )));
+        }
+    }
+
+    let proc = {
+        let mut map = state.lock().await;
+        map.remove(plugin_id)
+    };
+    if let Some(proc) = proc {
+        // Take the child out from under the Arc<Mutex<Option<Child>>> so
+        // we can call `kill().await` without holding the per-process
+        // mutex. After `start_kill` returns, the OS-level `kill_on_drop`
+        // flag we set on the Command is a no-op (we *did* kill it), but
+        // we still `await` the kill so the child actually exits and
+        // its file descriptors are released before the caller proceeds
+        // (e.g. deletes the plugin directory).
+        let child_arc = proc.child.clone();
+        let mut guard = child_arc.lock().await;
+        if let Some(mut child) = guard.take() {
+            let _ = child.start_kill();
+            // Give the child a brief grace period to release any
+            // open file handles on the plugin dir; bounded so we
+            // don't block uninstall indefinitely on a wedged process.
+            let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+        }
+        // Also wake any pending oneshots with a "process killed" error
+        // so callers blocked on `invoke_plugin` unblock instead of
+        // hitting their full 30s timeout.
+        let mut pending = proc.pending.lock().await;
+        for (_, tx) in pending.drain() {
+            let _ = tx.send(JsonRpcResponse {
+                id: 0,
+                body: Err(PluginError::Process(format!(
+                    "plugin backend killed (plugin_id={})",
+                    plugin_id
+                ))),
+            });
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

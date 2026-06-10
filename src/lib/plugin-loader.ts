@@ -12,6 +12,8 @@
  */
 import type { PluginDefinition, PluginManifest, PluginMetadata } from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
+import { createElement, type ReactNode } from 'react'
+import { PlugZap } from 'lucide-react'
 
 /**
  * Convert Rust PluginMetadata to frontend PluginMetadata
@@ -47,7 +49,7 @@ export async function loadPluginModule(pluginPath: string): Promise<PluginManife
 /**
  * Internal: load a plugin module and return both the manifest and
  * the raw dynamic-import result. The raw module is needed by
- * `loadPluginFromPath` so it can attach `__pluginModule` to the
+ * `loadAllPlugins` so it can attach `__pluginModule` to the
  * definition (used by the host takeover layer to call `setHost`).
  */
 async function loadPluginModuleWithRef(
@@ -94,61 +96,6 @@ function attachPluginModule(
     writable: false,
     configurable: false,
   })
-}
-
-/**
- * Load a single plugin from a path. Used for hot reload.
- */
-export async function loadPluginFromPath(pluginPath: string): Promise<PluginDefinition | null> {
-  const { manifest, module } = await loadPluginModuleWithRef(pluginPath)
-  if (!manifest) {
-    return null
-  }
-
-  // Extract plugin ID from manifest or path
-  const pluginId = manifest.id || extractPluginIdFromPath(pluginPath)
-
-  const def = {
-    id: pluginId,
-    name: manifest.name,
-    description: manifest.description || '',
-    version: manifest.version || '1.0.0',
-    author: manifest.author || '',
-    publishedAt: manifest.publishedAt || new Date().toISOString(),
-    iconPosition: manifest.iconPosition || 'sidebar',
-    contentPosition: manifest.contentPosition || 'leftPanel',
-    order: manifest.order ?? 100,
-    enabled: manifest.enabled ?? true,
-    icon: manifest.icon,
-    panel: manifest.panel,
-    settings: manifest.settings,
-    pluginPath,
-    hasBackend: false,
-    permissions: manifest.permissions ?? [],
-    hooks: {
-      onLoad: manifest.onLoad,
-      onUnload: manifest.onUnload,
-      onEnable: manifest.onEnable,
-      onDisable: manifest.onDisable,
-      onMount: manifest.onMount,
-      onUnmount: manifest.onUnmount,
-      onActivate: manifest.onActivate,
-      onDeactivate: manifest.onDeactivate,
-    },
-  } satisfies PluginDefinition
-
-  attachPluginModule(def, module)
-  return def
-}
-
-/**
- * Extract plugin ID from file path
- */
-function extractPluginIdFromPath(path: string): string {
-  // Try to extract ID from path (e.g., /path/to/plugins/com.example.myplugin → com.example.myplugin)
-  const parts = path.split('/')
-  const lastPart = parts[parts.length - 1] || parts[parts.length - 2] || 'unknown-plugin'
-  return lastPart.replace(/[^a-zA-Z0-9.-]/g, '-')
 }
 
 /**
@@ -209,7 +156,46 @@ export async function loadAllPlugins(
         attachPluginModule(def, module)
         return def
       }
-      // Plugin without a valid manifest - create a placeholder
+      // Plugin without a valid manifest - create a placeholder that
+      // surfaces a clear, visible icon (PlugZap) and a short panel
+      // explaining the failure. The previous `() => null` produced
+      // an *invisible* sidebar entry that the user could click but
+      // not see, making it impossible to debug a missing manifest.
+      // We use `createElement` instead of JSX so this file stays a
+      // plain `.ts` module (no tsx transform needed for the loader).
+      const fallbackIcon: ReactNode = createElement(PlugZap, { size: 18 })
+      const fallbackPanel: ReactNode = createElement(
+        'div',
+        {
+          style: {
+            padding: 24,
+            color: 'var(--text-secondary)',
+            fontSize: 13,
+          },
+        },
+        createElement(
+          'div',
+          {
+            style: {
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 8,
+            },
+          },
+          createElement(PlugZap, { size: 16 }),
+          createElement('strong', null, '插件清单缺失'),
+        ),
+        createElement(
+          'p',
+          null,
+          `该插件 (${meta.id}) 的 `,
+          createElement('code', null, 'index.js'),
+          ' 未导出有效的 ',
+          createElement('code', null, 'manifest'),
+          ' 对象。请检查插件包是否完整、是否被部分删除，或联系插件作者。',
+        ),
+      )
       return {
         id: meta.id,
         name: meta.name,
@@ -221,8 +207,8 @@ export async function loadAllPlugins(
         contentPosition: meta.content_position as PluginDefinition['contentPosition'],
         order: meta.order,
         enabled: meta.enabled,
-        icon: () => null,
-        panel: () => null,
+        icon: () => fallbackIcon,
+        panel: () => fallbackPanel,
         pluginPath: meta.plugin_path,
         hasBackend: meta.has_backend,
         permissions: [],

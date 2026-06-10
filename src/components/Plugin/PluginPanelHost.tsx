@@ -103,6 +103,7 @@ export function PluginPanelHost({
     return (
       <PluginErrorBoundary
         pluginId={plugin.id}
+        resetKey={plugin.id}
         onCrash={handleCrash}
         onRecover={handleRecover}
       >
@@ -115,6 +116,7 @@ export function PluginPanelHost({
   return (
     <PluginErrorBoundary
       pluginId={plugin.id}
+      resetKey={plugin.id}
       onCrash={handleCrash}
       onRecover={handleRecover}
     >

@@ -80,6 +80,65 @@ fn plugins_dir(app_data_dir: &Path) -> PathBuf {
 /// Marketplace installs use a real semver from the index entry.
 const UPLOAD_VERSION: &str = "upload";
 
+/// Reject plugin identifiers that could be used to escape the
+/// `<app_data>/plugins/` tree. The frontend treats `plugin_id` as
+/// opaque, but the host uses it as a path component on every IPC
+/// call. A naive `plugin_id = "../foo"` would resolve to
+/// `<app_data>/plugins/../foo/...` and write outside the plugins
+/// root. We allow only `[a-zA-Z0-9._-]`, length 1..=128, and reject
+/// the boundary cases `.` / `..`.
+fn validate_plugin_id(id: &str) -> Result<(), PluginError> {
+    if id.is_empty() || id.len() > 128 {
+        return Err(PluginError::InvalidInput(format!(
+            "plugin id must be 1..=128 chars, got {}",
+            id.len()
+        )));
+    }
+    if id == "." || id == ".." {
+        return Err(PluginError::InvalidInput(format!(
+            "plugin id {:?} is reserved",
+            id
+        )));
+    }
+    for c in id.chars() {
+        let ok = c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-';
+        if !ok {
+            return Err(PluginError::InvalidInput(format!(
+                "plugin id {:?} contains illegal character {:?}",
+                id, c
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Same as [`validate_plugin_id`] but for the `version` field, which
+/// is semver-ish so we additionally allow `+` (build metadata).
+fn validate_plugin_version(version: &str) -> Result<(), PluginError> {
+    if version.is_empty() || version.len() > 64 {
+        return Err(PluginError::InvalidInput(format!(
+            "plugin version must be 1..=64 chars, got {}",
+            version.len()
+        )));
+    }
+    if version == "." || version == ".." {
+        return Err(PluginError::InvalidInput(format!(
+            "plugin version {:?} is reserved",
+            version
+        )));
+    }
+    for c in version.chars() {
+        let ok = c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' || c == '+';
+        if !ok {
+            return Err(PluginError::InvalidInput(format!(
+                "plugin version {:?} contains illegal character {:?}",
+                version, c
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Return the directory that currently holds the active version of a
 /// plugin. Prefers the `current` symlink; falls back to the `.current_version`
 /// text marker when symlinks aren't available (Windows without
@@ -395,6 +454,11 @@ pub fn install_plugin(
         .to_string_lossy()
         .to_string();
 
+    // Reject zip stems that would escape the plugins tree before we
+    // touch the filesystem. The frontend hands us a `String` path so
+    // a user can technically type `..` or `/` — guard at the boundary.
+    validate_plugin_id(&zip_filename)?;
+
     let plugin_dir = plugins_root.join(&zip_filename);
     let version_dir = plugin_dir.join(".versions").join(UPLOAD_VERSION);
 
@@ -453,7 +517,37 @@ pub fn install_plugin(
 }
 
 #[tauri::command]
-pub fn uninstall_plugin(app_handle: tauri::AppHandle, plugin_id: String) -> Result<(), PluginError> {
+pub async fn uninstall_plugin(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, crate::commands::plugin_invoke::SharedPluginProcessState>,
+    plugin_id: String,
+) -> Result<(), PluginError> {
+    // Reject path-traversal ids before we touch the filesystem. The
+    // canonicalize + starts_with check below would also catch it, but
+    // failing fast at the boundary gives a cleaner error message.
+    validate_plugin_id(&plugin_id)?;
+
+    // 1) Kill the backend child *first* so the OS releases any open
+    //    file handles on the plugin directory. Without this, a plugin
+    //    uninstall would leave a long-lived subprocess around that
+    //    could still respond to `invoke_plugin` calls — a security
+    //    problem (an "uninstalled" plugin still has IPC reach) and a
+    //    resource leak (FDs, memory, file handles).
+    //
+    //    Best-effort: even if the kill fails (e.g. no backend was
+    //    ever spawned for this plugin), we proceed to the dir removal.
+    if let Err(e) = crate::commands::plugin_invoke::kill_plugin_backend(
+        state.inner(),
+        &plugin_id,
+    )
+    .await
+    {
+        eprintln!(
+            "[plugin] kill_plugin_backend for '{}' failed (continuing with uninstall): {}",
+            plugin_id, e
+        );
+    }
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -484,11 +578,26 @@ pub fn uninstall_plugin(app_handle: tauri::AppHandle, plugin_id: String) -> Resu
 }
 
 #[tauri::command]
+pub async fn kill_plugin(
+    state: tauri::State<'_, crate::commands::plugin_invoke::SharedPluginProcessState>,
+    plugin_id: String,
+) -> Result<bool, PluginError> {
+    // The path-traversal guard runs *inside* `kill_plugin_backend`
+    // (defence in depth), so any caller that re-exports this function
+    // — including future Rust unit tests — gets the same validation
+    // for free.
+    crate::commands::plugin_invoke::kill_plugin_backend(state.inner(), &plugin_id).await
+}
+
+#[tauri::command]
 pub fn toggle_plugin_enabled(
     app_handle: tauri::AppHandle,
     plugin_id: String,
     enabled: bool,
 ) -> Result<(), PluginError> {
+    // Guard against path traversal before we touch the filesystem.
+    validate_plugin_id(&plugin_id)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -524,6 +633,11 @@ pub fn get_plugin_storage_path(
     app_handle: tauri::AppHandle,
     plugin_id: String,
 ) -> Result<String, PluginError> {
+    // The returned path is used by the frontend to `readFile` /
+    // `writeFile` directly. Validate to prevent `../` from leaking
+    // out into the renderer.
+    validate_plugin_id(&plugin_id)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -698,12 +812,13 @@ pub async fn install_plugin_from_bytes(
     pubkey_b64: String,
     signature_b64: String,
 ) -> Result<PluginMetadataRust, PluginError> {
-    if plugin_id.is_empty() {
-        return Err(PluginError::InvalidInput("plugin_id is required".to_string()));
-    }
-    if version.is_empty() {
-        return Err(PluginError::InvalidInput("version is required".to_string()));
-    }
+    // Strict validation: plugin_id and version are joined onto the
+    // filesystem path unconditionally, so we reject anything that
+    // contains `..`, `/`, `\`, or other path-traversal characters
+    // before doing *anything* else. The earlier empty-string check
+    // is now subsumed by `validate_plugin_id`/`_version`.
+    validate_plugin_id(&plugin_id)?;
+    validate_plugin_version(&version)?;
 
     // 1) SHA-256 must match.
     let actual = sha256_hex(&bytes);
@@ -902,12 +1017,12 @@ pub fn rollback_plugin(
     plugin_id: String,
     version: String,
 ) -> Result<PluginMetadataRust, PluginError> {
-    if plugin_id.is_empty() {
-        return Err(PluginError::InvalidInput("plugin_id is required".to_string()));
-    }
-    if version.is_empty() {
-        return Err(PluginError::InvalidInput("version is required".to_string()));
-    }
+    // Validate both inputs strictly — `version` ends up in a symlink
+    // target inside `.versions/<version>/`, which would otherwise
+    // point outside the plugin dir for a malicious input.
+    validate_plugin_id(&plugin_id)?;
+    validate_plugin_version(&version)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -951,9 +1066,8 @@ pub fn list_plugin_versions(
     app_handle: tauri::AppHandle,
     plugin_id: String,
 ) -> Result<Vec<PluginVersionInfo>, PluginError> {
-    if plugin_id.is_empty() {
-        return Err(PluginError::InvalidInput("plugin_id is required".to_string()));
-    }
+    validate_plugin_id(&plugin_id)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()

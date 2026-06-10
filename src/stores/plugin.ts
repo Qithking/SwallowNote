@@ -139,25 +139,28 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   },
 
   registerPlugins: (newPlugins) => {
-    set((state) => {
-      const existingIds = new Set(state.plugins.map((p) => p.id))
-      const added = newPlugins.filter((p) => !existingIds.has(p.id))
-      if (added.length === 0) return state
+    // Compute the diff *before* the `set()` callback so we can fire
+    // onLoad for the same set we actually inserted. The previous
+    // implementation re-derived `currentIds` *after* `set()` and
+    // asked "is the plugin in the store?" — but that returns true
+    // for **every** plugin in the store, including pre-existing
+    // ones, so passing `[A, B]` where A is already registered
+    // caused A's onLoad to fire a second time. The diff is now
+    // captured locally and used as the sole onLoad trigger.
+    const state = get()
+    const existingIds = new Set(state.plugins.map((p) => p.id))
+    const added = newPlugins.filter((p) => !existingIds.has(p.id))
+    if (added.length > 0) {
       const plugins = [...state.plugins, ...added]
-      return { plugins, registry: buildRegistry(plugins) }
-    })
-    // Fire onLoad hooks for newly added plugins only (not duplicates).
-    // We re-read the set after set() to know which actually got added.
-    const currentIds = new Set(get().plugins.map((p) => p.id))
-    for (const plugin of newPlugins) {
-      if (currentIds.has(plugin.id)) {
-        void runPluginLifecycleHook(
-          plugin,
-          plugin.hooks?.onLoad,
-          buildPluginContext(plugin),
-          'onLoad'
-        )
-      }
+      set({ plugins, registry: buildRegistry(plugins) })
+    }
+    for (const plugin of added) {
+      void runPluginLifecycleHook(
+        plugin,
+        plugin.hooks?.onLoad,
+        buildPluginContext(plugin),
+        'onLoad'
+      )
     }
   },
 
@@ -270,7 +273,98 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   },
 
   setPlugins: (plugins) => {
-    set({ plugins, registry: buildRegistry(plugins) })
+    // Diff against the current list BEFORE we replace it. Anything
+    // that disappears needs its per-plugin resources cleaned up
+    // (storage cache, context-menu contributions, permissions) and
+    // its `onUnload` hook fired. Anything that appears needs its
+    // `onLoad` hook fired. Skipping both halves would let:
+    //
+    //   - a plugin removed via the file system (or via the
+    //     marketplace uninstall path) leave behind stale storage
+    //     cache, menu items, a localStorage permissions entry, and
+    //     an `onUnload` that never got called
+    //   - a freshly-installed plugin start with its event
+    //     subscriptions, storage seeding, and lifecycle timers
+    //     never running — the install *succeeded* but the plugin
+    //     was never *started*
+    //
+    // We can't call `unregisterPlugin` / `registerPlugin` here
+    // because they each do their own `set()`, which would either
+    // race with our atomic replacement (registerPlugin's set
+    // happens AFTER ours) or briefly drop the rest of the list
+    // (unregisterPlugin's set happens BEFORE ours). Instead we
+    // re-implement the lifecycle fire inline so the list is
+    // written exactly once and the hooks see the *correct*
+    // pre-/post-set plugin references.
+    //
+    // Dedupe: if the caller accidentally passes a list with the
+    // same plugin id twice, the `added` filter below would only
+    // catch the *first* occurrence of the duplicate and silently
+    // drop the rest. Detect duplicates up front and warn so the
+    // call site can be fixed, while still using a deterministic
+    // "last wins" merge of the kept entries.
+    const seen = new Set<string>()
+    const deduped: typeof plugins = []
+    for (const p of plugins) {
+      if (seen.has(p.id)) {
+        console.warn(
+          `[plugin-store] setPlugins received duplicate id "${p.id}", keeping the last occurrence`,
+        )
+        // Replace the prior kept entry with this later one so
+        // the "last wins" semantics are well-defined.
+        const idx = deduped.findIndex((q) => q.id === p.id)
+        if (idx >= 0) deduped[idx] = p
+        continue
+      }
+      seen.add(p.id)
+      deduped.push(p)
+    }
+    const state = get()
+    const oldIds = new Set(state.plugins.map((p) => p.id))
+    const newIds = new Set(deduped.map((p) => p.id))
+    const removed = state.plugins.filter((p) => !newIds.has(p.id))
+    const added = deduped.filter((p) => !oldIds.has(p.id))
+    set({ plugins: deduped, registry: buildRegistry(deduped) })
+    for (const target of removed) {
+      void runPluginLifecycleHook(
+        target,
+        target.hooks?.onUnload,
+        buildPluginContext(target),
+        'onUnload'
+      )
+      dropPluginStorage(target.id)
+      clearPluginMenuItems(target.id)
+      void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
+        void dropPluginPermissions(target.id)
+      })
+    }
+    for (const target of added) {
+      // Fire onLoad on the *new* plugin reference (the one the
+      // store just accepted). The host takeover layer (run via
+      // `runPluginLifecycleHook`) installs the SDK overrides
+      // for the hook's duration so the plugin can call
+      // `getPluginStorage`, `registerContextMenu`, etc. against
+      // the host's real implementations.
+      //
+      // Skip onLoad for plugins that are persisted as disabled:
+      // the lifecycle model is `onLoad → onEnable`, and a plugin
+      // that was last disabled on disk would otherwise initialize
+      // its event subscriptions, timers, and storage seeding only
+      // to be told it's disabled the moment the user enables it —
+      // duplicating the work and (worse) potentially racing the
+      // user-triggered onEnable with the post-registration onLoad.
+      // `onLoad` will fire the next time the plugin is enabled
+      // via `setPluginEnabled(id, true)` after a cold reload.
+      if (target.enabled === false) {
+        continue
+      }
+      void runPluginLifecycleHook(
+        target,
+        target.hooks?.onLoad,
+        buildPluginContext(target),
+        'onLoad'
+      )
+    }
   },
 
   setLoaded: (loaded) => set({ loaded }),

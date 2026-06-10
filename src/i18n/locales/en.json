@@ -792,6 +792,23 @@
       "colDuration": "Duration",
       "colStatus": "Status"
     },
+    "error": {
+      "title": "Plugin Error",
+      "description": "The plugin {{id}} encountered an error and cannot be displayed.",
+      "viewDetails": "View error details",
+      "retry": "Retry",
+      "disable": "Disable Plugin"
+    },
+    "permission": {
+      "title": "Plugin Permissions",
+      "warning": "These permissions allow the plugin to access certain features. You can change these settings later in the plugin manager.",
+      "revoking": "Will be revoked",
+      "cancel": "Cancel",
+      "save": "Save Changes",
+      "saving": "Saving…",
+      "noDescription": "No description",
+      "saveFailed": "Failed to save permissions"
+    },
     "market": {
       "tabManage": "Installed",
       "tabMarket": "Marketplace",
@@ -808,13 +825,19 @@
       "installed": "Installed {{name}} v{{version}}",
       "rolledBack": "Rolled back to {{version}}",
       "unknownAuthor": "Unknown author",
+      "unknownName": "Unnamed plugin",
+      "noDescription": "No description",
       "dependencies": "Dependencies",
       "versionHistory": "Version history",
       "localVersions": "Installed versions",
+      "active": "active",
       "rollback": "Rollback",
       "install": "Install",
       "updateTo": "Update to v{{version}}",
-      "upToDate": "Up to date"
+      "upToDate": "Up to date",
+      "badgeUpdate": "Update",
+      "badgeInstalled": "Installed",
+      "badgeInstall": "Install"
     }
   }
 }

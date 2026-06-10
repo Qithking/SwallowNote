@@ -40,16 +40,33 @@ import { usePluginMarketStore, usePluginStore } from '@/stores'
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { scanPlugins } from '@/lib/tauri'
 import type { PluginIndex, PluginIndexEntry, PluginVersionInfo } from '@/types/plugin'
+import type { PluginMetadataRust } from '@/lib/tauri'
 export function PluginMarketDetail({
   entry,
   index,
   localVersion,
   onClose,
+  onInstalled,
 }: {
   entry: PluginIndexEntry
   index: PluginIndex
   localVersion: string | null
   onClose: () => void
+  /**
+   * Called by the dialog right before closing, after a successful
+   * install / update / rollback. The parent (`PluginMarketView`)
+   * uses the returned `PluginMetadataRust` to open the post-install
+   * permission grant dialog — the same affordance the user-upload
+   * path in `PluginManagerView` provides. Without this callback the
+   * marketplace install would silently skip the permission step and
+   * the user would have to discover the per-card "Permissions"
+   * button before they could grant the first permission.
+   *
+   * Only the metadata is forwarded (id, name, etc.) — we don't pass
+   * the full `PluginDefinition` because the registry might not have
+   * picked the new entry up yet by the time the callback runs.
+   */
+  onInstalled?: (meta: PluginMetadataRust) => void
 }) {
   const { t } = useTranslation()
   const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
@@ -83,10 +100,11 @@ export function PluginMarketDetail({
   const onInstall = async () => {
     setError(null)
     setIsInstalling(true)
+    let installedMeta: PluginMetadataRust | null = null
     try {
       const bytes = await downloadPluginZip(entry)
       const pubkeyB64 = effectivePubkey(index, entry)
-      await installPluginFromBytes({
+      installedMeta = await installPluginFromBytes({
         pluginId: entry.id,
         version: entry.version,
         bytes,
@@ -94,13 +112,17 @@ export function PluginMarketDetail({
         pubkeyB64,
         signatureB64: entry.signatureB64,
       })
-      // The host successfully wrote the plugin. Re-scan, reload, and
-      // re-check updates so the card flips to "Installed" without a
-      // manual refresh.
+      // The host successfully wrote the plugin. Run the full reload
+      // path (scan → loadAllPlugins → setPlugins) so the new entry
+      // is registered with the store *and* gets its `onLoad` hook
+      // fired by the host-takeover layer. A shortcut like
+      // `setPlugins(list as any)` would skip `loadAllPlugins` and
+      // the onLoad hook would never run, leaving the plugin's
+      // event subscriptions / storage seeding silent.
       try {
         const list = await scanPlugins()
-        usePluginStore.getState().setPlugins(list as any)
-        await loadAllPlugins(list as any)
+        const defs = await loadAllPlugins(list)
+        usePluginStore.getState().setPlugins(defs)
       } catch (e) {
         console.warn('post-install reload failed', e)
       }
@@ -112,7 +134,16 @@ export function PluginMarketDetail({
           version: entry.version,
         })
       )
-      onClose()
+      // Hand off to the parent so the post-install permission
+      // dialog can open with the freshly-loaded plugin's declared
+      // permission list. The parent closes this dialog and opens
+      // the permission modal in a follow-up tick so the two
+      // dialogs don't stack.
+      if (onInstalled && installedMeta) {
+        onInstalled(installedMeta)
+      } else {
+        onClose()
+      }
     } catch (e: any) {
       setError(e?.message ?? String(e))
     } finally {
@@ -125,10 +156,13 @@ export function PluginMarketDetail({
     setIsRolling(version)
     try {
       await rollbackPlugin(entry.id, version)
+      // Same full-reload path as install. Rolling back to a previous
+      // version is conceptually a fresh plugin load, so we want
+      // onLoad/onUnload to fire cleanly.
       try {
         const list = await scanPlugins()
-        usePluginStore.getState().setPlugins(list as any)
-        await loadAllPlugins(list as any)
+        const defs = await loadAllPlugins(list)
+        usePluginStore.getState().setPlugins(defs)
       } catch (e) {
         console.warn('post-rollback reload failed', e)
       }
@@ -139,6 +173,12 @@ export function PluginMarketDetail({
           version,
         })
       )
+      // A rollback is a re-activation of an already-installed
+      // plugin whose permissions were set on the original install.
+      // We don't re-open the permission dialog here — the user
+      // has already made their decision on the prior install, and
+      // re-prompting on every rollback would be a regression.
+      // (The post-install path is purely a "first install" affordance.)
       onClose()
     } catch (e: any) {
       setError(e?.message ?? String(e))
@@ -156,20 +196,20 @@ export function PluginMarketDetail({
         <DialogHeader>
           <DialogTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Package size={18} />
-            {entry.name}
+            {entry.name || t('plugin.market.unknownName', { defaultValue: '未命名插件' })}
             <Badge variant="outline" style={{ marginLeft: 4 }}>
               v{entry.version}
             </Badge>
             {isUpdateAvailable && (
               <Badge style={{ background: 'var(--accent, #4f46e5)', color: 'white' }}>
                 <Download size={10} />
-                Update
+                {t('plugin.market.badgeUpdate', { defaultValue: 'Update' })}
               </Badge>
             )}
             {isInstalled && !isUpdateAvailable && (
               <Badge variant="secondary">
                 <CheckCircle2 size={10} />
-                Installed
+                {t('plugin.market.badgeInstalled', { defaultValue: 'Installed' })}
               </Badge>
             )}
           </DialogTitle>
@@ -199,7 +239,9 @@ export function PluginMarketDetail({
             </div>
 
             {/* Description */}
-            <p style={{ fontSize: 13, lineHeight: 1.5 }}>{entry.description}</p>
+            <p style={{ fontSize: 13, lineHeight: 1.5 }}>
+              {entry.description || t('plugin.market.noDescription', { defaultValue: '暂无描述' })}
+            </p>
 
             {/* Dependencies */}
             {entry.dependencies.length > 0 && (
@@ -309,7 +351,7 @@ export function PluginMarketDetail({
                         v{v.version}
                         {v.isActive && (
                           <Badge variant="secondary" style={{ marginLeft: 6, fontSize: 10 }}>
-                            active
+                            {t('plugin.market.active', { defaultValue: 'active' })}
                           </Badge>
                         )}
                       </span>

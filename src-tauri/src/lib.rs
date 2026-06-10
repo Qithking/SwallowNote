@@ -185,6 +185,7 @@ pub fn run() {
             commands::plugin::update_plugin,
             commands::plugin::rollback_plugin,
             commands::plugin::list_plugin_versions,
+            commands::plugin::kill_plugin,
             commands::plugin_invoke::invoke_plugin,
         ])
         .setup(|app| {
