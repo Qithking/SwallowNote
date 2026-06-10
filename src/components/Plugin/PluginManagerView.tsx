@@ -1,12 +1,24 @@
 /**
- * PluginManagerView - Full-panel plugin management page
+ * PluginManagerView - Full-panel plugin management page (Phase 9.2).
  *
- * Upper section: Upload plugin package (.zip)
- * Lower section: Plugin card list
- * Header: Refresh + Diagnostics buttons
+ * Top: a header with the page title, an "Observability" button that
+ * opens the diagnostics dialog, and a Refresh button that re-scans
+ * the local plugins directory.
+ *
+ * Below the header, a tab strip with two tabs:
+ * - 已安装 (Installed): the original upload zone + per-plugin cards
+ * - 插件市场 (Marketplace): a `PluginMarketView` for browsing,
+ *   installing, updating, and rolling back plugins from a remote
+ *   `repo.json` index.
+ *
+ * We keep the two views in a single component (instead of routing
+ * to a separate full-panel route) because (a) the marketplace needs
+ * the same plugin list to render "Installed" / "Update" badges and
+ * (b) the user can switch between them with a single click without
+ * losing any state.
  */
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon, Activity, Shield } from 'lucide-react'
+import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon, Activity, Shield, Store, List } from 'lucide-react'
 import { usePluginStore } from '@/stores'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
@@ -28,8 +40,17 @@ import {
 import { PluginPanelHost } from './PluginPanelHost'
 import { PluginDiagnosticsPanel } from './PluginDiagnosticsPanel'
 import { PluginPermissionDialog } from './PluginPermissionDialog'
+import { PluginMarketView } from './PluginMarketView'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
 import type { PluginDefinition, PluginPanelProps, PluginPermission } from '@/types/plugin'
+
+/**
+ * The two sub-views under the plugin manager header. We use a tiny
+ * string-literal union instead of an enum so the state value can
+ * be serialised (e.g. if we ever decide to persist the active tab
+ * to localStorage).
+ */
+type PluginManagerTab = 'manage' | 'market'
 
 function PluginManagerView() {
   const { t } = useTranslation()
@@ -38,6 +59,10 @@ function PluginManagerView() {
   const setLoaded = usePluginStore((s) => s.setLoaded)
   const [isUploading, setIsUploading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
+  // Active tab. Defaults to "manage" so the user lands on the
+  // familiar upload + list view that was the only view before the
+  // marketplace was added. The marketplace is opt-in.
+  const [activeTab, setActiveTab] = useState<PluginManagerTab>('manage')
   // Settings dialog state. We keep the plugin reference (not just the
   // id) so we don't depend on store re-selection while the dialog is
   // open. Opening a settings dialog for a plugin that was just
@@ -223,8 +248,43 @@ function PluginManagerView() {
         </div>
       </div>
 
+      {/* Tab strip. We render both tabs (rather than swapping) so the
+          user can see where they are at a glance, and the tab bar
+          itself doesn't shift when switching. The active tab gets
+          the primary border colour; the inactive tab is muted. */}
+      <div
+        role="tablist"
+        className="flex items-center gap-1 px-6 pt-2 border-b"
+        style={{ borderColor: 'var(--border-color)' }}
+      >
+        <TabButton
+          active={activeTab === 'manage'}
+          onClick={() => setActiveTab('manage')}
+          icon={<List size={14} />}
+          label={t('plugin.market.tabManage', { defaultValue: '已安装' })}
+        />
+        <TabButton
+          active={activeTab === 'market'}
+          onClick={() => setActiveTab('market')}
+          icon={<Store size={14} />}
+          label={t('plugin.market.tabMarket', { defaultValue: '插件市场' })}
+        />
+      </div>
+
       <ScrollArea className="flex-1">
-        <div className="p-6 space-y-6">
+        {/*
+          We keep the marketplace always mounted (hidden via
+          `display: none`) so its in-memory state — repo URL, index,
+          search query, tag filter — survives a tab switch. A
+          conditional render would drop that state and the user
+          would lose their scroll position / search term on every
+          switch.
+        */}
+        <div
+          role="tabpanel"
+          hidden={activeTab !== 'manage'}
+          style={{ padding: activeTab === 'manage' ? 24 : 0 }}
+        >
           {/* Upload Section */}
           <div
             className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-[var(--theme-color)] transition-colors"
@@ -241,7 +301,7 @@ function PluginManagerView() {
           </div>
 
           {/* Plugin List */}
-          <div className="space-y-3">
+          <div className="space-y-3 mt-6">
             <h3 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
               {t('plugin.installed')} ({plugins.length})
             </h3>
@@ -365,6 +425,20 @@ function PluginManagerView() {
             )}
           </div>
         </div>
+
+        {/*
+          Marketplace panel. We render it on the same ScrollArea as
+          the manage tab so the outer scrollable container is shared;
+          a separate ScrollArea inside would conflict with the
+          parent's scroll position.
+        */}
+        <div
+          role="tabpanel"
+          hidden={activeTab !== 'market'}
+          style={{ padding: activeTab === 'market' ? 24 : 0, height: '100%' }}
+        >
+          {activeTab === 'market' && <PluginMarketView />}
+        </div>
       </ScrollArea>
 
       {/* Settings dialog. We render the plugin's own `settings` component
@@ -439,6 +513,49 @@ function PluginManagerView() {
         onClose={() => setPermissionsPlugin(null)}
       />
     </div>
+  )
+}
+
+/**
+ * A single tab in the manager tab strip. We keep the button styling
+ * inline so we don't need to ship a new `Tabs`/`Tab` component pair
+ * for what's effectively a 2-state switch. The active tab gets a
+ * primary-coloured underline; the inactive tab is muted.
+ */
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+}) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '6px 10px',
+        background: 'transparent',
+        border: 'none',
+        borderBottom: active ? '2px solid var(--theme-color)' : '2px solid transparent',
+        color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+        cursor: 'pointer',
+        fontSize: 13,
+        fontWeight: active ? 500 : 400,
+        marginBottom: -1,
+      }}
+    >
+      {icon}
+      {label}
+    </button>
   )
 }
 

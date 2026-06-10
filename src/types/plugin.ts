@@ -348,6 +348,61 @@ export interface PluginMetadata {
   hasBackend: boolean
 }
 
+// ─── Plugin Marketplace / Phase 9.2 ───────────────────────────────────────────
+
+/**
+ * One row in a remote plugin repository index. Shape mirrors
+ * `src-tauri/src/commands/plugin.rs::PluginIndexEntry`. See
+ * `docs/plugin-marketplace/README.md` for the protocol spec.
+ */
+export interface PluginIndexEntry {
+  id: string
+  name: string
+  version: string
+  description: string
+  author: string
+  icon?: string
+  tags: string[]
+  downloadUrl: string
+  sha256: string
+  signatureB64: string
+  /** Override the repo-level key (optional). */
+  pubkeyB64: string
+  versions: PluginIndexEntryVersion[]
+  dependencies: string[]
+}
+
+export interface PluginIndexEntryVersion {
+  version: string
+  downloadUrl: string
+  sha256: string
+  changelog: string
+  publishedAt: string
+}
+
+export interface PluginIndex {
+  schemaVersion: number
+  updatedAt: string
+  pubkeyB64: string
+  plugins: PluginIndexEntry[]
+}
+
+/** Returned by the `check_plugin_updates` Tauri command. */
+export interface PluginUpdateInfo {
+  id: string
+  localVersion: string
+  remoteVersion: string
+  sha256: string
+}
+
+/** Returned by the `list_plugin_versions` Tauri command. */
+export interface PluginVersionInfo {
+  version: string
+  isActive: boolean
+  sizeBytes: number
+  installedAt: string
+}
+
 // ─── Plugin context ───────────────────────────────────────────────────────────
 
 /** Props passed to plugin panel components */

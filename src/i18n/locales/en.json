@@ -791,6 +791,30 @@
       "colName": "Name",
       "colDuration": "Duration",
       "colStatus": "Status"
+    },
+    "market": {
+      "tabManage": "Installed",
+      "tabMarket": "Marketplace",
+      "repoPlaceholder": "https://…/repo.json",
+      "apply": "Apply",
+      "refresh": "Refresh",
+      "searchPlaceholder": "Search by name / description / tag",
+      "emptyTitle": "No repository configured",
+      "emptyHint": "Paste a repo.json URL above and SwallowNote will fetch and list all available plugins.",
+      "loading": "Loading repository…",
+      "noResults": "No matching plugins",
+      "noResultsHint": "Try adjusting the search query or clearing tag filters.",
+      "local": "Local",
+      "installed": "Installed {{name}} v{{version}}",
+      "rolledBack": "Rolled back to {{version}}",
+      "unknownAuthor": "Unknown author",
+      "dependencies": "Dependencies",
+      "versionHistory": "Version history",
+      "localVersions": "Installed versions",
+      "rollback": "Rollback",
+      "install": "Install",
+      "updateTo": "Update to v{{version}}",
+      "upToDate": "Up to date"
     }
   }
 }

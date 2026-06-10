@@ -18,3 +18,6 @@ export type { EditorSettingsState } from './editorSettings'
 
 export { usePluginStore } from './plugin'
 export type { PluginState } from './plugin'
+
+export { usePluginMarketStore } from './plugin-market'
+export type { PluginMarketState } from './plugin-market'

@@ -29,7 +29,7 @@ grep = "0.1"
 regex = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 zip = "2"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
 dirs = "6"
 futures = "0.3"
 once_cell = "1"
@@ -44,6 +44,7 @@ jwalk = "0.8"
 keyring = "3"
 similar = { version = "2", features = ["text"] }
 thiserror = "1"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"

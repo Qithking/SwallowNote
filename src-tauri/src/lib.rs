@@ -180,6 +180,11 @@ pub fn run() {
             commands::plugin::uninstall_plugin,
             commands::plugin::toggle_plugin_enabled,
             commands::plugin::get_plugin_storage_path,
+            commands::plugin::install_plugin_from_bytes,
+            commands::plugin::check_plugin_updates,
+            commands::plugin::update_plugin,
+            commands::plugin::rollback_plugin,
+            commands::plugin::list_plugin_versions,
             commands::plugin_invoke::invoke_plugin,
         ])
         .setup(|app| {
