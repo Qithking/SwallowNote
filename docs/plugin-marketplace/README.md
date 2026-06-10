@@ -1,49 +1,46 @@
-# Plugin Marketplace — Repository Protocol
+# 插件市场 —— 仓库协议
 
-This directory is a **sample plugin repository** for SwallowNote's in-app
-marketplace (Phase 9.2). A repo is just a static directory of files served over
-HTTPS — no server-side code is required.
+本目录是 SwallowNote 内置插件市场（Phase 9.2）的**示例插件仓库**。仓库就是一个**通过 HTTPS 静态托管**的目录——不需要任何服务端代码。
 
-## Layout
+## 目录结构
 
 ```text
 plugin-marketplace/
-├── README.md          ← this file
-├── repo.json          ← the index (fetched on marketplace open)
-├── pubkey.b64         ← base64-encoded 32-byte ed25519 verifying key
-│                        (used as the default for entries that don't
-│                         ship their own pubkey_b64)
-└── artifacts/         ← zips, one per (id, version) tuple
+├── README.md          ← 本文件
+├── repo.json          ← 索引（打开市场时拉取）
+├── pubkey.b64         ← base64 编码的 32 字节 ed25519 验证公钥
+│                        （对未自带 pubkey_b64 的条目作为默认）
+└── artifacts/         ← zip 包，每个 (id, version) 一份
     ├── <id>-<version>.zip
     └── ...
 ```
 
 ## `repo.json`
 
-Top-level shape (mirrors `src-tauri/src/commands/plugin.rs::PluginIndex`):
+顶层结构（对应 `src-tauri/src/commands/plugin.rs::PluginIndex`）：
 
 ```ts
 interface PluginIndex {
   schema_version: 1
-  updated_at: string                  // ISO 8601, refresh hint
-  pubkey_b64: string                  // repo-level ed25519 key (b64 raw 32B)
+  updated_at: string                  // ISO 8601，刷新提示
+  pubkey_b64: string                  // 仓库级 ed25519 公钥（b64 原始 32 字节）
   plugins: PluginIndexEntry[]
 }
 
 interface PluginIndexEntry {
-  id: string                          // e.g. "com.example.hello-world"
+  id: string                          // 例如 "com.example.hello-world"
   name: string
-  version: string                     // latest semver
+  version: string                     // 最新 semver
   description: string
   author: string
-  icon?: string                       // absolute URL to an SVG/PNG
+  icon?: string                       // SVG/PNG 的绝对 URL
   tags: string[]
-  download_url: string                // absolute URL to the zip
-  sha256: string                      // lowercase hex of the zip bytes
-  signature_b64: string               // ed25519 sig over the zip bytes
-  pubkey_b64: string                  // override repo key (optional)
-  versions: PluginIndexEntryVersion[] // history (newest first)
-  dependencies: string[]              // peer plugin ids
+  download_url: string                // zip 的绝对 URL
+  sha256: string                      // zip 字节的小写十六进制摘要
+  signature_b64: string               // 对 zip 字节的 ed25519 签名
+  pubkey_b64: string                  // 覆盖仓库级公钥（可选）
+  versions: PluginIndexEntryVersion[] // 历史版本（最新在前）
+  dependencies: string[]              // 依赖的对等插件 id
 }
 
 interface PluginIndexEntryVersion {
@@ -55,47 +52,39 @@ interface PluginIndexEntryVersion {
 }
 ```
 
-## Signing flow
+## 签名流程
 
-Each zip is signed once with an ed25519 private key. The host
-(`install_plugin_from_bytes` in `src-tauri/src/commands/plugin.rs`) verifies
-**two** things before installing:
+每个 zip 用 ed25519 私钥签名一次。宿主（`install_plugin_from_bytes`，位于 `src-tauri/src/commands/plugin.rs`）在安装前会校验**两项**：
 
-1. **SHA-256 digest** of the zip bytes matches `entry.sha256`.
-2. **ed25519 signature** of the zip bytes (raw) matches `entry.signature_b64`
-   under `entry.pubkey_b64` (or the repo-level `pubkey_b64` when the entry
-   leaves it empty).
+1. zip 字节的 **SHA-256 摘要** 与 `entry.sha256` 一致。
+2. zip 字节的 **ed25519 签名** 与 `entry.signature_b64` 一致，验签公钥为 `entry.pubkey_b64`（若该字段为空则回退到仓库级 `pubkey_b64`）。
 
-A failure on either check yields `PluginError::Security(...)` and the install
-is refused before any file lands on disk.
+任一项校验失败都会抛 `PluginError::Security(...)`，且**不会有任何文件落盘**。
 
-### Why base64 raw 32 bytes, not PEM?
+### 为什么要用 base64 编码的原始 32 字节，而不是 PEM？
 
-PEM requires ASN.1 DER parsing of a `SubjectPublicKeyInfo` structure, which
-pulls in another dep (or ~80 lines of hand-rolled ASN.1). For a single
-fixed-size public key the raw 32-byte form is simpler and the frontend
-doesn't need any ed25519 crypto lib at all — only the Rust host does.
+PEM 需要 ASN.1 DER 解析 `SubjectPublicKeyInfo` 结构，这要么引入新依赖、要么手写 ~80 行 ASN.1。对一个固定大小的公钥来说，原始 32 字节形式更简洁，前端也完全不需要 ed25519 加密库——**只有 Rust 宿主用得到**。
 
-### Generating a signed zip
+### 生成一个签过名的 zip
 
 ```bash
-# 1. Build the plugin (e.g. hello-world)
+# 1. 构建插件（例如 hello-world）
 cd docs/plugin-samples/hello-world
 npm install
-npm run build           # produces dist/index.js etc.
+npm run build           # 产出 dist/index.js 等
 
-# 2. Pack the zip
+# 2. 打包
 zip -r ../../../plugin-marketplace/artifacts/com.example.hello-world-0.1.0.zip \
   dist manifest.json index.tsx
 
-# 3. Sign with the repo's private key (replace with your own)
+# 3. 用仓库私钥签名（替换成你自己的）
 PRIV_B64=$(cat ../../plugin-marketplace/priv.b64)
 node -e "
   const c = require('crypto');
   const fs = require('fs');
   const buf = fs.readFileSync('artifacts/com.example.hello-world-0.1.0.zip');
-  const priv = Buffer.from('${PRIV_B64}', 'base64');
-  // Re-import as PKCS8 DER
+  const priv = Buffer.from('\${PRIV_B64}', 'base64');
+  // 重新导入为 PKCS8 DER
   const pkcs8 = Buffer.concat([
     Buffer.from('302e020100300506032b657004220420','hex'),
     priv,
@@ -105,44 +94,35 @@ node -e "
   console.log('sha256:  ' + c.createHash('sha256').update(buf).digest('hex'));
   console.log('sig_b64: ' + sig.toString('base64'));
 "
-# → paste `sha256` and `sig_b64` into the corresponding entry in repo.json
+# → 把输出的 sha256 和 sig_b64 粘贴到 repo.json 对应条目
 ```
 
-The host's verifier matches this exactly:
+宿主端的验签代码与之**完全一致**：
 
 ```rust
 verifier.verify(zip_bytes, &Signature::from_bytes(&sig_b64_decoded))
 ```
 
-## How the host fetches a repo
+## 宿主如何拉取仓库
 
-The user pastes a `repo.json` URL into the marketplace UI (or selects a
-hard-coded default). `src/lib/plugin-market.ts` then:
+用户在市场 UI 中粘贴一个 `repo.json` URL（或选择内置的默认仓库）。`src/lib/plugin-market.ts` 接着：
 
-1. `fetch(url)` → parse as `PluginIndex`.
-2. For each entry, compare `local_version` (from
-   `invoke('check_plugin_updates', { repoUrl: url })`) with `entry.version`.
-3. On install, look up the entry's `download_url` + `sha256` +
-   `signature_b64` (or fall back to the repo-level `pubkey_b64`).
-4. Download the zip into an in-memory `Blob` (also cached in IndexedDB by
-   `sha256` — second install is a single IndexedDB read).
-5. `invoke('install_plugin_from_bytes', { id, version, bytes, sha256, pubkeyB64, signatureB64 })`.
+1. `fetch(url)` → 解析为 `PluginIndex`。
+2. 对每个条目，把 `local_version`（来自 `invoke('check_plugin_updates', { repoUrl: url })`）与 `entry.version` 比较。
+3. 安装时，查找该条目的 `download_url` + `sha256` + `signature_b64`（或回退到仓库级 `pubkey_b64`）。
+4. 把 zip 下载到内存中的 `Blob`（同时按 `sha256` 缓存到 IndexedDB——二次安装只需一次 IndexedDB 读取）。
+5. `invoke('install_plugin_from_bytes', { id, version, bytes, sha256, pubkeyB64, signatureB64 })`。
 
-## Security properties
+## 安全特性
 
-- **Tampered zip**: SHA-256 mismatch → rejected before signature is checked.
-- **Wrong key**: signature verification fails → rejected.
-- **MITM on `download_url`**: SHA-256 mismatch (or signature failure) → rejected.
-- **MITM on `repo.json`**: a malicious index can deny service (point entries
-  at unreachable URLs) but cannot ship a plugin that wasn't signed by the
-  private key — the signature check is the binding between the zip and
-  the index entry.
+- **zip 被篡改**：SHA-256 不匹配 → 在签名校验之前就被拒绝。
+- **公钥错误**：签名校验失败 → 拒绝。
+- **`download_url` 遭 MITM**：SHA-256 不匹配（或签名失败）→ 拒绝。
+- **`repo.json` 遭 MITM**：恶意索引可以发起 DoS（把条目指向不可达 URL），但**无法**下发一个未用私钥签名的插件——签名校验就是 zip 与索引条目之间的"绑定关系"。
 
-## Sample keypair
+## 示例密钥对
 
-`pubkey.b64` ships with this sample repo. **It is for demonstration only**;
-the corresponding private key is not included. To run an end-to-end install
-test, generate your own keypair and re-sign your sample zips.
+`pubkey.b64` 随本示例仓库一并发布。**仅用于演示**；对应的私钥**未**包含在内。要跑完整的端到端安装测试，请生成你自己的密钥对并重新签名示例 zip。
 
 ```bash
 node -e "
