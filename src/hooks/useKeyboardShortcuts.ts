@@ -4,6 +4,7 @@ import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { openFolderDialog, openWorkspaceDialog, createFile } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
 import { invoke } from '@tauri-apps/api/core'
+import { emitLocaleChanged } from '@/lib/plugin-host'
 import i18n from 'i18next'
 
 function getShortcut(key: ShortcutKey): string {
@@ -289,6 +290,7 @@ export function useKeyboardShortcuts() {
         const currentLang = i18n.language
         const newLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN'
         i18n.changeLanguage(newLang)
+        queueMicrotask(() => emitLocaleChanged(newLang))
         return
       }
       if (matchShortcut(e, getShortcut('openExplorer'))) {

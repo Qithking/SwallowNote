@@ -24,4 +24,4 @@
 - `icon` 是 `ComponentType<{ size?: number }>`，宿主用 `<Icon size={18} />` 渲染
 - `panel` 是 `ComponentType<PluginPanelProps>`，宿主传入 `{ pluginId, isActive, close, store, events, invokeBackend }`
 - `manifest.id` 全局唯一，重复安装会复用同一存储目录
-- `pluginPath: ''` 在打包时由 loader 自动填充
+- `pluginPath` / `hasBackend` 不属于 `PluginManifest`；它们由宿主在加载时填充到 `PluginDefinition`，不要写在 manifest 里

@@ -614,7 +614,12 @@ export function usePluginEvent<E extends PluginEvent>(
 export function usePluginEvents<E extends PluginEvent>(
   panel: PluginPanelProps,
   events: readonly E[],
-  handler: (event: E, payload: PluginEventPayloadMap[E]) => void
+  // Payload is `unknown` when subscribing to multiple different event types
+  // (TypeScript can't narrow intersection to union). Cast inside the handler:
+  //   if (event === 'note:open') { const p = payload as PluginEventPayloadMap['note:open'] }
+  // For single-event arrays use `usePluginEvent` instead.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: (event: E, payload: unknown) => void
 ): void {
   const { events: bus } = panel
   const handlerRef = useRef(handler)

@@ -11,10 +11,9 @@ import { useState } from 'react'
 import type {
   PluginManifest,
   PluginEvent,
-  PluginEventPayloadMap,
   PluginPanelProps,
-} from '@/types/plugin'
-import { usePluginEvents } from '@/lib/plugin-hooks'
+} from '@swallow-note/plugin-sdk'
+import { usePluginEvents } from '@swallow-note/plugin-sdk'
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 
@@ -67,7 +66,7 @@ function EventListenerPanel(panel: PluginPanelProps) {
   const [log, setLog] = useState<LogEntry[]>([])
   const [paused, setPaused] = useState(false)
 
-  usePluginEvents(panel, ALL_EVENTS, (event, payload: PluginEventPayloadMap[typeof event]) => {
+  usePluginEvents(panel, ALL_EVENTS, (event, payload) => {
     if (paused) return
     setLog((prev) => {
       const next: LogEntry = {
@@ -164,8 +163,6 @@ const manifest: PluginManifest = {
   enabled: true,
   icon: EventIcon,
   panel: EventListenerPanel,
-  pluginPath: '',
-  hasBackend: false,
 }
 
 export default manifest

@@ -118,8 +118,6 @@ const manifest: PluginManifest = {
   enabled: true,
   icon: Icon,
   panel: Panel,
-  pluginPath: '',
-  hasBackend: false,
   // Optional lifecycle hooks – try toggling isActive in the preview header
   onLoad: () => console.log('[plugin] onLoad'),
   onUnload: () => console.log('[plugin] onUnload'),

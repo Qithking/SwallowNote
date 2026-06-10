@@ -7,8 +7,8 @@
  *  - panel.close() dismisses the dialog
  *  - Settings also go through onMount / onUnmount lifecycle
  */
-import type { PluginManifest, PluginPanelProps } from '@/types/plugin'
-import { usePluginStorage } from '@/lib/plugin-hooks'
+import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import { usePluginStorage } from '@swallow-note/plugin-sdk'
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 
@@ -155,8 +155,6 @@ const manifest: PluginManifest = {
   // shows a gear button. Clicking it opens a modal hosting this
   // component with the same props as the main panel.
   settings: SettingsDialog,
-  pluginPath: '',
-  hasBackend: false,
 }
 
 export default manifest

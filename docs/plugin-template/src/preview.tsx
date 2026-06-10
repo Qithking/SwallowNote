@@ -122,22 +122,24 @@ export function Preview() {
   } | null>(null)
 
   // Lifecycle: onMount, onUnmount, onActivate, onDeactivate
+  // Hooks are flat top-level fields on PluginManifest (not under
+  // a `hooks` object). The standalone preview synthesises a
+  // PluginDefinition-shaped context (id + pluginPath) for the
+  // hooks since the host fills in `pluginPath` at load time.
+  const ctx = useMemo(() => buildPluginContext({ id: manifest.id, pluginPath: '' }), [])
   useEffect(() => {
-    void runLifecycleHook(manifest.hooks?.onLoad, buildPluginContext(manifest))
-    void runLifecycleHook(manifest.hooks?.onMount, buildPluginContext(manifest))
+    void runLifecycleHook(manifest.onLoad, ctx)
+    void runLifecycleHook(manifest.onMount, ctx)
     return () => {
-      void runLifecycleHook(manifest.hooks?.onUnmount, buildPluginContext(manifest))
-      void runLifecycleHook(manifest.hooks?.onUnload, buildPluginContext(manifest))
+      void runLifecycleHook(manifest.onUnmount, ctx)
+      void runLifecycleHook(manifest.onUnload, ctx)
       clearPluginMenuItems(manifest.id)
     }
-  }, [])
+  }, [ctx])
 
   useEffect(() => {
-    void runLifecycleHook(
-      active ? manifest.hooks?.onActivate : manifest.hooks?.onDeactivate,
-      buildPluginContext(manifest)
-    )
-  }, [active])
+    void runLifecycleHook(active ? manifest.onActivate : manifest.onDeactivate, ctx)
+  }, [active, ctx])
 
   // App ready – one-shot
   useEffect(() => {
@@ -176,19 +178,16 @@ export function Preview() {
   const Panel = manifest.panel as ComponentType<PluginPanelProps>
 
   // Storage snapshot
+  // Uses store.keys() so unknown / custom keys are visible without
+  // hardcoding them in the preview frame.
   const [storageSnapshot, setStorageSnapshot] = useState<Record<string, unknown>>({})
   useEffect(() => {
     const store = getPluginStorage(manifest.id)
-    void store.get('__all').then(() => {
-      // The stub doesn't expose a keys() API; dump known keys by
-      // attempting to read a few common ones. For full inspection,
-      // use the localStorage panel in DevTools.
-      const known = ['count', 'config', 'history', 'installedAt']
-      void Promise.all(known.map((k) => store.get(k).then((v) => [k, v] as const))).then((rows) => {
-        const obj: Record<string, unknown> = {}
-        for (const [k, v] of rows) if (v !== null) obj[k] = v
-        setStorageSnapshot(obj)
-      })
+    void store.keys().then(async (keys) => {
+      const rows = await Promise.all(keys.map(async (k) => [k, await store.get(k)] as const))
+      const obj: Record<string, unknown> = {}
+      for (const [k, v] of rows) if (v !== null && v !== undefined) obj[k] = v
+      setStorageSnapshot(obj)
     })
   }, [storageTick])
 

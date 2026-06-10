@@ -13,7 +13,7 @@
  * the bundler inlines these types from a published SDK or this same
  * source tree at build time.
  */
-import type { PluginManifest, PluginPanelProps } from '@/types/plugin'
+import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
 
 // ─── Icon (sidebar trigger) ────────────────────────────────────────────────────
 
@@ -76,9 +76,6 @@ const manifest: PluginManifest = {
 
   icon: HelloIcon,
   panel: HelloPanel,
-
-  pluginPath: '',
-  hasBackend: false,
 }
 
 export default manifest

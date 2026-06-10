@@ -239,8 +239,27 @@ function TabBar() {
 
   if (tabs.length === 0) {
     return (
-      <div className="h-10 flex items-center bg-[var(--tab-bg)] border-b border-[var(--border-color)]">
-      </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            className="h-10 flex items-center bg-[var(--tab-bg)] border-b border-[var(--border-color)]"
+            data-tab-bar-empty="true"
+          >
+            {/* Empty tab bar — no tabs open. Plugins can still
+                contribute right-click items here via tabBarEmpty. */}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          className="min-w-[160px]"
+          style={{
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+          }}
+        >
+          <PluginContextMenuItems location="tabBarEmpty" ctx={{}} />
+        </ContextMenuContent>
+      </ContextMenu>
     )
   }
 

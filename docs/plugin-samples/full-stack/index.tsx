@@ -20,16 +20,19 @@
  *  - Storage keys are namespaced: 'config' for settings, 'history' for
  *    the list, 'installedAt' for read-only metadata.
  */
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type {
   PluginContext,
   PluginManifest,
-  PluginEventPayloadMap,
   PluginPanelProps,
-} from '@/types/plugin'
-import { getPluginStorage } from '@/lib/plugin-host'
-import { usePluginStorage, usePluginEvents } from '@/lib/plugin-hooks'
-import { registerContextMenu, unregisterContextMenu } from '@/lib/plugin-menu'
+} from '@swallow-note/plugin-sdk'
+import {
+  getPluginStorage,
+  usePluginStorage,
+  usePluginEvents,
+  registerContextMenu,
+  unregisterContextMenu,
+} from '@swallow-note/plugin-sdk'
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
 
@@ -131,13 +134,21 @@ function RecentPanel(panel: PluginPanelProps) {
   // Bump a key to force re-read from disk after context-menu actions
   const [refreshTick, setRefreshTick] = usePluginStorage<number>(panel, 'refreshTick', 0)
 
+  // Hold the latest `history` in a ref so the internal-bus
+  // subscription (registered once) can read it without forcing the
+  // effect to re-bind on every history update.
+  const historyRef = useRef<RecentNote[]>(history)
+  useEffect(() => { historyRef.current = history }, [history])
+
   // Subscribe to host events for note activity tracking.
+  // payload is typed as `unknown` by the SDK (mixed-event array limitation);
+  // we narrow with `as` casts inside.
   usePluginEvents(panel, ['note:open', 'note:save'] as const, (
     event: 'note:open' | 'note:save',
-    payload: PluginEventPayloadMap['note:open' | 'note:save']
+    payload: unknown
   ) => {
     if (event === 'note:open') {
-      const p = payload as PluginEventPayloadMap['note:open']
+      const p = payload as { path: string }
       const noteId = p.path
       setHistory((prev: RecentNote[]) => {
         const filtered = prev.filter((n: RecentNote) => n.path !== noteId)
@@ -152,7 +163,7 @@ function RecentPanel(panel: PluginPanelProps) {
         return next
       })
     } else if (event === 'note:save') {
-      const p = payload as PluginEventPayloadMap['note:save']
+      const p = payload as { path: string }
       const noteId = p.path
       setHistory((prev: RecentNote[]) =>
         prev.map((n: RecentNote) => (n.path === noteId ? { ...n, saveCount: n.saveCount + 1 } : n))
@@ -161,6 +172,8 @@ function RecentPanel(panel: PluginPanelProps) {
   })
 
   // Subscribe to plugin-internal bus for context-menu actions.
+  // Bind once; read latest `history` via the ref so we don't have to
+  // re-add the handler on every history change.
   useEffect(() => {
     const handler: InternalHandler = (event) => {
       if (event === 'clear') setHistory([])
@@ -169,14 +182,14 @@ function RecentPanel(panel: PluginPanelProps) {
         // Expose the current history via storage so other code
         // (or a settings dialog) can read it. A real plugin might
         // trigger a download or write a file here.
-        void panel.store.set('recentNotes:exportData', history)
+        void panel.store.set('recentNotes:exportData', historyRef.current)
       }
     }
     internalHandlers.add(handler)
     return () => {
       internalHandlers.delete(handler)
     }
-  }, [history, panel])
+  }, [panel])
 
   // The 'list' branch is verbose; 'count' is a one-liner.
   if (config.viewMode === 'count') {
@@ -314,8 +327,6 @@ const manifest: PluginManifest = {
   settings: RecentSettings,
   onLoad,
   onUnload,
-  pluginPath: '',
-  hasBackend: false,
 }
 
 export default manifest

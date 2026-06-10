@@ -7,10 +7,8 @@
  *  - "null" setter deletes the key
  *  - Mixing stored + derived UI state
  */
-import { useState, useEffect } from 'react'
-import type { PluginManifest, PluginPanelProps } from '@/types/plugin'
-import { usePluginStorage } from '@/lib/plugin-hooks'
-import { getPluginStorage } from '@/lib/plugin-host'
+import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import { usePluginStorage } from '@swallow-note/plugin-sdk'
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 
@@ -51,18 +49,6 @@ function CounterPanel(panel: PluginPanelProps) {
   // work; using one key keeps writes atomic.
   const [state, setState] = usePluginStorage<CounterState>(panel, 'counter', initial)
 
-  // We use module-level storage for the first-installed timestamp
-  // because we don't want it to change on reset. The hook's
-  // initialValue runs once on mount; seeding from disk in onLoad
-  // ensures it stays stable across resets.
-  const [installedAt] = useState<string>(state.firstInstalledAt)
-  useEffect(() => {
-    if (state.firstInstalledAt !== installedAt) {
-      // First reset happened; persist a new install time
-      void getPluginStorage(panel.pluginId).set('counter', { ...state, firstInstalledAt: new Date().toISOString() })
-    }
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
-
   const increment = () => {
     setState((prev) => ({
       ...prev,
@@ -89,7 +75,7 @@ function CounterPanel(panel: PluginPanelProps) {
       <header>
         <h2 style={{ fontSize: 16, fontWeight: 600 }}>Storage Counter</h2>
         <p style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-          First installed: {new Date(installedAt).toLocaleString()}
+          First installed: {new Date(state.firstInstalledAt).toLocaleString()}
         </p>
       </header>
 
@@ -140,8 +126,6 @@ const manifest: PluginManifest = {
   enabled: true,
   icon: CounterIcon,
   panel: CounterPanel,
-  pluginPath: '',
-  hasBackend: false,
 }
 
 export default manifest

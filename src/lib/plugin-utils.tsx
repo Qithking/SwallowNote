@@ -159,30 +159,14 @@ export function createPluginPanelProps(
         )
       }
     },
-    // Per-plugin persistent storage. Resolved via the lazy module
-    // import in plugin-host; result is cached per pluginId on the
-    // function object so repeated calls reuse the same storage
-    // instance.
-    store: getOrCacheStore(pluginId),
+    // Per-plugin persistent storage. `getPluginStorage` already caches
+    // one PluginStorage per pluginId internally, so no extra cache is
+    // needed here. `dropPluginStorage` (called on plugin unload)
+    // invalidates the underlying entry.
+    store: getPluginStorage(pluginId),
     // Global event bus. The same bus instance is shared by every panel
     // and lifecycle hook, so two plugins can subscribe to the same
     // event without coordinating.
     events: pluginEventBus,
   }
-}
-
-/**
- * Cache PluginStorage instances on the function object so a panel that
- * re-renders (or the host calling createPluginPanelProps twice for the
- * same plugin) reuses the same underlying storage object. Storing on
- * the function keeps the cache out of the React render path.
- */
-const pluginStoreCache = new Map<string, PluginPanelProps['store']>()
-function getOrCacheStore(pluginId: string): PluginPanelProps['store'] {
-  let s = pluginStoreCache.get(pluginId)
-  if (!s) {
-    s = getPluginStorage(pluginId)
-    pluginStoreCache.set(pluginId, s)
-  }
-  return s
 }

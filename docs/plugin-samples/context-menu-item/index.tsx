@@ -22,13 +22,13 @@ import type {
   PluginManifest,
   PluginLifecycleHook,
   PluginPanelProps,
-} from '@/types/plugin'
+} from '@swallow-note/plugin-sdk'
 import {
   registerContextMenu,
   unregisterContextMenu,
-  pluginMenuRegistry,
-} from '@/lib/plugin-menu'
-import { usePluginStorage } from '@/lib/plugin-hooks'
+  getStubMenuRegistry,
+} from '@swallow-note/plugin-sdk'
+import { usePluginStorage } from '@swallow-note/plugin-sdk'
 
 // ─── Icon ─────────────────────────────────────────────────────────────────────
 
@@ -186,7 +186,7 @@ function MainPanel(panel: PluginPanelProps) {
           Last word count:{' '}
           {lastCount ? `${lastCount.words} words / ${lastCount.chars} chars` : '(none)'}
         </div>
-        <div>Active items: {pluginMenuRegistry.getByLocation('fileTree').length}</div>
+        <div>Active items: {getStubMenuRegistry().getByLocation('fileTree').length}</div>
       </div>
     </div>
   )
@@ -209,8 +209,6 @@ const manifest: PluginManifest = {
   panel: MainPanel,
   onLoad,
   onUnload,
-  pluginPath: '',
-  hasBackend: false,
 }
 
 export default manifest

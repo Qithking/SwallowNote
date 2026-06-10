@@ -26,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { setAppLocale } from '@/lib/tauri'
+import { emitLocaleChanged } from '@/lib/plugin-host'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -222,7 +223,7 @@ function SettingsView() {
                   </div>                 
                   <div className="px-4">
                     <SettingRow label={t('settings.general.language')} desc={t('settings.general.language.desc')}>
-                      <Select value={i18n.language} onValueChange={(v) => { i18n.changeLanguage(v); setAppLocale(v); }}>
+                      <Select value={i18n.language} onValueChange={(v) => { i18n.changeLanguage(v); setAppLocale(v); queueMicrotask(() => emitLocaleChanged(v)); }}>
                         <SelectTrigger className="w-[160px]">
                           <SelectValue />
                         </SelectTrigger>
