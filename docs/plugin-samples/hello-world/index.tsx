@@ -69,6 +69,13 @@ function HelloPanel({ pluginId }: PluginPanelProps) {
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
+// No `permissions` field is declared on purpose — hello-world only
+// renders a static panel and never touches the SDK's `store` /
+// `events` / `context-menu` / `backend` surfaces, so it needs no
+// runtime grants. This is the "minimum permission" baseline that
+// every plugin should aim for. See ../../plugin-system/manifest.md
+// for the full permission catalogue.
+
 const manifest: PluginManifest = {
   id: 'com.example.hello-world',
   name: 'Hello World',
