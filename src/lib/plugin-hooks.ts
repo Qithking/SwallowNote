@@ -125,13 +125,15 @@ export function usePluginEvent<E extends PluginEvent>(
     // Adapt the handler to the bus's loose signature: the bus stores
     // handlers as `AnyHandler` but we still get type safety on the
     // payload thanks to PluginEventHandler<E>'s generic.
-    const unsubscribe = (events as PluginEventBus & {
-      on: PluginEventBus['on']
-    }).on(event, ((payload: PluginEventPayloadMap[E]) => {
+    // Stash the pluginId on the wrapper handler so the bus can
+    // attribute emissions to this plugin for metrics purposes.
+    const wrapped = ((payload: PluginEventPayloadMap[E]) => {
       handlerRef.current(payload)
-    }) as PluginEventHandler<E>)
+    }) as PluginEventHandler<E> & { __pluginId?: string }
+    wrapped.__pluginId = panel.pluginId
+    const unsubscribe = events.on(event, wrapped as PluginEventHandler<E>)
     return unsubscribe
-  }, [event, events])
+  }, [event, events, panel.pluginId])
 }
 
 /**

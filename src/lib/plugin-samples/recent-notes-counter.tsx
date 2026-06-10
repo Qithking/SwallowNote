@@ -251,6 +251,7 @@ const manifest: PluginDefinition = {
   settings: RecentNotesSettings,
   pluginPath: '', // Filled in by the loader at install time.
   hasBackend: false,
+  permissions: [],
   hooks: {
     onLoad,
     onUnload,

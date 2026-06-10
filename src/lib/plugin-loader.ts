@@ -45,12 +45,67 @@ export async function loadPluginModule(pluginPath: string): Promise<PluginManife
     const indexJsUrl = convertFileSrc(`${pluginPath}/index.js`)
 
     // Dynamic import of the plugin module
-    const module = await import(/* @vite-ignore */ indexJsUrl)
+    // Use a cache-busting query param to ensure fresh load during HMR
+    const cacheBuster = `?v=${Date.now()}`
+    const module = await import(/* @vite-ignore */ `${indexJsUrl}${cacheBuster}`)
     return module.default || module.manifest || null
   } catch (err) {
     console.error(`[PluginLoader] Failed to load plugin from ${pluginPath}:`, err)
     return null
   }
+}
+
+/**
+ * Load a single plugin from a path. Used for hot reload.
+ */
+export async function loadPluginFromPath(pluginPath: string): Promise<PluginDefinition | null> {
+  const manifest = await loadPluginModule(pluginPath)
+  
+  if (!manifest) {
+    return null
+  }
+
+  // Extract plugin ID from manifest or path
+  const pluginId = manifest.id || extractPluginIdFromPath(pluginPath)
+  
+  return {
+    id: pluginId,
+    name: manifest.name,
+    description: manifest.description || '',
+    version: manifest.version || '1.0.0',
+    author: manifest.author || '',
+    publishedAt: manifest.publishedAt || new Date().toISOString(),
+    iconPosition: manifest.iconPosition || 'sidebar',
+    contentPosition: manifest.contentPosition || 'leftPanel',
+    order: manifest.order ?? 100,
+    enabled: manifest.enabled ?? true,
+    icon: manifest.icon,
+    panel: manifest.panel,
+    settings: manifest.settings,
+    pluginPath,
+    hasBackend: false,
+    permissions: manifest.permissions ?? [],
+    hooks: {
+      onLoad: manifest.onLoad,
+      onUnload: manifest.onUnload,
+      onEnable: manifest.onEnable,
+      onDisable: manifest.onDisable,
+      onMount: manifest.onMount,
+      onUnmount: manifest.onUnmount,
+      onActivate: manifest.onActivate,
+      onDeactivate: manifest.onDeactivate,
+    },
+  } satisfies PluginDefinition
+}
+
+/**
+ * Extract plugin ID from file path
+ */
+function extractPluginIdFromPath(path: string): string {
+  // Try to extract ID from path (e.g., /path/to/plugins/com.example.myplugin → com.example.myplugin)
+  const parts = path.split('/')
+  const lastPart = parts[parts.length - 1] || parts[parts.length - 2] || 'unknown-plugin'
+  return lastPart.replace(/[^a-zA-Z0-9.-]/g, '-')
 }
 
 /**
@@ -91,6 +146,7 @@ export async function loadAllPlugins(
           settings: manifest.settings,
           pluginPath: meta.plugin_path,
           hasBackend: meta.has_backend,
+          permissions: manifest.permissions ?? [],
           // Carry lifecycle hooks from the manifest onto the runtime
           // definition. The store invokes these at register /
           // unregister / enable / disable time. If a plugin author
@@ -124,6 +180,7 @@ export async function loadAllPlugins(
         panel: () => null,
         pluginPath: meta.plugin_path,
         hasBackend: meta.has_backend,
+        permissions: [],
       } satisfies PluginDefinition
     })
   )

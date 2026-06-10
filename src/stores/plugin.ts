@@ -122,7 +122,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     // safely call getPluginById, subscribe to events, or read storage.
     // We invoke it asynchronously (fire-and-forget) so a slow hook
     // never blocks registration.
-    void runLifecycleHook(plugin.hooks?.onLoad, buildPluginContext(plugin))
+    void runLifecycleHook(plugin.hooks?.onLoad, buildPluginContext(plugin), 'onLoad')
   },
 
   registerPlugins: (newPlugins) => {
@@ -138,7 +138,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const currentIds = new Set(get().plugins.map((p) => p.id))
     for (const plugin of newPlugins) {
       if (currentIds.has(plugin.id)) {
-        void runLifecycleHook(plugin.hooks?.onLoad, buildPluginContext(plugin))
+        void runLifecycleHook(plugin.hooks?.onLoad, buildPluginContext(plugin), 'onLoad')
       }
     }
   },
@@ -211,7 +211,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     // Fire onUnload (after the plugin is fully detached) and drop
     // the cached PluginStorage so a future reinstall starts clean.
     if (target) {
-      void runLifecycleHook(target.hooks?.onUnload, buildPluginContext(target))
+      void runLifecycleHook(target.hooks?.onUnload, buildPluginContext(target), 'onUnload')
     }
     dropPluginStorage(id)
     // Drop any context-menu items this plugin contributed so they
@@ -234,7 +234,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     })
     if (target && wasEnabled !== enabled) {
       const hook = enabled ? target.hooks?.onEnable : target.hooks?.onDisable
-      void runLifecycleHook(hook, buildPluginContext(target))
+      const hookName = enabled ? 'onEnable' : 'onDisable'
+      void runLifecycleHook(hook, buildPluginContext(target), hookName)
     }
   },
 

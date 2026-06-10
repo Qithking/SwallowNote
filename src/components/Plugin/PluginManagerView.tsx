@@ -3,9 +3,10 @@
  *
  * Upper section: Upload plugin package (.zip)
  * Lower section: Plugin card list
+ * Header: Refresh + Diagnostics buttons
  */
 import { useState, useCallback } from 'react'
-import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon } from 'lucide-react'
+import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon, Activity } from 'lucide-react'
 import { usePluginStore } from '@/stores'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
@@ -25,6 +26,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { PluginPanelHost } from './PluginPanelHost'
+import { PluginDiagnosticsPanel } from './PluginDiagnosticsPanel'
 import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
 
 function PluginManagerView() {
@@ -40,6 +42,10 @@ function PluginManagerView() {
   // uninstalled races with the close handler, so the open() guard
   // checks the plugin still exists in the store.
   const [settingsPlugin, setSettingsPlugin] = useState<PluginDefinition | null>(null)
+  // Diagnostics dialog visibility. The panel reads in-memory metrics
+  // and refreshes on its own interval, so we don't need to pass
+  // anything through props.
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
 
   /**
    * Build the props passed to a plugin's settings component. The
@@ -144,6 +150,15 @@ function PluginManagerView() {
           {t('plugin.manager')}
         </h2>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDiagnosticsOpen(true)}
+            title={t('plugin.diagnostics.title')}
+          >
+            <Activity size={14} className="mr-1" />
+            {t('plugin.diagnostics.title')}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -313,6 +328,25 @@ function PluginManagerView() {
               />
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Diagnostics dialog. The panel is purely host-side, so we render
+          it directly without PluginPanelHost: there is no plugin to
+          dispatch onMount/onUnmount to, and we don't want the panel's
+          refresh interval to outlive the dialog (the panel cleans up
+          its own interval on unmount). */}
+      <Dialog open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden p-0">
+          <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border-color)' }}>
+            <DialogHeader>
+              <DialogTitle>{t('plugin.diagnostics.title')}</DialogTitle>
+              <DialogDescription>
+                {t('plugin.diagnostics.description')}
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <PluginDiagnosticsPanel />
         </DialogContent>
       </Dialog>
     </div>

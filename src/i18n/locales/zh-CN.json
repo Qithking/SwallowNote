@@ -759,6 +759,36 @@
       "rightPanel": "右面板",
       "fullPanel": "全面板",
       "editorArea": "编辑区"
+    },
+    "diagnostics": {
+      "title": "可观测性",
+      "description": "实时查看已安装插件的运行指标",
+      "exportBundle": "导出诊断包",
+      "copyBundle": "复制到剪贴板",
+      "copied": "已复制！",
+      "clearMetrics": "清空指标",
+      "clearConfirm": "确定要清空所有已收集的指标吗？此操作不可撤销。",
+      "tabOverview": "概览",
+      "tabEvents": "事件",
+      "tabStorage": "存储",
+      "tabHooks": "钩子",
+      "tabBackend": "后端",
+      "empty": "暂无指标数据",
+      "emptyHint": "与插件交互即可开始收集数据",
+      "tableEmpty": "暂无{{type}}记录",
+      "statEvents": "事件数",
+      "statStorageOps": "存储操作",
+      "statHookCalls": "钩子调用",
+      "statBackendCalls": "后端 IPC",
+      "statErrors": "错误数",
+      "statStorageSize": "存储大小",
+      "statAvgEventDuration": "平均事件耗时",
+      "statAvgStorageDuration": "平均存储耗时",
+      "colTime": "时间",
+      "colPlugin": "插件",
+      "colName": "名称",
+      "colDuration": "耗时",
+      "colStatus": "状态"
     }
   }
 }

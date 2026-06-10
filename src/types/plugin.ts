@@ -36,6 +36,92 @@ export type IconPosition = 'sidebar' | 'editorToolbar' | 'titleBar'
 /** Where the plugin panel (content) is displayed */
 export type ContentPosition = 'leftPanel' | 'rightPanel' | 'fullPanel' | 'editorArea'
 
+// ─── Permission types ───────────────────────────────────────────────────────────
+
+/**
+ * Plugin permission types. Plugins declare what permissions they need
+ * in their manifest, and users grant/revoke them during installation
+ * or later in settings.
+ */
+export type PluginPermission =
+  | 'storage'           // Access to persistent storage
+  | 'events'            // Subscribe to host events
+  | 'context-menu'      // Register context menu items
+  | 'backend'           // Access to Rust backend IPC
+  | 'filesystem-read'   // Read files from filesystem
+  | 'filesystem-write'  // Write files to filesystem
+  | 'network'           // Make network requests
+  | 'clipboard'         // Access clipboard
+  | 'notifications'     // Show notifications
+
+/**
+ * Permission metadata for display in UI
+ */
+export interface PermissionInfo {
+  permission: PluginPermission
+  name: string
+  description: string
+  icon?: string
+}
+
+/**
+ * Permission status for a plugin
+ */
+export interface PluginPermissionStatus {
+  permission: PluginPermission
+  granted: boolean
+  requested: boolean
+}
+
+/** Permission descriptions for UI */
+export const PLUGIN_PERMISSIONS: PermissionInfo[] = [
+  {
+    permission: 'storage',
+    name: 'Storage',
+    description: 'Access persistent storage for saving plugin data',
+  },
+  {
+    permission: 'events',
+    name: 'Events',
+    description: 'Subscribe to host events (note open/save, theme change, etc.)',
+  },
+  {
+    permission: 'context-menu',
+    name: 'Context Menu',
+    description: 'Add items to right-click menus',
+  },
+  {
+    permission: 'backend',
+    name: 'Backend',
+    description: 'Communicate with native Rust backend',
+  },
+  {
+    permission: 'filesystem-read',
+    name: 'Filesystem Read',
+    description: 'Read files from your system',
+  },
+  {
+    permission: 'filesystem-write',
+    name: 'Filesystem Write',
+    description: 'Write files to your system',
+  },
+  {
+    permission: 'network',
+    name: 'Network',
+    description: 'Make network requests',
+  },
+  {
+    permission: 'clipboard',
+    name: 'Clipboard',
+    description: 'Read from and write to clipboard',
+  },
+  {
+    permission: 'notifications',
+    name: 'Notifications',
+    description: 'Show desktop notifications',
+  },
+]
+
 // ─── Event bus types ───────────────────────────────────────────────────────────
 
 /**
@@ -163,6 +249,12 @@ export interface PluginManifest {
    * the plugin manager. Same props as `panel`; use `close` to dismiss.
    */
   settings?: ComponentType<PluginPanelProps> | ReactNode
+  /**
+   * Permissions required by the plugin. Declare what access the plugin needs
+   * (storage, events, context-menu, backend, filesystem, network, etc.).
+   * Users will be asked to grant these permissions during installation.
+   */
+  permissions?: PluginPermission[]
   // ── Lifecycle hooks (all optional) ────────────────────────────────────────
   /** Called once after the plugin module has been loaded. */
   onLoad?: PluginLifecycleHook
@@ -215,6 +307,8 @@ export interface PluginDefinition {
   pluginPath: string
   /** Whether the plugin has a Rust backend */
   hasBackend: boolean
+  /** Permissions declared by the plugin. These are requested during installation. */
+  permissions: PluginPermission[]
   /** Lifecycle hooks carried over from the original manifest. The store
    *  invokes these at register / unregister / enable / disable. All are
    *  optional; missing hooks are simply skipped. */

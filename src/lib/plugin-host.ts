@@ -39,6 +39,13 @@ type AnyHandler = PluginEventHandler<PluginEvent>
  */
 class PluginEventBusImpl implements PluginEventBus {
   private readonly handlers = new Map<PluginEvent, Set<AnyHandler>>()
+  // Optional per-handler metadata stashed by callers (e.g. usePluginEvent)
+  // for metrics attribution. The bus only reads this in emit(); it never
+  // writes. We use a duck-typed `__pluginId` field on the handler itself
+  // so the public PluginEventBus.on() signature stays unchanged.
+  private readPluginId(handler: AnyHandler): string | undefined {
+    return (handler as { __pluginId?: string }).__pluginId
+  }
 
   on<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): () => void {
     let set = this.handlers.get(event)
@@ -65,16 +72,52 @@ class PluginEventBusImpl implements PluginEventBus {
   emit<E extends PluginEvent>(event: E, payload: PluginEventPayloadMap[E]): void {
     const set = this.handlers.get(event)
     if (!set || set.size === 0) return
+    // Record per-plugin metrics: payload size, handler duration, errors.
+    // We aggregate durations/errors across the handler loop and emit one
+    // record per (pluginId, event) pair at the end.
+    const dispatchStart = performance.now()
+    const perPlugin = new Map<string, { durationMs: number; errors: number }>()
+    const hostOwner = 'host' // default attribution when handler has no plugin meta
     // Snapshot the set so handlers that subscribe/unsubscribe during
     // dispatch don't mutate the iteration target.
     for (const handler of Array.from(set)) {
+      const owner = this.readPluginId(handler) ?? hostOwner
+      const stats = perPlugin.get(owner) ?? { durationMs: 0, errors: 0 }
+      const start = performance.now()
       try {
         ;(handler as PluginEventHandler<E>)(payload)
       } catch (err) {
         // One bad plugin must not stop the others. Log and continue.
         console.error(`[plugin-host] handler for "${event}" threw:`, err)
+        stats.errors++
       }
+      stats.durationMs += performance.now() - start
+      perPlugin.set(owner, stats)
     }
+    const totalDuration = performance.now() - dispatchStart
+    // Lazy import to avoid a circular dep (telemetry imports nothing
+    // from host; host imports telemetry only on emit, which is rare).
+    void import('./plugin-telemetry').then(({ recordEventMetric }) => {
+      const payloadSize = (() => {
+        try {
+          return JSON.stringify(payload).length
+        } catch {
+          return 0
+        }
+      })()
+      for (const [pid, stats] of perPlugin) {
+        recordEventMetric(
+          pid,
+          event,
+          payload,
+          1,
+          totalDuration,
+          stats.errors
+        )
+      }
+      // Keep the local references to silence unused warnings
+      void payloadSize
+    })
   }
 }
 
@@ -144,35 +187,120 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   async get<T = unknown>(key: string): Promise<T | null> {
-    const data = await this.load()
-    return (data[key] as T | undefined) ?? null
+    const start = performance.now()
+    let success = true
+    let errorMsg: string | undefined
+    try {
+      const data = await this.load()
+      return (data[key] as T | undefined) ?? null
+    } catch (err) {
+      success = false
+      errorMsg = String(err)
+      throw err
+    } finally {
+      this.recordMetric('get', 1, 0, performance.now() - start, success, errorMsg)
+    }
   }
 
   async set<T = unknown>(key: string, value: T): Promise<void> {
-    const data = await this.load()
-    data[key] = value
-    this.dirty = true
-    await this.flush()
+    const start = performance.now()
+    let success = true
+    let errorMsg: string | undefined
+    try {
+      const data = await this.load()
+      data[key] = value
+      this.dirty = true
+      await this.flush()
+    } catch (err) {
+      success = false
+      errorMsg = String(err)
+      throw err
+    } finally {
+      const dataSize = this.estimateSize(value)
+      this.recordMetric('set', 1, dataSize, performance.now() - start, success, errorMsg)
+    }
   }
 
   async delete(key: string): Promise<void> {
-    const data = await this.load()
-    if (key in data) {
-      delete data[key]
-      this.dirty = true
-      await this.flush()
+    const start = performance.now()
+    let success = true
+    let errorMsg: string | undefined
+    let dataSize = 0
+    try {
+      const data = await this.load()
+      if (key in data) {
+        dataSize = this.estimateSize(data[key])
+        delete data[key]
+        this.dirty = true
+        await this.flush()
+      }
+    } catch (err) {
+      success = false
+      errorMsg = String(err)
+      throw err
+    } finally {
+      this.recordMetric('delete', 1, dataSize, performance.now() - start, success, errorMsg)
     }
   }
 
   async clear(): Promise<void> {
-    this.cache = {}
-    this.dirty = true
-    await this.flush()
+    const start = performance.now()
+    let success = true
+    let errorMsg: string | undefined
+    let dataSize = 0
+    try {
+      const data = await this.load()
+      dataSize = this.estimateSize(data)
+      this.cache = {}
+      this.dirty = true
+      await this.flush()
+    } catch (err) {
+      success = false
+      errorMsg = String(err)
+      throw err
+    } finally {
+      this.recordMetric('clear', 0, dataSize, performance.now() - start, success, errorMsg)
+    }
   }
 
   async keys(): Promise<string[]> {
-    const data = await this.load()
-    return Object.keys(data).sort()
+    const start = performance.now()
+    let success = true
+    let errorMsg: string | undefined
+    try {
+      const data = await this.load()
+      return Object.keys(data).sort()
+    } catch (err) {
+      success = false
+      errorMsg = String(err)
+      throw err
+    } finally {
+      this.recordMetric('keys', 0, 0, performance.now() - start, success, errorMsg)
+    }
+  }
+
+  /** Record a storage operation metric. Lazy-imports telemetry to keep
+   *  the storage path independent of the metrics layer. */
+  private recordMetric(
+    operation: 'get' | 'set' | 'delete' | 'clear' | 'keys',
+    keyCount: number,
+    dataSize: number,
+    durationMs: number,
+    success: boolean,
+    error?: string
+  ): void {
+    void import('./plugin-telemetry').then(({ recordStorageMetric }) => {
+      recordStorageMetric(this.pluginId, operation, keyCount, dataSize, durationMs, success, error)
+    })
+  }
+
+  /** Estimate JSON-encoded size of a value in bytes. */
+  private estimateSize(value: unknown): number {
+    try {
+      return JSON.stringify(value).length
+    } catch {
+      return 0
+    }
   }
 }
 
@@ -218,19 +346,36 @@ export function buildPluginContext(plugin: PluginDefinition): PluginContext {
 /**
  * Run a plugin lifecycle hook in a try/catch so a buggy plugin never
  * crashes the host. We await async hooks but don't let rejections bubble.
+ *
+ * `hookName` is recorded as a stable label in the metrics table. The
+ * caller is responsible for passing it because the hook function itself
+ * is usually a method reference (e.g. `plugin.onLoad`) and its `.name`
+ * is generic; relying on the stack trace to recover the lifecycle stage
+ * is fragile across minifiers and async boundaries.
  */
 export async function runLifecycleHook(
   hook: ((context: PluginContext) => void | Promise<void>) | undefined,
-  context: PluginContext
+  context: PluginContext,
+  hookName: string
 ): Promise<void> {
   if (!hook) return
+  const start = performance.now()
+  let success = true
+  let errorMsg: string | undefined
   try {
     await hook(context)
   } catch (err) {
+    success = false
+    errorMsg = err instanceof Error ? err.message : String(err)
     console.error(
-      `[plugin-host] lifecycle hook failed for plugin "${context.pluginId}":`,
+      `[plugin-host] lifecycle hook "${hookName}" failed for plugin "${context.pluginId}":`,
       err
     )
+  } finally {
+    const durationMs = performance.now() - start
+    void import('./plugin-telemetry').then(({ recordHookMetric }) => {
+      recordHookMetric(context.pluginId, hookName, durationMs, success, errorMsg)
+    })
   }
 }
 

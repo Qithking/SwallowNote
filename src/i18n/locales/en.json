@@ -759,6 +759,36 @@
       "rightPanel": "Right Panel",
       "fullPanel": "Full Panel",
       "editorArea": "Editor Area"
+    },
+    "diagnostics": {
+      "title": "Diagnostics",
+      "description": "Real-time observability for installed plugins",
+      "exportBundle": "Export Diagnostic Bundle",
+      "copyBundle": "Copy to Clipboard",
+      "copied": "Copied!",
+      "clearMetrics": "Clear Metrics",
+      "clearConfirm": "Clear all collected metrics? This cannot be undone.",
+      "tabOverview": "Overview",
+      "tabEvents": "Events",
+      "tabStorage": "Storage",
+      "tabHooks": "Hooks",
+      "tabBackend": "Backend",
+      "empty": "No metrics collected yet",
+      "emptyHint": "Interact with plugins to start collecting data",
+      "tableEmpty": "No {{type}} records yet",
+      "statEvents": "Events",
+      "statStorageOps": "Storage Ops",
+      "statHookCalls": "Hook Calls",
+      "statBackendCalls": "Backend IPC",
+      "statErrors": "Errors",
+      "statStorageSize": "Storage Size",
+      "statAvgEventDuration": "Avg Event Duration",
+      "statAvgStorageDuration": "Avg Storage Duration",
+      "colTime": "Time",
+      "colPlugin": "Plugin",
+      "colName": "Name",
+      "colDuration": "Duration",
+      "colStatus": "Status"
     }
   }
 }

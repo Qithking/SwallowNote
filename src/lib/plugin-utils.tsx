@@ -148,15 +148,28 @@ export function createPluginPanelProps(
     // "backend unavailable" UI) rather than crashing.
     invokeBackend: async (command: string, args?: Record<string, unknown>) => {
       const { invoke } = await import('@tauri-apps/api/core')
+      const start = performance.now()
+      let success = true
+      let errorMsg: string | undefined
       try {
         return await invoke(`plugin_${pluginId}_${command}`, args)
       } catch (err) {
+        success = false
+        errorMsg = String(err)
         // Surface a clearer error to the panel so the user knows the
         // backend layer is not yet wired up, instead of a raw tauri
         // "command not found" string.
         throw new Error(
           `Plugin backend IPC not implemented yet (plugin_id=${pluginId}, command=${command}): ${String(err)}`,
         )
+      } finally {
+        // Record backend metrics for the diagnostics panel. Lazy-import
+        // the telemetry module so this file stays free of a hard
+        // dependency on it (telemetry has no other importers).
+        const durationMs = performance.now() - start
+        void import('./plugin-telemetry').then(({ recordBackendMetric }) => {
+          recordBackendMetric(pluginId, command, durationMs, success, errorMsg)
+        })
       }
     },
     // Per-plugin persistent storage. `getPluginStorage` already caches

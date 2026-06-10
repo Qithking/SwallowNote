@@ -22,10 +22,16 @@
  *
  * Both pairs run after React's commit phase, so a hook that does
  * `setState` won't trigger a re-render in the same tick.
+ *
+ * Stability:
+ *  - Wrapped in PluginErrorBoundary to catch render errors
+ *  - Connected to health monitor for crash tracking and auto-disable
  */
 import { Suspense, useEffect, useRef, type ReactNode } from 'react'
 import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
 import { buildPluginContext, runLifecycleHook } from '@/lib/plugin-host'
+import { PluginErrorBoundary } from './PluginErrorBoundary'
+import { recordPluginCrash, resetPluginCrashCount } from '@/lib/plugin-health'
 
 export interface PluginPanelHostProps {
   plugin: PluginDefinition
@@ -52,9 +58,9 @@ export function PluginPanelHost({
   // the host crashes mid-render.
   useEffect(() => {
     const ctx = buildPluginContext(plugin)
-    void runLifecycleHook(plugin.hooks?.onMount, ctx)
+    void runLifecycleHook(plugin.hooks?.onMount, ctx, 'onMount')
     return () => {
-      void runLifecycleHook(plugin.hooks?.onUnmount, ctx)
+      void runLifecycleHook(plugin.hooks?.onUnmount, ctx, 'onUnmount')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugin.id])
@@ -67,25 +73,51 @@ export function PluginPanelHost({
   useEffect(() => {
     const ctx = buildPluginContext(plugin)
     if (isActive && !wasActiveRef.current) {
-      void runLifecycleHook(plugin.hooks?.onActivate, ctx)
+      void runLifecycleHook(plugin.hooks?.onActivate, ctx, 'onActivate')
     } else if (!isActive && wasActiveRef.current) {
-      void runLifecycleHook(plugin.hooks?.onDeactivate, ctx)
+      void runLifecycleHook(plugin.hooks?.onDeactivate, ctx, 'onDeactivate')
     }
     wasActiveRef.current = isActive
     return () => {
       // Final cleanup: if the host unmounts while active, fire
       // onDeactivate so the plugin can flush any pending state.
       if (wasActiveRef.current) {
-        void runLifecycleHook(plugin.hooks?.onDeactivate, ctx)
+        void runLifecycleHook(plugin.hooks?.onDeactivate, ctx, 'onDeactivate')
         wasActiveRef.current = false
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugin.id, isActive])
 
+  const handleCrash = (pluginId: string, error: Error) => {
+    recordPluginCrash(pluginId, error)
+  }
+
+  const handleRecover = (pluginId: string) => {
+    resetPluginCrashCount(pluginId)
+  }
+
   if (typeof panel === 'function') {
     const PanelComp = panel as unknown as React.ComponentType<typeof panelProps>
-    return <Suspense fallback={null}><PanelComp {...panelProps} /></Suspense>
+    return (
+      <PluginErrorBoundary
+        pluginId={plugin.id}
+        onCrash={handleCrash}
+        onRecover={handleRecover}
+      >
+        <Suspense fallback={null}>
+          <PanelComp {...panelProps} />
+        </Suspense>
+      </PluginErrorBoundary>
+    )
   }
-  return <Suspense fallback={null}>{panel}</Suspense>
+  return (
+    <PluginErrorBoundary
+      pluginId={plugin.id}
+      onCrash={handleCrash}
+      onRecover={handleRecover}
+    >
+      <Suspense fallback={null}>{panel}</Suspense>
+    </PluginErrorBoundary>
+  )
 }
