@@ -1,0 +1,11 @@
+{
+  "id": "com.example.settings-dialog",
+  "name": "Settings Dialog",
+  "description": "Plugin with a configurable settings dialog opened from the plugin manager.",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "iconPosition": "sidebar",
+  "contentPosition": "leftPanel",
+  "hasBackend": false,
+  "entry": "index.tsx"
+}

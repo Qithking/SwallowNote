@@ -281,7 +281,8 @@
     "search": "搜索",
     "git": "源代码管理",
     "ai": "AI 助手",
-    "settings": "设置"
+    "settings": "设置",
+    "plugins": "插件管理"
   },
   "titleBar": {
     "folder": "文件夹",
@@ -732,5 +733,32 @@
   "tray": {
     "showWindow": "显示窗口",
     "quit": "退出"
+  },
+  "plugin": {
+    "manager": "插件管理",
+    "installed": "已安装插件",
+    "noPlugins": "暂无已安装的插件",
+    "uploadHint": "点击上传插件包",
+    "uploadFormat": "支持 .zip 格式的插件包",
+    "installSuccess": "插件 {{name}} 安装成功",
+    "installFailed": "插件安装失败",
+    "uninstallSuccess": "插件 {{name}} 已卸载",
+    "uninstallFailed": "插件卸载失败",
+    "enabled": "插件 {{name}} 已启用",
+    "disabled": "插件 {{name}} 已禁用",
+    "toggleFailed": "切换插件状态失败",
+    "refresh": "刷新",
+    "installing": "正在安装...",
+    "iconPosition": {
+      "sidebar": "侧边栏",
+      "editorToolbar": "编辑器工具栏",
+      "titleBar": "标题栏"
+    },
+    "contentPosition": {
+      "leftPanel": "左面板",
+      "rightPanel": "右面板",
+      "fullPanel": "全面板",
+      "editorArea": "编辑区"
+    }
   }
 }

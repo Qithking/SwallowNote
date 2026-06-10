@@ -4,7 +4,7 @@
  */
 import { Minus, Square, X, Sun, Moon, Monitor, Bot, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { useUIStore } from '@/stores'
+import { useUIStore, usePluginStore } from '@/stores'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -19,10 +19,12 @@ import {
 import { TitleBarRecentPopover } from './TitleBarRecentPopover'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
+import { pluginRightPanelType, pluginSidebarView, renderPluginIcon } from '@/lib/plugin-utils'
 
 function TitleBar() {
-  const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode, sidebarVisible, setSidebarVisible } = useUIStore()
+  const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode, sidebarVisible, setSidebarVisible, settingsPanelVisible, setSettingsPanelVisible, sidebarView } = useUIStore()
   const { switchMode } = useWorkspaceStore()
+  const titleBarPlugins = usePluginStore((s) => s.registry.titleBar)
   const { t } = useTranslation()
 
   const handleMinimize = async () => {
@@ -69,8 +71,81 @@ function TitleBar() {
         <TitleBarRecentPopover />
       </div>
 
-      {/* Right: AI button + Theme toggle + Window controls */}
+      {/* Right: TitleBar plugins + AI button + Theme toggle + Window controls */}
       <div className="flex items-center h-full">
+        {/* TitleBar plugin icons */}
+        {titleBarPlugins.map((plugin) => {
+          const isPluginActive = (() => {
+            if (plugin.contentPosition === 'rightPanel') {
+              return rightPanelType === pluginRightPanelType(plugin.id)
+            } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
+              const pluginViewId = pluginSidebarView(plugin.id)
+              return settingsPanelVisible && sidebarView === pluginViewId
+            } else {
+              const pluginViewId = pluginSidebarView(plugin.id)
+              return sidebarView === pluginViewId && sidebarVisible
+            }
+          })()
+
+          const handleClick = () => {
+            const ui = useUIStore.getState()
+            if (plugin.contentPosition === 'rightPanel') {
+              const pluginPanelType = pluginRightPanelType(plugin.id)
+              if (rightPanelType === pluginPanelType) {
+                setRightPanelType(null)
+                usePluginStore.getState().setActivePlugin(null, 'rightPanel')
+              } else {
+                setRightPanelType(pluginPanelType)
+                usePluginStore.getState().setActivePlugin(plugin.id, 'rightPanel')
+              }
+            } else if (plugin.contentPosition === 'leftPanel') {
+              const pluginViewId = pluginSidebarView(plugin.id)
+              if (sidebarView === pluginViewId && sidebarVisible) {
+                ui.toggleSidebar()
+                // setActivePlugin(null, ...) below also resets sidebarView
+                // to 'explorer' through the cross-store coupling in the
+                // plugin store.
+                usePluginStore.getState().setActivePlugin(null, 'leftPanel')
+              } else {
+                ui.setSidebarVisible(true)
+                ui.setSidebarView(pluginViewId)
+                usePluginStore.getState().setActivePlugin(plugin.id, 'leftPanel')
+              }
+            } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
+              const pluginViewId = pluginSidebarView(plugin.id)
+              if (settingsPanelVisible && sidebarView === pluginViewId) {
+                setSettingsPanelVisible(false)
+                // Reset sidebarView to explorer so the next time the user
+                // opens the sidebar (leftPanel), the default view appears
+                // rather than this plugin's stale view.
+                ui.setSidebarView('explorer')
+                usePluginStore.getState().setActivePlugin(null, 'fullPanel')
+              } else {
+                setSettingsPanelVisible(true)
+                ui.setSidebarView(pluginViewId)
+                usePluginStore.getState().setActivePlugin(plugin.id, 'fullPanel')
+              }
+            }
+          }
+
+          return (
+            <Tooltip key={plugin.id}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleClick}
+                  className="h-full px-2 flex items-center justify-center cursor-pointer"
+                  style={{ color: isPluginActive ? 'var(--text-primary)' : 'var(--text-muted)' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+                >
+                  {renderPluginIcon(plugin.icon, 14)}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{plugin.name}</TooltipContent>
+            </Tooltip>
+          )
+        })}
+
         <Tooltip>
           <TooltipTrigger asChild>
             <button

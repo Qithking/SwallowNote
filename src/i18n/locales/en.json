@@ -281,7 +281,8 @@
     "search": "Search",
     "git": "Source Control",
     "ai": "AI Assistant",
-    "settings": "Settings"
+    "settings": "Settings",
+    "plugins": "Plugins"
   },
   "titleBar": {
     "folder": "Folder",
@@ -732,5 +733,32 @@
   "tray": {
     "showWindow": "Show Window",
     "quit": "Quit"
+  },
+  "plugin": {
+    "manager": "Plugin Manager",
+    "installed": "Installed Plugins",
+    "noPlugins": "No plugins installed",
+    "uploadHint": "Click to upload a plugin package",
+    "uploadFormat": "Supports .zip plugin packages",
+    "installSuccess": "Plugin {{name}} installed successfully",
+    "installFailed": "Plugin installation failed",
+    "uninstallSuccess": "Plugin {{name}} uninstalled",
+    "uninstallFailed": "Plugin uninstall failed",
+    "enabled": "Plugin {{name}} enabled",
+    "disabled": "Plugin {{name}} disabled",
+    "toggleFailed": "Failed to toggle plugin",
+    "refresh": "Refresh",
+    "installing": "Installing...",
+    "iconPosition": {
+      "sidebar": "Sidebar",
+      "editorToolbar": "Editor Toolbar",
+      "titleBar": "Title Bar"
+    },
+    "contentPosition": {
+      "leftPanel": "Left Panel",
+      "rightPanel": "Right Panel",
+      "fullPanel": "Full Panel",
+      "editorArea": "Editor Area"
+    }
   }
 }

@@ -1,0 +1,11 @@
+{
+  "id": "com.example.context-menu-item",
+  "name": "Context Menu Items",
+  "description": "Contributes custom entries to file tree, tab, and editor right-click menus.",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "iconPosition": "titleBar",
+  "contentPosition": "leftPanel",
+  "hasBackend": false,
+  "entry": "index.tsx"
+}

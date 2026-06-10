@@ -175,6 +175,11 @@ pub fn run() {
             commands::ai_role_prompts::update_ai_role_prompt_name,
             commands::ai_role_prompts::reset_ai_role_prompt,
             commands::ai_builtin_models::get_builtin_ai_models,
+            commands::plugin::scan_plugins,
+            commands::plugin::install_plugin,
+            commands::plugin::uninstall_plugin,
+            commands::plugin::toggle_plugin_enabled,
+            commands::plugin::get_plugin_storage_path,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");

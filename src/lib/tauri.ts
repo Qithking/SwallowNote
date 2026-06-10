@@ -161,6 +161,15 @@ export async function writeFile(path: string, content: string): Promise<void> {
   await invoke('write_file', { path, content })
 }
 
+/**
+ * Return the absolute path to a plugin's JSON storage file. The frontend
+ * (src/lib/plugin-host.ts) uses this to read/write plugin state without
+ * having to know the cross-platform app-data layout.
+ */
+export async function getPluginStoragePath(pluginId: string): Promise<string> {
+  return await invoke('get_plugin_storage_path', { pluginId })
+}
+
 export async function writeBinaryFile(path: string, data: string): Promise<void> {
   await invoke('write_binary_file', { path, data })
 }
@@ -740,4 +749,41 @@ export interface BuiltinAiModel {
 
 export async function getBuiltinAiModels(): Promise<BuiltinAiModel[]> {
   return await invoke('get_builtin_ai_models')
+}
+
+// ── Plugin APIs ────────────────────────────────────────────────────────────────
+
+export interface PluginMetadataRust {
+  id: string
+  name: string
+  description: string
+  version: string
+  author: string
+  published_at: string
+  icon_position: string
+  content_position: string
+  order: number
+  enabled: boolean
+  plugin_path: string
+  has_backend: boolean
+}
+
+/** Scan the plugins directory and return metadata for each plugin */
+export async function scanPlugins(): Promise<PluginMetadataRust[]> {
+  return await invoke('scan_plugins')
+}
+
+/** Install a plugin from a .zip file */
+export async function installPlugin(zipPath: string): Promise<PluginMetadataRust> {
+  return await invoke('install_plugin', { zipPath })
+}
+
+/** Uninstall a plugin by id */
+export async function uninstallPlugin(pluginId: string): Promise<void> {
+  return await invoke('uninstall_plugin', { pluginId })
+}
+
+/** Enable or disable a plugin */
+export async function togglePluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
+  return await invoke('toggle_plugin_enabled', { pluginId, enabled })
 }

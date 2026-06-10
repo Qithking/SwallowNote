@@ -1,0 +1,13 @@
+{
+  "id": "com.example.template",
+  "name": "Plugin Template",
+  "description": "A starting point for building SwallowNote plugins.",
+  "version": "0.1.0",
+  "author": "You",
+  "publishedAt": "2026-06-10",
+  "iconPosition": "sidebar",
+  "contentPosition": "leftPanel",
+  "order": 100,
+  "enabled": true,
+  "hasBackend": false
+}

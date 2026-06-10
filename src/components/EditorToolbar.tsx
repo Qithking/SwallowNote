@@ -4,11 +4,12 @@
  */
 import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
-import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore } from '@/stores'
+import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore, usePluginStore } from '@/stores'
 import type { ConflictRepoRecord } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
+import { pluginRightPanelType, renderPluginIcon, pluginSidebarView } from '@/lib/plugin-utils'
 
 function EditorToolbar() {
   const tabs = useEditorStore((s) => s.tabs)
@@ -17,6 +18,9 @@ function EditorToolbar() {
   const rightPanelType = useUIStore((s) => s.rightPanelType)
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
   const noteWidth = useUIStore((s) => s.noteWidth)
+  const sidebarView = useUIStore((s) => s.sidebarView)
+  const sidebarVisible = useUIStore((s) => s.sidebarVisible)
+  const settingsPanelVisible = useUIStore((s) => s.settingsPanelVisible)
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
   const workspaceMode = useUIStore((s) => s.workspaceMode)
@@ -26,6 +30,7 @@ function EditorToolbar() {
   const widePaddingHorizontal = useEditorSettingsStore((s) => s.widePaddingHorizontal)
   const conflictFilesMap = useGitStore((s) => s.conflictFilesMap)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
+  const editorToolbarPlugins = usePluginStore((s) => s.registry.editorToolbar)
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
   const [isWide, setIsWide] = useState(noteWidth === 'wide')
@@ -252,6 +257,77 @@ function EditorToolbar() {
           </TooltipTrigger>
           <TooltipContent>{t('editorToolbar.copyFullPath')}</TooltipContent>
         </Tooltip>
+
+        {/* Plugin icons with iconPosition === 'editorToolbar' */}
+        {editorToolbarPlugins.map((plugin) => {
+          const handleClick = () => {
+            if (plugin.contentPosition === 'rightPanel') {
+              const pluginPanelType = pluginRightPanelType(plugin.id)
+              if (rightPanelType === pluginPanelType) {
+                setRightPanelType(null)
+                usePluginStore.getState().setActivePlugin(null, 'rightPanel')
+              } else {
+                setRightPanelType(pluginPanelType)
+                usePluginStore.getState().setActivePlugin(plugin.id, 'rightPanel')
+              }
+            } else if (plugin.contentPosition === 'leftPanel') {
+              const pluginViewId = pluginSidebarView(plugin.id)
+              const uiState = useUIStore.getState()
+              if (uiState.sidebarView === pluginViewId && uiState.sidebarVisible) {
+                uiState.toggleSidebar()
+                // setActivePlugin(null, ...) below also resets sidebarView
+                // to 'explorer' through the cross-store coupling in the
+                // plugin store.
+                usePluginStore.getState().setActivePlugin(null, 'leftPanel')
+              } else {
+                uiState.setSidebarVisible(true)
+                uiState.setSidebarView(pluginViewId)
+                usePluginStore.getState().setActivePlugin(plugin.id, 'leftPanel')
+              }
+            } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
+              const pluginViewId = pluginSidebarView(plugin.id)
+              const uiState = useUIStore.getState()
+              if (uiState.settingsPanelVisible && uiState.sidebarView === pluginViewId) {
+                uiState.setSettingsPanelVisible(false)
+                // Reset sidebarView to explorer so a subsequent leftPanel
+                // open shows the default view, not this plugin's stale view.
+                uiState.setSidebarView('explorer')
+                usePluginStore.getState().setActivePlugin(null, 'fullPanel')
+              } else {
+                uiState.setSettingsPanelVisible(true)
+                uiState.setSidebarView(pluginViewId)
+                usePluginStore.getState().setActivePlugin(plugin.id, 'fullPanel')
+              }
+            }
+          }
+
+          const isPluginActive = (() => {
+            if (plugin.contentPosition === 'rightPanel') {
+              return rightPanelType === pluginRightPanelType(plugin.id)
+            } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
+              const pluginViewId = pluginSidebarView(plugin.id)
+              return settingsPanelVisible && sidebarView === pluginViewId
+            } else {
+              const pluginViewId = pluginSidebarView(plugin.id)
+              return sidebarView === pluginViewId && sidebarVisible
+            }
+          })()
+
+          return (
+            <Tooltip key={plugin.id}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleClick}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: isPluginActive ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  {renderPluginIcon(plugin.icon, 14)}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{plugin.name}</TooltipContent>
+            </Tooltip>
+          )
+        })}
       </div>
     </div>
   )

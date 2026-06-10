@@ -31,6 +31,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
 import { removeFolderHistory } from '@/lib/tauri'
 import { useTranslation } from 'react-i18next'
+import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 
 /**
  * Count words in content, properly handling CJK characters.
@@ -441,6 +442,17 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           <Trash2 size={12} />
           <span style={{ color: 'var(--danger-color, #f44336)' }}>{t('contextMenu.hardDelete')}</span>
         </ContextMenuItem>
+
+        {/* Plugin-contributed items. They appear after the host's own
+            items so the standard order is preserved and plugins
+            extend rather than compete. The helper renders a
+            separator + items only when at least one contribution
+            is applicable, so it's a no-op when no plugin is
+            registered. */}
+        <PluginContextMenuItems
+          location="fileTree"
+          ctx={{ path: node.path, isDirectory: node.isDirectory }}
+        />
       </ContextMenuContent>
     </ContextMenu>
   )

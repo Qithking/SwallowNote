@@ -16,6 +16,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { cn } from '@/lib/utils'
 import type { EditorTab } from '@/stores/editor'
 import { useTranslation } from 'react-i18next'
+import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 
 function TabBar() {
   const { tabs, activeTabId, setActiveTab, removeTab } = useEditorStore()
@@ -386,6 +387,12 @@ function TabBar() {
                   <FileText size={12} />
                   <span>{t('tabBar.showInExplorer')}</span>
                 </ContextMenuItem>
+
+                {/* Plugin-contributed items (tab surface). */}
+                <PluginContextMenuItems
+                  location="tab"
+                  ctx={{ path: tab.path, activePath: activeTabId === tab.id ? tab.path : undefined }}
+                />
               </ContextMenuContent>
             </ContextMenu>
           )

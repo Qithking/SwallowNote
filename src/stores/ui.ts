@@ -7,11 +7,12 @@ import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, 
 import { ShortcutKey } from '@/lib/shortcuts'
 import { AiModelConfig, generateModelId } from '@/lib/ai'
 import { useFileTreeStore } from './filetree'
+import { emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
 
 export type Theme = 'light' | 'dark' | 'system'
-export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
+export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings' | `plugin:${string}`
 export type EditorViewMode = 'edit' | 'preview' | 'split'
-export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | null
+export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | `plugin:${string}` | null
 
 /** Request from editor context menu to trigger an AI action */
 export interface AiContextMenuRequest {
@@ -522,10 +523,20 @@ export const useUIStore = create<UIState>((set) => ({
   setTheme: (theme) => {
     set({ theme })
     saveAppSettings({ theme })
+    // Plugins only need to know the resolved theme identifier; they
+    // shouldn't need to read the raw `theme` (which can be 'system')
+    // to compute the actual dark/light state. We emit only the
+    // persisted identifier so consumers can mirror localStorage if
+    // they want to.
+    queueMicrotask(() => emitThemeChanged(theme))
   },
   setThemeColor: (color) => {
     set({ themeColor: color })
     saveAppSettings({ themeColor: color })
+    // Colour change goes through `settings:change` rather than
+    // `theme:change` because plugins tracking `theme:change` care
+    // about the light/dark mode, not the accent colour.
+    queueMicrotask(() => emitSettingChanged('themeColor', color))
   },
   setSidebarView: (view) => set({ sidebarView: view }),
   setSidebarWidth: (width) => set({ sidebarWidth: Math.max(150, Math.min(500, width)) }),
@@ -533,7 +544,10 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
   toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
-  setEditorViewMode: (mode) => set({ editorViewMode: mode }),
+  setEditorViewMode: (mode) => {
+    set({ editorViewMode: mode })
+    queueMicrotask(() => emitSettingChanged('editorViewMode', mode))
+  },
   toggleCommandPalette: () =>
     set((state) => ({ commandPaletteVisible: !state.commandPaletteVisible })),
   toggleSearchPanel: () =>
@@ -576,18 +590,22 @@ export const useUIStore = create<UIState>((set) => ({
     set({ autoStart: value })
     saveAppSettings({ autoStart: String(value) })
     setAutoStartEnabled(value).catch(() => {})
+    queueMicrotask(() => emitSettingChanged('autoStart', value))
   },
   setAutoCheckUpdate: (value) => {
     set({ autoCheckUpdate: value })
     saveAppSettings({ autoCheckUpdate: String(value) })
+    queueMicrotask(() => emitSettingChanged('autoCheckUpdate', value))
   },
   setCloseWithoutExit: (value) => {
     set({ closeWithoutExit: value })
     saveAppSettings({ closeWithoutExit: String(value) })
+    queueMicrotask(() => emitSettingChanged('closeWithoutExit', value))
   },
   setNoteWidth: (width) => {
     set({ noteWidth: width })
     saveAppSettings({ noteWidth: width })
+    queueMicrotask(() => emitSettingChanged('noteWidth', width))
   },
   setShowAllFiles: (value) => {
     // If enabling showAllFiles, disable markdownOnly since they are mutually exclusive
@@ -614,18 +632,22 @@ export const useUIStore = create<UIState>((set) => ({
   setSyncInterval: (interval: number) => {
     set({ syncInterval: interval })
     saveAppSettings({ syncInterval: String(interval) })
+    queueMicrotask(() => emitSettingChanged('syncInterval', interval))
   },
   setAutoSyncPush: (value: boolean) => {
     set({ autoSyncPush: value })
     saveAppSettings({ autoSyncPush: String(value) })
+    queueMicrotask(() => emitSettingChanged('autoSyncPush', value))
   },
   setUploadPath: (path: string) => {
     set({ uploadPath: path })
     saveAppSettings({ uploadPath: path })
+    queueMicrotask(() => emitSettingChanged('uploadPath', path))
   },
   setShowConflictBadge: (value: boolean) => {
     set({ showConflictBadge: value })
     saveAppSettings({ showConflictBadge: String(value) })
+    queueMicrotask(() => emitSettingChanged('showConflictBadge', value))
   },
   setAiProvider: (provider: string) => {
     set({ aiProvider: provider })

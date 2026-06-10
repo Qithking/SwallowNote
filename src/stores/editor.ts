@@ -4,6 +4,7 @@
 import { create } from 'zustand'
 import { loadFileContent } from '@/lib/api'
 import { writeFile, gitAutoCommit } from '@/lib/tauri'
+import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
 
 /**
  * Count words in content, properly handling CJK (Chinese, Japanese, Korean) characters.
@@ -120,6 +121,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         return { activeTabId: existing.id }
       }
       const newTabs = [...state.tabs, { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }]
+      // Notify plugins: a fresh tab was opened. We emit after set so the
+      // store update is committed before subscribers (which may read
+      // `state.tabs` from a parent store snapshot) observe the event.
+      queueMicrotask(() => emitNoteOpened(tab.id, tab.path))
       return {
         tabs: newTabs,
         activeTabId: tab.id,
@@ -199,6 +204,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   removeTab: (id) => {
     set((state) => {
       const index = state.tabs.findIndex((t) => t.id === id)
+      // Capture the tab being removed so we can emit a `note:close`
+      // after the state update commits. We do NOT emit if the tab
+      // doesn't exist (e.g. already removed) – that would generate
+      // spurious close events for plugins tracking active notes.
+      const removedTab = index >= 0 ? state.tabs[index] : null
       const newTabs = state.tabs.filter((t) => t.id !== id)
       let newActiveId = state.activeTabId
       if (state.activeTabId === id) {
@@ -207,6 +217,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         } else {
           newActiveId = null
         }
+      }
+      if (removedTab) {
+        queueMicrotask(() => emitNoteClosed(removedTab.id, removedTab.path))
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
@@ -311,9 +324,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
   },
-  updateTabContent: (id, content) =>
-    set((state) => ({
-      tabs: state.tabs.map((t) => {
+  updateTabContent: (id, content) => {
+    set((state) => {
+      const tabs = state.tabs.map((t) => {
         if (t.id !== id) return t
         // 只有内容真正变化时才标记为 dirty
         // Note: t.content can be undefined (not loaded yet) while content might be '' (empty file)
@@ -322,8 +335,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const newNormalized = content ?? ''
         if (currentNormalized === newNormalized) return t
         return { ...t, content, isDirty: true, isEdited: true }
-      }),
-    })),
+      })
+      // Locate the tab that actually changed. The map above already
+      // updated `isDirty`/`isEdited`, so we can re-read the tab from
+      // the new array. We emit only on a real content transition to
+      // avoid one event per keystroke that ends up a no-op due to
+      // normalisation (e.g. setting '' to '' when the file is empty).
+      const updated = tabs.find((t) => t.id === id)
+      if (updated && (updated.content ?? '') === (content ?? '') && updated.isDirty) {
+        queueMicrotask(() => emitNoteChanged(updated.id, updated.path, updated.content ?? ''))
+      }
+      return { tabs }
+    })
+  },
   updateTabDirty: (id, isDirty) =>
     set((state) => ({
       tabs: state.tabs.map((t) => (t.id === id ? { ...t, isDirty } : t)),
@@ -423,6 +447,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             t.id === tab.id ? { ...t, isDirty: false, isEdited: false } : t
           ),
         }))
+        // Notify plugins: a dirty tab has been successfully persisted.
+        // We emit after the store commit so the `isDirty=false` state
+        // is observable by subscribers reading from the store.
+        queueMicrotask(() => emitNoteSaved(tab.id, tab.path))
         // Auto commit if file is in a git repo (async, non-blocking)
         try {
           await gitAutoCommit(tab.path)
