@@ -3,8 +3,8 @@
  */
 import { type ComponentType, type ReactNode } from 'react'
 import type { SidebarView, RightPanelType } from '@/stores'
-import type { ContentPosition, PluginPanelProps } from '@/types/plugin'
-import { getPluginStorage, pluginEventBus } from './plugin-host'
+import type { ContentPosition, PluginPanelProps, ToolbarButtonProps } from '@/types/plugin'
+import { getPluginStorage, createPluginEventBus } from './plugin-host'
 import { assertPermission } from './plugin-permission-guard'
 
 /**
@@ -133,7 +133,9 @@ export function renderPluginIcon(
 export function createPluginPanelProps(
   pluginId: string,
   isActive: boolean,
-  close: () => void
+  close: () => void,
+  activeNoteContent: string = '',
+  activeNotePath: string = '',
 ): PluginPanelProps {
   // Import lazily to avoid pulling the Tauri-side bridge into the
   // bundle for non-Tauri code paths (tests, Storybook).
@@ -162,7 +164,7 @@ export function createPluginPanelProps(
       let success = true
       let errorMsg: string | undefined
       try {
-        return await invoke(`plugin_${pluginId}_${command}`, args)
+        return await invoke('invoke_plugin', { pluginId, command, args })
       } catch (err) {
         success = false
         errorMsg = String(err)
@@ -185,6 +187,70 @@ export function createPluginPanelProps(
     // Global event bus. The same bus instance is shared by every panel
     // and lifecycle hook, so two plugins can subscribe to the same
     // event without coordinating.
-    events: pluginEventBus,
+    events: createPluginEventBus(pluginId),
+    activeNoteContent,
+    activeNotePath,
   }
+}
+
+// ─── Toolbar button helpers ──────────────────────────────────────────────────
+
+/**
+ * Create ToolbarButtonProps for a plugin's custom toolbar button component.
+ * Similar to createPluginPanelProps but tailored for toolbar-level rendering.
+ */
+export function createToolbarButtonProps(
+  pluginId: string,
+  isActive: boolean,
+  size: number,
+  activate: () => void,
+  deactivate: () => void,
+  activeNoteContent: string = '',
+  activeNotePath: string = '',
+): ToolbarButtonProps {
+  return {
+    size,
+    isActive,
+    pluginId,
+    invokeBackend: async (command: string, args?: Record<string, unknown>) => {
+      assertPermission(pluginId, 'backend', `invoke backend command "${command}"`)
+      const { invoke } = await import('@tauri-apps/api/core')
+      const start = performance.now()
+      let success = true
+      let errorMsg: string | undefined
+      try {
+        return await invoke('invoke_plugin', { pluginId, command, args })
+      } catch (err) {
+        success = false
+        errorMsg = String(err)
+        throw err
+      } finally {
+        const durationMs = performance.now() - start
+        void import('./plugin-telemetry').then(({ recordBackendMetric }) => {
+          recordBackendMetric(pluginId, command, durationMs, success, errorMsg)
+        })
+      }
+    },
+    store: getPluginStorage(pluginId),
+    events: createPluginEventBus(pluginId),
+    activate,
+    deactivate,
+    activeNoteContent,
+    activeNotePath,
+  }
+}
+
+/**
+ * Render a plugin's custom toolbar button component.
+ * Handles both ComponentType and ReactNode, same pattern as renderPluginIcon.
+ */
+export function renderPluginToolbarButton(
+  toolbarButton: ComponentType<ToolbarButtonProps> | ReactNode,
+  props: ToolbarButtonProps,
+): ReactNode {
+  if (isComponentLike(toolbarButton)) {
+    const ButtonComponent = toolbarButton as ComponentType<ToolbarButtonProps>
+    return <ButtonComponent {...props} />
+  }
+  return toolbarButton as ReactNode
 }

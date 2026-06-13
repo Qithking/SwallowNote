@@ -1,0 +1,950 @@
+# 带后端的插件开发指南
+
+> 以「文档导出」插件为例，完整演示如何开发一个包含 Rust 后端的 SwallowNote 插件。
+
+---
+
+## 目录
+
+1. [插件架构概览](#1-插件架构概览)
+2. [目录结构](#2-目录结构)
+3. [manifest.json — 插件清单](#3-manifestjson--插件清单)
+4. [前端开发](#4-前端开发)
+5. [后端开发（Rust）](#5-后端开发rust)
+6. [构建与打包](#6-构建与打包)
+7. [安装与验证](#7-安装与验证)
+8. [调用链路详解](#8-调用链路详解)
+9. [常见问题](#9-常见问题)
+
+---
+
+## 1. 插件架构概览
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  SwallowNote 宿主                                                    │
+│                                                                      │
+│  ┌─────────────────┐    invoke('invoke_plugin', ...)    ┌─────────┐ │
+│  │  前端 (index.js) │ ─────────────────────────────────▶│ Rust    │ │
+│  │                  │    JSON-RPC over stdin/stdout      │ 后端    │ │
+│  │  • toolbarButton │◀──────────────────────────────────│ 二进制  │ │
+│  │  • panel         │    base64 / JSON response          │         │ │
+│  └─────────────────┘                                   └─────────┘ │
+│         │                                                    │       │
+│         │ 事件订阅 (note:change, note:open ...)              │       │
+│         ▼                                                    │       │
+│  ┌─────────────────┐                                        │       │
+│  │  宿主事件总线     │                                        │       │
+│  └─────────────────┘                                        │       │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**关键原则**：插件完全自包含，与宿主零耦合。
+
+- 前端：React 组件，通过 SDK 获取类型，通过 `ToolbarButtonProps` 接收宿主上下文
+- 后端：独立 Rust 二进制，不依赖 Tauri，通过 JSON-RPC over stdin/stdout 通信
+- 宿主只提供通用机制（`invoke_plugin`、事件总线、存储），不包含任何插件专属代码
+
+---
+
+## 2. 目录结构
+
+```
+plugins/export/
+├── manifest.json           # 插件清单（Rust 端读取）
+├── package.json            # npm 配置（前端构建依赖）
+├── tsconfig.json           # TypeScript 配置
+├── vite.config.ts          # Vite 构建配置（IIFE 输出）
+├── build.sh                # 后端构建脚本
+├── package.sh              # 完整打包脚本（前端+后端→zip）
+├── src/
+│   └── index.tsx           # 前端入口
+└── src-tauri/              # Rust 后端源码
+    ├── Cargo.toml          # Rust 依赖配置
+    └── src/
+        ├── main.rs         # JSON-RPC 入口（stdin/stdout 通信）
+        └── convert.rs      # 核心转换逻辑（Markdown→DOCX）
+```
+
+构建产物：
+
+```
+dist/                       # Vite 构建输出
+├── index.js                # IIFE bundle（宿主加载此文件）
+└── manifest.json           # 复制的清单
+
+com.swallownote.export.zip  # 最终可安装的插件包
+├── index.js
+├── manifest.json
+└── backend/
+    └── plugin_com.swallownote.export   # Rust 二进制
+```
+
+---
+
+## 3. manifest.json — 插件清单
+
+```json
+{
+  "id": "com.swallownote.export",
+  "name": "文档导出",
+  "description": "将 Markdown 文档导出为 Word (.docx) 或 PDF 格式",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "publishedAt": "2026-06-13",
+  "iconPosition": "editorToolbar",
+  "contentPosition": "editorArea",
+  "order": 50,
+  "enabled": true,
+  "hasBackend": true,
+  "entry": "index.tsx"
+}
+```
+
+### 关键字段说明
+
+| 字段 | 值 | 说明 |
+|---|---|---|
+| `id` | `com.swallownote.export` | 全局唯一标识，反向域名格式。ZIP 包名必须与此一致 |
+| `iconPosition` | `editorToolbar` | 图标显示在编辑器工具栏（也可选 `sidebar`、`titleBar`） |
+| `contentPosition` | `editorArea` | 面板内容区域（本插件无面板，但字段必填） |
+| `hasBackend` | `true` | **必须设为 true**，否则宿主不会查找 `backend/` 目录 |
+| `entry` | `index.tsx` | 源码入口，构建后宿主加载的是 `index.js` |
+
+---
+
+## 4. 前端开发
+
+### 4.1 package.json
+
+```json
+{
+  "name": "swallownote-plugin-export",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:backend": "bash build.sh release",
+    "package": "bash package.sh",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@swallow-note/plugin-sdk": "file:../../docs/plugin-sdk",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.0",
+    "@tauri-apps/plugin-dialog": "^2.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "i18next": "^23.0.0",
+    "react-i18next": "^14.0.0",
+    "sonner": "^1.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}
+```
+
+**要点**：
+
+- `@swallow-note/plugin-sdk`：通过 `file:` 协议链接到本地 SDK，提供类型和运行时 stub
+- `@tauri-apps/api`、`@tauri-apps/plugin-dialog`：Tauri 公共 API，放在 `devDependencies` 中避免打包进 IIFE
+- `sonner`、`react-i18next`：宿主已提供的库，放在 `devDependencies` 中（IIFE bundle 在宿主环境运行时可访问）
+
+### 4.2 vite.config.ts
+
+```typescript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { resolve } from 'node:path'
+import { copyFileSync, mkdirSync, existsSync } from 'node:fs'
+
+export default defineConfig(({ mode }) => {
+  if (mode === 'production') {
+    return {
+      plugins: [
+        react(),
+        // 构建完成后复制 manifest.json 到 dist/
+        {
+          name: 'copy-manifest',
+          closeBundle() {
+            if (!existsSync('dist')) mkdirSync('dist', { recursive: true })
+            copyFileSync(
+              resolve(__dirname, 'manifest.json'),
+              resolve(__dirname, 'dist/manifest.json')
+            )
+          },
+        },
+      ],
+      build: {
+        outDir: 'dist',
+        emptyOutDir: true,
+        lib: {
+          entry: resolve(__dirname, 'src/index.tsx'),
+          name: 'SwallowNoteExportPlugin',
+          formats: ['iife'],        // 必须是 IIFE 格式
+          fileName: () => 'index.js', // 宿主期望的文件名
+        },
+        rollupOptions: {
+          external: [],
+          output: { inlineDynamicImports: true },
+        },
+      },
+    }
+  }
+  // dev 模式：浏览器预览
+  return {
+    plugins: [react()],
+    server: { port: 5174, open: true },
+  }
+})
+```
+
+**关键配置**：
+
+- `formats: ['iife']`：宿主通过 `convertFileSrc` + `import()` 动态加载，必须是 IIFE 格式
+- `fileName: () => 'index.js'`：安装时宿主检查 `index.js` 是否存在
+- `inlineDynamicImports: true`：所有代码内联到单文件，避免多 chunk 加载问题
+
+### 4.3 tsconfig.json
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true
+  },
+  "include": ["src", "../../docs/plugin-sdk/src"]
+}
+```
+
+`include` 中加入 SDK 源码路径，确保 TypeScript 能解析 `@swallow-note/plugin-sdk` 的类型。
+
+### 4.4 src/index.tsx — 前端入口
+
+完整代码结构：
+
+```tsx
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
+import type { PluginManifest, PluginPanelProps, ToolbarButtonProps } from '@swallow-note/plugin-sdk'
+import { save } from '@tauri-apps/plugin-dialog'
+import { invoke } from '@tauri-apps/api/core'
+import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
+
+// ─── 图标组件 ────────────────────────────────────────────────
+function ExportIcon({ size = 18 }: { size?: number }): ReactNode {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" strokeWidth="2">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+// ─── 工具栏按钮组件（下拉菜单） ──────────────────────────────
+function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
+  const { size, pluginId, invokeBackend, events } = props
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [noteContent, setNoteContent] = useState<string>('')
+  const [noteName, setNoteName] = useState<string>('')
+
+  // 通过事件总线跟踪当前笔记内容
+  useEffect(() => {
+    const unsub1 = events.on('note:change', ({ content, path }) => {
+      setNoteContent(content ?? '')
+      if (path) setNoteName(path.split('/').pop() || path)
+    })
+    const unsub2 = events.on('note:open', ({ path }) => {
+      if (path) setNoteName(path.split('/').pop() || path)
+      setNoteContent('')
+    })
+    return () => { unsub1(); unsub2() }
+  }, [events])
+
+  // 点击外部关闭菜单
+  useEffect(() => {
+    if (!menuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node))
+        setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [menuOpen])
+
+  // 导出为 Word
+  const handleExportDocx = useCallback(async () => {
+    setMenuOpen(false)
+    if (isExporting) return
+    setIsExporting(true)
+    try {
+      // 调用后端：invokeBackend → invoke('invoke_plugin', { pluginId, command, args })
+      const b64 = await invokeBackend('markdown_to_docx', { markdown: noteContent }) as string
+      const fileName = noteName.replace(/\.(md|markdown)$/i, '') + '.docx'
+      const selected = await save({
+        defaultPath: fileName,
+        filters: [{ name: 'Word Document', extensions: ['docx'] }],
+      })
+      if (!selected) { setIsExporting(false); return }
+      await invoke('write_binary_file', { path: selected, data: b64 })
+      toast.success('导出成功')
+    } catch (err) {
+      toast.error('导出失败', { description: String(err) })
+    } finally {
+      setIsExporting(false)
+    }
+  }, [noteContent, noteName, isExporting, invokeBackend])
+
+  // 导出为 PDF
+  const handleExportPdf = useCallback(() => {
+    setMenuOpen(false)
+    window.print()  // 浏览器原生打印 API
+  }, [])
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button onClick={() => setMenuOpen(!menuOpen)}
+              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)]">
+        <ExportIcon size={size} />
+      </button>
+      {menuOpen && (
+        <div className="absolute right-0 top-full mt-1 z-50 rounded-lg py-1 min-w-[140px]"
+             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+          <button onClick={handleExportDocx}>导出为 Word</button>
+          <button onClick={handleExportPdf}>导出为 PDF</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── 面板（本插件无面板内容） ────────────────────────────────
+function ExportPanel(_props: PluginPanelProps): ReactNode { return null }
+
+// ─── 导出清单 ────────────────────────────────────────────────
+const manifest: PluginManifest = {
+  id: 'com.swallownote.export',
+  name: '文档导出',
+  description: '将 Markdown 文档导出为 Word (.docx) 或 PDF 格式',
+  version: '0.1.0',
+  author: 'SwallowNote',
+  publishedAt: '2026-06-13',
+  iconPosition: 'editorToolbar',
+  contentPosition: 'editorArea',
+  order: 50,
+  enabled: true,
+  hasBackend: true,
+  icon: ExportIcon,
+  panel: ExportPanel,
+  toolbarButton: ExportToolbarButton,  // 自定义工具栏按钮
+  permissions: ['events', 'backend'],   // 声明所需权限
+}
+
+export default manifest
+```
+
+### 4.5 关键概念
+
+#### toolbarButton vs icon
+
+| 方式 | 行为 |
+|---|---|
+| 只提供 `icon` | 宿主渲染默认按钮，点击激活/停用面板 |
+| 提供 `toolbarButton` | 宿主渲染你的自定义组件，完全控制交互 |
+
+`toolbarButton` 接收 `ToolbarButtonProps`：
+
+```typescript
+interface ToolbarButtonProps {
+  size: number                    // 推荐图标尺寸（editorToolbar: 14, sidebar: 18）
+  isActive: boolean               // 面板是否激活
+  pluginId: string                // 插件 ID
+  invokeBackend: (command, args?) => Promise<unknown>  // 调用后端
+  store: PluginStorage            // 持久化存储
+  events: PluginEventBus          // 事件总线
+  activate: () => void            // 激活面板
+  deactivate: () => void          // 停用面板
+}
+```
+
+#### invokeBackend 调用链路
+
+```
+invokeBackend('markdown_to_docx', { markdown: '...' })
+  → invoke('invoke_plugin', {
+      pluginId: 'com.swallownote.export',
+      command: 'markdown_to_docx',
+      args: { markdown: '...' }
+    })
+  → 宿主 Rust 查找 backend/plugin_com.swallownote.export
+  → 启动子进程，发送 JSON-RPC 请求
+  → 插件后端处理并返回
+```
+
+#### 事件订阅
+
+```typescript
+// 订阅笔记内容变化
+events.on('note:change', ({ content, path }) => { ... })
+// 订阅笔记打开
+events.on('note:open', ({ path }) => { ... })
+```
+
+可用事件：`note:open`、`note:close`、`note:save`、`note:change`、`theme:change`、`locale:change`、`settings:change`、`app:ready`、`app:exit`
+
+---
+
+## 5. 后端开发（Rust）
+
+### 5.1 Cargo.toml
+
+```toml
+[package]
+name = "swallownote-plugin-export"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "plugin_com_swallownote_export"   # 二进制文件名
+path = "src/main.rs"
+
+[dependencies]
+docx-rs = "0.4"            # DOCX 生成
+pulldown-cmark = "0.12"    # Markdown 解析
+base64 = "0.22"            # base64 编码
+thiserror = "1"            # 错误处理
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"           # JSON-RPC 协议
+```
+
+**要点**：
+
+- **不依赖 tauri**：后端是独立二进制，通过 stdin/stdout 与宿主通信
+- `[[bin]]` 的 `name` 必须遵循 `plugin_<plugin_id 中的 . 替换为 _>` 的命名规则
+- 二进制最终会被重命名为 `plugin_com.swallownote.export`（宿主查找的文件名）
+
+### 5.2 main.rs — JSON-RPC 入口
+
+```rust
+mod convert;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::io::{self, BufRead, Write};
+
+/// JSON-RPC 2.0 请求
+#[derive(Deserialize)]
+struct JsonRpcRequest {
+    jsonrpc: String,
+    id: u64,
+    method: String,
+    #[serde(default)]
+    params: Value,
+}
+
+/// JSON-RPC 2.0 成功响应
+#[derive(Serialize)]
+struct JsonRpcSuccess {
+    jsonrpc: &'static str,
+    id: u64,
+    result: Value,
+}
+
+/// JSON-RPC 2.0 错误响应
+#[derive(Serialize)]
+struct JsonRpcError {
+    jsonrpc: &'static str,
+    id: u64,
+    error: JsonRpcErrorDetail,
+}
+
+#[derive(Serialize)]
+struct JsonRpcErrorDetail {
+    code: i64,
+    message: String,
+}
+
+fn main() {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+
+    // 逐行读取 stdin，每行是一个 JSON-RPC 请求
+    for line in stdin.lock().lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,  // stdin 关闭，退出
+        };
+
+        let line = line.trim();
+        if line.is_empty() { continue; }
+
+        // 解析请求
+        let req: JsonRpcRequest = match serde_json::from_str(line) {
+            Ok(r) => r,
+            Err(e) => {
+                // 返回解析错误
+                let resp = JsonRpcError { /* ... */ };
+                let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap());
+                let _ = stdout.flush();
+                continue;
+            }
+        };
+
+        // 分发到处理函数
+        let response = handle_request(&req);
+        let _ = writeln!(stdout, "{}", serde_json::to_string(&response).unwrap());
+        let _ = stdout.flush();  // 必须刷新！
+    }
+}
+
+fn handle_request(req: &JsonRpcRequest) -> Value {
+    match req.method.as_str() {
+        "markdown_to_docx" => {
+            let markdown = req.params.get("markdown")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            match convert::markdown_to_docx(markdown.to_string()) {
+                Ok(b64) => {
+                    // 成功：返回 { "jsonrpc": "2.0", "id": N, "result": "<base64>" }
+                    let resp = JsonRpcSuccess {
+                        jsonrpc: "2.0",
+                        id: req.id,
+                        result: Value::String(b64),
+                    };
+                    serde_json::to_value(resp).unwrap()
+                }
+                Err(e) => {
+                    // 失败：返回 { "jsonrpc": "2.0", "id": N, "error": { ... } }
+                    let resp = JsonRpcError { /* ... */ };
+                    serde_json::to_value(resp).unwrap()
+                }
+            }
+        }
+        _ => {
+            // 未知方法
+            let resp = JsonRpcError {
+                jsonrpc: "2.0",
+                id: req.id,
+                error: JsonRpcErrorDetail {
+                    code: -32601,
+                    message: format!("Method not found: {}", req.method),
+                },
+            };
+            serde_json::to_value(resp).unwrap()
+        }
+    }
+}
+```
+
+### 5.3 JSON-RPC 协议规范
+
+宿主与插件后端之间的通信协议是 **行分隔的 JSON-RPC 2.0**：
+
+```
+宿主 → 插件:  {"jsonrpc":"2.0","id":1,"method":"markdown_to_docx","params":{"markdown":"# Hello"}}\n
+插件 → 宿主:  {"jsonrpc":"2.0","id":1,"result":"UEsDBBQAAAA..."}\n
+```
+
+错误响应：
+
+```
+插件 → 宿主:  {"jsonrpc":"2.0","id":1,"error":{"code":-1,"message":"docx-rs pack failed: ..."}}\n
+```
+
+**关键规则**：
+
+1. 每行一个 JSON 对象，以 `\n` 结尾
+2. 必须调用 `stdout.flush()`，否则宿主读不到数据
+3. `id` 必须与请求中的 `id` 一致
+4. stderr 输出会被宿主日志记录，但不会被视为响应
+5. stdin 关闭（EOF）时进程应正常退出
+
+### 5.4 convert.rs — 核心转换逻辑
+
+```rust
+use docx_rs::*;
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use std::io::Cursor;
+use base64::Engine;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ExportError {
+    #[error("DOCX generation failed: {0}")]
+    DocxGeneration(String),
+}
+
+/// 将 Markdown 字符串转换为 DOCX，返回 base64 编码的字节
+pub fn markdown_to_docx(markdown: String) -> Result<String, ExportError> {
+    let doc = build_docx(&markdown)?;
+    let mut buf = Cursor::new(Vec::new());
+    doc.build()
+        .pack(&mut buf)
+        .map_err(|e| ExportError::DocxGeneration(format!("docx-rs pack failed: {}", e)))?;
+    let bytes = buf.into_inner();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(b64)
+}
+
+fn build_docx(markdown: &str) -> Result<Docx, ExportError> {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TASKLISTS);
+
+    let parser = Parser::new_ext(markdown, options);
+    let blocks = parse_blocks(parser);
+
+    let mut doc = Docx::new();
+    for block in &blocks {
+        match block {
+            Block::Heading { level, inlines } => {
+                let style = format!("Heading{}", level.min(&6));
+                let para = append_inlines(Paragraph::new().style(&style), inlines);
+                doc = doc.add_paragraph(para);
+            }
+            Block::Paragraph(inlines) => {
+                let para = append_inlines(Paragraph::new(), inlines);
+                doc = doc.add_paragraph(para);
+            }
+            Block::CodeBlock { code } => {
+                let para = Paragraph::new().add_run(
+                    Run::new().add_text(code)
+                        .fonts(RunFonts::new().ascii("Courier New").east_asia("Courier New"))
+                        .size(18)
+                );
+                doc = doc.add_paragraph(para);
+            }
+            Block::ListItem { depth, inlines } => {
+                let indent_val: i32 = (*depth as i32).min(4) * 360;
+                let mut para = Paragraph::new()
+                    .add_run(Run::new().add_text("• "))
+                    .indent(Some(indent_val), None, None, None);
+                para = append_inlines(para, inlines);
+                doc = doc.add_paragraph(para);
+            }
+            Block::Table { headers, rows } => {
+                // 构建表格...
+            }
+        }
+    }
+    Ok(doc)
+}
+```
+
+**docx-rs 0.4 API 要点**：
+
+| API | 说明 |
+|---|---|
+| `Docx::new()` | 创建空文档 |
+| `doc.add_paragraph(para)` | 添加段落 |
+| `doc.add_table(table)` | 添加表格 |
+| `Paragraph::new().style("Heading1")` | 使用内置标题样式 |
+| `Run::new().add_text(t).bold().italic()` | 粗体/斜体文本 |
+| `Run::new().fonts(RunFonts::new().ascii("Courier New"))` | 设置字体 |
+| `doc.build().pack(&mut buf)` | 生成 DOCX 并写入 |
+
+**pulldown-cmark 0.12 API 要点**：
+
+| API | 说明 |
+|---|---|
+| `Parser::new_ext(md, options)` | 创建解析器 |
+| `Tag::Heading { level, .. }` | 标题开始（注意 `..` 忽略其他字段） |
+| `Tag::BlockQuote(_)` | 引用块（0.12 变为 tuple variant） |
+| `TagEnd::Table` | 表格结束（0.12 变为 unit variant） |
+| `TagEnd::BlockQuote(_)` | 引用块结束 |
+
+---
+
+## 6. 构建与打包
+
+### 6.1 前端构建
+
+```bash
+cd plugins/export
+
+# 安装依赖
+npm install
+
+# 构建（输出 dist/index.js + dist/manifest.json）
+npm run build
+```
+
+构建产物：
+- `dist/index.js` — IIFE bundle，约 500KB（包含 React、SDK 等）
+- `dist/manifest.json` — 从项目根目录复制
+
+### 6.2 后端构建
+
+```bash
+cd plugins/export
+
+# Debug 模式
+bash build.sh
+
+# Release 模式（推荐，体积更小）
+bash build.sh release
+```
+
+`build.sh` 做了什么：
+
+1. `cargo build --release --manifest-path src-tauri/Cargo.toml`
+2. 复制 `src-tauri/target/release/plugin_com_swallownote_export` → `backend/plugin_com.swallownote.export`
+3. 设置可执行权限
+
+**二进制命名规则**：
+
+| 阶段 | 文件名 | 说明 |
+|---|---|---|
+| Cargo 编译产物 | `plugin_com_swallownote_export` | `_` 替代 `.` |
+| 宿主期望的文件名 | `plugin_com.swallownote.export` | 保留 `.` |
+| Windows | `plugin_com.swallownote.export.exe` | 自动加 `.exe` |
+
+宿主查找路径：`<plugin_path>/backend/plugin_<plugin_id>` 或 `<plugin_path>/backend/<plugin_id>`
+
+### 6.3 完整打包
+
+```bash
+cd plugins/export
+
+# 一键打包（前端 + 后端 + zip）
+npm run package
+# 或
+bash package.sh release
+```
+
+`package.sh` 做了什么：
+
+1. `npx vite build` — 构建前端
+2. `cargo build --release` — 构建后端
+3. 复制后端二进制到 `dist/backend/plugin_com.swallownote.export`
+4. `zip -r com.swallownote.export.zip index.js manifest.json backend/`
+
+最终产物：`plugins/export/com.swallownote.export.zip`
+
+### 6.4 跨平台构建
+
+如果需要支持多个平台，需要分别编译后端：
+
+```bash
+# macOS (Apple Silicon)
+cargo build --release --target aarch64-apple-darwin --manifest-path src-tauri/Cargo.toml
+
+# macOS (Intel)
+cargo build --release --target x86_64-apple-darwin --manifest-path src-tauri/Cargo.toml
+
+# Windows
+cargo build --release --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml
+
+# Linux
+cargo build --release --target x86_64-unknown-linux-gnu --manifest-path src-tauri/Cargo.toml
+```
+
+每个平台生成独立的 zip 包，用户根据操作系统选择安装。
+
+---
+
+## 7. 安装与验证
+
+### 7.1 安装方式
+
+1. 打开 SwallowNote → 设置 → 插件管理
+2. 拖拽 `com.swallownote.export.zip` 到上传区域，或点击上传按钮选择文件
+3. 插件出现在列表中，启用即可
+
+### 7.2 安装后目录结构
+
+宿主将 zip 解压到 `<app_data_dir>/plugins/com.swallownote.export/`：
+
+```
+<app_data_dir>/plugins/com.swallownote.export/
+└── .versions/
+    └── upload/
+        ├── index.js
+        ├── manifest.json
+        └── backend/
+            └── plugin_com.swallownote.export
+```
+
+### 7.3 验证清单
+
+| 验证项 | 预期结果 |
+|---|---|
+| 编辑器工具栏出现下载图标 | 图标可见，hover 有背景变化 |
+| 点击图标出现下拉菜单 | 显示「导出为 Word」和「导出为 PDF」 |
+| 点击「导出为 Word」 | 弹出保存对话框，保存后文件可正常打开 |
+| 点击「导出为 PDF」 | 弹出浏览器打印对话框 |
+| 禁用插件后 | 工具栏图标消失 |
+| 卸载插件后 | 无残留，主应用正常运行 |
+
+---
+
+## 8. 调用链路详解
+
+### 8.1 DOCX 导出完整链路
+
+```
+用户点击「导出为 Word」
+  │
+  ▼
+ExportToolbarButton.handleExportDocx()
+  │
+  ▼
+invokeBackend('markdown_to_docx', { markdown: noteContent })
+  │  ← ToolbarButtonProps.invokeBackend
+  │
+  ▼
+invoke('invoke_plugin', {
+  pluginId: 'com.swallownote.export',
+  command: 'markdown_to_docx',
+  args: { markdown: '...' }
+})
+  │  ← @tauri-apps/api/core
+  │
+  ▼
+[Rust] invoke_plugin() — src-tauri/src/commands/plugin_invoke.rs
+  │
+  ├─ get_or_spawn() — 查找或启动后端子进程
+  │   ├─ resolve_backend_binary() — 查找 backend/plugin_com.swallownote.export
+  │   └─ spawn_plugin_process() — 启动子进程 + stdin/stdout 管道
+  │
+  ├─ 构造 JSON-RPC 请求: {"jsonrpc":"2.0","id":1,"method":"markdown_to_docx","params":{...}}
+  │
+  ├─ 写入子进程 stdin + flush
+  │
+  └─ 等待子进程 stdout 响应（30s 超时）
+      │
+      ▼
+[插件后端] main.rs — 逐行读取 stdin
+  │
+  ├─ 解析 JSON-RPC 请求
+  │
+  ├─ handle_request() — 分发到 convert::markdown_to_docx()
+  │   ├─ pulldown-cmark 解析 Markdown
+  │   ├─ docx-rs 生成 DOCX
+  │   └─ base64 编码
+  │
+  └─ 写入 stdout: {"jsonrpc":"2.0","id":1,"result":"<base64>"}
+      │
+      ▼
+[Rust] invoke_plugin() — 解析响应，返回 result
+  │
+  ▼
+[前端] b64 = await invokeBackend(...)
+  │
+  ▼
+save() — 弹出保存对话框
+  │
+  ▼
+invoke('write_binary_file', { path, data: b64 }) — 写入文件
+  │
+  ▼
+toast.success('导出成功')
+```
+
+### 8.2 PDF 导出链路
+
+```
+用户点击「导出为 PDF」
+  │
+  ▼
+ExportToolbarButton.handleExportPdf()
+  │
+  ▼
+window.print() — 浏览器原生打印 API
+  │
+  ▼
+系统打印对话框 → 选择「另存为 PDF」
+```
+
+### 8.3 事件订阅链路
+
+```
+宿主编辑器内容变化
+  │
+  ▼
+pluginEventBus.emit('note:change', { noteId, path, content })
+  │
+  ▼
+[宿主] events.on 回调触发
+  │
+  ▼
+ExportToolbarButton.setNoteContent(content)
+```
+
+---
+
+## 9. 常见问题
+
+### Q: 后端二进制放在哪里？宿主怎么找到它？
+
+宿主按以下顺序查找：
+
+1. `<plugin_path>/backend/plugin_<plugin_id>[.exe]`
+2. `<plugin_path>/backend/<plugin_id>[.exe]`
+
+其中 `plugin_path` 是安装时解压的目录（`<app_data_dir>/plugins/<id>/.versions/upload/`）。
+
+### Q: invokeBackend 报错 "plugin backend not found"
+
+检查：
+1. `manifest.json` 中 `hasBackend` 是否为 `true`
+2. `backend/` 目录是否存在
+3. 二进制文件名是否正确（`plugin_com.swallownote.export`，不是 `plugin_com_swallownote_export`）
+4. 二进制是否有可执行权限（`chmod +x`）
+
+### Q: invokeBackend 报错 "failed to write to plugin stdin"
+
+后端进程可能已崩溃。宿主会在下次调用时自动重启子进程。如果持续失败，检查后端代码是否有 panic。
+
+### Q: 前端构建后 index.js 太大
+
+确保 `react`、`react-dom` 等宿主已提供的库放在 `devDependencies` 中。Vite IIFE 模式会将所有 `dependencies` 打包进去。
+
+### Q: 后端进程什么时候启动？什么时候退出？
+
+- **启动**：首次 `invokeBackend` 调用时懒启动
+- **复用**：同一插件的后续调用复用同一进程
+- **重启**：进程崩溃后下次调用自动重启
+- **退出**：插件卸载时宿主调用 `kill_plugin_backend` 终止进程
+
+### Q: 如何调试后端？
+
+1. 在 `main.rs` 中使用 `eprintln!()` 输出调试信息（宿主会记录到日志）
+2. 手动运行二进制并输入 JSON-RPC 请求：
+   ```bash
+   echo '{"jsonrpc":"2.0","id":1,"method":"markdown_to_docx","params":{"markdown":"# Hello"}}' | \
+     ./backend/plugin_com.swallownote.export
+   ```
+
+### Q: 如何添加新的后端命令？
+
+1. 在 `convert.rs` 中实现新函数
+2. 在 `main.rs` 的 `handle_request()` 中添加新的 `match` 分支
+3. 前端通过 `invokeBackend('new_command', { ... })` 调用
+
+### Q: 插件独立性如何保证？
+
+| 检查项 | 验证方法 |
+|---|---|
+| 主应用 `src/` 中无插件代码 | `grep -r "com.swallownote.export" src/` 应无结果 |
+| 主应用 `src-tauri/` 中无插件代码 | `grep -r "swallownote_plugin_export" src-tauri/src/` 应无结果 |
+| 主应用 `Cargo.toml` 无插件依赖 | 不含 `swallownote-plugin-export`、`docx-rs`、`pulldown-cmark` |
+| 删除插件目录后主应用可编译 | `npx tsc --noEmit && npx vite build && cd src-tauri && cargo check` |

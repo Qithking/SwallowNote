@@ -34,7 +34,7 @@ import themeWatcherManifest from './theme-watcher'
 
 import type { PluginDefinition } from '@/types/plugin'
 
-/** All bundled sample manifests, in display order. */
+/** all bundled sample manifests, in display order. */
 export const SAMPLE_PLUGINS: readonly PluginDefinition[] = [
   recentNotesManifest,
   wordCounterManifest,

@@ -39,7 +39,7 @@ import type {
   PluginLifecycleHook,
 } from '@/types/plugin'
 import type { HostOverrides } from '@swallow-note/plugin-sdk'
-import { getPluginStorage, pluginEventBus, runLifecycleHook } from './plugin-host'
+import { getPluginStorage, pluginEventBus, createPluginEventBus, runLifecycleHook } from './plugin-host'
 import {
   registerContextMenu,
   unregisterContextMenu,
@@ -79,14 +79,15 @@ export interface PluginWithModule extends PluginDefinition {
  */
 function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
   const pluginId = plugin.id
+  const pluginEvents = createPluginEventBus(pluginId)
   return {
     getPluginStorage: (id) => getPluginStorage(id),
     registerContextMenu: (id, item) => registerContextMenu(id, item),
     unregisterContextMenu: (id, itemId) => unregisterContextMenu(id, itemId),
     clearPluginMenuItems: (id) => clearPluginMenuItems(id),
     getContextMenuItems: (loc, ctx) => getContextMenuItems(loc, ctx),
-    on: (e, h) => pluginEventBus.on(e, h),
-    off: (e, h) => pluginEventBus.off(e, h),
+    on: (e, h) => pluginEvents.on(e, h),
+    off: (e, h) => pluginEvents.off(e, h),
     emit: (e, p) => pluginEventBus.emit(e, p),
     // `invokeBackend` is reached from the SDK's `buildPluginContext`
     // path – a plugin's lifecycle hook can do
@@ -103,7 +104,7 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       let success = true
       let errorMsg: string | undefined
       try {
-        return await invoke(`plugin_${pluginId}_${cmd}`, args)
+        return await invoke('invoke_plugin', { pluginId, command: cmd, args })
       } catch (err) {
         success = false
         errorMsg = String(err)

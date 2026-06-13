@@ -38,7 +38,7 @@
 | `publishedAt` | `string` (ISO 8601) | 首次发布日期。仅展示用。 |
 | `order` | `number` | 触发器在同 `iconPosition` 内的排序，数字越小越靠前。 |
 | `enabled` | `boolean` | 初始启用状态。宿主加载后会同步到运行时。 |
-| `hasBackend` | `boolean` | 是否携带 Rust 后端。如果为 `true`，插件目录必须包含 `backend/` 子目录。 |
+| `hasBackend` | `boolean` | 是否携带 Rust 后端。支持 `true` / `false`，默认为 `false`（省略时等同 `false`）。如果为 `true`，插件目录必须包含 `backend/` 子目录。 |
 | `pluginPath` | `string` | **由 loader 填充**，留空即可。 |
 | `hooks` | `object` | 生命周期钩子（见 [lifecycle.md](./lifecycle.md)） |
 | `settings` | `ComponentType<PluginPanelProps> \| ReactNode` | 可选设置组件（见 [settings.md](./settings.md)） |
@@ -71,10 +71,10 @@ const manifest: PluginManifest = {
 **最佳实践**：
 
 - **最小权限原则**：只声明实际用到的权限。一个只用 `usePluginStorage` 的插件不要声明 `events`。
-- **运行时检查**：`events.on` 内部会读取 handler 上的 `__pluginId` 字段并查询 `assertPermission(pluginId, 'events', ...)`，未授权时抛 `PluginPermissionDeniedError`。
+- **运行时检查**：宿主使用 `createPluginEventBus(pluginId)` 创建每个插件的事件总线实例，当插件调用 `events.on()` 时，宿主会自动为 handler 打上 `__pluginId` 标签并查询 `assertPermission(pluginId, 'events', ...)`，未授权时抛 `PluginPermissionDeniedError`。**插件作者无需手动为 handler 添加 `__pluginId`**。
 - **撤销即时生效**：用户在插件管理页撤销某条权限后，下一次 `store.get / events.on` 等调用立即报错，无需重启宿主。
 
-> **SDK 集成**：`usePluginEvent` / `usePluginEvents` 在订阅时会自动给 handler 打 `__pluginId` 标签，宿主总线据此执行权限检查。`usePluginStorage` / `registerContextMenu` 同样在内部走宿主 `assertPermission`，无需插件作者额外处理。
+> **SDK 集成**：`usePluginEvent` / `usePluginEvents` 不再手动给 handler 打 `__pluginId` 标签——标签由宿主在 `events.on()` 调用时自动注入。`usePluginStorage` / `registerContextMenu` 同样在内部走宿主 `assertPermission`，无需插件作者额外处理。
 
 ## 完整 manifest 示例
 
@@ -131,6 +131,40 @@ export default manifest
 ```
 
 完整 Rust 端 schema 见 `src-tauri/src/commands/plugin.rs`。
+
+## 宿主注入的 Props 字段
+
+`panel`、`settings` 组件接收 `PluginPanelProps`，`toolbarButton` 组件接收 `ToolbarButtonProps`。这些 Props 由宿主在渲染时注入，**不需要在 manifest.json 中声明**，但插件组件可以直接使用。
+
+### PluginPanelProps
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `close` | `() => void` | 关闭当前插件面板 |
+| `isActive` | `boolean` | 当前面板是否处于激活/可见状态 |
+| `pluginId` | `string` | 插件 ID |
+| `invokeBackend` | `(command: string, args?: Record<string, unknown>) => Promise<unknown>` | 调用插件后端命令 |
+| `store` | `PluginStorage` | 插件作用域的持久化键值存储 |
+| `events` | `PluginEventBus` | 宿主事件总线，可订阅主题/笔记/语言/设置变更 |
+| `activeNoteContent` | `string` | 当前活动笔记的内容（Markdown 字符串）。无活动笔记时为空字符串 |
+| `activeNotePath` | `string` | 当前活动笔记的文件路径。无活动笔记时为空字符串 |
+
+### ToolbarButtonProps
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `size` | `number` | 当前工具栏上下文推荐的图标尺寸（`editorToolbar`/`titleBar` 为 14px，`sidebar` 为 18px） |
+| `isActive` | `boolean` | 插件面板是否处于激活状态 |
+| `pluginId` | `string` | 插件 ID |
+| `invokeBackend` | `(command: string, args?: Record<string, unknown>) => Promise<unknown>` | 调用插件后端命令 |
+| `store` | `PluginStorage` | 插件作用域的持久化键值存储 |
+| `events` | `PluginEventBus` | 宿主事件总线 |
+| `activate` | `() => void` | 激活插件（根据 `contentPosition` 显示面板） |
+| `deactivate` | `() => void` | 停用插件（隐藏面板） |
+| `activeNoteContent` | `string` | 当前活动笔记的内容（Markdown 字符串）。无活动笔记时为空字符串 |
+| `activeNotePath` | `string` | 当前活动笔记的文件路径。无活动笔记时为空字符串 |
+
+> **提示**：`activeNoteContent` 和 `activeNotePath` 是宿主实时注入的只读字段，插件无需订阅事件即可获取当前笔记信息。当用户切换笔记时，宿主会自动更新这些值并触发组件重渲染。
 
 ## 源码引用
 

@@ -306,6 +306,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             : t
         ),
       }))
+      // Emit note:change so plugins receive the initial content after load
+      const loadedTab = get().tabs.find((t) => t.id === id)
+      if (loadedTab) {
+        queueMicrotask(() => emitNoteChanged(loadedTab.id, loadedTab.path, loadedTab.content ?? ''))
+      }
     } catch (e) {
       console.error('Failed to load tab content after retries:', e)
       // Instead of closing the tab, mark it as having external change

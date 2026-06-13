@@ -9,7 +9,8 @@ import type { ConflictRepoRecord } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
-import { pluginRightPanelType, renderPluginIcon, pluginSidebarView } from '@/lib/plugin-utils'
+import { pluginRightPanelType, renderPluginIcon, pluginSidebarView, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
+import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 
 function EditorToolbar() {
   const tabs = useEditorStore((s) => s.tabs)
@@ -122,6 +123,57 @@ function EditorToolbar() {
     useUIStore.getState().setNoteWidth(newWide ? 'wide' : 'normal')
   }
 
+  // Helper: compute activate/deactivate callbacks for a plugin
+  const getPluginActivateCallbacks = (pluginId: string, contentPosition: string) => {
+    const activate = () => {
+      if (contentPosition === 'rightPanel') {
+        setRightPanelType(pluginRightPanelType(pluginId))
+        usePluginStore.getState().setActivePlugin(pluginId, 'rightPanel')
+      } else if (contentPosition === 'leftPanel') {
+        const pluginViewId = pluginSidebarView(pluginId)
+        const uiState = useUIStore.getState()
+        uiState.setSidebarVisible(true)
+        uiState.setSidebarView(pluginViewId)
+        usePluginStore.getState().setActivePlugin(pluginId, 'leftPanel')
+      } else if (contentPosition === 'fullPanel' || contentPosition === 'editorArea') {
+        const pluginViewId = pluginSidebarView(pluginId)
+        const uiState = useUIStore.getState()
+        uiState.setSettingsPanelVisible(true)
+        uiState.setSidebarView(pluginViewId)
+        usePluginStore.getState().setActivePlugin(pluginId, 'fullPanel')
+      }
+    }
+    const deactivate = () => {
+      if (contentPosition === 'rightPanel') {
+        setRightPanelType(null)
+        usePluginStore.getState().setActivePlugin(null, 'rightPanel')
+      } else if (contentPosition === 'leftPanel') {
+        const uiState = useUIStore.getState()
+        uiState.toggleSidebar()
+        usePluginStore.getState().setActivePlugin(null, 'leftPanel')
+      } else if (contentPosition === 'fullPanel' || contentPosition === 'editorArea') {
+        const uiState = useUIStore.getState()
+        uiState.setSettingsPanelVisible(false)
+        uiState.setSidebarView('explorer')
+        usePluginStore.getState().setActivePlugin(null, 'fullPanel')
+      }
+    }
+    return { activate, deactivate }
+  }
+
+  // Helper: check if a plugin is currently active
+  const isPluginActive = (plugin: { id: string; contentPosition: string }): boolean => {
+    if (plugin.contentPosition === 'rightPanel') {
+      return rightPanelType === pluginRightPanelType(plugin.id)
+    } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
+      const pluginViewId = pluginSidebarView(plugin.id)
+      return settingsPanelVisible && sidebarView === pluginViewId
+    } else {
+      const pluginViewId = pluginSidebarView(plugin.id)
+      return sidebarView === pluginViewId && sidebarVisible
+    }
+  }
+
   return (
     <div className="flex items-center justify-between h-[25px] pl-3 pr-1 text-[11px]   select-none">
       {/* Left: File path - display relative path from root */}
@@ -182,7 +234,7 @@ function EditorToolbar() {
               </button>
             </TooltipTrigger>
             <TooltipContent>{t('editorToolbar.openMarkdownFolder')}</TooltipContent>
-          </Tooltip>        
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -260,58 +312,34 @@ function EditorToolbar() {
 
         {/* Plugin icons with iconPosition === 'editorToolbar' */}
         {editorToolbarPlugins.map((plugin) => {
-          const handleClick = () => {
-            if (plugin.contentPosition === 'rightPanel') {
-              const pluginPanelType = pluginRightPanelType(plugin.id)
-              if (rightPanelType === pluginPanelType) {
-                setRightPanelType(null)
-                usePluginStore.getState().setActivePlugin(null, 'rightPanel')
-              } else {
-                setRightPanelType(pluginPanelType)
-                usePluginStore.getState().setActivePlugin(plugin.id, 'rightPanel')
-              }
-            } else if (plugin.contentPosition === 'leftPanel') {
-              const pluginViewId = pluginSidebarView(plugin.id)
-              const uiState = useUIStore.getState()
-              if (uiState.sidebarView === pluginViewId && uiState.sidebarVisible) {
-                uiState.toggleSidebar()
-                // setActivePlugin(null, ...) below also resets sidebarView
-                // to 'explorer' through the cross-store coupling in the
-                // plugin store.
-                usePluginStore.getState().setActivePlugin(null, 'leftPanel')
-              } else {
-                uiState.setSidebarVisible(true)
-                uiState.setSidebarView(pluginViewId)
-                usePluginStore.getState().setActivePlugin(plugin.id, 'leftPanel')
-              }
-            } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
-              const pluginViewId = pluginSidebarView(plugin.id)
-              const uiState = useUIStore.getState()
-              if (uiState.settingsPanelVisible && uiState.sidebarView === pluginViewId) {
-                uiState.setSettingsPanelVisible(false)
-                // Reset sidebarView to explorer so a subsequent leftPanel
-                // open shows the default view, not this plugin's stale view.
-                uiState.setSidebarView('explorer')
-                usePluginStore.getState().setActivePlugin(null, 'fullPanel')
-              } else {
-                uiState.setSettingsPanelVisible(true)
-                uiState.setSidebarView(pluginViewId)
-                usePluginStore.getState().setActivePlugin(plugin.id, 'fullPanel')
-              }
+          const active = isPluginActive(plugin)
+
+          // If the plugin provides a custom toolbarButton, render it
+          if (plugin.toolbarButton) {
+            const { activate, deactivate } = getPluginActivateCallbacks(plugin.id, plugin.contentPosition)
+            const toolbarProps = createToolbarButtonProps(plugin.id, active, 14, activate, deactivate, activeTab.content ?? '', activeTab.path ?? '')
+            try {
+              return (
+                <PluginErrorBoundary key={plugin.id} pluginId={plugin.id} resetKey={plugin.id}>
+                  {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}
+                </PluginErrorBoundary>
+              )
+            } catch {
+              // If toolbarButton throws synchronously during render,
+              // fall through to the default icon rendering below
             }
           }
 
-          const isPluginActive = (() => {
-            if (plugin.contentPosition === 'rightPanel') {
-              return rightPanelType === pluginRightPanelType(plugin.id)
-            } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
-              const pluginViewId = pluginSidebarView(plugin.id)
-              return settingsPanelVisible && sidebarView === pluginViewId
+          // Default rendering: icon + button that toggles panel
+          const handleClick = () => {
+            if (active) {
+              const { deactivate } = getPluginActivateCallbacks(plugin.id, plugin.contentPosition)
+              deactivate()
             } else {
-              const pluginViewId = pluginSidebarView(plugin.id)
-              return sidebarView === pluginViewId && sidebarVisible
+              const { activate } = getPluginActivateCallbacks(plugin.id, plugin.contentPosition)
+              activate()
             }
-          })()
+          }
 
           return (
             <Tooltip key={plugin.id}>
@@ -319,7 +347,7 @@ function EditorToolbar() {
                 <button
                   onClick={handleClick}
                   className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                  style={{ color: isPluginActive ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                  style={{ color: active ? 'var(--theme-color)' : 'var(--text-primary)' }}
                 >
                   {renderPluginIcon(plugin.icon, 14)}
                 </button>

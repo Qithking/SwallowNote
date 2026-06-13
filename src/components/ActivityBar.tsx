@@ -3,11 +3,12 @@
  * Supports built-in views, sidebar plugins, plugin manager, and settings
  */
 import { FolderTree, Search, GitBranch, Settings, Puzzle } from 'lucide-react'
-import { useUIStore, useGitStore, usePluginStore, SidebarView } from '@/stores'
+import { useUIStore, useGitStore, usePluginStore, useEditorStore, SidebarView } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
-import { pluginSidebarView, pluginRightPanelType, isFullPanelPluginActive, renderPluginIcon } from '@/lib/plugin-utils'
+import { pluginSidebarView, pluginRightPanelType, isFullPanelPluginActive, renderPluginIcon, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
 import type { PluginDefinition } from '@/types/plugin'
+import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 
 const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'explorer', icon: FolderTree },
@@ -36,6 +37,9 @@ function ActivityBar() {
   const showConflictBadge = useUIStore((s) => s.showConflictBadge)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
   const sidebarPlugins = usePluginStore((s) => s.registry.sidebar)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const tabs = useEditorStore((s) => s.tabs)
+  const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
 
   const conflictCount = conflictRepos.length
@@ -137,15 +141,39 @@ function ActivityBar() {
 
       {/* Plugin icons with iconPosition === 'sidebar' */}
       {sidebarPlugins.map((plugin) => {
-        const isActive = isPluginActive(plugin)
+        const active = isPluginActive(plugin)
+
+        // If the plugin provides a custom toolbarButton, render it
+        if (plugin.toolbarButton) {
+          const toolbarProps = createToolbarButtonProps(plugin.id, active, 18, () => handlePluginClick(plugin), () => {
+            // Deactivate: reverse the click logic
+            if (plugin.contentPosition === 'rightPanel') {
+              setRightPanelType(null)
+              usePluginStore.getState().setActivePlugin(null, 'rightPanel')
+            } else if (plugin.contentPosition === 'fullPanel') {
+              setSettingsPanelVisible(false)
+              setSidebarView('explorer')
+              usePluginStore.getState().setActivePlugin(null, 'fullPanel')
+            } else {
+              if (sidebarVisible) toggleSidebar()
+              usePluginStore.getState().setActivePlugin(null, 'leftPanel')
+            }
+          }, activeTab?.content ?? '', activeTab?.path ?? '')
+          return (
+            <PluginErrorBoundary key={plugin.id} pluginId={plugin.id} resetKey={plugin.id}>
+              {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}
+            </PluginErrorBoundary>
+          )
+        }
+
         return (
           <Tooltip key={plugin.id}>
             <TooltipTrigger asChild>
               <button
                 onClick={() => handlePluginClick(plugin)}
-                className={`w-[36px] h-[36px] flex items-center justify-center relative cursor-pointer rounded-lg ${isActive ? 'bg-primary/10' : ''}`}
+                className={`w-[36px] h-[36px] flex items-center justify-center relative cursor-pointer rounded-lg ${active ? 'bg-primary/10' : ''}`}
                 style={{
-                  color: isActive ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
+                  color: active ? 'var(--activity-foreground)' : 'var(--activity-inactive)',
                 }}
               >
                 {renderPluginIcon(plugin.icon, 18)}

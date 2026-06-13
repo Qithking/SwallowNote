@@ -48,6 +48,8 @@ function App() {
   const autoSyncPush = useUIStore((s: UIState) => s.autoSyncPush)
   const sidebarView = useUIStore((s: UIState) => s.sidebarView)
   const tabs = useEditorStore((s: EditorState) => s.tabs)
+  const activeTabId = useEditorStore((s: EditorState) => s.activeTabId)
+  const activeTab = tabs.find((t) => t.id === activeTabId)
   const cachedRepositories = useGitStore((s: GitState) => s.cachedRepositories)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
@@ -563,7 +565,9 @@ function App() {
             // paths.
             useUIStore.getState().setRightPanelType(null)
             usePluginStore.getState().setActivePlugin(null, 'rightPanel')
-          }
+          },
+          activeTab?.content ?? '',
+          activeTab?.path ?? ''
         )
         // `key={pluginId}` on PluginPanelHost forces a remount when
         // the user switches from one right-panel plugin to another,
@@ -586,7 +590,7 @@ function App() {
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
   const handleContextMenu = useCallback((_e: React.MouseEvent) => {
-    _e.preventDefault()
+    //_e.preventDefault()
   }, [])
 
   return (
@@ -654,7 +658,9 @@ function App() {
                     useUIStore.getState().setSettingsPanelVisible(false)
                     useUIStore.getState().setSidebarView('explorer')
                     usePluginStore.getState().setActivePlugin(null, 'fullPanel')
-                  }
+                  },
+                  activeTab?.content ?? '',
+                  activeTab?.path ?? ''
                 )
                 // `key={id}` ensures a fresh mount (and onMount /
                 // onUnmount) when the user switches from one fullPanel

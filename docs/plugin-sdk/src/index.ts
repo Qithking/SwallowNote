@@ -154,6 +154,41 @@ export interface PluginPanelProps {
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
   store: PluginStorage
   events: PluginEventBus
+  /** Current active note content (markdown string). Empty string if no note is active. */
+  activeNoteContent: string
+  /** Current active note file path. Empty string if no note is active. */
+  activeNotePath: string
+}
+
+/**
+ * Props for a plugin's custom toolbar button component.
+ *
+ * When a plugin provides `toolbarButton` in its manifest, the host
+ * renders this component instead of the default icon + button. This
+ * allows plugins to implement custom interactions such as dropdown
+ * menus, direct actions, or any other toolbar-level UI.
+ */
+export interface ToolbarButtonProps {
+  /** Recommended icon size for the current toolbar context */
+  size: number
+  /** Whether this plugin's panel is currently active */
+  isActive: boolean
+  /** Plugin ID */
+  pluginId: string
+  /** Invoke the plugin's backend command */
+  invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** Persistent key/value store scoped to this plugin */
+  store: PluginStorage
+  /** Host event bus */
+  events: PluginEventBus
+  /** Activate the plugin (show panel based on contentPosition) */
+  activate: () => void
+  /** Deactivate the plugin (hide panel) */
+  deactivate: () => void
+  /** Current active note content (markdown string). Empty string if no note is active. */
+  activeNoteContent: string
+  /** Current active note file path. Empty string if no note is active. */
+  activeNotePath: string
 }
 
 /**
@@ -179,6 +214,13 @@ export interface PluginManifest {
   enabled?: boolean
   icon: ComponentType<{ size?: number }>
   panel: ComponentType<PluginPanelProps>
+  /**
+   * Optional custom toolbar button component. When provided, the host
+   * renders this component instead of the default icon + button pattern.
+   * The component receives ToolbarButtonProps and can implement custom
+   * interactions (dropdown menus, direct actions, etc.).
+   */
+  toolbarButton?: ComponentType<ToolbarButtonProps>
   settings?: ComponentType<PluginPanelProps>
   /**
    * Permissions this plugin needs from the host. Listed values must
@@ -221,6 +263,8 @@ export interface PluginDefinition {
   enabled: boolean
   icon: ComponentType<{ size?: number }>
   panel: ComponentType<PluginPanelProps>
+  /** Custom toolbar button component (overrides default icon rendering) */
+  toolbarButton?: ComponentType<ToolbarButtonProps>
   settings?: ComponentType<PluginPanelProps>
   pluginPath: string
   hasBackend: boolean
@@ -694,19 +738,15 @@ export function usePluginEvent<E extends PluginEvent>(
   const { events } = panel
 
   useEffect(() => {
-    // Stash the pluginId on the wrapper so the host's bus can
-    // enforce the `events` permission. The host's `events.on()` reads
-    // `__pluginId` from the handler and throws
-    // `PluginPermissionDeniedError` if the plugin hasn't been granted
-    // the `events` permission. Without this tag a plugin that
-    // declares no `events` permission would still be able to
-    // subscribe through this hook – bypassing the runtime sandbox.
+    // No need to manually tag __pluginId here — the host's
+    // `createPluginEventBus(pluginId)` wrapper automatically tags
+    // every handler passed through `events.on()`. The SDK's stub
+    // bus ignores the tag; only the host bus checks it.
     const wrapped = ((payload: PluginEventPayloadMap[E]) => {
       handlerRef.current(payload)
-    }) as PluginEventHandler<E> & { __pluginId?: string }
-    wrapped.__pluginId = panel.pluginId
-    return events.on(event, wrapped as PluginEventHandler<E>)
-  }, [event, events, panel.pluginId])
+    }) as PluginEventHandler<E>
+    return events.on(event, wrapped)
+  }, [event, events])
 }
 
 /** Subscribe to multiple events with a unified callback. */
@@ -725,20 +765,19 @@ export function usePluginEvents<E extends PluginEvent>(
   handlerRef.current = handler
 
   useEffect(() => {
-    // Tag each wrapper with the panel's pluginId so the host's bus
-    // can enforce the `events` permission. See the note on
-    // `usePluginEvent` above.
+    // No need to manually tag __pluginId — the host's
+    // `createPluginEventBus(pluginId)` automatically tags every
+    // handler passed through `events.on()`.
     const unsubs = events.map((evt) => {
       const wrapped = ((payload: PluginEventPayloadMap[typeof evt]) => {
         handlerRef.current(evt, payload)
-      }) as PluginEventHandler<typeof evt> & { __pluginId?: string }
-      wrapped.__pluginId = panel.pluginId
-      return bus.on(evt, wrapped as PluginEventHandler<typeof evt>)
+      }) as PluginEventHandler<typeof evt>
+      return bus.on(evt, wrapped)
     })
     return () => {
       for (const u of unsubs) u()
     }
-  }, [bus, events, panel.pluginId])
+  }, [bus, events])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

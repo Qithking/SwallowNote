@@ -19,18 +19,34 @@ export default defineConfig(({ mode }) => {
           },
         },
       ],
+      define: {
+        'process.env.NODE_ENV': JSON.stringify('production'),
+      },
       build: {
         outDir: 'dist',
         emptyOutDir: true,
         lib: {
           entry: resolve(__dirname, 'index.tsx'),
-          name: 'SwallowNotePlugin',
-          formats: ['iife'],
-          fileName: () => 'plugin.js',
+          formats: ['es'],
+          fileName: () => 'index.js',
         },
         rollupOptions: {
-          external: [],
-          output: { inlineDynamicImports: true },
+          // React and ReactDOM must be external so the plugin uses the
+          // host's React instance (exposed as window.React / window.ReactDOM).
+          // Bundling a second copy causes "multiple React instances" crashes
+          // because hooks rely on a shared internal dispatcher.
+          // sonner / react-i18next / i18next are also provided by the host
+          // as window.SonnerToast / window.ReactI18Next.
+          external: [
+            'react', 'react-dom', 'react-dom/client',
+            'react/jsx-runtime', 'react/jsx-dev-runtime',
+            'sonner', 'react-i18next', 'i18next',
+          ],
+          output: {
+            // Disable code splitting — the plugin loader uses blob URLs
+            // which cannot resolve relative chunk imports.
+            inlineDynamicImports: true,
+          },
         },
       },
     }

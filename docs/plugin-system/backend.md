@@ -123,7 +123,8 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 大部分插件用前端就能实现（持久化存储、事件订阅、UI 扩展）。后端适合：
 
-- 解析大文件（PDF / Word / Excel）而不阻塞 UI
+- 解析大文件（Word / Excel）而不阻塞 UI
+- 将 Markdown 转换为带样式的 HTML（如导出插件使用 `markdown_to_html`，后端通过 pulldown-cmark 将 markdown 转为 styled HTML，前端再通过 modern-screenshot + jsPDF 将 HTML 渲染为 PDF）
 - 调本地工具（git / docker / sqlite）
 - 跑 CPU 密集型计算（图像处理、压缩）
 

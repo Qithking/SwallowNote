@@ -200,6 +200,8 @@ export interface PluginStorage {
 export interface PluginEventBus {
   on<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): () => void
   off<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void
+  /** Remove all handlers belonging to a specific plugin (called on uninstall). */
+  removeAllListenersForPlugin(pluginId: string): void
 }
 
 /**
@@ -244,6 +246,15 @@ export interface PluginManifest {
    * For component type, it will receive PluginContext as props.
    */
   panel: ComponentType<PluginPanelProps> | ReactNode
+  /**
+   * Optional custom toolbar button component. When provided, the host
+   * renders this component instead of the default icon + button pattern.
+   * The component receives ToolbarButtonProps and can implement custom
+   * interactions (dropdown menus, direct actions, etc.).
+   * If omitted, the host renders the `icon` inside a standard button
+   * that toggles the panel on click.
+   */
+  toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
   /**
    * Optional settings UI component. Renders inside a modal opened from
    * the plugin manager. Same props as `panel`; use `close` to dismiss.
@@ -295,6 +306,13 @@ export interface PluginDefinition {
   icon: ComponentType<{ size?: number }> | ReactNode
   /** Resolved panel component or ReactNode */
   panel: ComponentType<PluginPanelProps> | ReactNode
+  /**
+   * Optional custom toolbar button component. When provided, the host
+   * renders this component instead of the default icon + button pattern.
+   * The component receives ToolbarButtonProps and can implement custom
+   * interactions (dropdown menus, direct actions, etc.).
+   */
+  toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
   /**
    * Optional settings UI component. Rendered in a modal opened from
    * the plugin manager. Receives the same `PluginPanelProps` as the
@@ -422,6 +440,46 @@ export interface PluginPanelProps {
   store: PluginStorage
   /** Host event bus. Subscribe to theme / note / locale / settings changes. */
   events: PluginEventBus
+  /** Current active note content (markdown string). Empty string if no note is active. */
+  activeNoteContent: string
+  /** Current active note file path. Empty string if no note is active. */
+  activeNotePath: string
+}
+
+/**
+ * Props for a plugin's custom toolbar button component.
+ *
+ * When a plugin provides `toolbarButton` in its manifest, the host renders
+ * this component instead of the default icon + button. This allows plugins
+ * to implement custom interactions such as dropdown menus, direct actions,
+ * or any other toolbar-level UI.
+ *
+ * The `size` prop indicates the recommended icon size for the current
+ * toolbar context (14px for editorToolbar/titleBar, 18px for sidebar).
+ * Plugins should respect this size for visual consistency but can render
+ * larger UI elements (e.g. dropdown menus) that extend beyond the button.
+ */
+export interface ToolbarButtonProps {
+  /** Recommended icon size for the current toolbar context */
+  size: number
+  /** Whether this plugin's panel is currently active */
+  isActive: boolean
+  /** Plugin ID */
+  pluginId: string
+  /** Invoke the plugin's backend command */
+  invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** Persistent key/value store scoped to this plugin */
+  store: PluginStorage
+  /** Host event bus */
+  events: PluginEventBus
+  /** Activate the plugin (show panel based on contentPosition) */
+  activate: () => void
+  /** Deactivate the plugin (hide panel) */
+  deactivate: () => void
+  /** Current active note content (markdown string). Empty string if no note is active. */
+  activeNoteContent: string
+  /** Current active note file path. Empty string if no note is active. */
+  activeNotePath: string
 }
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────

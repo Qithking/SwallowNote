@@ -4,7 +4,7 @@
  */
 import { Minus, Square, X, Sun, Moon, Monitor, Bot, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { useUIStore, usePluginStore } from '@/stores'
+import { useUIStore, usePluginStore, useEditorStore } from '@/stores'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -19,12 +19,16 @@ import {
 import { TitleBarRecentPopover } from './TitleBarRecentPopover'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
-import { pluginRightPanelType, pluginSidebarView, renderPluginIcon } from '@/lib/plugin-utils'
+import { pluginRightPanelType, pluginSidebarView, renderPluginIcon, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
+import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 
 function TitleBar() {
   const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode, sidebarVisible, setSidebarVisible, settingsPanelVisible, setSettingsPanelVisible, sidebarView } = useUIStore()
   const { switchMode } = useWorkspaceStore()
   const titleBarPlugins = usePluginStore((s) => s.registry.titleBar)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const tabs = useEditorStore((s) => s.tabs)
+  const activeTab = tabs.find((t) => t.id === activeTabId)
   const { t } = useTranslation()
 
   const handleMinimize = async () => {
@@ -86,6 +90,45 @@ function TitleBar() {
               return sidebarView === pluginViewId && sidebarVisible
             }
           })()
+
+          // If the plugin provides a custom toolbarButton, render it
+          if (plugin.toolbarButton) {
+            const activate = () => {
+              const ui = useUIStore.getState()
+              if (plugin.contentPosition === 'rightPanel') {
+                setRightPanelType(pluginRightPanelType(plugin.id))
+                usePluginStore.getState().setActivePlugin(plugin.id, 'rightPanel')
+              } else if (plugin.contentPosition === 'leftPanel') {
+                ui.setSidebarVisible(true)
+                ui.setSidebarView(pluginSidebarView(plugin.id))
+                usePluginStore.getState().setActivePlugin(plugin.id, 'leftPanel')
+              } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
+                setSettingsPanelVisible(true)
+                ui.setSidebarView(pluginSidebarView(plugin.id))
+                usePluginStore.getState().setActivePlugin(plugin.id, 'fullPanel')
+              }
+            }
+            const deactivate = () => {
+              const ui = useUIStore.getState()
+              if (plugin.contentPosition === 'rightPanel') {
+                setRightPanelType(null)
+                usePluginStore.getState().setActivePlugin(null, 'rightPanel')
+              } else if (plugin.contentPosition === 'leftPanel') {
+                ui.toggleSidebar()
+                usePluginStore.getState().setActivePlugin(null, 'leftPanel')
+              } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
+                setSettingsPanelVisible(false)
+                ui.setSidebarView('explorer')
+                usePluginStore.getState().setActivePlugin(null, 'fullPanel')
+              }
+            }
+            const toolbarProps = createToolbarButtonProps(plugin.id, isPluginActive, 14, activate, deactivate, activeTab?.content ?? '', activeTab?.path ?? '')
+            return (
+              <PluginErrorBoundary key={plugin.id} pluginId={plugin.id} resetKey={plugin.id}>
+                {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}
+              </PluginErrorBoundary>
+            )
+          }
 
           const handleClick = () => {
             const ui = useUIStore.getState()

@@ -70,10 +70,22 @@ export default defineConfig({
   plugins: [react()],
   build: {
     lib: { entry: 'src/MyPlugin.tsx', formats: ['iife'], name: 'MyPlugin', fileName: () => 'plugin.js' },
-    rollupOptions: { external: [], output: { inlineDynamicImports: true } },
+    rollupOptions: {
+      external: [
+        'react', 'react-dom', 'react/jsx-runtime',
+        'sonner', 'react-i18next', 'i18next',
+      ],
+      output: {
+        inlineDynamicImports: true,  // 必须禁用代码分割，插件加载器使用 blob URL，无法解析相对路径的 chunk 导入
+      },
+    },
   },
 })
 ```
+
+> **external 说明**：`react` / `react-dom` / `react/jsx-runtime` 由宿主通过 `window.React` / `window.ReactDOM` 提供；`sonner` 由宿主通过 `window.SonnerToast` 提供；`react-i18next` / `i18next` 由宿主通过 `window.ReactI18Next` 提供。这些依赖不需要打包进插件产物，否则会导致体积膨胀或运行时冲突。
+
+> **`inlineDynamicImports` 说明**：插件加载器使用 blob URL 加载插件代码，blob URL 无法解析相对路径的 chunk 文件导入。因此必须设置 `inlineDynamicImports: true` 禁用代码分割，确保所有代码输出到单个 `plugin.js` 文件中。
 
 ## SDK 双模式详解
 

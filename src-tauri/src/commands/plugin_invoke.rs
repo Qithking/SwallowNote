@@ -340,7 +340,11 @@ async fn get_or_spawn(
         guard.remove(plugin_id);
     }
 
-    let plugin_path = app_data_dir.join("plugins").join(plugin_id);
+    let plugins_root = app_data_dir.join("plugins");
+    let plugin_root = super::plugin::resolve_plugin_dir(&plugins_root, plugin_id)
+        .ok_or_else(|| PluginError::NotFound(format!("plugin directory not found (plugin_id={})", plugin_id)))?;
+    let plugin_path = super::plugin::active_version_dir(&plugin_root)
+        .ok_or_else(|| PluginError::NotFound(format!("plugin version directory not found (plugin_id={})", plugin_id)))?;
     let plugin_path_str = plugin_path.to_string_lossy().to_string();
     let proc = spawn_plugin_process(plugin_id.to_string(), plugin_path_str).await?;
     guard.insert(plugin_id.to_string(), Arc::clone(&proc));

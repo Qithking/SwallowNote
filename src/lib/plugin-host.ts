@@ -106,6 +106,22 @@ class PluginEventBusImpl implements PluginEventBus {
   }
 
   /**
+   * Remove all handlers belonging to a specific plugin.
+   * Called on uninstall so stale subscriptions don't linger after
+   * the plugin's component tree has been torn down (or never
+   * mounted, e.g. when the module failed to load).
+   */
+  removeAllListenersForPlugin(pluginId: string): void {
+    for (const [, set] of this.handlers) {
+      for (const handler of Array.from(set)) {
+        if (this.readPluginId(handler as unknown as { __pluginId?: string }) === pluginId) {
+          set.delete(handler)
+        }
+      }
+    }
+  }
+
+  /**
    * Emit an event. Public so the host can fire events from any module
    * (App.tsx, useTheme, useTranslation, …) without prop-drilling.
    */
@@ -162,8 +178,30 @@ class PluginEventBusImpl implements PluginEventBus {
 }
 
 /** Global event bus singleton. */
-export const pluginEventBus: PluginEventBus & { emit: PluginEventBusImpl['emit'] } =
+export const pluginEventBus: PluginEventBus & { emit: PluginEventBusImpl['emit'] } & { removeAllListenersForPlugin: PluginEventBusImpl['removeAllListenersForPlugin'] } =
   new PluginEventBusImpl()
+
+/**
+ * Create a per-plugin event bus proxy that automatically tags every
+ * handler with `__pluginId`. Plugin code can then call
+ * `events.on('note:change', handler)` without manually attaching
+ * `__pluginId` to each handler — the proxy does it transparently.
+ */
+export function createPluginEventBus(pluginId: string): PluginEventBus {
+  return {
+    on: (event, handler) => {
+      // Auto-tag the handler so the host's permission gate passes.
+      ;(handler as unknown as { __pluginId?: string }).__pluginId = pluginId
+      return pluginEventBus.on(event, handler)
+    },
+    off: (event, handler) => {
+      pluginEventBus.off(event, handler)
+    },
+    removeAllListenersForPlugin: (id) => {
+      pluginEventBus.removeAllListenersForPlugin(id)
+    },
+  }
+}
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 

@@ -185,10 +185,16 @@ interface PluginPanelProps {
   invokeBackend: (cmd, args?) => Promise<unknown>  // 调用 Rust 后端
   store: PluginStorage                       // 持久化键值
   events: PluginEventBus                     // 事件订阅
+  activeNoteContent: string                  // 当前活跃笔记的 markdown 内容（宿主提供）
+  activeNotePath: string                     // 当前活跃笔记的文件路径（宿主提供）
 }
 ```
 
 > `settings` 组件接收**完全相同**的 props（但 `isActive === false`，因为是 modal）。
+
+> **`activeNoteContent` / `activeNotePath` 使用提示**：这两个属性由宿主直接提供当前活跃笔记的内容和路径，插件无需订阅 `note:change` 事件即可获取当前笔记内容。这一点非常重要——插件挂载时，初始的 `note:change` 事件已经触发完毕，基于事件的内容获取可能错过初始内容。如果需要实时跟踪笔记变化，仍可结合 `usePluginEvent(panel, 'note:change', ...)` 使用。
+
+`ToolbarButtonProps`（`iconPosition: 'editorToolbar'` 时 icon 组件接收的 props）同样包含 `activeNoteContent` 和 `activeNotePath`。
 
 ### 完整 manifest 示例
 
@@ -351,6 +357,8 @@ emitSettingChanged('my-plugin:last-clicked', 42)
 ```
 
 > **错误隔离**：bus 内部 `try/catch` 每个 handler 的调用，一个 plugin 抛异常不影响其他订阅者。
+
+> **`__pluginId` 自动打标签**：宿主使用 `createPluginEventBus(pluginId)` 创建每个插件的事件总线实例。当插件调用 `events.on()` 时，宿主会自动为每个 handler 打上 `__pluginId` 标签，用于权限检查和插件卸载时的自动清理。**插件作者无需手动为 handler 添加 `__pluginId`**。SDK 的 `usePluginEvent` 和 `usePluginEvents` hooks 也不再手动添加 `__pluginId`——标签由宿主在 `events.on()` 调用时自动注入。
 
 完整文档：[events.md](./events.md)
 
@@ -804,6 +812,36 @@ npm run dev         # http://localhost:5173
 npm run build       # → dist/plugin.js + dist/manifest.json
 ```
 
+### 构建配置（vite.config.ts）
+
+独立开发使用 Vite library mode 构建，关键配置如下：
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    lib: { entry: 'src/MyPlugin.tsx', formats: ['iife'], name: 'MyPlugin', fileName: () => 'plugin.js' },
+    rollupOptions: {
+      external: [
+        'react', 'react-dom', 'react/jsx-runtime',
+        'sonner', 'react-i18next', 'i18next',
+      ],
+      output: {
+        inlineDynamicImports: true,  // 必须禁用代码分割，插件加载器使用 blob URL，无法解析相对路径的 chunk 导入
+      },
+    },
+  },
+})
+```
+
+> **external 说明**：`react` / `react-dom` / `react/jsx-runtime` 由宿主通过 `window.React` / `window.ReactDOM` 提供；`sonner` 由宿主通过 `window.SonnerToast` 提供；`react-i18next` / `i18next` 由宿主通过 `window.ReactI18Next` 提供。这些依赖不需要打包进插件产物，否则会导致体积膨胀或运行时冲突。
+
+> **`inlineDynamicImports` 说明**：插件加载器使用 blob URL 加载插件代码，blob URL 无法解析相对路径的 chunk 文件导入。因此必须设置 `inlineDynamicImports: true` 禁用代码分割，确保所有代码输出到单个 `plugin.js` 文件中。
+
 ### SDK 双模式
 
 SDK 的核心：**一份代码、两种运行模式、零分支**。
@@ -1035,6 +1073,7 @@ function MyPanel(panel: PluginPanelProps): ReactNode {
         My Plugin {active ? '•' : ''}
       </h2>
       <div>Plugin ID: <code>{panel.pluginId}</code></div>
+      <div>Active note: <code>{panel.activeNotePath || '(none)'}</code></div>
       <div>Count: {count}</div>
       <button onClick={() => setCount(c => c + 1)}>+1</button>
       <button onClick={() => setCount(null)}>Reset</button>

@@ -108,7 +108,7 @@ export function usePluginStorage<T = unknown>(
  * ergonomic API.
  */
 export function usePluginEvent<E extends PluginEvent>(
-  panel: PluginPanelProps,
+  panel: { pluginId: string; events: PluginEventBus },
   event: E,
   handler: PluginEventHandler<E>
 ): void {
@@ -147,7 +147,7 @@ export function usePluginEvent<E extends PluginEvent>(
  *   })
  */
 export function usePluginEvents<E extends PluginEvent>(
-  panel: PluginPanelProps,
+  panel: { pluginId: string; events: PluginEventBus },
   events: readonly E[],
   handler: (event: E, payload: PluginEventPayloadMap[E]) => void
 ): void {

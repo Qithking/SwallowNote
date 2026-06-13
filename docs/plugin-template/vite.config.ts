@@ -6,8 +6,16 @@ import { copyFileSync, mkdirSync, existsSync } from 'node:fs'
 /**
  * Two modes:
  *  - `vite` (dev): runs the standalone preview at http://localhost:5173
- *  - `vite build`: emits a library bundle `dist/plugin.js` (IIFE) +
- *    `dist/manifest.json` that you can upload to SwallowNote.
+ *  - `vite build`: emits `dist/index.js` (ES module) + `dist/manifest.json`
+ *    that can be zipped and installed into SwallowNote.
+ *
+ * Uses ES module format so that the host's `import()` can resolve
+ * `module.default` as the plugin manifest object.
+ * React and ReactDOM are marked as external so the plugin uses the
+ * host's React instance (exposed as window.React / window.ReactDOM /
+ * window.ReactJSXRuntime). Bundling a second copy causes "multiple
+ * React instances" crashes because hooks rely on a shared internal
+ * dispatcher.
  */
 export default defineConfig(({ mode }) => {
   if (mode === 'production') {
@@ -26,19 +34,35 @@ export default defineConfig(({ mode }) => {
           },
         },
       ],
+      define: {
+        'process.env.NODE_ENV': JSON.stringify('production'),
+      },
       build: {
         outDir: 'dist',
         emptyOutDir: true,
         lib: {
           entry: resolve(__dirname, 'src/plugin/index.tsx'),
-          name: 'SwallowNotePlugin',
-          formats: ['iife'],
-          fileName: () => 'plugin.js',
+          formats: ['es'],
+          fileName: () => 'index.js',
         },
         rollupOptions: {
-          // Treat the SDK as a single bundle for predictable output
-          external: [],
-          output: { inlineDynamicImports: true },
+          // React and ReactDOM must be external so the plugin uses the
+          // host's React instance (exposed as window.React / window.ReactDOM /
+          // window.ReactJSXRuntime). Bundling a second copy causes "multiple
+          // React instances" crashes because hooks rely on a shared internal
+          // dispatcher.
+          // sonner / react-i18next / i18next are also provided by the host
+          // as window.SonnerToast / window.ReactI18Next.
+          external: [
+            'react', 'react-dom', 'react-dom/client',
+            'react/jsx-runtime', 'react/jsx-dev-runtime',
+            'sonner', 'react-i18next', 'i18next',
+          ],
+          output: {
+            // Disable code splitting — the plugin loader uses blob URLs
+            // which cannot resolve relative chunk imports.
+            inlineDynamicImports: true,
+          },
         },
       },
     }

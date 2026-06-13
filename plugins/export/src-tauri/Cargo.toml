@@ -1,0 +1,18 @@
+[package]
+name = "swallownote-plugin-export"
+version = "0.1.0"
+description = "SwallowNote export plugin backend — Markdown to DOCX conversion"
+authors = ["SwallowNote"]
+edition = "2021"
+
+[[bin]]
+name = "plugin_com_swallownote_export"
+path = "src/main.rs"
+
+[dependencies]
+docx-rs = "0.4"
+pulldown-cmark = "0.12"
+base64 = "0.22"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

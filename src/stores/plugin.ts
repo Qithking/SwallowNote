@@ -11,7 +11,7 @@ import type {
 } from '@/types/plugin'
 import { emptyRegistry } from '@/types/plugin'
 import { useUIStore } from './ui'
-import { dropPluginStorage } from '@/lib/plugin-host'
+import { dropPluginStorage, pluginEventBus } from '@/lib/plugin-host'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
 import { clearPluginMenuItems } from '@/lib/plugin-menu'
 
@@ -95,12 +95,16 @@ const sortByOrder = <T extends { order?: number }>(items: T[]): T[] =>
 function buildRegistry(plugins: PluginDefinition[]): PluginRegistry {
   const registry: PluginRegistry = { sidebar: [], editorToolbar: [], titleBar: [] }
   for (const plugin of plugins) {
-    if (!plugin.enabled) continue
+    if (!plugin.enabled) { console.log(`[PluginStore] Skipping disabled plugin: ${plugin.id}`); continue }
     const key = plugin.iconPosition
     if (key in registry) {
       registry[key].push(plugin)
+      console.log(`[PluginStore] Registered plugin ${plugin.id} in registry.${key}`)
+    } else {
+      console.warn(`[PluginStore] Plugin ${plugin.id} has unknown iconPosition: "${key}"`)
     }
   }
+  console.log(`[PluginStore] buildRegistry result:`, { sidebar: registry.sidebar.length, editorToolbar: registry.editorToolbar.length, titleBar: registry.titleBar.length })
   return registry
 }
 
@@ -240,6 +244,11 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       )
     }
     dropPluginStorage(id)
+    // Remove all event handlers registered by this plugin so stale
+    // subscriptions don't fire after the plugin is gone (especially
+    // important when the plugin failed to load and its useEffect
+    // cleanup never ran).
+    pluginEventBus.removeAllListenersForPlugin(id)
     // Drop any context-menu items this plugin contributed so they
     // don't linger after the plugin is gone. Clear before running
     // onUnload so the plugin's own tear-down logic can't see stale
@@ -333,6 +342,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         'onUnload'
       )
       dropPluginStorage(target.id)
+      pluginEventBus.removeAllListenersForPlugin(target.id)
       clearPluginMenuItems(target.id)
       void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
         void dropPluginPermissions(target.id)

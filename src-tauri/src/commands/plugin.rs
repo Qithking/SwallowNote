@@ -54,6 +54,11 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 /// Metadata for a plugin package, returned to the frontend.
+///
+/// Fields that are only populated at runtime (not present in the
+/// manifest JSON embedded in index.js) use `#[serde(default)]` so
+/// that `serde_json::from_str` succeeds even when those keys are
+/// absent from the manifest comment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginMetadataRust {
     pub id: String,
@@ -66,7 +71,9 @@ pub struct PluginMetadataRust {
     pub content_position: String,   // "leftPanel" | "rightPanel" | "fullPanel" | "editorArea"
     pub order: i32,
     pub enabled: bool,
+    #[serde(default)]
     pub plugin_path: String,
+    #[serde(default)]
     pub has_backend: bool,
 }
 
@@ -74,6 +81,43 @@ pub struct PluginMetadataRust {
 /// Located at <app_data_dir>/plugins/
 fn plugins_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("plugins")
+}
+
+/// Resolve the filesystem directory for a plugin id.
+///
+/// First tries an exact match (`plugins/<id>/`). If that doesn't exist,
+/// scans all plugin directories for one whose manifest declares this id.
+/// This handles the case where the directory was named after a versioned
+/// zip (e.g. "com.example.plugin-1.0.0") but the manifest declares
+/// id "com.example.plugin".
+pub(crate) fn resolve_plugin_dir(plugins_root: &Path, plugin_id: &str) -> Option<PathBuf> {
+    let exact = plugins_root.join(plugin_id);
+    if exact.is_dir() {
+        return Some(exact);
+    }
+    // Fallback: scan for a directory whose manifest matches the id.
+    let entries = fs::read_dir(plugins_root).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        // Skip hidden bookkeeping dirs
+        if path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.')) {
+            continue;
+        }
+        if let Some(active_dir) = active_version_dir(&path) {
+            let index_js = active_dir.join("index.js");
+            if index_js.exists() {
+                if let Some(meta) = parse_manifest_from_index_js(&index_js) {
+                    if meta.id == plugin_id {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Sentinel version used for ad-hoc `install_plugin` (user-uploaded zip).
@@ -145,7 +189,7 @@ fn validate_plugin_version(version: &str) -> Result<(), PluginError> {
 /// Developer Mode); finally falls back to scanning the version tree
 /// for the most recent directory. Returns `None` if no version is
 /// installed.
-fn active_version_dir(plugin_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn active_version_dir(plugin_dir: &Path) -> Option<PathBuf> {
     // 1) Symlink path (Unix + Windows w/ Developer Mode).
     let current_link = plugin_dir.join("current");
     if let Ok(target) = fs::read_link(&current_link) {
@@ -371,11 +415,8 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
         // Hidden bookkeeping directories under the plugin root — skip them
         // if they show up as bare entries (e.g. an unversioned install).
         if path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.')) {
-            // Exception: a plugin whose entire name starts with `.` is unusual
-            // but allowed; we only skip known metadata folders here.
-            if matches!(path.file_name().and_then(|n| n.to_str()), Some(".versions")) {
-                continue;
-            }
+            // Skip known internal directories: .versions, .installing-*
+            continue;
         }
 
         // Resolve through the `current` symlink / text marker. If the
@@ -391,19 +432,29 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
             continue;
         }
 
-        let plugin_id = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
         // backend/ lives in the version directory so different
         // versions can ship different native binaries.
         let has_backend = active_dir.join("backend").exists();
         // .disabled is a top-level marker, not version-scoped.
         let enabled = !path.join(".disabled").exists();
 
-        let meta = if let Some(mut meta) = parse_manifest_from_index_js(&index_js) {
+        let parsed_manifest = parse_manifest_from_index_js(&index_js);
+
+        // Prefer the id declared in the manifest over the directory
+        // name — the directory may have been named after a versioned
+        // zip (e.g. "com.example.plugin-1.0.0").
+        let plugin_id = parsed_manifest
+            .as_ref()
+            .map(|m| m.id.clone())
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| {
+                path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
+
+        let meta = if let Some(mut meta) = parsed_manifest {
             // Persisted enabled state takes precedence over the manifest value.
             meta.enabled = enabled;
             meta.plugin_path = active_dir.to_string_lossy().to_string();
@@ -448,6 +499,11 @@ pub fn install_plugin(
     // User-uploaded zips get the sentinel `upload` version. The next
     // upload overwrites that bucket (delete-then-extract). Marketplace
     // installs go through `install_plugin_from_bytes` with a real semver.
+    //
+    // The zip filename may include a version suffix (e.g.
+    // `com.example.plugin-1.0.0.zip`). We extract first, then read
+    // the real plugin id from the manifest and rename the directory
+    // if they differ.
     let zip_filename = PathBuf::from(&zip_path)
         .file_stem()
         .unwrap_or_default()
@@ -459,8 +515,11 @@ pub fn install_plugin(
     // a user can technically type `..` or `/` — guard at the boundary.
     validate_plugin_id(&zip_filename)?;
 
-    let plugin_dir = plugins_root.join(&zip_filename);
-    let version_dir = plugin_dir.join(".versions").join(UPLOAD_VERSION);
+    // Extract into a temporary directory first so we can read the
+    // real plugin id from the manifest before committing the final
+    // directory name.
+    let temp_plugin_dir = plugins_root.join(format!(".installing-{}", zip_filename));
+    let version_dir = temp_plugin_dir.join(".versions").join(UPLOAD_VERSION);
 
     fs::create_dir_all(&version_dir)
         .map_err(|e| PluginError::Io(format!("Failed to create version dir: {}", e)))?;
@@ -473,34 +532,64 @@ pub fn install_plugin(
         .map_err(|e| PluginError::Io(format!("Failed to read zip archive: {}", e)))?;
     if let Err(e) = extract_zip_with_precheck(archive, &version_dir) {
         // Best-effort cleanup of the partial version dir on failure.
-        let _ = fs::remove_dir_all(&version_dir);
+        let _ = fs::remove_dir_all(&temp_plugin_dir);
         return Err(e);
     }
 
     // If the zip contained a single top-level directory, flatten it
     // inside `version_dir` so the plugin lives directly there.
     if let Err(e) = flatten_single_top_dir(&version_dir) {
-        let _ = fs::remove_dir_all(&version_dir);
+        let _ = fs::remove_dir_all(&temp_plugin_dir);
         return Err(e);
     }
 
     // Verify index.js exists
     let index_js = version_dir.join("index.js");
     if !index_js.exists() {
-        let _ = fs::remove_dir_all(&version_dir);
+        let _ = fs::remove_dir_all(&temp_plugin_dir);
         return Err(PluginError::InvalidInput(
             "Plugin package must contain an index.js file".to_string(),
         ));
     }
 
-    set_current_version(&plugin_dir, UPLOAD_VERSION)?;
+    // Determine the real plugin id from the manifest. Fall back to
+    // the zip filename if the manifest doesn't declare one.
+    let real_plugin_id = parse_manifest_from_index_js(&index_js)
+        .map(|m| m.id.clone())
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| zip_filename.clone());
 
-    let has_backend = version_dir.join("backend").exists();
-    let enabled = !plugin_dir.join(".disabled").exists();
+    validate_plugin_id(&real_plugin_id)?;
 
-    let meta = parse_manifest_from_index_js(&index_js).unwrap_or(PluginMetadataRust {
-        id: zip_filename.clone(),
-        name: zip_filename.clone(),
+    // Move the temp directory to the final location. If a plugin with
+    // the same id already exists, replace it entirely.
+    let final_plugin_dir = plugins_root.join(&real_plugin_id);
+    if final_plugin_dir.exists() {
+        let _ = fs::remove_dir_all(&final_plugin_dir);
+    }
+    // Also clean up a stale directory named after the zip filename
+    // (e.g. "com.example.plugin-1.0.0") if it differs from the real
+    // plugin id. This happens when a plugin was first installed from
+    // a versioned zip and the directory was named after the zip stem.
+    if real_plugin_id != zip_filename {
+        let stale_dir = plugins_root.join(&zip_filename);
+        if stale_dir.exists() {
+            let _ = fs::remove_dir_all(&stale_dir);
+        }
+    }
+    fs::rename(&temp_plugin_dir, &final_plugin_dir)
+        .map_err(|e| PluginError::Io(format!("Failed to rename plugin dir: {}", e)))?;
+
+    let final_version_dir = final_plugin_dir.join(".versions").join(UPLOAD_VERSION);
+    set_current_version(&final_plugin_dir, UPLOAD_VERSION)?;
+
+    let has_backend = final_version_dir.join("backend").exists();
+    let enabled = !final_plugin_dir.join(".disabled").exists();
+
+    let final_index_js = final_version_dir.join("index.js");
+    let meta = parse_manifest_from_index_js(&final_index_js).unwrap_or(PluginMetadataRust {
+        id: real_plugin_id.clone(),
+        name: real_plugin_id.clone(),
         description: String::new(),
         version: String::new(),
         author: String::new(),
@@ -509,7 +598,7 @@ pub fn install_plugin(
         content_position: String::from("leftPanel"),
         order: 100,
         enabled,
-        plugin_path: version_dir.to_string_lossy().to_string(),
+        plugin_path: final_version_dir.to_string_lossy().to_string(),
         has_backend,
     });
 
@@ -554,11 +643,8 @@ pub async fn uninstall_plugin(
         .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
 
     let plugins_root = plugins_dir(&app_data_dir);
-    let plugin_dir = plugins_root.join(&plugin_id);
-
-    if !plugin_dir.exists() {
-        return Err(PluginError::NotFound(format!("Plugin '{}' not found", plugin_id)));
-    }
+    let plugin_dir = resolve_plugin_dir(&plugins_root, &plugin_id)
+        .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not found", plugin_id)))?;
 
     // Security check: ensure we're only deleting within the plugins directory
     let canonical_plugins = plugins_root
@@ -604,7 +690,8 @@ pub fn toggle_plugin_enabled(
         .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
 
     let plugins_root = plugins_dir(&app_data_dir);
-    let plugin_dir = plugins_root.join(&plugin_id);
+    let plugin_dir = resolve_plugin_dir(&plugins_root, &plugin_id)
+        .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not found", plugin_id)))?;
     let disabled_marker = plugin_dir.join(".disabled");
 
     if enabled {
@@ -642,9 +729,10 @@ pub fn get_plugin_storage_path(
         .path()
         .app_data_dir()
         .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
-    let plugin_storage = plugins_dir(&app_data_dir)
-        .join(&plugin_id)
-        .join("storage.json");
+    let plugins_root = plugins_dir(&app_data_dir);
+    let plugin_dir = resolve_plugin_dir(&plugins_root, &plugin_id)
+        .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not found", plugin_id)))?;
+    let plugin_storage = plugin_dir.join("storage.json");
     Ok(plugin_storage.to_string_lossy().to_string())
 }
 
@@ -1027,7 +1115,9 @@ pub fn rollback_plugin(
         .path()
         .app_data_dir()
         .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
-    let plugin_dir = plugins_dir(&app_data_dir).join(&plugin_id);
+    let plugins_root = plugins_dir(&app_data_dir);
+    let plugin_dir = resolve_plugin_dir(&plugins_root, &plugin_id)
+        .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not found", plugin_id)))?;
     let version_dir = plugin_dir.join(".versions").join(&version);
     if !version_dir.is_dir() {
         return Err(PluginError::NotFound(format!(
@@ -1072,7 +1162,9 @@ pub fn list_plugin_versions(
         .path()
         .app_data_dir()
         .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
-    let plugin_dir = plugins_dir(&app_data_dir).join(&plugin_id);
+    let plugins_root = plugins_dir(&app_data_dir);
+    let plugin_dir = resolve_plugin_dir(&plugins_root, &plugin_id)
+        .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not found", plugin_id)))?;
     let versions_root = plugin_dir.join(".versions");
     if !versions_root.is_dir() {
         return Ok(Vec::new());
@@ -1118,4 +1210,28 @@ pub fn list_plugin_versions(
             .then_with(|| b.version.cmp(&a.version))
     });
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_manifest_from_index_js() {
+        // Manifest JSON embedded in index.js does NOT contain `plugin_path` or `has_backend`;
+        // those are runtime-only fields. serde(default) lets us parse the comment successfully.
+        let json = r#"{"id":"com.swallownote.export","name":"文档导出","description":"将 Markdown 文档导出为 Word (.docx) 或 PDF 格式","version":"0.1.0","author":"SwallowNote","published_at":"2026-06-13","icon_position":"editorToolbar","content_position":"editorArea","order":50,"enabled":true,"has_backend":true,"entry":"index.tsx"}"#;
+        let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.id, "com.swallownote.export");
+        assert_eq!(meta.plugin_path, ""); // default
+    }
+
+    #[test]
+    fn test_parse_manifest_minimal() {
+        // Even a manifest without has_backend should parse (defaults to false).
+        let json = r#"{"id":"com.example.test","name":"Test","description":"","version":"1.0.0","author":"A","published_at":"","icon_position":"sidebar","content_position":"leftPanel","order":0,"enabled":true}"#;
+        let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.id, "com.example.test");
+        assert!(!meta.has_backend);
+    }
 }

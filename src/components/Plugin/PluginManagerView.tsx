@@ -23,7 +23,7 @@ import { usePluginStore, useUIStore } from '@/stores'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { renderPluginIcon } from '@/lib/plugin-utils'
-import { buildPluginContext, getPluginStorage, pluginEventBus } from '@/lib/plugin-host'
+import { buildPluginContext, getPluginStorage, createPluginEventBus } from '@/lib/plugin-host'
 import { open } from '@tauri-apps/plugin-dialog'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -102,7 +102,9 @@ function PluginManagerView() {
       close: () => setSettingsPlugin(null),
       invokeBackend: ctx.invokeBackend,
       store: getPluginStorage(plugin.id),
-      events: pluginEventBus,
+      events: createPluginEventBus(plugin.id),
+      activeNoteContent: '',
+      activeNotePath: '',
     }
   }, [])
 

@@ -19,18 +19,26 @@ export default defineConfig(({ mode }) => {
           },
         },
       ],
+      define: {
+        'process.env.NODE_ENV': JSON.stringify('production'),
+      },
       build: {
         outDir: 'dist',
         emptyOutDir: true,
         lib: {
           entry: resolve(__dirname, 'index.tsx'),
-          name: 'SwallowNotePlugin',
-          formats: ['iife'],
-          fileName: () => 'plugin.js',
+          formats: ['es'],
+          fileName: () => 'index.js',
         },
         rollupOptions: {
-          external: [],
-          output: { inlineDynamicImports: true },
+          external: [
+            'react', 'react-dom', 'react-dom/client',
+            'react/jsx-runtime', 'react/jsx-dev-runtime',
+            'sonner', 'react-i18next', 'i18next',
+          ],
+          output: {
+            inlineDynamicImports: true,
+          },
         },
       },
     }

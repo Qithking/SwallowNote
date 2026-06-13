@@ -5,6 +5,12 @@ node_modules/
 build/
 dist/
 
+# Plugin build artifacts
+plugins/*/dist/
+plugins/*/node_modules/
+plugins/*/src-tauri/target/
+plugins/*/*.zip
+
 # Tauri
 src-tauri/target/
 
@@ -33,3 +39,4 @@ npm-debug.log*
 .catpaw/
 .workbuddy/
 .trae/
+target/

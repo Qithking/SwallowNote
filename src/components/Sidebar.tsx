@@ -9,11 +9,14 @@ import { SearchView } from './Search/SearchView'
 import { GitView } from './Git/GitView'
 import { SettingsView } from './Settings/SettingsView'
 import { PluginPanelHost } from './Plugin/PluginPanelHost'
-import { useUIStore, usePluginStore } from '@/stores'
+import { useUIStore, usePluginStore, useEditorStore } from '@/stores'
 import { createPluginPanelProps } from '@/lib/plugin-utils'
 
 function Sidebar() {
   const sidebarView = useUIStore((s) => s.sidebarView)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const tabs = useEditorStore((s) => s.tabs)
+  const activeTab = tabs.find((t) => t.id === activeTabId)
   // useShallow compares the selector result structurally so we don't
   // re-render the whole Sidebar every time any plugin metadata changes.
   const leftPanelPlugins = usePluginStore(
@@ -64,7 +67,7 @@ function Sidebar() {
             // ActivityBar/TitleBar close paths.
             useUIStore.getState().setSidebarView('explorer')
             usePluginStore.getState().setActivePlugin(null, 'leftPanel')
-          })
+          }, activeTab?.content ?? '', activeTab?.path ?? '')
           return (
             <div key={plugin.id} className="absolute inset-0">
               <PluginPanelHost

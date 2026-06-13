@@ -16,6 +16,27 @@
 | `app:ready` | `{}` | 应用启动完成 |
 | `app:exit` | `{}` | 应用开始关闭 |
 
+## 获取当前笔记内容：`activeNoteContent` vs `note:change`
+
+插件如需获取当前笔记内容，**推荐**使用 props 中的 `activeNoteContent` 而非订阅 `note:change` 事件：
+
+- **Panel 插件**：通过 `PluginPanelProps` 的 `panel.activeNoteContent` 获取
+- **Toolbar 插件**：通过 `ToolbarButtonProps` 的 `props.activeNoteContent` 获取
+
+### 为什么推荐 `activeNoteContent`？
+
+存在时序问题：插件挂载时，初始的 `note:change` 事件已经触发完毕，此时再订阅事件会**错过初始内容**。`activeNoteContent` 在 props 中直接提供当前内容，不存在此问题。
+
+`note:change` 事件仍然适用于需要**增量更新**的场景（如实时监听内容变化并做响应）。
+
+## `__pluginId` 自动标记
+
+宿主通过 `createPluginEventBus(pluginId)` 为每个插件创建专属事件总线包装。当插件调用 `events.on()` 注册 handler 时，宿主会自动为该 handler 打上 `__pluginId` 标记，**插件作者无需手动为 handler 添加 `__pluginId`**。
+
+SDK 的 `usePluginEvent` 和 `usePluginEvents` hook 同样不再手动添加 `__pluginId`——宿主的事件总线包装层已透明处理。
+
+> 这意味着插件卸载时，宿主可通过 `__pluginId` 批量清理该插件注册的所有 handler，无需插件自行维护引用。
+
 ## 订阅方式
 
 ### 方式 1：panel 内用 hook（推荐）

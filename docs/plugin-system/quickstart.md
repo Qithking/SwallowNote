@@ -8,6 +8,7 @@
 hello-world/
 ├── manifest.json     # 插件元数据（仅 Rust 端读取）
 ├── index.tsx         # 插件入口（动态 import）
+├── vite.config.ts    # 打包配置（外部化宿主依赖、关闭代码分割）
 └── README.md
 ```
 
@@ -78,14 +79,78 @@ export default manifest
 
 > 完整 manifest 字段含义见 [manifest.md](./manifest.md)。`pluginPath` 留空即可，loader 会自动填上。
 
-## 第 4 步：打包上传
+> **可用 Props**：`PluginPanelProps` 和 `ToolbarButtonProps` 中还包含 `activeNoteContent`（当前活动笔记的 Markdown 内容）和 `activeNotePath`（当前活动笔记的文件路径）两个由宿主注入的只读字段。插件可以直接从 props 中解构使用，无需订阅额外事件。例如：`function MyPanel({ pluginId, activeNoteContent, activeNotePath }: PluginPanelProps) { ... }`。完整 Props 字段列表见 [manifest.md](./manifest.md)。
+
+## 第 4 步：配置 `vite.config.ts`
+
+插件需要将宿主已提供的依赖标记为 `external`，避免重复打包导致多实例冲突（如 React hooks 崩溃）。同时需要关闭代码分割，因为插件加载器使用 blob URL，无法解析分块导入。
+
+```ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { resolve } from 'node:path'
+import { copyFileSync, mkdirSync, existsSync } from 'node:fs'
+
+export default defineConfig(({ mode }) => {
+  if (mode === 'production') {
+    return {
+      plugins: [
+        react(),
+        {
+          name: 'copy-manifest',
+          closeBundle() {
+            if (!existsSync('dist')) mkdirSync('dist', { recursive: true })
+            copyFileSync(
+              resolve(__dirname, 'manifest.json'),
+              resolve(__dirname, 'dist/manifest.json')
+            )
+          },
+        },
+      ],
+      define: {
+        'process.env.NODE_ENV': JSON.stringify('production'),
+      },
+      build: {
+        outDir: 'dist',
+        emptyOutDir: true,
+        lib: {
+          entry: resolve(__dirname, 'index.tsx'),
+          formats: ['es'],
+          fileName: () => 'index.js',
+        },
+        rollupOptions: {
+          // React / ReactDOM 必须外部化，使用宿主的 React 实例
+          // sonner / react-i18next / i18next 同样由宿主提供
+          external: [
+            'react', 'react-dom', 'react-dom/client',
+            'react/jsx-runtime', 'react/jsx-dev-runtime',
+            'sonner', 'react-i18next', 'i18next',
+          ],
+          output: {
+            // 关闭代码分割——插件加载器使用 blob URL，无法解析分块导入
+            inlineDynamicImports: true,
+          },
+        },
+      },
+    }
+  }
+  return {
+    plugins: [react()],
+    server: { port: 5173, open: true },
+  }
+})
+```
+
+> **关键点**：`external` 列表中的库由宿主通过 `window.React` / `window.ReactDOM` / `window.SonnerToast` / `window.ReactI18Next` 等全局变量提供，插件打包时不能重复包含。`inlineDynamicImports: true` 确保产物为单文件。
+
+## 第 5 步：打包上传
 
 1. 把 `hello-world/` 目录压缩成 `.zip`
 2. 在 SwallowNote 中打开 **Settings → Plugins**
 3. 点击 **Upload** 选择 `.zip`
 4. 插件出现在卡片列表，启用后侧边栏出现新图标
 
-## 第 5 步：验证
+## 第 6 步：验证
 
 点击侧边栏图标 → 主区域出现 "Hello, world!" 面板。
 
