@@ -330,3 +330,114 @@ export function measure<T>(fn: () => T): { result: T; durationMs: number } {
   const durationMs = performance.now() - start
   return { result, durationMs }
 }
+
+// ─── Log formatting (for the new Logs popup) ────────────────────────────────
+
+/** Log severity for the formatted log line. */
+export type LogLevel = 'info' | 'ok' | 'warn' | 'err'
+
+/** One formatted line ready to render in the Logs popup. */
+export interface FormattedLogLine {
+  /** Timestamp the host recorded for the metric. */
+  timestamp: number
+  /** Time formatted as `HH:MM:SS.mmm`. */
+  time: string
+  /** Severity used to pick the colour-coded chip. */
+  level: LogLevel
+  /** Plugin id (short, may be elided for host events). */
+  plugin: string
+  /** Plain-text body of the log line. Caller can still add `<b>` markup. */
+  message: string
+}
+
+/** Union of all metric record types — accepted by `formatLogLine`. */
+export type AnyMetric = EventMetric | StorageMetric | HookMetric | BackendMetric
+
+/**
+ * Convert a single metric record to a display-ready log line. The shape
+ * stays the same regardless of source (`event` / `storage` / `hook` /
+ * `backend`) so the popup can stream them in arrival order. Severity
+ * defaults to `info` and is upgraded to `err` for storage/hook/backend
+ * records whose `success === false`, and to `warn` for `success` storage
+ * ops on a permission-style hook.
+ *
+ * We intentionally do not consult any I/O: this is a pure transformation
+ * over the metric snapshot the popup is iterating over, so it stays
+ * cheap enough to run for every line on every render.
+ */
+export function formatLogLine(metric: AnyMetric, now: number = Date.now()): FormattedLogLine {
+  const date = new Date(metric.timestamp)
+  const time = formatTime(date)
+  const plugin = metric.pluginId
+  if ('event' in metric) {
+    const m = metric as EventMetric
+    const errs = m.errors
+    const level: LogLevel = errs > 0 ? 'err' : 'ok'
+    return {
+      timestamp: m.timestamp,
+      time,
+      level,
+      plugin,
+      message: `event ${m.event} · ${m.handlerCount} handlers · ${m.totalDurationMs.toFixed(2)}ms${errs > 0 ? ` · ${errs} error(s)` : ''}`,
+    }
+  }
+  if ('operation' in metric) {
+    const m = metric as StorageMetric
+    const level: LogLevel = m.success ? 'info' : 'err'
+    return {
+      timestamp: m.timestamp,
+      time,
+      level,
+      plugin,
+      message: `storage.${m.operation} · ${m.keyCount} keys · ${m.dataSize}B · ${m.durationMs.toFixed(2)}ms${m.error ? ` · ${m.error}` : ''}`,
+    }
+  }
+  if ('hook' in metric) {
+    const m = metric as HookMetric
+    const level: LogLevel = m.success ? 'info' : 'err'
+    return {
+      timestamp: m.timestamp,
+      time,
+      level,
+      plugin,
+      message: `hook ${m.hook} · ${m.durationMs.toFixed(2)}ms${m.error ? ` · ${m.error}` : ''}`,
+    }
+  }
+  // BackendMetric (must be last because every other type has a discriminator above)
+  const m = metric as BackendMetric
+  const level: LogLevel = m.success ? 'info' : 'err'
+  return {
+    timestamp: m.timestamp,
+    time,
+    level,
+    plugin,
+    message: `ipc ${m.command} · ${m.durationMs.toFixed(2)}ms${m.error ? ` · ${m.error}` : ''}`,
+  }
+  // `now` is reserved for future "x seconds ago" formatting.
+  void now
+}
+
+/** Return up to `limit` log lines, newest first. */
+export function getRecentLogLines(limit: number = 100): FormattedLogLine[] {
+  // We use `getAllPluginMetrics` indirectly through the per-type helpers
+  // because the host already keeps three ring buffers; merging them
+  // is cheaper than asking the plugin store for a per-plugin summary.
+  const events = eventMetrics
+  const storage = storageMetrics
+  const hooks = hookMetrics
+  const backend = backendMetrics
+  const all: AnyMetric[] = []
+  for (const m of events) all.push(m)
+  for (const m of storage) all.push(m)
+  for (const m of hooks) all.push(m)
+  for (const m of backend) all.push(m)
+  return all
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, limit)
+    .map((m) => formatLogLine(m))
+}
+
+function formatTime(d: Date): string {
+  const pad = (n: number, w: number = 2) => String(n).padStart(w, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
+}

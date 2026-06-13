@@ -838,6 +838,108 @@
       "badgeUpdate": "更新",
       "badgeInstalled": "已安装",
       "badgeInstall": "安装"
+    },
+    "pa": {
+      "title": "插件管理",
+      "searchPlaceholder": "搜索…",
+      "card": {
+        "statusOn": "已启用",
+        "statusOff": "已停用"
+      },
+      "stats": {
+        "installed": "已安装",
+        "active": "已启用",
+        "disabled": "已禁用",
+        "updates": "可更新",
+        "errors": "错误数"
+      },
+      "filter": {
+        "all": "全部",
+        "active": "已启用",
+        "disabled": "已禁用",
+        "updates": "可更新"
+      },
+      "view": {
+        "installed": "已安装",
+        "marketplace": "插件市场"
+      },
+      "tabs": {
+        "aria": "切换插件管理视图"
+      },
+      "tab": {
+        "sync": "最近同步",
+        "badge": {
+          "new": "{{count}} 个新"
+        }
+      },
+      "viewMeta": {
+        "installed": "共 <b>{{total}}</b> · 启用 <b>{{active}}</b> · 更新 <b>{{updates}}</b> · 上次扫描 <b>{{scan}}</b>",
+        "marketplace": "<b>{{count}}</b> 项 · 已验证密钥"
+      },
+      "btn": {
+        "search": "搜索",
+        "activity": "活动",
+        "diagnostics": "诊断",
+        "logs": "日志",
+        "install": "安装插件",
+        "refresh": "刷新",
+        "upload": "上传 .zip",
+        "themeLight": "浅色",
+        "themeDark": "深色"
+      },
+      "rail": {
+        "stats": "安装统计",
+        "storage": "插件存储",
+        "open": "打开"
+      },
+      "manifestPath": "清单位置 <b>{{path}}</b>",
+      "update": {
+        "available": "{{count}} 个更新"
+      },
+      "empty": {
+        "title": "暂无已安装的插件",
+        "hint": "上传一个 .zip 插件包以开始。"
+      },
+      "dialog": {
+        "activity": {
+          "eyebrow": "最近 24 小时",
+          "title": "活动",
+          "count": "{{count}} 条事件 · 24h",
+          "clear": "清空",
+          "export": "导出"
+        },
+        "diagnostics": {
+          "eyebrow": "插件运行时 · 24h",
+          "title": "诊断",
+          "footer": "上次扫描 <b>{{time}}</b> · 24h 窗口",
+          "rescan": "重新扫描",
+          "exportBundle": "导出诊断包",
+          "cell": {
+            "events": "事件数",
+            "avgDuration": "平均耗时",
+            "hookCalls": "钩子调用",
+            "storageOps": "存储操作",
+            "backendIpc": "后端 IPC",
+            "errorRate": "错误率"
+          },
+          "perPluginLoad": "按插件负载"
+        },
+        "logs": {
+          "eyebrow": "tail -f · 实时",
+          "title": "日志",
+          "footer": "跟踪 <b>host</b> · {{count}} 行",
+          "filter": "过滤",
+          "copy": "复制"
+        }
+      },
+      "market": {
+        "repoLabel": "仓库",
+        "apply": "应用",
+        "keyVerified": "密钥已验证 · ed25519:7f4a…b21c",
+        "search": "搜索…",
+        "heroTitle": "浏览插件目录",
+        "heroHint": "粘贴一个 repo.json URL 来加载插件目录。更新通过 ed25519 签名验证。"
+      }
     }
   }
 }

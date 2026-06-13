@@ -1,27 +1,60 @@
 /**
- * PluginMarketView — in-app plugin marketplace browser (Phase 9.2).
+ * PluginMarketView - in-app plugin marketplace browser (Plugin Atlas).
  *
- * Renders a search/filter bar on top, then a responsive card grid
- * of `PluginMarketCard`. The repo URL is set via a small input in
- * the header; a Refresh button re-fetches the index. Clicking a
- * card opens `PluginMarketDetail` in a dialog.
+ * The marketplace tab is mounted inside the same `pa-root` shell as
+ * the Installed view, so the `--pa-*` tokens it consumes are
+ * already bound to the application's theme variables — there is no
+ * `data-pa-theme` toggle here, and the panel picks up light / dark
+ * / system automatically. The `.pa-market-*` classes in
+ * `index.css` mirror the editorial style of the Installed list and
+ * stay scoped to `.pa-root`.
  *
- * State lives in `usePluginMarketStore` (Zustand) so the install
- * state survives navigation away from the marketplace tab.
+ * Layout:
+ *   ┌─ pa-market-hero ─────────────────────────────┐
+ *   │  pa-repo-input (store icon + URL + Apply)     │
+ *   │  pa-pill (key verified)                      │
+ *   └──────────────────────────────────────────────┘
+ *   ┌─ pa-toolbar ──────────────────────────────────┐
+ *   │  pa-search  (full-width)                      │
+ *   │  pa-segmented (all / editor / ai / …)         │
+ *   └──────────────────────────────────────────────┘
+ *   pa-market-grid
+ *     pa-market-card × N (4px spine + body + badge)
+ *
+ * State lives in `usePluginMarketStore` so the install state
+ * survives navigation away from the marketplace tab. The detail
+ * and post-install permission dialogs are unchanged from the
+ * pre-Atlas version.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { Search, RefreshCw, X, Store, Download, CheckCircle2, AlertCircle, Package, Tag } from 'lucide-react'
+import { useTranslation, Trans } from 'react-i18next'
+import {
+  Store,
+  RefreshCw,
+  X,
+  Download,
+  CheckCircle2,
+  AlertCircle,
+  Package,
+  Tag,
+  Search,
+} from 'lucide-react'
 import { usePluginMarketStore, usePluginStore } from '@/stores'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { PluginMarketDetail } from './PluginMarketDetail'
 import { PluginPermissionDialog } from './PluginPermissionDialog'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
-import type { PluginIndexEntry, PluginPermission, PluginPermissionStatus } from '@/types/plugin'
+import type {
+  PluginIndexEntry,
+  PluginPermission,
+  PluginPermissionStatus,
+} from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
+
+const SPINE_CLASSES = [
+  'pa-spine-c1', 'pa-spine-c2', 'pa-spine-c3', 'pa-spine-c4',
+  'pa-spine-c5', 'pa-spine-c6', 'pa-spine-c7', 'pa-spine-c8',
+  'pa-spine-c9', 'pa-spine-c10', 'pa-spine-c11', 'pa-spine-c12',
+] as const
 
 function PluginMarketView() {
   const { t } = useTranslation()
@@ -55,7 +88,7 @@ function PluginMarketView() {
     if (!idx) return []
     const set = new Set<string>()
     for (const p of idx.plugins) {
-      for (const t of p.tags) set.add(t)
+      for (const tag of p.tags) set.add(tag)
     }
     return Array.from(set).sort()
   }, [index])
@@ -184,114 +217,141 @@ function PluginMarketView() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 12 }}>
-      {/* Repo URL bar */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <Store size={16} style={{ color: 'var(--text-secondary)' }} />
-        <Input
-          value={draftUrl}
-          onChange={(e) => setDraftUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') applyRepoUrl()
-          }}
-          placeholder={t('plugin.market.repoPlaceholder', { defaultValue: 'https://…/repo.json' })}
-          style={{ flex: 1, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}
-        />
-        <Button onClick={applyRepoUrl} disabled={!draftUrl.trim()}>
-          {t('plugin.market.apply', { defaultValue: '应用' })}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => {
-            void refreshIndex()
-            void refreshUpdates()
-          }}
-          disabled={!repoUrl || isFetchingIndex}
-        >
-          <RefreshCw size={14} className={isFetchingIndex ? 'animate-spin' : ''} />
-          {t('plugin.market.refresh', { defaultValue: '刷新' })}
-        </Button>
-      </div>
+    <div className="pa-flex-col pa-market" style={{ height: '100%', gap: 0 }}>
+      {/*
+        The marketplace gets its own visual chrome so it doesn't
+        blur into the Installed list. The `pa-market-hero` is a
+        paper-2 card with a bold heading, the repo URL input, and
+        the key-verified pill — a clearly different surface from
+        the Installed list's book-spine cards. Below it: a search
+        bar + tag chips, then the card grid.
+      */}
+      <section className="pa-market-hero">
+        <div className="pa-market-hero-head">
+          <h3 className="pa-market-hero-title">
+            {t('plugin.pa.market.heroTitle')}
+          </h3>
+          <p className="pa-market-hero-hint">
+            {t('plugin.pa.market.heroHint')}
+          </p>
+        </div>
+        <div className="pa-market-hero-cta">
+          <div className="pa-repo-input">
+            <Store />
+            <input
+              value={draftUrl}
+              onChange={(e) => setDraftUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') applyRepoUrl()
+              }}
+              placeholder={t('plugin.market.repoPlaceholder', { defaultValue: 'https://…/repo.json' })}
+              aria-label="Repository URL"
+            />
+            <button type="button" onClick={applyRepoUrl} disabled={!draftUrl.trim()}>
+              {t('plugin.market.apply', { defaultValue: '应用' })}
+            </button>
+          </div>
+          <div className="pa-market-hero-meta">
+            <button
+              type="button"
+              className="pa-btn pa-btn-ghost"
+              onClick={() => {
+                void refreshIndex()
+                void refreshUpdates()
+              }}
+              disabled={!repoUrl || isFetchingIndex}
+              title={t('plugin.market.refresh', { defaultValue: '刷新' })}
+            >
+              <RefreshCw size={12} className={isFetchingIndex ? 'animate-spin' : ''} />
+              {t('plugin.market.refresh', { defaultValue: '刷新' })}
+            </button>
+            <span className="pa-pill" title={t('plugin.pa.market.keyVerified')}>
+              <CheckCircle2 size={10} />
+              {t('plugin.pa.market.keyVerified')}
+            </span>
+          </div>
+        </div>
+      </section>
 
-      {/* Search + tag filter */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 200 }}>
-          <Search
-            size={14}
-            style={{
-              position: 'absolute',
-              left: 8,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'var(--text-secondary)',
-            }}
+      {/* ── Search + tag filter (toolbar) ─────────────── */}
+      <div className="pa-market-toolbar">
+        <div className="pa-market-meta">
+          {/*
+            Use Trans so the count is rendered as a <b> child
+            component, not as the raw `<b>` HTML string. The
+            translation key is just `{{count}} 项 · 已验证密钥`
+            with no embedded markup; the wrapping <b> lives in
+            this component, not in the i18n string.
+          */}
+          <Trans
+            i18nKey="plugin.pa.viewMeta.marketplace"
+            values={{ count: index ? index.plugins.length : 0 }}
+            components={{ b: <b /> }}
           />
-          <Input
+        </div>
+        <div className="pa-search" style={{ maxWidth: 'none' }}>
+          <Search />
+          <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('plugin.market.searchPlaceholder', { defaultValue: '搜索插件名 / 描述 / 标签' })}
-            style={{ paddingLeft: 28 }}
+            aria-label="Search marketplace"
           />
           {searchQuery && (
             <button
+              type="button"
+              className="pa-btn pa-btn-ghost pa-btn is-icon"
+              style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}
               onClick={() => setSearchQuery('')}
               aria-label="clear"
-              style={{
-                position: 'absolute',
-                right: 6,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--text-secondary)',
-              }}
             >
-              <X size={14} />
+              <X size={12} />
             </button>
           )}
         </div>
         {allTags.length > 0 && (
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            {allTags.map((tag) => {
-              const active = tagFilter.includes(tag)
+          <div className="pa-segmented" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tagFilter.length === 0}
+              className={tagFilter.length === 0 ? 'is-active' : ''}
+              onClick={() => usePluginMarketStore.getState().setTagFilter([])}
+            >
+              all
+            </button>
+            {allTags.slice(0, 5).map((tag) => {
+              const active = tagFilter.length === 1 && tagFilter[0] === tag
               return (
-                <Badge
+                <button
                   key={tag}
-                  variant={active ? 'default' : 'outline'}
-                  style={{ cursor: 'pointer' }}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={active ? 'is-active' : ''}
                   onClick={() => toggleTag(tag)}
                 >
-                  <Tag size={10} />
                   {tag}
-                </Badge>
+                </button>
               )
             })}
           </div>
         )}
       </div>
 
-      {/* Error / status row */}
+      {/* ── Error / status row ────────────────────────── */}
       {fetchError && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            color: 'var(--danger, #c0392b)',
-            fontSize: 12,
-          }}
-        >
-          <AlertCircle size={14} />
+        <div className="pa-error" style={{ marginTop: 6, marginBottom: 6 }}>
+          <AlertCircle size={13} />
           {fetchError}
         </div>
       )}
 
-      {/* Body */}
-      <ScrollArea style={{ flex: 1 }}>
+      {/* ── Body ──────────────────────────────────────── */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {!repoUrl ? (
           <EmptyState
-            icon={<Store size={32} />}
+            icon={<Store size={28} />}
             title={t('plugin.market.emptyTitle', { defaultValue: '尚未配置仓库' })}
             hint={t('plugin.market.emptyHint', {
               defaultValue: '在顶部粘贴一个 repo.json 的 URL，SwallowNote 会拉取并展示所有可用插件。',
@@ -299,12 +359,12 @@ function PluginMarketView() {
           />
         ) : isFetchingIndex && !index ? (
           <EmptyState
-            icon={<RefreshCw size={32} className="animate-spin" />}
+            icon={<RefreshCw size={28} className="animate-spin" />}
             title={t('plugin.market.loading', { defaultValue: '正在加载仓库…' })}
           />
         ) : filteredEntries.length === 0 ? (
           <EmptyState
-            icon={<Package size={32} />}
+            icon={<Package size={28} />}
             title={t('plugin.market.noResults', { defaultValue: '没有匹配的插件' })}
             hint={
               searchQuery
@@ -313,18 +373,12 @@ function PluginMarketView() {
             }
           />
         ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-              gap: 12,
-              padding: '4px 0',
-            }}
-          >
-            {filteredEntries.map((entry) => (
+          <div className="pa-market-grid">
+            {filteredEntries.map((entry, idx) => (
               <PluginMarketCard
                 key={entry.id}
                 entry={entry}
+                spineClass={SPINE_CLASSES[idx % SPINE_CLASSES.length]}
                 localVersion={localVersionFor(entry.id)}
                 updateInfo={updates.find((u) => u.id === entry.id)}
                 onClick={() => setDetailEntry(entry)}
@@ -332,9 +386,9 @@ function PluginMarketView() {
             ))}
           </div>
         )}
-      </ScrollArea>
+      </div>
 
-      {/* Detail dialog */}
+      {/* ── Detail dialog ─────────────────────────────── */}
       {detailEntry && index && (
         <PluginMarketDetail
           entry={detailEntry}
@@ -345,11 +399,7 @@ function PluginMarketView() {
         />
       )}
 
-      {/* Post-install permission dialog. Mirrors the install-time
-          flow in `PluginManagerView` so marketplace installs and
-          user uploads land in the same place. `pendingPermissionGrant`
-          carries the install-time state; the dialog itself handles
-          the grant / revoke through `plugin-permissions.ts`. */}
+      {/* ── Post-install permission dialog ────────────── */}
       {pendingPermissionGrant && (
         <PluginPermissionDialog
           pluginId={pendingPermissionGrant.pluginId}
@@ -373,34 +423,23 @@ function EmptyState({
   hint?: string
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100%',
-        minHeight: 200,
-        color: 'var(--text-secondary)',
-        gap: 8,
-        textAlign: 'center',
-        padding: 24,
-      }}
-    >
+    <div className="pa-empty">
       {icon}
-      <div style={{ fontSize: 14, fontWeight: 500 }}>{title}</div>
-      {hint && <div style={{ fontSize: 12, maxWidth: 360 }}>{hint}</div>}
+      <div className="pa-empty-title">{title}</div>
+      {hint && <div className="pa-empty-hint">{hint}</div>}
     </div>
   )
 }
 
 function PluginMarketCard({
   entry,
+  spineClass,
   localVersion,
   updateInfo,
   onClick,
 }: {
   entry: PluginIndexEntry
+  spineClass: string
   localVersion: string | undefined
   updateInfo?: { localVersion: string; remoteVersion: string; sha256: string }
   onClick: () => void
@@ -411,58 +450,37 @@ function PluginMarketCard({
   const isFresh = !localVersion && !updateInfo
 
   return (
-    <button
-      onClick={onClick}
-      style={{
-        textAlign: 'left',
-        background: 'var(--bg-elevated, #fafafa)',
-        border: '1px solid var(--border, #e5e5e5)',
-        borderRadius: 8,
-        padding: 12,
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        transition: 'border-color 0.15s',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>
-            {entry.name || t('plugin.market.unknownName', { defaultValue: '未命名插件' })}
+    <button type="button" className={`pa-market-card ${spineClass}`} onClick={onClick}>
+      <div className="pa-market-card-spine" />
+      <div className="pa-market-card-body">
+        <div className="pa-market-card-head">
+          <div style={{ minWidth: 0 }}>
+            <div className="pa-market-card-name">
+              {entry.name || t('plugin.market.unknownName', { defaultValue: '未命名插件' })}
+            </div>
+            <div className="pa-market-card-id">{entry.id}</div>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono, monospace)' }}>
-            {entry.id}
-          </div>
+          <InstallStatus isInstalled={isInstalled} isUpdateAvailable={isUpdateAvailable} isFresh={isFresh} />
         </div>
-        <InstallStatus isInstalled={isInstalled} isUpdateAvailable={isUpdateAvailable} isFresh={isFresh} />
-      </div>
-      <div
-        style={{
-          fontSize: 12,
-          color: 'var(--text-secondary)',
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}
-      >
-        {entry.description || t('plugin.market.noDescription', { defaultValue: '暂无描述' })}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <Badge variant="outline" style={{ fontSize: 10 }}>
-          v{entry.version}
-        </Badge>
-        {localVersion && localVersion !== entry.version && (
-          <Badge variant="outline" style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-            {t('plugin.market.local', { defaultValue: '本地' })} v{localVersion}
-          </Badge>
+        {entry.description && (
+          <div className="pa-market-card-desc">
+            {entry.description}
+          </div>
         )}
-        {entry.tags.slice(0, 3).map((tag) => (
-          <Badge key={tag} variant="secondary" style={{ fontSize: 10 }}>
-            {tag}
-          </Badge>
-        ))}
+        <div className="pa-market-card-meta">
+          <span className="pa-market-badge">v{entry.version}</span>
+          {localVersion && localVersion !== entry.version && (
+            <span className="pa-market-badge">
+              {t('plugin.market.local', { defaultValue: '本地' })} v{localVersion}
+            </span>
+          )}
+          {entry.tags.slice(0, 3).map((tag) => (
+            <span key={tag} className="pa-market-badge">
+              <Tag size={9} style={{ marginRight: 2, verticalAlign: -1 }} />
+              {tag}
+            </span>
+          ))}
+        </div>
       </div>
     </button>
   )
@@ -480,26 +498,26 @@ function InstallStatus({
   const { t } = useTranslation()
   if (isUpdateAvailable) {
     return (
-      <Badge style={{ background: 'var(--accent, #4f46e5)', color: 'white' }}>
-        <Download size={10} />
+      <span className="pa-market-badge is-update">
+        <Download size={9} style={{ marginRight: 2, verticalAlign: -1 }} />
         {t('plugin.market.badgeUpdate', { defaultValue: 'Update' })}
-      </Badge>
+      </span>
     )
   }
   if (isInstalled) {
     return (
-      <Badge variant="secondary">
-        <CheckCircle2 size={10} />
+      <span className="pa-market-badge is-installed">
+        <CheckCircle2 size={9} style={{ marginRight: 2, verticalAlign: -1 }} />
         {t('plugin.market.badgeInstalled', { defaultValue: 'Installed' })}
-      </Badge>
+      </span>
     )
   }
   if (isFresh) {
     return (
-      <Badge variant="outline">
-        <Download size={10} />
+      <span className="pa-market-badge is-install">
+        <Download size={9} style={{ marginRight: 2, verticalAlign: -1 }} />
         {t('plugin.market.badgeInstall', { defaultValue: 'Install' })}
-      </Badge>
+      </span>
     )
   }
   return null

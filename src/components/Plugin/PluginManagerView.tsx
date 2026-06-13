@@ -1,35 +1,43 @@
 /**
- * PluginManagerView - Full-panel plugin management page (Phase 9.2).
+ * PluginManagerView - Full-panel plugin management page (Plugin Atlas).
  *
- * Top: a header with the page title, an "Observability" button that
- * opens the diagnostics dialog, and a Refresh button that re-scans
- * the local plugins directory.
+ * New design (Plugin Atlas) — layout & typography borrowed from
+ * `designs/plugin-atlas.html`, but **all colors are bound to the
+ * application's own theme variables** via the `--pa-*` aliases in
+ * `index.css`. The plugin manager therefore inherits the app's
+ * light / dark / system theme automatically — no toggle, no
+ * independent palette, no `data-pa-theme` attribute.
  *
- * Below the header, a tab strip with two tabs:
- * - 已安装 (Installed): the original upload zone + per-plugin cards
- * - 插件市场 (Marketplace): a `PluginMarketView` for browsing,
- *   installing, updating, and rolling back plugins from a remote
- *   `repo.json` index.
+ * Top of the panel: editorial hero (eyebrow + serif title + 4
+ * action buttons), then a 5-cell stats ribbon, then a 1fr/268px
+ * grid whose main column holds the book-spine list and whose
+ * rail holds the storage meter and the three "open" buttons
+ * (Activity / Diagnostics / Logs) that pop the corresponding
+ * dialog.
  *
- * We keep the two views in a single component (instead of routing
- * to a separate full-panel route) because (a) the marketplace needs
- * the same plugin list to render "Installed" / "Update" badges and
- * (b) the user can switch between them with a single click without
- * losing any state.
+ * We keep the two-tab structure (Installed / Marketplace) — the
+ * marketplace needs the same installed list to render Install /
+ * Update / Installed badges, and the user expects a single click
+ * to switch.
  */
-import { useState, useCallback, useEffect, useMemo } from 'react'
-import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon, Activity, Shield, Store, List } from 'lucide-react'
-import { usePluginStore, useUIStore } from '@/stores'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import {
+  Upload,
+  Store,
+  List,
+  Activity,
+  LineChart,
+  ScrollText,
+  Search,
+  ChevronUp,
+} from 'lucide-react'
+import { useTranslation, Trans } from 'react-i18next'
+import { usePluginStore, useUIStore, usePluginMarketStore } from '@/stores'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { buildPluginContext, getPluginStorage, createPluginEventBus } from '@/lib/plugin-host'
 import { open } from '@tauri-apps/plugin-dialog'
 import { toast } from 'sonner'
-import { useTranslation } from 'react-i18next'
-import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Switch } from '@/components/ui/switch'
-import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -38,19 +46,27 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { PluginPanelHost } from './PluginPanelHost'
-import { PluginDiagnosticsPanel } from './PluginDiagnosticsPanel'
 import { PluginPermissionDialog } from './PluginPermissionDialog'
 import { PluginMarketView } from './PluginMarketView'
+import { PluginStatsRibbon } from './PluginStatsRibbon'
+import { PluginInstalledCard } from './PluginInstalledCard'
+import { PluginActivityDialog } from './PluginActivityDialog'
+import { PluginDiagnosticsDialog } from './PluginDiagnosticsDialog'
+import { PluginLogsDialog } from './PluginLogsDialog'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
+import { getAllPluginMetrics } from '@/lib/plugin-telemetry'
 import type { PluginDefinition, PluginPanelProps, PluginPermission } from '@/types/plugin'
 
-/**
- * The two sub-views under the plugin manager header. We use a tiny
- * string-literal union instead of an enum so the state value can
- * be serialised (e.g. if we ever decide to persist the active tab
- * to localStorage).
- */
+/** Active tab. Kept as a string-literal union so the value can be
+ *  serialised (e.g. if we ever decide to persist the active tab
+ *  to localStorage). */
 type PluginManagerTab = 'manage' | 'market'
+
+/** Sub-filter on the installed list (toolbar segmented control). */
+type ListFilter = 'all' | 'active' | 'disabled' | 'updates'
+
+/** Which of the three plugin popups is currently open. */
+type DialogKind = 'activity' | 'diagnostics' | 'logs'
 
 function PluginManagerView() {
   const { t } = useTranslation()
@@ -59,9 +75,6 @@ function PluginManagerView() {
   const setLoaded = usePluginStore((s) => s.setLoaded)
   const [isUploading, setIsUploading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
-  // Active tab. Defaults to "manage" so the user lands on the
-  // familiar upload + list view that was the only view before the
-  // marketplace was added. The marketplace is opt-in.
   const [activeTab, setActiveTab] = useState<PluginManagerTab>('manage')
   // Settings dialog state. We keep the plugin reference (not just the
   // id) so we don't depend on store re-selection while the dialog is
@@ -69,10 +82,6 @@ function PluginManagerView() {
   // uninstalled races with the close handler, so the open() guard
   // checks the plugin still exists in the store.
   const [settingsPlugin, setSettingsPlugin] = useState<PluginDefinition | null>(null)
-  // Diagnostics dialog visibility. The panel reads in-memory metrics
-  // and refreshes on its own interval, so we don't need to pass
-  // anything through props.
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   // Permission dialog target. Same pattern as settingsPlugin: we keep
   // the full reference so a concurrent uninstall can't take the
   // plugin out from under the dialog.
@@ -88,6 +97,120 @@ function PluginManagerView() {
     pluginName: string
     requested: PluginPermission[]
   } | null>(null)
+  // Three plugin popups (Activity / Diagnostics / Logs). Local state
+  // — these dialogs are scoped to the plugin manager view, not
+  // app-wide, so we don't push them into `useUIStore`.
+  const [openDialog, setOpenDialog] = useState<DialogKind | null>(null)
+  // Search query & sub-filter on the installed list. The search
+  // matches the design's `pa-search` input; the segmented control
+  // narrows the list to active / disabled / update-pending rows.
+  const [search, setSearch] = useState('')
+  const [listFilter, setListFilter] = useState<ListFilter>('all')
+  // Last successful rescan / install / market refresh time. Drives
+  // the small "— Latest sync 12:04" label on the right of the tab
+  // strip. The label updates reactively when any of the three
+  // sources change (rescan / upload / market refresh). Stored as a
+  // tick that gets stringified via the locale-aware formatter.
+  const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null)
+  useEffect(() => {
+    // The first render shows the time of the most recent mount —
+    // the user can compare it to their own watch to gauge
+    // staleness. After that, every rescan / install / market
+    // refresh bumps the value (see handleRescan, handleUpload
+    // and the market refresh effect below).
+    setLastSyncAt(new Date())
+  }, [])
+  const lastSyncLabel = useMemo(() => {
+    if (!lastSyncAt) return '—'
+    const hh = String(lastSyncAt.getHours()).padStart(2, '0')
+    const mm = String(lastSyncAt.getMinutes()).padStart(2, '0')
+    return `${hh}:${mm}`
+  }, [lastSyncAt])
+
+  // Marketplace update info — used to compute the "X updates"
+  // badge in the hero and to drive the "Updates" sub-filter.
+  const marketUpdates = usePluginMarketStore((s) => s.updates)
+  const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
+
+  // Re-fetch the update check whenever the installed list
+  // changes. The marketplace store already debounces its
+  // own back-to-back fetches, so calling this from a
+  // `useEffect` is cheap.
+  useEffect(() => {
+    void refreshUpdates()
+  }, [plugins.length, refreshUpdates])
+
+  // Compute the totals for the 5-cell stats ribbon. Errors come
+  // from the telemetry store; the other four are derived from
+  // `plugins` and `marketUpdates`. Trends are intentionally
+  // left undefined — we'd need a baseline snapshot to compute
+  // them, and the host doesn't expose one yet.
+  //
+  // We snapshot the host metrics once per `plugins` change so
+  // both `stats` and `storageMeter` see the same point-in-time
+  // data. Calling `getAllPluginMetrics()` twice in a single
+  // render would otherwise give a slightly different count if
+  // the host wrote between the two reads.
+  const metricsSnapshot = useMemo(
+    () => getAllPluginMetrics(),
+    // `plugins` is the cache-buster, not a value read by
+    // `getAllPluginMetrics()`. We re-snapshot any time the
+    // installed set changes so downstream `stats` /
+    // `storageMeter` memos see fresh data; the function
+    // itself only reads the host's metric stores.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plugins],
+  )
+  const stats = useMemo(() => {
+    const enabled = plugins.filter((p) => p.enabled).length
+    const disabled = plugins.length - enabled
+    const updates = marketUpdates.length
+    const errors = metricsSnapshot.reduce((sum, m) => sum + m.totalErrors, 0)
+    return { total: plugins.length, active: enabled, disabled, updates, errors }
+  }, [plugins, marketUpdates, metricsSnapshot])
+
+  // Total bytes used by all plugin storage, and a 100 MB soft
+  // quota. The host's per-plugin size tracker is in
+  // `plugin-telemetry`, but the per-plugin metric only has
+  // `storageSizeBytes` for plugins that have already had a
+  // `set` recorded. To avoid an awkward "0 KB" display for
+  // freshly-installed plugins, we fall back to a 0-byte
+  // baseline and let the meter render a thin sliver.
+  const storageMeter = useMemo(() => {
+    const usedBytes = metricsSnapshot.reduce((sum, m) => sum + m.storageSizeBytes, 0)
+    const maxBytes = 100 * 1024 * 1024 // 100 MB
+    const pct = Math.min(100, (usedBytes / maxBytes) * 100)
+    return { usedBytes, maxBytes, pct }
+  }, [metricsSnapshot])
+
+  // Total events over the last 24h (drives the `Activity`
+  // rail-button meta chip).
+  const eventCount = useMemo(() => {
+    return metricsSnapshot.reduce((sum, m) => sum + m.totalEvents, 0)
+  }, [metricsSnapshot])
+
+  // Resolve the plugin list through the active filter + search.
+  // Filtering is cheap (≤ a few hundred plugins) so we don't
+  // need memoisation beyond the obvious dep list.
+  const visiblePlugins = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return plugins.filter((p) => {
+      if (listFilter === 'active' && !p.enabled) return false
+      if (listFilter === 'disabled' && p.enabled) return false
+      if (listFilter === 'updates') {
+        const hasUpdate = marketUpdates.some(
+          (u) => u.id === p.id && u.localVersion !== u.remoteVersion,
+        )
+        if (!hasUpdate) return false
+      }
+      if (!q) return true
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.id.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q)
+      )
+    })
+  }, [plugins, search, listFilter, marketUpdates])
 
   /**
    * Build the props passed to a plugin's settings component. The
@@ -120,6 +243,9 @@ function PluginManagerView() {
       const loadedPlugins = await loadAllPlugins(rustMetas)
       setPlugins(loadedPlugins)
       setLoaded(true)
+      // Bump the "latest sync" label so the user can see the
+      // scan/refresh is fresh.
+      setLastSyncAt(new Date())
     } catch (err) {
       console.error('Failed to reload plugins:', err)
     } finally {
@@ -227,234 +353,183 @@ function PluginManagerView() {
     }
   }, [t])
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return ''
-    try {
-      return new Date(dateStr).toLocaleDateString()
-    } catch {
-      return dateStr
-    }
-  }
+  // Rescan the marketplace for updates when the user lands on
+  // the Installed tab. We do this on mount + when the installed
+  // list changes so a newly-installed plugin is immediately
+  // represented in the "Updates" sub-filter.
+  useEffect(() => {
+    void refreshUpdates()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plugins.length])
+
+  // "Rescan" button in the meta row — refreshes the plugin
+  // list (and indirectly the update list via the effect
+  // above). Kept as a top-level handler so the button works
+  // whether the user is on the Installed or the Marketplace
+  // tab.
+  const handleRescan = useCallback(() => {
+    void handleReload()
+  }, [handleReload])
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border-color)' }}>
-        <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-          {t('plugin.manager')}
-        </h2>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setDiagnosticsOpen(true)}
-            title={t('plugin.diagnostics.title')}
-          >
-            <Activity size={14} className="mr-1" />
-            {t('plugin.diagnostics.title')}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleReload}
-            disabled={isScanning}
-          >
-            {isScanning ? t('common.loading') : t('plugin.refresh')}
-          </Button>
+    <div className="pa-root flex flex-col h-full">
+      {/* ── Hero header (editorial) ───────────────────────── */}
+      <header className="pa-hero">
+        <div className="pa-title-row">
+          <h1 className="pa-page-title">{t('plugin.pa.title')}</h1>
+          {marketUpdates.length > 0 && (
+            <button
+              type="button"
+              className="pa-update-chip"
+              onClick={() => setActiveTab('market')}
+              title={t('plugin.market.tabMarket', { defaultValue: '插件市场' })}
+            >
+              <ChevronUp size={11} className="pa-arrow" />
+              <Trans
+                i18nKey="plugin.pa.update.available"
+                values={{ count: marketUpdates.length }}
+                components={{}}
+              />
+            </button>
+          )}
         </div>
-      </div>
+      </header>
 
-      {/* Tab strip. We render both tabs (rather than swapping) so the
-          user can see where they are at a glance, and the tab bar
-          itself doesn't shift when switching. The active tab gets
-          the primary border colour; the inactive tab is muted. */}
-      <div
-        role="tablist"
-        className="flex items-center gap-1 px-6 pt-2 border-b"
-        style={{ borderColor: 'var(--border-color)' }}
-      >
-        <TabButton
-          active={activeTab === 'manage'}
+      {/* ── Tab strip (Installed / Marketplace) — the spine of the page.
+             Each tab carries a leading 01 / 02 mono number and a count
+             badge in the active tab. The right side shows the latest
+             sync time so the user always knows the data is fresh. ── */}
+      <nav className="pa-tab-strip" role="tablist" aria-label={t('plugin.pa.tabs.aria')}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'manage'}
+          className={`pa-tab ${activeTab === 'manage' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('manage')}
-          icon={<List size={14} />}
-          label={t('plugin.market.tabManage', { defaultValue: '已安装' })}
-        />
-        <TabButton
-          active={activeTab === 'market'}
+        >
+          <span className="pa-tab-num">01</span>
+          <List size={13} className="pa-tab-icon" />
+          <span className="pa-tab-label">{t('plugin.pa.view.installed')}</span>
+          <span className="pa-tab-count">{plugins.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'market'}
+          className={`pa-tab ${activeTab === 'market' ? 'is-active' : ''}`}
           onClick={() => setActiveTab('market')}
-          icon={<Store size={14} />}
-          label={t('plugin.market.tabMarket', { defaultValue: '插件市场' })}
-        />
+        >
+          <span className="pa-tab-num">02</span>
+          <Store size={13} className="pa-tab-icon" />
+          <span className="pa-tab-label">{t('plugin.pa.view.marketplace')}</span>
+          <span className="pa-tab-count">
+            {marketUpdates.length > 0
+              ? t('plugin.pa.tab.badge.new', { count: marketUpdates.length })
+              : '—'}
+          </span>
+        </button>
+        <div className="pa-tab-divider">
+          <span className="pa-tab-divider-text">
+            {t('plugin.pa.tab.sync')} <b>{lastSyncLabel}</b>
+          </span>
+        </div>
+      </nav>
+
+      {/* ── Body grid (main + rail) ───────────────────────
+            The right rail — storage meter + Activity /
+            Diagnostics / Logs entry points — only belongs
+            on the Installed tab. On the Marketplace tab the
+            card grid runs full-width; storage info is
+            irrelevant to browsing a remote repo. We render
+            the rail conditionally and switch the body class
+            so `.pa-body` collapses to a single column. */}
+      <div className={`pa-body ${activeTab === 'market' ? 'is-fullwidth' : ''}`}>
+        <main className="pa-main" data-view={activeTab}>
+          {/*
+            Marketplace panel is always rendered (hidden via
+            `display: none`) so its in-memory state — repo URL,
+            index, search query, tag filter — survives a tab
+            switch. A conditional render would drop that state
+            and the user would lose their scroll position /
+            search term on every switch.
+          */}
+          {activeTab === 'manage' && (
+            <ManageTab
+              search={search}
+              setSearch={setSearch}
+              listFilter={listFilter}
+              setListFilter={setListFilter}
+              visiblePlugins={visiblePlugins}
+              stats={stats}
+              isScanning={isScanning}
+              isUploading={isUploading}
+              onRescan={handleRescan}
+              onUpload={handleUpload}
+              hasUpdate={(id) =>
+                marketUpdates.some((u) => u.id === id && u.localVersion !== u.remoteVersion)
+              }
+              onToggle={handleToggleEnabled}
+              onUninstall={handleUninstall}
+              onSettings={openSettings}
+              onPermissions={openPermissions}
+            />
+          )}
+          {activeTab === 'market' && <PluginMarketView />}
+        </main>
+
+        {activeTab === 'manage' && (
+          <aside className="pa-rail">
+            {/* Install stats (2 cells per row) sit at the top of
+                the right rail so the user gets a one-glance
+                summary of the installed plugin set right above
+                the storage meter. Stats and storage share the
+                same `pa-rail` panel — visually the rail reads as
+                a vertical column: stats → storage → open. */}
+            <div className="pa-rail-title">
+              <span>{t('plugin.pa.rail.stats')}</span>
+            </div>
+            <PluginStatsRibbon
+              total={stats.total}
+              active={stats.active}
+              disabled={stats.disabled}
+              updates={stats.updates}
+              errors={stats.errors}
+            />
+
+            <div className="pa-rail-title" style={{ marginTop: 18 }}>
+              <span>{t('plugin.pa.rail.storage')}</span>
+              <span>
+                {formatBytes(storageMeter.usedBytes)} / {formatBytes(storageMeter.maxBytes)}
+              </span>
+            </div>
+            <StorageMeter pct={storageMeter.pct} />
+
+            <div className="pa-rail-title" style={{ marginTop: 18 }}>
+              <span>{t('plugin.pa.rail.open')}</span>
+            </div>
+            <RailButton
+              icon={<Activity size={13} />}
+              label={t('plugin.pa.btn.activity')}
+              meta={String(eventCount)}
+              onClick={() => setOpenDialog('activity')}
+            />
+            <RailButton
+              icon={<LineChart size={13} />}
+              label={t('plugin.pa.btn.diagnostics')}
+              meta={String(stats.errors)}
+              onClick={() => setOpenDialog('diagnostics')}
+            />
+            <RailButton
+              icon={<ScrollText size={13} />}
+              label={t('plugin.pa.btn.logs')}
+              meta="—"
+              onClick={() => setOpenDialog('logs')}
+            />
+          </aside>
+        )}
       </div>
 
-      <ScrollArea className="flex-1">
-        {/*
-          We keep the marketplace always mounted (hidden via
-          `display: none`) so its in-memory state — repo URL, index,
-          search query, tag filter — survives a tab switch. A
-          conditional render would drop that state and the user
-          would lose their scroll position / search term on every
-          switch.
-        */}
-        <div
-          role="tabpanel"
-          hidden={activeTab !== 'manage'}
-          style={{ padding: activeTab === 'manage' ? 24 : 0 }}
-        >
-          {/* Upload Section */}
-          <div
-            className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-[var(--theme-color)] transition-colors"
-            style={{ borderColor: 'var(--border-color)' }}
-            onClick={handleUpload}
-          >
-            <Upload size={32} className="mx-auto mb-3 opacity-40" />
-            <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-              {isUploading ? t('plugin.installing') : t('plugin.uploadHint')}
-            </p>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              {t('plugin.uploadFormat')}
-            </p>
-          </div>
-
-          {/* Plugin List */}
-          <div className="space-y-3 mt-6">
-            <h3 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-              {t('plugin.installed')} ({plugins.length})
-            </h3>
-
-            {plugins.length === 0 ? (
-              <div className="text-center py-12">
-                <Package size={40} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                  {t('plugin.noPlugins')}
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-3 grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 3xl:grid-cols-6">
-                {plugins.map((plugin) => (
-                  <Card
-                    key={plugin.id}
-                    style={{
-                      borderColor: 'var(--border-color)',
-                      background: 'var(--bg-primary)',
-                      opacity: plugin.enabled ? 1 : 0.6,
-                    }}
-                  >
-                    <CardContent className="p-4 flex flex-col gap-3">
-                      {/* Plugin Info */}
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                            {plugin.name}
-                          </span>
-                          {plugin.version && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}>
-                              <Tag size={8} className="inline mr-0.5" />
-                              {plugin.version}
-                            </span>
-                          )}
-                        </div>
-                        {plugin.description && (
-                          <p
-                            className="text-xs mt-1 overflow-hidden"
-                            style={{
-                              color: 'var(--text-muted)',
-                              height: '48px',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 3,
-                              WebkitBoxOrient: 'vertical',
-                            }}
-                          >
-                            {plugin.description}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Meta & Actions - 分为上下两行 */}
-                      <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                          {plugin.author && (
-                            <span className="flex items-center gap-0.5 truncate">
-                              <User size={9} className="shrink-0" />
-                              {plugin.author}
-                            </span>
-                          )}
-                          {plugin.publishedAt && (
-                            <span className="flex items-center gap-0.5 shrink-0">
-                              <Calendar size={9} />
-                              {formatDate(plugin.publishedAt)}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between gap-1">
-                          <div className='flex'>
-                            {plugin.settings && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="w-7 h-7"
-                                title={t('plugin.settings')}
-                                onClick={() => openSettings(plugin)}
-                              >
-                                <SettingsIcon size={14} />
-                              </Button>
-                            )}
-                            {/* Permissions button */}
-                            {plugin.permissions.length > 0 && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="w-7 h-7"
-                                title={t('plugin.permissions')}
-                                onClick={() => openPermissions(plugin)}
-                              >
-                                <Shield size={14} />
-                              </Button>
-                            )}
-                          </div>
-                          <div className='flex'>
-                            <Switch
-                              checked={plugin.enabled}
-                              onCheckedChange={(checked) => handleToggleEnabled(plugin, checked)}
-                            />
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="w-7 h-7"
-                              onClick={() => handleUninstall(plugin)}
-                            >
-                              <Trash2 size={14} className="text-[var(--color-error)]" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/*
-          Marketplace panel. We render it on the same ScrollArea as
-          the manage tab so the outer scrollable container is shared;
-          a separate ScrollArea inside would conflict with the
-          parent's scroll position.
-        */}
-        <div
-          role="tabpanel"
-          hidden={activeTab !== 'market'}
-          style={{ padding: activeTab === 'market' ? 24 : 0, height: '100%' }}
-        >
-          {activeTab === 'market' && <PluginMarketView />}
-        </div>
-      </ScrollArea>
-
-      {/* Settings dialog. We render the plugin's own `settings` component
-          inside a PluginPanelHost so the host can fire onMount/onUnmount
-          and the plugin can use the same lifecycle pattern as the main
-          panel. `isActive` is false because this is a modal, not a tab. */}
+      {/* ── Settings dialog ─────────────────────────────── */}
       <Dialog
         open={settingsPlugin !== null}
         onOpenChange={(open) => {
@@ -483,87 +558,256 @@ function PluginManagerView() {
         </DialogContent>
       </Dialog>
 
-      {/* Diagnostics dialog. The panel is purely host-side, so we render
-          it directly without PluginPanelHost: there is no plugin to
-          dispatch onMount/onUnmount to, and we don't want the panel's
-          refresh interval to outlive the dialog (the panel cleans up
-          its own interval on unmount). */}
-      <Dialog open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden p-0">
-          <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border-color)' }}>
-            <DialogHeader>
-              <DialogTitle>{t('plugin.diagnostics.title')}</DialogTitle>
-              <DialogDescription>
-                {t('plugin.diagnostics.description')}
-              </DialogDescription>
-            </DialogHeader>
-          </div>
-          <PluginDiagnosticsPanel />
-        </DialogContent>
-      </Dialog>
-
-      {/* Permission dialog – install-time flow. We open it the moment
-          the user finishes installing a plugin, pre-seeded with the
-          permissions declared in its manifest. The dialog itself does
-          the grant/revoke through `plugin-permissions.ts`; we just
-          host the modal and clear the pending state on close. */}
+      {/* ── Permission dialog – install-time flow ───────── */}
       <PermissionDialogMount
         open={pendingPermissionGrant !== null}
         plugin={pendingPermissionGrant}
         onClose={() => setPendingPermissionGrant(null)}
       />
 
-      {/* Permission dialog – per-plugin card flow. Same component, but
-          opened from the Permissions button on a card. We pass the
-          plugin reference and let the dialog fetch the current
-          status asynchronously. */}
+      {/* ── Permission dialog – per-plugin card flow ────── */}
       <PermissionDialogMount
         open={permissionsPlugin !== null}
         plugin={permissionsPlugin}
         onClose={() => setPermissionsPlugin(null)}
       />
+
+      {/* ── Three plugin popups (Activity / Diagnostics / Logs) ── */}
+      <PluginActivityDialog
+        open={openDialog === 'activity'}
+        onOpenChange={(o) => setOpenDialog(o ? 'activity' : null)}
+      />
+      <PluginDiagnosticsDialog
+        open={openDialog === 'diagnostics'}
+        onOpenChange={(o) => setOpenDialog(o ? 'diagnostics' : null)}
+      />
+      <PluginLogsDialog
+        open={openDialog === 'logs'}
+        onOpenChange={(o) => setOpenDialog(o ? 'logs' : null)}
+      />
     </div>
   )
 }
 
-/**
- * A single tab in the manager tab strip. We keep the button styling
- * inline so we don't need to ship a new `Tabs`/`Tab` component pair
- * for what's effectively a 2-state switch. The active tab gets a
- * primary-coloured underline; the inactive tab is muted.
- */
-function TabButton({
-  active,
-  onClick,
-  icon,
-  label,
-}: {
-  active: boolean
-  onClick: () => void
+// ────────────────────────────────────────────────────────────────────────────
+// Sub-components
+// ────────────────────────────────────────────────────────────────────────────
+
+interface ManageTabProps {
+  search: string
+  setSearch: (s: string) => void
+  listFilter: ListFilter
+  setListFilter: (f: ListFilter) => void
+  visiblePlugins: PluginDefinition[]
+  stats: { total: number; active: number; updates: number; errors: number }
+  isScanning: boolean
+  isUploading: boolean
+  onRescan: () => void
+  onUpload: () => void
+  hasUpdate: (id: string) => boolean
+  onToggle: (plugin: PluginDefinition, enabled: boolean) => void
+  onUninstall: (plugin: PluginDefinition) => void
+  onSettings: (plugin: PluginDefinition) => void
+  onPermissions: (plugin: PluginDefinition) => void
+}
+
+function ManageTab({
+  search,
+  setSearch,
+  listFilter,
+  setListFilter,
+  visiblePlugins,
+  stats,
+  isScanning,
+  isUploading,
+  onRescan,
+  onUpload,
+  hasUpdate,
+  onToggle,
+  onUninstall,
+  onSettings,
+  onPermissions,
+}: ManageTabProps) {
+  const { t } = useTranslation()
+  const searchRef = useRef<HTMLInputElement>(null)
+  // Cmd/Ctrl-K focuses the search input. We register on the
+  // window so it works regardless of which element has focus.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        searchRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  return (
+    <>
+      <div className="pa-view-head">
+        <h2 className="pa-view-title">
+          {t('plugin.pa.view.installed')}
+        </h2>
+        <span className="pa-view-meta">
+          <Trans
+            i18nKey="plugin.pa.viewMeta.installed"
+            values={{
+              total: stats.total,
+              active: stats.active,
+              updates: stats.updates,
+              scan: formatTime(new Date()),
+            }}
+            components={{ b: <b /> }}
+          />
+        </span>
+      </div>
+
+      <div className="pa-toolbar">
+        <div className="pa-search">
+          <Search />
+          <input
+            ref={searchRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('plugin.pa.searchPlaceholder')}
+            aria-label={t('plugin.pa.searchPlaceholder')}
+          />
+          <span className="pa-kbd">⌘K</span>
+        </div>
+        <div className="pa-segmented" role="tablist">
+          <SegmentButton
+            active={listFilter === 'all'}
+            onClick={() => setListFilter('all')}
+            label={t('plugin.pa.filter.all')}
+          />
+          <SegmentButton
+            active={listFilter === 'active'}
+            onClick={() => setListFilter('active')}
+            label={t('plugin.pa.filter.active')}
+          />
+          <SegmentButton
+            active={listFilter === 'disabled'}
+            onClick={() => setListFilter('disabled')}
+            label={t('plugin.pa.filter.disabled')}
+          />
+          <SegmentButton
+            active={listFilter === 'updates'}
+            onClick={() => setListFilter('updates')}
+            label={t('plugin.pa.filter.updates')}
+          />
+        </div>
+        <button
+          type="button"
+          className="pa-btn"
+          onClick={onRescan}
+          disabled={isScanning}
+          style={{ marginLeft: 'auto' }}
+        >
+          {isScanning ? t('common.loading') : t('plugin.pa.btn.refresh')}
+        </button>
+        <button
+          type="button"
+          className="pa-btn pa-btn-primary"
+          onClick={() => void onUpload()}
+          disabled={isUploading}
+        >
+          <Upload size={12} />
+          {isUploading ? t('plugin.installing') : t('plugin.pa.btn.install')}
+        </button>
+      </div>
+
+      {visiblePlugins.length === 0 ? (
+        <EmptyListHint />
+      ) : (
+        <div className="pa-market-grid pa-installed-grid">
+          {visiblePlugins.map((plugin, idx) => (
+            <PluginInstalledCard
+              key={plugin.id}
+              plugin={plugin}
+              index={idx + 1}
+              hasUpdate={hasUpdate(plugin.id)}
+              onToggle={(enabled) => onToggle(plugin, enabled)}
+              onUninstall={() => onUninstall(plugin)}
+              onSettings={() => onSettings(plugin)}
+              onPermissions={() => onPermissions(plugin)}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+function EmptyListHint() {
+  const { t } = useTranslation()
+  return (
+    <div className="pa-empty">
+      <div className="pa-empty-title">{t('plugin.pa.empty.title')}</div>
+      <div className="pa-empty-hint">{t('plugin.pa.empty.hint')}</div>
+    </div>
+  )
+}
+
+function StorageMeter({ pct }: { pct: number }) {
+  // We render the bar ourselves (not via `.pa-meter` whose
+  // gradient is fixed at 34%) so the bar actually reflects
+  // the user's plugin footprint. The host doesn't yet expose
+  // a quota, so we render a soft cap at 100 MB.
+  return (
+    <div className="pa-meter">
+      <div className="pa-meter-bar" style={{ position: 'relative' }}>
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: `${Math.max(2, pct)}%`,
+            background: 'linear-gradient(to right, var(--pa-accent), var(--pa-accent-2))',
+            borderRadius: 999,
+            transition: 'width 0.3s ease',
+          }}
+        />
+      </div>
+      <div className="pa-meter-foot">
+        <span>{pct.toFixed(0)}% used</span>
+        <span>soft cap 100 MB</span>
+      </div>
+    </div>
+  )
+}
+
+interface RailButtonProps {
   icon: React.ReactNode
   label: string
-}) {
+  meta: string
+  onClick: () => void
+}
+
+function RailButton({ icon, label, meta, onClick }: RailButtonProps) {
+  return (
+    <button type="button" className="pa-rail-btn" onClick={onClick}>
+      {icon}
+      <span>{label}</span>
+      <span className="pa-rail-btn-meta">{meta}</span>
+    </button>
+  )
+}
+
+interface SegmentButtonProps {
+  active: boolean
+  onClick: () => void
+  label: string
+}
+
+function SegmentButton({ active, onClick, label }: SegmentButtonProps) {
   return (
     <button
+      type="button"
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '6px 10px',
-        background: 'transparent',
-        border: 'none',
-        borderBottom: active ? '2px solid var(--theme-color)' : '2px solid transparent',
-        color: active ? 'var(--text-primary)' : 'var(--text-muted)',
-        cursor: 'pointer',
-        fontSize: 13,
-        fontWeight: active ? 500 : 400,
-        marginBottom: -1,
-      }}
+      className={active ? 'is-active' : ''}
     >
-      {icon}
       {label}
     </button>
   )
@@ -640,6 +884,17 @@ function PermissionDialogMount({
       onClose={onClose}
     />
   )
+}
+
+function formatBytes(b: number): string {
+  if (b < 1024) return `${b} B`
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatTime(d: Date): string {
+  const pad = (n: number, w: number = 2) => String(n).padStart(w, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 export { PluginManagerView }

@@ -838,6 +838,108 @@
       "badgeUpdate": "Update",
       "badgeInstalled": "Installed",
       "badgeInstall": "Install"
+    },
+    "pa": {
+      "title": "Plugin Manager",
+      "searchPlaceholder": "Search…",
+      "card": {
+        "statusOn": "On",
+        "statusOff": "Off"
+      },
+      "stats": {
+        "installed": "Installed",
+        "active": "Active",
+        "disabled": "Disabled",
+        "updates": "Updates",
+        "errors": "Errors"
+      },
+      "filter": {
+        "all": "all",
+        "active": "active",
+        "disabled": "disabled",
+        "updates": "updates"
+      },
+      "view": {
+        "installed": "Installed",
+        "marketplace": "Marketplace"
+      },
+      "tabs": {
+        "aria": "Switch plugin manager view"
+      },
+      "tab": {
+        "sync": "Latest sync",
+        "badge": {
+          "new": "{{count}} new"
+        }
+      },
+      "viewMeta": {
+        "installed": "{{total}} total · {{active}} active · {{updates}} updates · last scan <b>{{scan}}</b>",
+        "marketplace": "{{count}} entries · key verified"
+      },
+      "btn": {
+        "search": "Search",
+        "activity": "Activity",
+        "diagnostics": "Diagnostics",
+        "logs": "Logs",
+        "install": "Install Plugin",
+        "refresh": "Refresh",
+        "upload": "Upload .zip",
+        "themeLight": "Light",
+        "themeDark": "Dark"
+      },
+      "rail": {
+        "stats": "Install stats",
+        "storage": "Plugin storage",
+        "open": "Open"
+      },
+      "manifestPath": "Manifests at <b>{{path}}</b>",
+      "update": {
+        "available": "{{count}} updates"
+      },
+      "empty": {
+        "title": "No plugins installed",
+        "hint": "Upload a .zip package to get started."
+      },
+      "dialog": {
+        "activity": {
+          "eyebrow": "Last 24 hours",
+          "title": "Activity",
+          "count": "{{count}} events · 24h",
+          "clear": "Clear",
+          "export": "Export"
+        },
+        "diagnostics": {
+          "eyebrow": "Plugin runtime · 24h",
+          "title": "Diagnostics",
+          "footer": "Last scan <b>{{time}}</b> · 24h window",
+          "rescan": "Rescan",
+          "exportBundle": "Export bundle",
+          "cell": {
+            "events": "Events",
+            "avgDuration": "Avg duration",
+            "hookCalls": "Hook calls",
+            "storageOps": "Storage ops",
+            "backendIpc": "Backend IPC",
+            "errorRate": "Error rate"
+          },
+          "perPluginLoad": "Per-plugin load"
+        },
+        "logs": {
+          "eyebrow": "tail -f · live",
+          "title": "Logs",
+          "footer": "Following <b>host</b> · {{count}} lines",
+          "filter": "Filter",
+          "copy": "Copy"
+        }
+      },
+      "market": {
+        "repoLabel": "Repository",
+        "apply": "Apply",
+        "keyVerified": "Key verified · ed25519:7f4a…b21c",
+        "search": "Search…",
+        "heroTitle": "Browse the Atlas",
+        "heroHint": "Paste a repo.json URL to load the catalogue. Updates are verified against an ed25519 signature."
+      }
     }
   }
 }
