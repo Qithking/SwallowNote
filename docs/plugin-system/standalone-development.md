@@ -12,7 +12,7 @@
 
 | 维度 | 项目内开发 | 独立开发（SDK + template） | 单文件 |
 | --- | --- | --- | --- |
-| 起步 | 把 `index.tsx` 放到 `src/lib/plugin-samples/` | 拷贝 `plugin-template/` 到任意目录 | 把 `index.tsx` 拷到任意位置 |
+| 起步 | 把 `index.tsx` 放到 `src/lib/core-plugins/` | 拷贝 `plugin-template/` 到任意目录 | 把 `index.tsx` 拷到任意位置 |
 | 调试 | 必须启动 Electron | 浏览器 + Vite HMR | 浏览器（手动） |
 | 类型 | 引用项目内 `@/types/plugin` | `@swallow-note/plugin-sdk` | 手写或 vendored |
 | 运行时 | 宿主真实实现 | Stub（localStorage / EventTarget） | 全部手写 mock |

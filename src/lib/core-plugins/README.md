@@ -1,4 +1,4 @@
-# Plugin Samples
+# Core Plugins
 
 Bundled, in-tree plugin manifests shipped with the host. They are **not
 auto-loaded** — they exist as a small, well-commented reference library
@@ -8,8 +8,8 @@ storage, and context-menu APIs.
 ## Layout
 
 ```
-plugin-samples/
-├── index.ts                   # Re-exports all manifests as SAMPLE_PLUGINS
+core-plugins/
+├── index.ts                   # Re-exports all manifests as CORE_PLUGINS (SAMPLE_PLUGINS is deprecated)
 ├── recent-notes-counter.tsx   # Baseline: storage + events + context-menu
 ├── word-counter.tsx           # editorToolbar + editorArea placement
 ├── theme-watcher.tsx          # Multi-event subscription + settings emit

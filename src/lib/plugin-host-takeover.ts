@@ -57,7 +57,7 @@ import { assertPermission } from './plugin-permission-guard'
  * host can install takeovers later without re-importing the
  * bundle.
  *
- * Inline plugins (defined in `src/lib/plugin-samples/*.tsx` for
+ * Inline plugins (defined in `src/lib/core-plugins/*.tsx` for
  * example) never go through the loader, so this field stays
  * undefined for them and the takeover is skipped – those plugins
  * import the host's real implementations directly.

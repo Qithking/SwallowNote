@@ -1,5 +1,5 @@
 /**
- * Bundled reference plugins shipped with the host.
+ * Core bundled plugins shipped with the host.
  *
  * These are *not* auto-loaded — they exist so plugin authors (and
  * the host's smoke tests) have a small, well-commented library of
@@ -7,7 +7,7 @@
  * `PluginDefinition` that can be installed via "Install from folder"
  * after dropping it into a directory alongside a `manifest.json`.
  *
- * The three samples cover different parts of the public API:
+ * The three core plugins cover different parts of the public API:
  *
  *   1. `recent-notes-counter` — basic lifecycle + storage + context-menu
  *      and the *full* 8-hook lifecycle. Best starting point.
@@ -34,11 +34,14 @@ import themeWatcherManifest from './theme-watcher'
 
 import type { PluginDefinition } from '@/types/plugin'
 
-/** all bundled sample manifests, in display order. */
-export const SAMPLE_PLUGINS: readonly PluginDefinition[] = [
+/** all bundled core plugin manifests, in display order. */
+export const CORE_PLUGINS: readonly PluginDefinition[] = [
   recentNotesManifest,
   wordCounterManifest,
   themeWatcherManifest,
 ] as const
 
-export default SAMPLE_PLUGINS
+/** @deprecated Use CORE_PLUGINS instead */
+export const SAMPLE_PLUGINS = CORE_PLUGINS
+
+export default CORE_PLUGINS

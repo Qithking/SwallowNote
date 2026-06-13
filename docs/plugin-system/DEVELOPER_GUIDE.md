@@ -30,7 +30,7 @@
 | 你的身份 | 推荐模式 | 文档 |
 | --- | --- | --- |
 | 第三方作者，没有 SwallowNote 源码 | 独立开发（`@swallow-note/plugin-sdk` + template） | [第 8 节](#独立开发swallow-noteplugin-sdk--plugin-template) |
-| SwallowNote 维护者，要随主仓一起改 | 项目内开发（`src/lib/plugin-samples/`） | [第 2 节](#5-分钟上手写一个最小可运行插件) |
+| SwallowNote 维护者，要随主仓一起改 | 项目内开发（`src/lib/core-plugins/`） | [第 2 节](#5-分钟上手写一个最小可运行插件) |
 | 写一个简单 demo / 一次性脚本 | 单文件 `.tsx` 拷到任何地方 | [第 8 节：方法 C](#方法-c单文件-demo) |
 
 > **本文档的第 2-7 节以"项目内开发"为例** —— 概念和 API 与独立开发 100% 一致，后者只是把宿主实现替换成 SDK 内的 stub（开发用）和宿主真实实现（运行时通过 `setHost` 接管）。详见 [第 8 节](#独立开发swallow-noteplugin-sdk--plugin-template)。
@@ -325,7 +325,7 @@ function MyPanel(panel: PluginPanelProps) {
 }
 ```
 
-> **陷阱**：`usePluginEvents` 的 `events` 参数在 effect deps 里——**必须 module-scope 常量**，不能用 `as const` 数组字面量（每次 render 都是新引用，导致反复重建订阅）。详见 [theme-watcher.tsx](../../src/lib/plugin-samples/theme-watcher.tsx) 的 `WATCHED_EVENTS`。
+> **陷阱**：`usePluginEvents` 的 `events` 参数在 effect deps 里——**必须 module-scope 常量**，不能用 `as const` 数组字面量（每次 render 都是新引用，导致反复重建订阅）。详见 [theme-watcher.tsx](../../src/lib/core-plugins/theme-watcher.tsx) 的 `WATCHED_EVENTS`。
 
 **模块级 bus（用于生命周期钩子）**
 
@@ -903,7 +903,7 @@ const manifest: PluginDefinition = {
 export default manifest
 ```
 
-拷到 `src/lib/plugin-samples/` 即可在 SwallowNote 内即时看到（仅 dev 模式）。
+拷到 `src/lib/core-plugins/` 即可在 SwallowNote 内即时看到（仅 dev 模式）。
 
 完整文档：[standalone-development.md](./standalone-development.md)
 
@@ -926,7 +926,7 @@ export default manifest
 | Rust 命令注册 | [src-tauri/src/commands/plugin.rs](../../src-tauri/src/commands/plugin.rs) |
 | Rust 后端 IPC | [src-tauri/src/commands/plugin_invoke.rs](../../src-tauri/src/commands/plugin_invoke.rs) |
 | 错误类型 | [src-tauri/src/commands/error.rs](../../src-tauri/src/commands/error.rs) |
-| 内置示例插件 | [src/lib/plugin-samples/](../../src/lib/plugin-samples/) |
+| 内置示例插件 | [src/lib/core-plugins/](../../src/lib/core-plugins/) |
 | SDK 实现 | [docs/plugin-sdk/src/index.ts](../plugin-sdk/src/index.ts) |
 | 独立开发模板 | [docs/plugin-template/](../plugin-template/) |
 
@@ -1186,7 +1186,7 @@ export default manifest
 | 加设置 dialog | [settings.md](./settings.md) |
 | 写 Rust 后端 | [backend.md](./backend.md) |
 | 独立开发 | [standalone-development.md](./standalone-development.md) |
-| 看完整示例 | [plugin-samples/](../plugin-samples/) |
+| 看完整示例 | [core-plugins/](../core-plugins/) |
 | 走市场分发 | [plugin-marketplace/](../plugin-marketplace/) |
 
 ---
