@@ -837,7 +837,9 @@
       "upToDate": "Up to date",
       "badgeUpdate": "Update",
       "badgeInstalled": "Installed",
-      "badgeInstall": "Install"
+      "badgeInstall": "Install",
+      "viewDetails": "View details",
+      "installNow": "Install now"
     },
     "pa": {
       "title": "Plugin Manager",

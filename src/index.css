@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -387,15 +385,7 @@ body, #root {
    (tab strip + stats ribbon + toolbar) to reduce visual noise. */
 .pa-hero {
   padding: 18px 28px;
-  border-bottom: 1px solid var(--pa-line);
   position: relative;
-}
-.pa-hero::after {
-  content: '';
-  position: absolute;
-  left: 28px; right: 28px;
-  bottom: -1px; height: 1px;
-  background: linear-gradient(to right, transparent, var(--pa-line-2) 20%, var(--pa-line-2) 80%, transparent);
 }
 .pa-title-row {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
@@ -583,7 +573,6 @@ body, #root {
   letter-spacing: 0.10em;
   text-transform: uppercase;
   position: relative;
-  margin-bottom: -1px;
   transition: color 0.15s, border-color 0.15s;
 }
 .pa-tab:hover { color: var(--pa-ink); }
@@ -622,13 +611,9 @@ body, #root {
   color: var(--pa-mute-2);
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  justify-content: end;
 }
-.pa-tab-divider::before {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--pa-line);
-}
+
 .pa-tab-divider-text b {
   color: var(--pa-ink);
   font-weight: 600;
@@ -690,7 +675,9 @@ body, #root {
 .pa-view-meta b { color: var(--pa-ink); font-weight: 500; }
 .pa-toolbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 8px 0 14px;
+  padding: 20px 0 14px;
+  border-bottom: 1px dashed var(--pa-line);
+  margin-bottom: 14px;
 }
 .pa-search {
   position: relative;
@@ -1571,6 +1558,56 @@ body, #root {
   padding-top: 8px;
   border-top: 1px dashed var(--pa-line);
 }
+
+/* ── Marketplace primary CTA ───────────────────────────────
+   The marketplace card shares the Installed card's
+   `.pa-installed-actions` row layout (dashed divider, icon
+   row on the right), but the left half is a primary call-
+   to-action button instead of an on/off switch. The
+   `.pa-market-cta` button is sized to occupy the same
+   horizontal space as `.pa-switch` so the two card
+   types line up row-by-row in the marketplace grid.
+
+   Three colour themes mirror the badge system:
+   - `.is-install`   — accent (terracotta). "I want this."
+   - `.is-update`    — accent (same colour; the badge above
+                       already conveys the urgency).
+   - `.is-installed` — positive (green). "You have this." */
+.pa-market-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 3px;
+  border: 1px solid var(--pa-accent);
+  background: var(--pa-accent);
+  color: var(--pa-paper);
+  font-family: var(--pa-font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+}
+.pa-market-cta:hover { opacity: 0.88; }
+.pa-market-cta.is-install {
+  background: var(--pa-accent);
+  border-color: var(--pa-accent);
+  color: var(--pa-paper);
+}
+.pa-market-cta.is-update {
+  background: var(--pa-accent);
+  border-color: var(--pa-accent);
+  color: var(--pa-paper);
+}
+.pa-market-cta.is-installed {
+  background: var(--pa-positive-soft);
+  border-color: var(--pa-positive-soft);
+  color: var(--pa-positive);
+  cursor: default;
+}
+.pa-market-cta.is-installed:hover { opacity: 1; }
 
 /* ── Misc helpers ──────────────────────────────────────────── */
 .pa-flex-col { display: flex; flex-direction: column; }

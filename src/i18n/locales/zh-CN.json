@@ -837,7 +837,10 @@
       "upToDate": "已是最新",
       "badgeUpdate": "更新",
       "badgeInstalled": "已安装",
-      "badgeInstall": "安装"
+      "badgeInstall": "安装",
+      "viewDetails": "查看详情",
+      "installNow": "立即安装",
+      "local": "本地"
     },
     "pa": {
       "title": "插件管理",

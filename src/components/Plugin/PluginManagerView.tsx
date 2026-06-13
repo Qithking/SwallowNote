@@ -645,36 +645,7 @@ function ManageTab({
 
   return (
     <>
-      <div className="pa-view-head">
-        <h2 className="pa-view-title">
-          {t('plugin.pa.view.installed')}
-        </h2>
-        <span className="pa-view-meta">
-          <Trans
-            i18nKey="plugin.pa.viewMeta.installed"
-            values={{
-              total: stats.total,
-              active: stats.active,
-              updates: stats.updates,
-              scan: formatTime(new Date()),
-            }}
-            components={{ b: <b /> }}
-          />
-        </span>
-      </div>
-
-      <div className="pa-toolbar">
-        <div className="pa-search">
-          <Search />
-          <input
-            ref={searchRef}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('plugin.pa.searchPlaceholder')}
-            aria-label={t('plugin.pa.searchPlaceholder')}
-          />
-          <span className="pa-kbd">⌘K</span>
-        </div>
+      <div className="pa-toolbar">        
         <div className="pa-segmented" role="tablist">
           <SegmentButton
             active={listFilter === 'all'}
@@ -696,6 +667,17 @@ function ManageTab({
             onClick={() => setListFilter('updates')}
             label={t('plugin.pa.filter.updates')}
           />
+        </div>
+        <div className="pa-search">
+          <Search />
+          <input
+            ref={searchRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('plugin.pa.searchPlaceholder')}
+            aria-label={t('plugin.pa.searchPlaceholder')}
+          />
+          <span className="pa-kbd">⌘K</span>
         </div>
         <button
           type="button"

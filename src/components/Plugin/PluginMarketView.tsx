@@ -36,8 +36,10 @@ import {
   CheckCircle2,
   AlertCircle,
   Package,
-  Tag,
   Search,
+  User,
+  Calendar,
+  Info,
 } from 'lucide-react'
 import { usePluginMarketStore, usePluginStore } from '@/stores'
 import { PluginMarketDetail } from './PluginMarketDetail'
@@ -274,41 +276,7 @@ function PluginMarketView() {
       </section>
 
       {/* ── Search + tag filter (toolbar) ─────────────── */}
-      <div className="pa-market-toolbar">
-        <div className="pa-market-meta">
-          {/*
-            Use Trans so the count is rendered as a <b> child
-            component, not as the raw `<b>` HTML string. The
-            translation key is just `{{count}} 项 · 已验证密钥`
-            with no embedded markup; the wrapping <b> lives in
-            this component, not in the i18n string.
-          */}
-          <Trans
-            i18nKey="plugin.pa.viewMeta.marketplace"
-            values={{ count: index ? index.plugins.length : 0 }}
-            components={{ b: <b /> }}
-          />
-        </div>
-        <div className="pa-search" style={{ maxWidth: 'none' }}>
-          <Search />
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('plugin.market.searchPlaceholder', { defaultValue: '搜索插件名 / 描述 / 标签' })}
-            aria-label="Search marketplace"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              className="pa-btn pa-btn-ghost pa-btn is-icon"
-              style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}
-              onClick={() => setSearchQuery('')}
-              aria-label="clear"
-            >
-              <X size={12} />
-            </button>
-          )}
-        </div>
+      <div className="pa-market-toolbar">        
         {allTags.length > 0 && (
           <div className="pa-segmented" role="tablist">
             <button
@@ -336,7 +304,41 @@ function PluginMarketView() {
               )
             })}
           </div>
-        )}
+        )}        
+        <div className="pa-search" style={{ maxWidth: 'none' }}>
+          <Search />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t('plugin.market.searchPlaceholder', { defaultValue: '搜索插件名 / 描述 / 标签' })}
+            aria-label="Search marketplace"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              className="pa-btn pa-btn-ghost pa-btn is-icon"
+              style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}
+              onClick={() => setSearchQuery('')}
+              aria-label="clear"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        <div className="pa-market-meta">
+          {/*
+            Use Trans so the count is rendered as a <b> child
+            component, not as the raw `<b>` HTML string. The
+            translation key is just `{{count}} 项 · 已验证密钥`
+            with no embedded markup; the wrapping <b> lives in
+            this component, not in the i18n string.
+          */}
+          <Trans
+            i18nKey="plugin.pa.viewMeta.marketplace"
+            values={{ count: index ? index.plugins.length : 0 }}
+            components={{ b: <b /> }}
+          />
+        </div>
       </div>
 
       {/* ── Error / status row ────────────────────────── */}
@@ -431,6 +433,43 @@ function EmptyState({
   )
 }
 
+/**
+ * PluginMarketCard — a single plugin tile in the marketplace grid.
+ *
+ * This card is a *sibling* of `PluginInstalledCard` rather than a
+ * different style: both use the same `.pa-market-card` chrome
+ * (4px coloured spine + body), the same head layout (italic
+ * display name + mono id + status badge), the same byline row
+ * (author · date · version, mono, with leading icons), and the
+ * same tag chip row. They differ only in the actions row at the
+ * bottom — Installed exposes a switch + per-plugin icon buttons
+ * (settings/permissions/update/uninstall), while Marketplace
+ * exposes a primary CTA (Install / Update / Installed) + a
+ * details icon, because the marketplace view cannot toggle a
+ * plugin that's only listed remotely.
+ *
+ * Anatomy (top → bottom):
+ *   ┌──────────────────────────────────────────┐
+ *   │▌ spine 4px (one of 12 hues)             │
+ *   ├──────────────────────────────────────────┤
+ *   │ ● Plugin Name (italic display)       ⤓  │ ← status dot + name + badge
+ *   │ by · author · 2024-01-01 · v0.1.0        │ ← byline (mono)
+ *   │                                          │
+ *   │ Description, two lines max.             │
+ *   │                                          │
+ *   │ [tag] [tag] [2 deps] [Update]            │ ← tag chips
+ *   │ ─────────────────────────────────────    │
+ *   │ [Install]            [⤓]  [ℹ]            │ ← CTA + icon row
+ *   └──────────────────────────────────────────┘
+ *
+ * The card itself is clickable (opens the detail dialog); the
+ * actions row's `e.stopPropagation()` lets the buttons fire
+ * without bubbling up to the card click. The CTA and the info
+ * icon are *both* shortcuts to the same detail dialog — the CTA
+ * is the primary action because it shows the install / update
+ * state at a glance, and the info icon is a fallback for users
+ * who want to read the changelog before installing.
+ */
 function PluginMarketCard({
   entry,
   spineClass,
@@ -447,11 +486,74 @@ function PluginMarketCard({
   const { t } = useTranslation()
   const isInstalled = !!localVersion
   const isUpdateAvailable = !!updateInfo && updateInfo.localVersion !== updateInfo.remoteVersion
-  const isFresh = !localVersion && !updateInfo
+
+  // Most-recent version is the first entry in the `versions` list
+  // (the protocol documents it as "newest first"). Fall back to the
+  // entry's own `version` field for older indexes that don't ship
+  // a `versions` array.
+  const publishedAt = entry.versions?.[0]?.publishedAt ?? ''
+  const dateText = publishedAt ? formatDate(publishedAt) : ''
+  const version = entry.version || '—'
+
+  // ── Tag chips ────────────────────────────────────────────
+  // The Installed card surfaces runtime status (position, backend,
+  // permissions, update, error). The Marketplace card doesn't have
+  // any of that data — it has tags, dependencies, and update
+  // availability. Same `.pa-market-badge` chrome, different
+  // content. We show up to 3 tags (matching the segmented filter
+  // row above) plus a deps counter when the plugin ships with
+  // peer dependencies.
+  const tags: { key: string; cls: string; label: string }[] = []
+  if (entry.tags) {
+    for (const tag of entry.tags.slice(0, 3)) {
+      tags.push({ key: `tag-${tag}`, cls: 'pa-market-badge', label: tag })
+    }
+  }
+  if (entry.dependencies && entry.dependencies.length > 0) {
+    tags.push({
+      key: 'deps',
+      cls: 'pa-market-badge',
+      label: `${entry.dependencies.length} deps`,
+    })
+  }
+  if (isUpdateAvailable) {
+    tags.push({
+      key: 'update',
+      cls: 'pa-market-badge is-update',
+      label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }),
+    })
+  }
+
+  // Status badge in the card head. Mirrors the `is-installed`
+  // colour family of the Installed card, plus an accent colour
+  // for "Update available" and a paper-3 muted colour for the
+  // fresh-install case.
+  const statusBadge = isUpdateAvailable
+    ? { cls: 'pa-market-badge is-update', label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }) }
+    : isInstalled
+    ? { cls: 'pa-market-badge is-installed', label: t('plugin.market.badgeInstalled', { defaultValue: 'Installed' }) }
+    : { cls: 'pa-market-badge is-install', label: t('plugin.market.badgeInstall', { defaultValue: 'Install' }) }
+
+  // CTA button (left half of the actions row). The label is the
+  // human-friendly action verb; the class swaps the colour theme
+  // for install / update / installed states. The button is
+  // *always* enabled and *always* opens the detail dialog — the
+  // detail dialog owns the actual install / update flow so we
+  // can show the changelog + permissions before committing.
+  const cta = isUpdateAvailable
+    ? { cls: 'pa-market-cta is-update', label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }) }
+    : isInstalled
+    ? { cls: 'pa-market-cta is-installed', label: t('plugin.market.upToDate', { defaultValue: 'Up to date' }) }
+    : { cls: 'pa-market-cta is-install', label: t('plugin.market.badgeInstall', { defaultValue: 'Install' }) }
 
   return (
-    <button type="button" className={`pa-market-card ${spineClass}`} onClick={onClick}>
+    <article
+      className={`pa-market-card ${spineClass}`}
+      data-plugin-id={entry.id}
+      onClick={onClick}
+    >
       <div className="pa-market-card-spine" />
+
       <div className="pa-market-card-body">
         <div className="pa-market-card-head">
           <div style={{ minWidth: 0 }}>
@@ -460,67 +562,119 @@ function PluginMarketCard({
             </div>
             <div className="pa-market-card-id">{entry.id}</div>
           </div>
-          <InstallStatus isInstalled={isInstalled} isUpdateAvailable={isUpdateAvailable} isFresh={isFresh} />
+          <span className={statusBadge.cls}>{statusBadge.label}</span>
         </div>
-        {entry.description && (
-          <div className="pa-market-card-desc">
-            {entry.description}
-          </div>
-        )}
-        <div className="pa-market-card-meta">
-          <span className="pa-market-badge">v{entry.version}</span>
-          {localVersion && localVersion !== entry.version && (
-            <span className="pa-market-badge">
-              {t('plugin.market.local', { defaultValue: '本地' })} v{localVersion}
+
+        <div className="pa-installed-byline">
+          {entry.author && (
+            <span>
+              <User size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+              <b>{entry.author}</b>
             </span>
           )}
-          {entry.tags.slice(0, 3).map((tag) => (
-            <span key={tag} className="pa-market-badge">
-              <Tag size={9} style={{ marginRight: 2, verticalAlign: -1 }} />
-              {tag}
+          {entry.author && dateText && <span className="pa-sep">·</span>}
+          {dateText && (
+            <span>
+              <Calendar size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+              {dateText}
             </span>
+          )}
+          <span className="pa-sep">·</span>
+          <span>v{version}</span>
+          {localVersion && localVersion !== version && (
+            <>
+              <span className="pa-sep">·</span>
+              <span>
+                {t('plugin.market.local', { defaultValue: '本地' })} v{localVersion}
+              </span>
+            </>
+          )}
+        </div>
+
+        {entry.description && (
+          <div className="pa-market-card-desc">{entry.description}</div>
+        )}
+
+        <div className="pa-market-card-meta">
+          {tags.map((tag) => (
+            <span key={tag.key} className={tag.cls}>{tag.label}</span>
           ))}
         </div>
+
+        {/*
+          Actions row. Stops propagation so the buttons fire
+          without bubbling up to the card's own click handler
+          (which would also open the detail dialog). Visually
+          identical to the Installed card's actions row — same
+          dashed divider, same icon row, same horizontal
+          layout. The left half is a primary CTA instead of a
+          switch (marketplace plugins can't be toggled), and
+          the right half is `Download` (shortcut to the detail
+          dialog — same destination as the card body click)
+          and `Info` (alias for the same shortcut, labelled
+          for users who don't recognise the download icon as
+          a "view details" action).
+        */}
+        <div className="pa-installed-actions" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={cta.cls}
+            onClick={onClick}
+            title={
+              isUpdateAvailable
+                ? t('plugin.market.updateTo', { defaultValue: 'Update', version })
+                : isInstalled
+                ? t('plugin.market.upToDate', { defaultValue: 'Up to date' })
+                : t('plugin.market.badgeInstall', { defaultValue: 'Install' })
+            }
+          >
+            {cta.label}
+          </button>
+          <div className="pa-icon-row">
+            <button
+              type="button"
+              className="pa-icon-btn"
+              title={t('plugin.market.viewDetails', { defaultValue: '查看详情' })}
+              onClick={onClick}
+            >
+              <Info />
+            </button>
+            <button
+              type="button"
+              className="pa-icon-btn"
+              title={
+                isUpdateAvailable
+                  ? t('plugin.market.updateTo', { defaultValue: '更新到 v{{version}}', version })
+                  : t('plugin.market.installNow', { defaultValue: '立即安装' })
+              }
+              onClick={onClick}
+            >
+              <Download />
+            </button>
+          </div>
+        </div>
       </div>
-    </button>
+    </article>
   )
 }
 
-function InstallStatus({
-  isInstalled,
-  isUpdateAvailable,
-  isFresh,
-}: {
-  isInstalled: boolean
-  isUpdateAvailable: boolean
-  isFresh: boolean
-}) {
-  const { t } = useTranslation()
-  if (isUpdateAvailable) {
-    return (
-      <span className="pa-market-badge is-update">
-        <Download size={9} style={{ marginRight: 2, verticalAlign: -1 }} />
-        {t('plugin.market.badgeUpdate', { defaultValue: 'Update' })}
-      </span>
-    )
+/**
+ * `YYYY-MM-DD` for a date string (ISO 8601 expected). Falls back
+ * to the input string if parsing fails so a malformed `publishedAt`
+ * never crashes the card.
+ */
+function formatDate(dateStr: string): string {
+  if (!dateStr) return ''
+  try {
+    const d = new Date(dateStr)
+    if (Number.isNaN(d.getTime())) return dateStr
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  } catch {
+    return dateStr
   }
-  if (isInstalled) {
-    return (
-      <span className="pa-market-badge is-installed">
-        <CheckCircle2 size={9} style={{ marginRight: 2, verticalAlign: -1 }} />
-        {t('plugin.market.badgeInstalled', { defaultValue: 'Installed' })}
-      </span>
-    )
-  }
-  if (isFresh) {
-    return (
-      <span className="pa-market-badge is-install">
-        <Download size={9} style={{ marginRight: 2, verticalAlign: -1 }} />
-        {t('plugin.market.badgeInstall', { defaultValue: 'Install' })}
-      </span>
-    )
-  }
-  return null
 }
 
 export { PluginMarketView }
