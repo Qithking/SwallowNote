@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-06-13T00:00:00Z",
+  "pubkey_b64": "TIJJekgAX+EAyx3OsQGDskNPrtpkr2YW+rqtb73QqVk=",
+  "plugins": [
+    {
+      "id": "com.swallownote.export",
+      "name": "文档导出",
+      "version": "0.1.0",
+      "description": "将 Markdown 文档导出为 Word (.docx) 或 PDF 格式",
+      "author": "SwallowNote",
+      "tags": ["export", "document", "pdf", "docx"],
+      "download_url": "./com.swallownote.export-0.1.0.zip",
+      "sha256": "edf8ac83073521a01350c20c629c42ca133fac59de2904cd5d9739029cb93a39",
+      "signature_b64": "L1xXAavpcZyoo+dq3QqmMoLCxyFm8gwf+cY3tYNNkMJrLXi7AlElNob+BwPzLVyMkrsXCcB31dFFf5u7hsYeDg==",
+      "pubkey_b64": "",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "download_url": "./com.swallownote.export-0.1.0.zip",
+          "sha256": "edf8ac83073521a01350c20c629c42ca133fac59de2904cd5d9739029cb93a39",
+          "changelog": "初版发布：支持 Markdown 导出为 Word (.docx) 和 PDF",
+          "published_at": "2026-06-13T00:00:00Z"
+        }
+      ],
+      "dependencies": []
+    }
+  ]
+}
