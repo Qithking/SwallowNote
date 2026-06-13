@@ -22,7 +22,6 @@ import { Upload, Trash2, Package, Calendar, User, Tag, Settings as SettingsIcon,
 import { usePluginStore, useUIStore } from '@/stores'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
-import { renderPluginIcon } from '@/lib/plugin-utils'
 import { buildPluginContext, getPluginStorage, createPluginEventBus } from '@/lib/plugin-host'
 import { open } from '@tauri-apps/plugin-dialog'
 import { toast } from 'sonner'
@@ -30,6 +29,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -330,112 +330,106 @@ function PluginManagerView() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="grid gap-3 grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 3xl:grid-cols-6">
                 {plugins.map((plugin) => (
-                  <div
+                  <Card
                     key={plugin.id}
-                    className="flex items-start gap-4 p-4 rounded-lg border"
                     style={{
                       borderColor: 'var(--border-color)',
                       background: 'var(--bg-primary)',
                       opacity: plugin.enabled ? 1 : 0.6,
                     }}
                   >
-                    {/* Plugin Icon */}
-                    <div
-                      className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ background: 'var(--bg-hover)' }}
-                    >
-                      {renderPluginIcon(plugin.icon, 20)}
-                    </div>
-
-                    {/* Plugin Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                          {plugin.name}
-                        </span>
-                        {plugin.version && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}>
-                            <Tag size={8} className="inline mr-0.5" />
-                            {plugin.version}
+                    <CardContent className="p-4 flex flex-col gap-3">
+                      {/* Plugin Info */}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                            {plugin.name}
                           </span>
+                          {plugin.version && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}>
+                              <Tag size={8} className="inline mr-0.5" />
+                              {plugin.version}
+                            </span>
+                          )}
+                        </div>
+                        {plugin.description && (
+                          <p
+                            className="text-xs mt-1 overflow-hidden"
+                            style={{
+                              color: 'var(--text-muted)',
+                              height: '48px',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 3,
+                              WebkitBoxOrient: 'vertical',
+                            }}
+                          >
+                            {plugin.description}
+                          </p>
                         )}
                       </div>
-                      {plugin.description && (
-                        <p className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--text-muted)' }}>
-                          {plugin.description}
-                        </p>
-                      )}
-                      <div className="flex items-center gap-3 mt-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                        {plugin.author && (
-                          <span className="flex items-center gap-0.5">
-                            <User size={9} />
-                            {plugin.author}
-                          </span>
-                        )}
-                        {plugin.publishedAt && (
-                          <span className="flex items-center gap-0.5">
-                            <Calendar size={9} />
-                            {formatDate(plugin.publishedAt)}
-                          </span>
-                        )}
-                        <span className="px-1.5 py-0.5 rounded" style={{ background: 'var(--bg-hover)' }}>
-                          {t(`plugin.iconPosition.${plugin.iconPosition}`)}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded" style={{ background: 'var(--bg-hover)' }}>
-                          {t(`plugin.contentPosition.${plugin.contentPosition}`)}
-                        </span>
-                        {plugin.hasBackend && (
-                          <span className="px-1.5 py-0.5 rounded" style={{ background: 'var(--bg-warning)', color: 'var(--text-warning)' }}>
-                            Rust
-                          </span>
-                        )}
-                      </div>
-                    </div>
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      {plugin.settings && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-7 h-7"
-                          title={t('plugin.settings')}
-                          onClick={() => openSettings(plugin)}
-                        >
-                          <SettingsIcon size={14} />
-                        </Button>
-                      )}
-                      {/* Permissions button. We show this whenever the
-                          plugin declares any permissions; without a
-                          declared list the dialog would have nothing
-                          to display, so we hide the entry point. */}
-                      {plugin.permissions.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-7 h-7"
-                          title={t('plugin.permissions')}
-                          onClick={() => openPermissions(plugin)}
-                        >
-                          <Shield size={14} />
-                        </Button>
-                      )}
-                      <Switch
-                        checked={plugin.enabled}
-                        onCheckedChange={(checked) => handleToggleEnabled(plugin, checked)}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-7 h-7"
-                        onClick={() => handleUninstall(plugin)}
-                      >
-                        <Trash2 size={14} className="text-[var(--color-error)]" />
-                      </Button>
-                    </div>
-                  </div>
+                      {/* Meta & Actions - 分为上下两行 */}
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                          {plugin.author && (
+                            <span className="flex items-center gap-0.5 truncate">
+                              <User size={9} className="shrink-0" />
+                              {plugin.author}
+                            </span>
+                          )}
+                          {plugin.publishedAt && (
+                            <span className="flex items-center gap-0.5 shrink-0">
+                              <Calendar size={9} />
+                              {formatDate(plugin.publishedAt)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <div className='flex'>
+                            {plugin.settings && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-7 h-7"
+                                title={t('plugin.settings')}
+                                onClick={() => openSettings(plugin)}
+                              >
+                                <SettingsIcon size={14} />
+                              </Button>
+                            )}
+                            {/* Permissions button */}
+                            {plugin.permissions.length > 0 && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="w-7 h-7"
+                                title={t('plugin.permissions')}
+                                onClick={() => openPermissions(plugin)}
+                              >
+                                <Shield size={14} />
+                              </Button>
+                            )}
+                          </div>
+                          <div className='flex'>
+                            <Switch
+                              checked={plugin.enabled}
+                              onCheckedChange={(checked) => handleToggleEnabled(plugin, checked)}
+                            />
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="w-7 h-7"
+                              onClick={() => handleUninstall(plugin)}
+                            >
+                              <Trash2 size={14} className="text-[var(--color-error)]" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             )}
