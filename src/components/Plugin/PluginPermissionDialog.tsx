@@ -103,6 +103,11 @@ export function PluginPermissionDialog({
     return wasGranted !== isSelected
   })
 
+  // Warn if the user hasn't selected any permissions — the plugin
+  // will install but all protected operations (storage, events, etc.)
+  // will throw at runtime, effectively making the plugin non-functional.
+  const noPermissionsSelected = selectedPermissions.length === 0
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent style={{ maxWidth: 480 }}>
@@ -232,17 +237,33 @@ export function PluginPermissionDialog({
           </div>
         )}
 
-        <DialogFooter style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting} style={{ flex: 1 }}>
-            {t('plugin.permission.cancel')}
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={isSubmitting || !hasChanges}
-            style={{ flex: 1 }}
-          >
-            {isSubmitting ? t('plugin.permission.saving') : t('plugin.permission.save')}
-          </Button>
+        <DialogFooter style={{ display: 'flex', gap: 8, marginTop: 16, flexDirection: 'column' }}>
+          {noPermissionsSelected && permissions.length > 0 && (
+            <div
+              style={{
+                padding: '6px 10px',
+                background: 'rgba(251, 191, 36, 0.1)',
+                border: '1px solid rgba(251, 191, 36, 0.3)',
+                borderRadius: 4,
+                fontSize: 11,
+                color: '#d97706',
+              }}
+            >
+              {t('plugin.permission.noPermissionWarning', { defaultValue: '未授权任何权限，插件可能无法正常工作' })}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="outline" onClick={onClose} disabled={isSubmitting} style={{ flex: 1 }}>
+              {t('plugin.permission.cancel')}
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={isSubmitting || !hasChanges}
+              style={{ flex: 1 }}
+            >
+              {isSubmitting ? t('plugin.permission.saving') : t('plugin.permission.save')}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

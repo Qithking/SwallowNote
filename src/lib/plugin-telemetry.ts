@@ -108,6 +108,8 @@ export function recordEventMetric(
   if (eventMetrics.length > MAX_METRICS_PER_TYPE) {
     eventMetrics.shift()
   }
+  _metricsCache = null
+  _groupsCache = null
 }
 
 /** Record a storage operation */
@@ -134,6 +136,8 @@ export function recordStorageMetric(
   if (storageMetrics.length > MAX_METRICS_PER_TYPE) {
     storageMetrics.shift()
   }
+  _metricsCache = null
+  _groupsCache = null
   
   // Update storage size tracking. The host now passes a signed
   // `dataSize` for `set` (new − old) so an overwrite of a 100-byte
@@ -172,6 +176,8 @@ export function recordHookMetric(
   if (hookMetrics.length > MAX_METRICS_PER_TYPE) {
     hookMetrics.shift()
   }
+  _metricsCache = null
+  _groupsCache = null
 }
 
 /** Record a backend IPC call */
@@ -194,6 +200,8 @@ export function recordBackendMetric(
   if (backendMetrics.length > MAX_METRICS_PER_TYPE) {
     backendMetrics.shift()
   }
+  _metricsCache = null
+  _groupsCache = null
 }
 
 // ─── Query functions ──────────────────────────────────────────────────────────
@@ -218,53 +226,137 @@ export function getBackendMetrics(): readonly BackendMetric[] {
   return backendMetrics
 }
 
-/** Get aggregated metrics for a plugin */
-export function getPluginMetrics(pluginId: string): PluginMetrics {
-  const pluginEvents = eventMetrics.filter((m) => m.pluginId === pluginId)
-  const pluginStorage = storageMetrics.filter((m) => m.pluginId === pluginId)
-  const pluginHooks = hookMetrics.filter((m) => m.pluginId === pluginId)
-  const pluginBackend = backendMetrics.filter((m) => m.pluginId === pluginId)
-  
-  const totalErrors = 
-    pluginEvents.reduce((sum, m) => sum + m.errors, 0) +
-    pluginStorage.filter((m) => !m.success).length +
-    pluginHooks.filter((m) => !m.success).length +
-    pluginBackend.filter((m) => !m.success).length
-  
-  const eventDurations = pluginEvents.map((m) => m.totalDurationMs)
-  const storageDurations = pluginStorage.map((m) => m.durationMs)
-  
-  const lastActivity = Math.max(
-    0,
-    ...pluginEvents.map((m) => m.timestamp),
-    ...pluginStorage.map((m) => m.timestamp),
-    ...pluginHooks.map((m) => m.timestamp),
-    ...pluginBackend.map((m) => m.timestamp)
-  )
-  
+/**
+ * Get aggregated metrics for a plugin.
+ *
+ * Performance: the previous implementation called `.filter()` on
+ * all four metric arrays per plugin, which made the typical
+ * `getAllPluginMetrics()` call O(4 × N × M) (N plugins × M total
+ * metrics). For a 200-plugin install with 1000 events buffered
+ * per type, that's 800 000 array allocations + scans per click.
+ *
+ * We pre-group the metrics by plugin id into per-id lists (one
+ * pass per array, O(M)) and reuse the groups across all
+ * `getPluginMetrics` calls. The total cost of a full snapshot
+ * is now O(4M + N) instead of O(4NM).
+ */
+type PluginMetricGroup = {
+  events: EventMetric[]
+  storage: StorageMetric[]
+  hooks: HookMetric[]
+  backend: BackendMetric[]
+}
+
+let _groupsCache: Map<string, PluginMetricGroup> | null = null
+let _groupsCacheAt = 0
+const GROUPS_CACHE_TTL_MS = 1000
+
+function getMetricGroups(): Map<string, PluginMetricGroup> {
+  const now = Date.now()
+  if (_groupsCache && now - _groupsCacheAt < GROUPS_CACHE_TTL_MS) {
+    return _groupsCache
+  }
+  const groups = new Map<string, PluginMetricGroup>()
+  const ensure = (id: string): PluginMetricGroup => {
+    let g = groups.get(id)
+    if (!g) {
+      g = { events: [], storage: [], hooks: [], backend: [] }
+      groups.set(id, g)
+    }
+    return g
+  }
+  for (const m of eventMetrics) ensure(m.pluginId).events.push(m)
+  for (const m of storageMetrics) ensure(m.pluginId).storage.push(m)
+  for (const m of hookMetrics) ensure(m.pluginId).hooks.push(m)
+  for (const m of backendMetrics) ensure(m.pluginId).backend.push(m)
+  _groupsCache = groups
+  _groupsCacheAt = now
+  return groups
+}
+
+function summariseGroup(pluginId: string, g: PluginMetricGroup): PluginMetrics {
+  let totalEvents = 0
+  let totalStorageOps = 0
+  let totalHookInvocations = 0
+  let totalBackendCalls = 0
+  let totalErrors = 0
+  let eventDurationSum = 0
+  let storageDurationSum = 0
+  let lastActivity = 0
+
+  for (const m of g.events) {
+    totalEvents++
+    eventDurationSum += m.totalDurationMs
+    totalErrors += m.errors
+    if (m.timestamp > lastActivity) lastActivity = m.timestamp
+  }
+  for (const m of g.storage) {
+    totalStorageOps++
+    storageDurationSum += m.durationMs
+    if (m.timestamp > lastActivity) lastActivity = m.timestamp
+    if (!m.success) totalErrors++
+  }
+  for (const m of g.hooks) {
+    totalHookInvocations++
+    if (m.timestamp > lastActivity) lastActivity = m.timestamp
+    if (!m.success) totalErrors++
+  }
+  for (const m of g.backend) {
+    totalBackendCalls++
+    if (m.timestamp > lastActivity) lastActivity = m.timestamp
+    if (!m.success) totalErrors++
+  }
+
   return {
     pluginId,
-    totalEvents: pluginEvents.length,
-    totalStorageOps: pluginStorage.length,
-    totalHookInvocations: pluginHooks.length,
-    totalBackendCalls: pluginBackend.length,
+    totalEvents,
+    totalStorageOps,
+    totalHookInvocations,
+    totalBackendCalls,
     totalErrors,
-    averageEventDurationMs: average(eventDurations),
-    averageStorageDurationMs: average(storageDurations),
+    averageEventDurationMs: totalEvents === 0 ? 0 : eventDurationSum / totalEvents,
+    averageStorageDurationMs: totalStorageOps === 0 ? 0 : storageDurationSum / totalStorageOps,
     storageSizeBytes: pluginStorageSize.get(pluginId) ?? 0,
     lastActivity,
   }
 }
 
+export function getPluginMetrics(pluginId: string): PluginMetrics {
+  const groups = getMetricGroups()
+  const g = groups.get(pluginId) ?? {
+    events: [],
+    storage: [],
+    hooks: [],
+    backend: [],
+  }
+  return summariseGroup(pluginId, g)
+}
+
 /** Get metrics for all plugins */
+let _metricsCache: PluginMetrics[] | null = null
+let _metricsCacheAt = 0
+const METRICS_CACHE_TTL_MS = 1000
+
 export function getAllPluginMetrics(): PluginMetrics[] {
-  const pluginIds = new Set<string>()
-  eventMetrics.forEach((m) => pluginIds.add(m.pluginId))
-  storageMetrics.forEach((m) => pluginIds.add(m.pluginId))
-  hookMetrics.forEach((m) => pluginIds.add(m.pluginId))
-  backendMetrics.forEach((m) => pluginIds.add(m.pluginId))
-  
-  return Array.from(pluginIds).map((id) => getPluginMetrics(id))
+  const now = Date.now()
+  if (_metricsCache && now - _metricsCacheAt < METRICS_CACHE_TTL_MS) {
+    return _metricsCache
+  }
+
+  // Reuse the pre-grouped metrics from `getMetricGroups` (O(4M))
+  // and summarise each plugin in a single pass. The previous
+  // implementation called `getPluginMetrics(id)` per id, which
+  // looked up the group, only to immediately throw it away — but
+  // because `getPluginMetrics` did its own `.filter()` scan over
+  // all four arrays, the total cost was O(4M) per call × N ids.
+  const groups = getMetricGroups()
+  const result: PluginMetrics[] = []
+  for (const [id, g] of groups) {
+    result.push(summariseGroup(id, g))
+  }
+  _metricsCache = result
+  _metricsCacheAt = now
+  return result
 }
 
 /** Clear all metrics */
@@ -274,6 +366,8 @@ export function clearAllMetrics(): void {
   hookMetrics.length = 0
   backendMetrics.length = 0
   pluginStorageSize.clear()
+  _metricsCache = null
+  _groupsCache = null
 }
 
 /** Clear metrics for a specific plugin. We splice each array in
@@ -293,6 +387,8 @@ export function clearPluginMetrics(pluginId: string): void {
     if (backendMetrics[i].pluginId === pluginId) backendMetrics.splice(i, 1)
   }
   pluginStorageSize.delete(pluginId)
+  _metricsCache = null
+  _groupsCache = null
 }
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
@@ -304,13 +400,6 @@ function estimatePayloadSize(payload: unknown): number {
   } catch {
     return 0
   }
-}
-
-/** Calculate average of a number array */
-function average(values: number[]): number {
-  if (values.length === 0) return 0
-  const sum = values.reduce((a, b) => a + b, 0)
-  return sum / values.length
 }
 
 /** Measure execution time of an async function */

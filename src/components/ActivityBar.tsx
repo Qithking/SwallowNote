@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { pluginSidebarView, pluginRightPanelType, isFullPanelPluginActive, renderPluginIcon, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
 import type { PluginDefinition } from '@/types/plugin'
 import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
+import { preloadPluginManager } from '@/App'
 
 const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'explorer', icon: FolderTree },
@@ -203,6 +204,7 @@ function ActivityBar() {
                 setSidebarView('plugin:__plugin_manager' as SidebarView)
               }
             }}
+            onMouseEnter={preloadPluginManager}
             className={`w-[36px] h-[36px] flex items-center justify-center relative cursor-pointer rounded-lg ${settingsPanelVisible && sidebarView === 'plugin:__plugin_manager' ? 'bg-primary/10' : ''}`}
             style={{
               color: settingsPanelVisible && sidebarView === 'plugin:__plugin_manager' ? 'var(--activity-foreground)' : 'var(--activity-inactive)',

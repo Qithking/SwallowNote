@@ -991,26 +991,67 @@ pub async fn install_plugin_from_bytes(
  * `tokio::task::spawn_blocking`.
  */
 #[tauri::command]
-pub fn check_plugin_updates(
+pub async fn check_plugin_updates(
     app_handle: tauri::AppHandle,
     repo_url: String,
 ) -> Result<Vec<PluginUpdateInfo>, PluginError> {
     if repo_url.is_empty() {
         return Err(PluginError::InvalidInput("repo_url is required".to_string()));
     }
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
+
+    // Performance: the previous implementation was a sync `pub fn`
+    // that used `reqwest::blocking::Client` and blocked the Tauri
+    // main thread for up to 15s on every call. Because the manager
+    // view triggers `refreshUpdates` 500ms after mount, a single
+    // unreachable / slow repo URL held the whole Rust IPC queue
+    // hostage — every other Tauri command (`scan_plugins`,
+    // `toggle_plugin_enabled`, etc.) was queued behind it.
+    //
+    // Two changes here:
+    //   1. `pub async fn` + non-blocking `reqwest::Client` so the
+    //      call runs on Tauri's async runtime instead of pinning the
+    //      main thread. The 15s timeout moves to a per-request
+    //      `tokio::time::timeout` so a single misbehaving repo can't
+    //      stall the caller for the full default.
+    //   2. A 30s in-memory cache keyed by repo URL. The frontend
+    //      already had a 60s cache on the index payload, but the
+    //      Rust side re-fetched on every call because it was
+    //      stateless. Caching here is the only way to make
+    //      `refreshUpdates` cheap on tab switches / re-mounts.
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
+    use tokio::sync::Mutex;
+
+    static UPDATES_CACHE: OnceLock<Mutex<Option<(String, Instant, Vec<PluginUpdateInfo>)>>> =
+        OnceLock::new();
+    let cache = UPDATES_CACHE.get_or_init(|| Mutex::new(None));
+    const UPDATES_CACHE_TTL: Duration = Duration::from_secs(30);
+    const UPDATES_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+
+    {
+        let guard = cache.lock().await;
+        if let Some((cached_url, at, updates)) = guard.as_ref() {
+            if cached_url == &repo_url && at.elapsed() < UPDATES_CACHE_TTL {
+                return Ok(updates.clone());
+            }
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(UPDATES_HTTP_TIMEOUT)
         .build()
         .map_err(|e| PluginError::Io(format!("Failed to build http client: {}", e)))?;
-    let response = client
-        .get(&repo_url)
-        .send()
+
+    let response = tokio::time::timeout(UPDATES_HTTP_TIMEOUT, client.get(&repo_url).send())
+        .await
+        .map_err(|_| PluginError::Io("Plugin index request timed out".to_string()))?
         .map_err(|e| PluginError::Io(format!("Failed to fetch plugin index: {}", e)))?;
     let response = response
         .error_for_status()
         .map_err(|e| PluginError::Io(format!("Plugin index returned error: {}", e)))?;
     let index: PluginIndex = response
         .json()
+        .await
         .map_err(|e| PluginError::Io(format!("Failed to parse plugin index: {}", e)))?;
 
     // Build a `plugin_id → active_version` map by walking the local
@@ -1065,6 +1106,16 @@ pub fn check_plugin_updates(
             });
         }
     }
+
+    // Write-through cache so the next `refreshUpdates` (e.g. on tab
+    // re-mount or window focus) hits the 30s TTL window without
+    // re-fetching. We swallow the lock error here because a poisoned
+    // cache is not worth failing the whole call.
+    {
+        let mut guard = cache.lock().await;
+        *guard = Some((repo_url, Instant::now(), updates.clone()));
+    }
+
     Ok(updates)
 }
 

@@ -48,6 +48,14 @@ export function usePluginStorage<T = unknown>(
 ): [T, (next: T | ((prev: T) => T) | null) => void] {
   const { store } = panel
   const [value, setValue] = useState<T>(initialValue)
+  // Track the latest value in a ref so the `set` callback always
+  // reads the current state instead of a stale closure capture.
+  // Without this, rapid consecutive calls like
+  //   set(v => v + 1); set(v => v + 1)
+  // would both read the same `value` snapshot and the second
+  // increment would be lost.
+  const valueRef = useRef(value)
+  valueRef.current = value
 
   useEffect(() => {
     let cancelled = false
@@ -75,14 +83,16 @@ export function usePluginStorage<T = unknown>(
         void store.delete(key)
         return
       }
-      const resolved = typeof next === 'function' ? (next as (p: T) => T)(value) : next
+      const resolved = typeof next === 'function' ? (next as (p: T) => T)(valueRef.current) : next
       setValue(resolved)
+      valueRef.current = resolved
       void store.set(key, resolved)
     },
-    // `value` is captured so the function-form update has the latest
-    // state. `initialValue` is included for the same reason – if a
-    // parent ever swaps the hook's initial value, we honour that.
-    [key, store, value, initialValue]
+    // `valueRef` is stable and always current, so we don't need
+    // `value` in the deps. `initialValue` is included for the
+    // null-delete path – if a parent ever swaps the hook's initial
+    // value, we honour that.
+    [key, store, initialValue]
   )
 
   return [value, set]

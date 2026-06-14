@@ -28,7 +28,7 @@
  * unit with a 4px coloured stripe at the top, an italic
  * display name, a 2-line description clamp, and a tag row.
  */
-import { useState } from 'react'
+import { useMemo, useState, useEffect, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Calendar,
@@ -47,6 +47,13 @@ const SPINE_CLASSES = [
   'pa-spine-c9', 'pa-spine-c10', 'pa-spine-c11', 'pa-spine-c12',
 ] as const
 
+// Stable style objects — pulled out of the render path so a card
+// re-render doesn't allocate two new `style` literals per card.
+// Inline-style allocation in the byline is intentional, but
+// the same literal was being recreated on every render even
+// when the relevant icons (User, Calendar) weren't visible.
+const ICON_STYLE = { marginRight: 3, verticalAlign: -1 } as const
+
 export interface PluginInstalledCardProps {
   plugin: PluginDefinition
   /** 1-based position, used to pick the spine colour (mod 12). */
@@ -55,16 +62,15 @@ export interface PluginInstalledCardProps {
   hasUpdate?: boolean
   /** Optional host error to render in the error bar. */
   error?: string | null
-  onToggle?: (enabled: boolean) => void
+  onToggle?: (enabled: boolean) => void | Promise<void>
   onUninstall?: () => void
   onUpdate?: () => void
   onSettings?: () => void
   onPermissions?: () => void
 }
 
-export function PluginInstalledCard({
+const PluginInstalledCardInner = memo(function PluginInstalledCard({
   plugin,
-  index,
   hasUpdate = false,
   error = null,
   onToggle,
@@ -84,45 +90,83 @@ export function PluginInstalledCard({
   // view toggled the same plugin), re-sync. Only fires when
   // the values differ and there's no error to avoid thrash
   // while the host is still surfacing one.
-  if (switchOn !== plugin.enabled && !error) {
-    setSwitchOn(plugin.enabled)
-  }
+  // Use useEffect to avoid setState during render warning.
+  useEffect(() => {
+    if (switchOn !== plugin.enabled && !error) {
+      setSwitchOn(plugin.enabled)
+    }
+  }, [plugin.enabled, error, switchOn])
 
-  const spineClass = SPINE_CLASSES[(index - 1) % SPINE_CLASSES.length]
+  // Use plugin id hash for stable spine color instead of filtered index
+  // to prevent color jumping when filtering/searching
+  const spineClass = useMemo(() => {
+    let hash = 0
+    for (let i = 0; i < plugin.id.length; i++) {
+      hash = ((hash << 5) - hash) + plugin.id.charCodeAt(i)
+      hash = hash & hash // Convert to 32bit integer
+    }
+    const index = Math.abs(hash) % SPINE_CLASSES.length
+    return SPINE_CLASSES[index]
+  }, [plugin.id])
   const version = plugin.version || '—'
-  const dateText = plugin.publishedAt ? formatDate(plugin.publishedAt) : ''
+  // Memoize the byline date string. The plugin object's
+  // `publishedAt` doesn't change after the plugin is loaded, so
+  // the only thing that forces a re-render of the card is a
+  // parent update (search query, list filter, etc.) — but the
+  // date string itself is a pure function of `publishedAt`, so
+  // we cache it and skip the `new Date()` round-trip on every
+  // render. With 50+ cards and a fast-typing user, that's a
+  // 50× savings on Date construction per keystroke.
+  const dateText = useMemo(
+    () => (plugin.publishedAt ? formatDate(plugin.publishedAt) : ''),
+    [plugin.publishedAt],
+  )
 
   // ── Tag chips ────────────────────────────────────────────
   // Position (where the plugin installs in the editor chrome),
   // backend capability, permission count, pending update, and
   // any surfaced error — all rendered as small mono badges
-  // along the bottom of the card body.
-  const tags: { key: string; cls: string; label: string }[] = []
-  tags.push({
-    key: 'pos',
-    cls: 'pa-market-badge',
-    label: t(`plugin.iconPosition.${plugin.iconPosition}`, { defaultValue: plugin.iconPosition }),
-  })
-  if (plugin.hasBackend) {
-    tags.push({ key: 'backend', cls: 'pa-market-badge', label: 'backend' })
-  }
-  if (plugin.permissions.length > 0) {
-    tags.push({ key: 'perms', cls: 'pa-market-badge', label: `${plugin.permissions.length} perms` })
-  }
-  if (hasUpdate) {
-    tags.push({
-      key: 'update',
-      cls: 'pa-market-badge is-update',
-      label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }),
-    })
-  }
-  if (error) {
-    tags.push({
-      key: 'err',
-      cls: 'pa-market-badge',
-      label: t('plugin.error.title', { defaultValue: 'Error' }),
-    })
-  }
+  // along the bottom of the card body. The array was previously
+  // built in the render body of every card on every parent
+  // re-render, allocating 5 objects per card per render. For a
+  // page with 50 cards and a 60Hz UI, that's 15k allocations
+  // per second of typing in the search box. The tag content is
+  // a pure function of `(plugin, hasUpdate, error, t)`, so
+  // memoize it.
+  const tags = useMemo(() => {
+    const result: { key: string; cls: string; label: string }[] = [
+      {
+        key: 'pos',
+        cls: 'pa-market-badge',
+        label: t(`plugin.iconPosition.${plugin.iconPosition}`, { defaultValue: plugin.iconPosition }),
+      },
+    ]
+    if (plugin.hasBackend) {
+      result.push({ key: 'backend', cls: 'pa-market-badge', label: 'backend' })
+    }
+    if (plugin.permissions.length > 0) {
+      result.push({
+        key: 'perms',
+        cls: 'pa-market-badge',
+        label: `${plugin.permissions.length} perms`,
+      })
+    }
+    if (hasUpdate) {
+      result.push({
+        key: 'update',
+        cls: 'pa-market-badge is-update',
+        label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }),
+      })
+    }
+    if (error) {
+      result.push({
+        key: 'err',
+        cls: 'pa-market-badge',
+        label: t('plugin.error.title', { defaultValue: 'Error' }),
+      })
+    }
+    return result
+  }, [t, plugin.iconPosition, plugin.hasBackend, plugin.permissions, hasUpdate, error])
 
   // Status badge in the card head: green for enabled, muted
   // for disabled. Mirrors the `is-installed` colour family
@@ -151,14 +195,14 @@ export function PluginInstalledCard({
         <div className="pa-installed-byline">
           {plugin.author && (
             <span>
-              <User size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+              <User size={9} style={ICON_STYLE} />
               <b>{plugin.author}</b>
             </span>
           )}
           {plugin.author && dateText && <span className="pa-sep">·</span>}
           {dateText && (
             <span>
-              <Calendar size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+              <Calendar size={9} style={ICON_STYLE} />
               {dateText}
             </span>
           )}
@@ -194,7 +238,15 @@ export function PluginInstalledCard({
             onClick={() => {
               const next = !switchOn
               setSwitchOn(next)
-              onToggle?.(next)
+              // If the host callback rejects, revert the optimistic
+              // switch state so the UI stays consistent with the
+              // actual enabled state.
+              const result = onToggle?.(next)
+              if (result && typeof result === 'object' && 'catch' in result) {
+                ;(result as Promise<unknown>).catch(() => {
+                  setSwitchOn(!next)
+                })
+              }
             }}
           >
             <span className="pa-switch-track">
@@ -248,7 +300,9 @@ export function PluginInstalledCard({
       </div>
     </article>
   )
-}
+})
+
+export { PluginInstalledCardInner as PluginInstalledCard }
 
 function formatDate(dateStr: string): string {
   if (!dateStr) return ''

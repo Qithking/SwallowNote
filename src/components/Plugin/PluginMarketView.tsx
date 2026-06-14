@@ -26,7 +26,7 @@
  * and post-install permission dialogs are unchanged from the
  * pre-Atlas version.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import {
   Store,
@@ -44,6 +44,7 @@ import {
 import { usePluginMarketStore, usePluginStore } from '@/stores'
 import { PluginMarketDetail } from './PluginMarketDetail'
 import { PluginPermissionDialog } from './PluginPermissionDialog'
+import { VirtualizedCardGrid } from './VirtualizedCardGrid'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
 import type {
   PluginIndexEntry,
@@ -58,18 +59,36 @@ const SPINE_CLASSES = [
   'pa-spine-c9', 'pa-spine-c10', 'pa-spine-c11', 'pa-spine-c12',
 ] as const
 
+// Stable style objects — pulled out of the render path so the
+// `byline` icons (User, Calendar) don't allocate a fresh
+// inline style literal on every render of every card. With
+// 100+ marketplace entries that adds up to hundreds of
+// allocations per keystroke in the search box.
+const ICON_STYLE = { marginRight: 3, verticalAlign: -1 } as const
+
 function PluginMarketView() {
   const { t } = useTranslation()
+  // Merge selectors into fewer calls to reduce the number of
+  // selector evaluations on each store update. Zustand's shallow
+  // comparison means we only re-render when the selected slice
+  // actually changes.
   const repoUrl = usePluginMarketStore((s) => s.repoUrl)
-  const setRepoUrl = usePluginMarketStore((s) => s.setRepoUrl)
   const index = usePluginMarketStore((s) => s.index)
   const isFetchingIndex = usePluginMarketStore((s) => s.isFetchingIndex)
   const fetchError = usePluginMarketStore((s) => s.fetchError)
-  const refreshIndex = usePluginMarketStore((s) => s.refreshIndex)
+  const fetchProgress = usePluginMarketStore((s) => s.fetchProgress)
   const searchQuery = usePluginMarketStore((s) => s.searchQuery)
-  const setSearchQuery = usePluginMarketStore((s) => s.setSearchQuery)
   const tagFilter = usePluginMarketStore((s) => s.tagFilter)
+  const updates = usePluginMarketStore((s) => s.updates)
+  // Actions are stable refs from Zustand — safe to select individually.
+  const setRepoUrl = usePluginMarketStore((s) => s.setRepoUrl)
+  const refreshIndex = usePluginMarketStore((s) => s.refreshIndex)
+  const refreshIndexWithProgress = usePluginMarketStore((s) => s.refreshIndexWithProgress)
+  const setSearchQuery = usePluginMarketStore((s) => s.setSearchQuery)
   const toggleTag = usePluginMarketStore((s) => s.toggleTag)
+  const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
+  const pendingDetailId = usePluginMarketStore((s) => s.pendingDetailId)
+  const setPendingDetailId = usePluginMarketStore((s) => s.setPendingDetailId)
   // Derive `allTags` and `filteredEntries` in the component via
   // `useMemo`. Calling store methods directly through the selector
   // — `usePluginMarketStore((s) => s.allTags())` — is a classic
@@ -110,12 +129,36 @@ function PluginMarketView() {
       )
     })
   }, [index, searchQuery, tagFilter])
-  const updates = usePluginMarketStore((s) => s.updates)
-  const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
   const localVersionFor = usePluginMarketStore((s) => s.localVersionFor)
+  
+  // Pre-compute update info map to avoid O(N) find() for every card
+  const updateInfoMap = useMemo(() => {
+    const map = new Map<string, { localVersion: string; remoteVersion: string; sha256: string }>()
+    for (const u of updates) {
+      if (u.localVersion !== u.remoteVersion) {
+        map.set(u.id, { localVersion: u.localVersion, remoteVersion: u.remoteVersion, sha256: u.sha256 })
+      }
+    }
+    return map
+  }, [updates])
 
   const [draftUrl, setDraftUrl] = useState(repoUrl)
   const [detailEntry, setDetailEntry] = useState<PluginIndexEntry | null>(null)
+  // Stable `openDetail` callback — the marketplace grid was
+  // previously creating a fresh `() => setDetailEntry(entry)`
+  // closure for every card on every parent re-render. Combined
+  // with the `localVersionFor(entry.id)` and `updates.find(...)`
+  // calls already in the map, that meant each keystroke in the
+  // search box allocated N+2 closures. Switching to a single
+  // `openDetail` keyed on `entry.id` keeps the card list's
+  // re-render path allocation-light.
+  const openDetail = useCallback(
+    (id: string) => {
+      const entry = index?.plugins.find((p) => p.id === id) ?? null
+      setDetailEntry(entry)
+    },
+    [index],
+  )
   // Post-install permission grant queue. The marketplace install path
   // runs the same flow as the user-upload path in `PluginManagerView`:
   // the host writes the plugin, we re-scan / re-load so the entry
@@ -196,15 +239,39 @@ function PluginMarketView() {
     setDraftUrl(repoUrl)
   }, [repoUrl])
 
-  // On first mount and whenever the repo URL changes, kick off a
-  // fetch + an update check. The update check depends on the host
-  // being able to resolve app_data_dir, which is always available
-  // when the marketplace tab is rendered inside the Tauri shell.
+  // Consume the pending detail ID set by `PluginManagerView.handleUpdatePlugin`.
+  // When a user clicks "Update" on an installed card, the manager sets
+  // `pendingDetailId` and switches to the market tab. This effect opens
+  // the detail dialog for that plugin and clears the pending ID.
+  //
+  // We track whether the effect has already consumed the value so a
+  // re-render (e.g. the index reloading after a fetch) doesn't reopen
+  // the same dialog. We also short-circuit if the component unmounted
+  // mid-flight to avoid a setState-on-unmounted warning.
+  const consumedDetailRef = useRef<string | null>(null)
   useEffect(() => {
-    if (repoUrl) {
-      void refreshIndex()
-      void refreshUpdates()
+    if (!pendingDetailId || pendingDetailId === consumedDetailRef.current) return
+    if (!index) return
+    consumedDetailRef.current = pendingDetailId
+    const entry = index.plugins.find((p) => p.id === pendingDetailId)
+    if (entry) {
+      setDetailEntry(entry)
     }
+    // Defer the clear to a microtask so the `setPendingDetailId(null)`
+    // doesn't run synchronously while we're still inside the effect
+    // that read `pendingDetailId`.
+    queueMicrotask(() => setPendingDetailId(null))
+  }, [pendingDetailId, index, setPendingDetailId])
+
+  // On first mount and whenever the repo URL changes, kick off a
+  // background fetch + update check. The index cache (60s TTL) means
+  // the user sees stale data immediately while fresh data loads in
+  // the background — no blocking spinner, no empty state flash.
+  useEffect(() => {
+    if (!repoUrl) return
+    // Use background refresh to avoid clearing existing index while loading
+    void refreshIndex({ background: true })
+    void refreshUpdates({ background: true })
     // We intentionally don't depend on the function identities —
     // Zustand returns stable function refs, but listing them would
     // re-run this on every store update. The deps we care about are
@@ -258,7 +325,8 @@ function PluginMarketView() {
               type="button"
               className="pa-btn pa-btn-ghost"
               onClick={() => {
-                void refreshIndex()
+                // Manual refresh with progress tracking
+                void refreshIndexWithProgress()
                 void refreshUpdates()
               }}
               disabled={!repoUrl || isFetchingIndex}
@@ -272,6 +340,18 @@ function PluginMarketView() {
               {t('plugin.pa.market.keyVerified')}
             </span>
           </div>
+          {/* Progress bar for index fetch */}
+          {isFetchingIndex && (
+            <div className="pa-market-progress">
+              <div className="pa-market-progress-bar">
+                <div
+                  className="pa-market-progress-fill"
+                  style={{ width: `${fetchProgress}%` }}
+                />
+              </div>
+              <span className="pa-market-progress-text">{fetchProgress}%</span>
+            </div>
+          )}
         </div>
       </section>
 
@@ -350,48 +430,49 @@ function PluginMarketView() {
       )}
 
       {/* ── Body ──────────────────────────────────────── */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        {!repoUrl ? (
-          <EmptyState
-            icon={<Store size={28} />}
-            title={t('plugin.market.emptyTitle', { defaultValue: '尚未配置仓库' })}
-            hint={t('plugin.market.emptyHint', {
-              defaultValue: '在顶部粘贴一个 repo.json 的 URL，SwallowNote 会拉取并展示所有可用插件。',
-            })}
-          />
-        ) : isFetchingIndex && !index ? (
-          <EmptyState
-            icon={<RefreshCw size={28} className="animate-spin" />}
-            title={t('plugin.market.loading', { defaultValue: '正在加载仓库…' })}
-          />
-        ) : filteredEntries.length === 0 ? (
-          <EmptyState
-            icon={<Package size={28} />}
-            title={t('plugin.market.noResults', { defaultValue: '没有匹配的插件' })}
-            hint={
-              searchQuery
-                ? t('plugin.market.noResultsHint', { defaultValue: '尝试调整搜索词或清空标签过滤。' })
-                : undefined
-            }
-          />
-        ) : (
-          <div className="pa-market-grid">
-            {filteredEntries.map((entry, idx) => (
-              <PluginMarketCard
-                key={entry.id}
-                entry={entry}
-                spineClass={SPINE_CLASSES[idx % SPINE_CLASSES.length]}
-                localVersion={localVersionFor(entry.id)}
-                updateInfo={updates.find((u) => u.id === entry.id)}
-                onClick={() => setDetailEntry(entry)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      {!repoUrl ? (
+        <EmptyState
+          icon={<Store size={28} />}
+          title={t('plugin.market.emptyTitle', { defaultValue: '尚未配置仓库' })}
+          hint={t('plugin.market.emptyHint', {
+            defaultValue: '在顶部粘贴一个 repo.json 的 URL，SwallowNote 会拉取并展示所有可用插件。',
+          })}
+        />
+      ) : isFetchingIndex && !index ? (
+        <EmptyState
+          icon={<RefreshCw size={28} className="animate-spin" />}
+          title={t('plugin.market.loading', { defaultValue: '正在加载仓库…' })}
+        />
+      ) : filteredEntries.length === 0 ? (
+        <EmptyState
+          icon={<Package size={28} />}
+          title={t('plugin.market.noResults', { defaultValue: '没有匹配的插件' })}
+          hint={
+            searchQuery
+              ? t('plugin.market.noResultsHint', { defaultValue: '尝试调整搜索词或清空标签过滤。' })
+              : undefined
+          }
+        />
+      ) : (
+        <VirtualizedCardGrid
+          items={filteredEntries}
+          estimatedRowHeight={220}
+          className="pa-market-grid"
+          renderItem={(entry, idx) => (
+            <PluginMarketCard
+              key={entry.id}
+              entry={entry}
+              spineClass={SPINE_CLASSES[idx % SPINE_CLASSES.length]}
+              localVersion={localVersionFor(entry.id)}
+              updateInfo={updateInfoMap.get(entry.id)}
+              onClick={() => openDetail(entry.id)}
+            />
+          )}
+        />
+      )}
 
       {/* ── Detail dialog ─────────────────────────────── */}
-      {detailEntry && index && (
+      {detailEntry && index ? (
         <PluginMarketDetail
           entry={detailEntry}
           index={index}
@@ -399,7 +480,7 @@ function PluginMarketView() {
           onClose={() => setDetailEntry(null)}
           onInstalled={handleInstalled}
         />
-      )}
+      ) : null}
 
       {/* ── Post-install permission dialog ────────────── */}
       {pendingPermissionGrant && (
@@ -470,7 +551,7 @@ function EmptyState({
  * state at a glance, and the info icon is a fallback for users
  * who want to read the changelog before installing.
  */
-function PluginMarketCard({
+const PluginMarketCard = memo(function PluginMarketCard({
   entry,
   spineClass,
   localVersion,
@@ -492,7 +573,16 @@ function PluginMarketCard({
   // entry's own `version` field for older indexes that don't ship
   // a `versions` array.
   const publishedAt = entry.versions?.[0]?.publishedAt ?? ''
-  const dateText = publishedAt ? formatDate(publishedAt) : ''
+  // Memoize the formatted byline date. The plugin entry's
+  // `versions` list doesn't change after the index is fetched, so
+  // the date string is a pure function of `publishedAt` — caching
+  // it here means a parent re-render (search box typing, tag
+  // filter toggle) doesn't repeat the `new Date()` round-trip
+  // for every card.
+  const dateText = useMemo(
+    () => (publishedAt ? formatDate(publishedAt) : ''),
+    [publishedAt],
+  )
   const version = entry.version || '—'
 
   // ── Tag chips ────────────────────────────────────────────
@@ -502,27 +592,31 @@ function PluginMarketCard({
   // availability. Same `.pa-market-badge` chrome, different
   // content. We show up to 3 tags (matching the segmented filter
   // row above) plus a deps counter when the plugin ships with
-  // peer dependencies.
-  const tags: { key: string; cls: string; label: string }[] = []
-  if (entry.tags) {
-    for (const tag of entry.tags.slice(0, 3)) {
-      tags.push({ key: `tag-${tag}`, cls: 'pa-market-badge', label: tag })
+  // peer dependencies. Memoized so a parent re-render doesn't
+  // re-allocate the chips array for every card.
+  const tags = useMemo(() => {
+    const result: { key: string; cls: string; label: string }[] = []
+    if (entry.tags) {
+      for (const tag of entry.tags.slice(0, 3)) {
+        result.push({ key: `tag-${tag}`, cls: 'pa-market-badge', label: tag })
+      }
     }
-  }
-  if (entry.dependencies && entry.dependencies.length > 0) {
-    tags.push({
-      key: 'deps',
-      cls: 'pa-market-badge',
-      label: `${entry.dependencies.length} deps`,
-    })
-  }
-  if (isUpdateAvailable) {
-    tags.push({
-      key: 'update',
-      cls: 'pa-market-badge is-update',
-      label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }),
-    })
-  }
+    if (entry.dependencies && entry.dependencies.length > 0) {
+      result.push({
+        key: 'deps',
+        cls: 'pa-market-badge',
+        label: `${entry.dependencies.length} deps`,
+      })
+    }
+    if (isUpdateAvailable) {
+      result.push({
+        key: 'update',
+        cls: 'pa-market-badge is-update',
+        label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }),
+      })
+    }
+    return result
+  }, [entry.tags, entry.dependencies, isUpdateAvailable, t])
 
   // Status badge in the card head. Mirrors the `is-installed`
   // colour family of the Installed card, plus an accent colour
@@ -568,14 +662,14 @@ function PluginMarketCard({
         <div className="pa-installed-byline">
           {entry.author && (
             <span>
-              <User size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+              <User size={9} style={ICON_STYLE} />
               <b>{entry.author}</b>
             </span>
           )}
           {entry.author && dateText && <span className="pa-sep">·</span>}
           {dateText && (
             <span>
-              <Calendar size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+              <Calendar size={9} style={ICON_STYLE} />
               {dateText}
             </span>
           )}
@@ -656,7 +750,7 @@ function PluginMarketCard({
       </div>
     </article>
   )
-}
+})
 
 /**
  * `YYYY-MM-DD` for a date string (ISO 8601 expected). Falls back

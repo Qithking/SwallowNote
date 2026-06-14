@@ -297,17 +297,59 @@ function attachPluginModule(
 /**
  * Load all plugins: scan metadata from Rust, then load JS modules.
  * Returns PluginDefinition[] ready for the plugin store.
+ *
+/**
+ * Plugins are loaded with bounded concurrency to avoid overwhelming
+ * the browser's module loader with too many simultaneous `import()`
+ * calls from blob URLs. Each import triggers parse → link →
+ * evaluate, which is CPU-bound and benefits from not running
+ * dozens in parallel.
+ *
+ * The base concurrency (`LOAD_CONCURRENCY_BASE = 4`) is tuned for
+ * a typical mix of small and medium plugins. We scale up slightly
+ * for larger install sets because the same wall-clock time can
+ * absorb more work in parallel; we cap at 8 because going past
+ * that point starts to thrash the V8 module cache and balloon
+ * memory. The lower bound is `min(2, items.length)` so we never
+ * spin up more workers than there are plugins to load.
  */
+const LOAD_CONCURRENCY_BASE = 4
+const LOAD_CONCURRENCY_MAX = 8
+const LOAD_CONCURRENCY_LARGE_SET = 50
+
+function loadConcurrencyFor(count: number): number {
+  if (count <= 1) return count
+  if (count >= LOAD_CONCURRENCY_LARGE_SET) return LOAD_CONCURRENCY_MAX
+  return LOAD_CONCURRENCY_BASE
+}
+
+async function loadWithConcurrency<T>(
+  items: T[],
+  fn: (item: T) => Promise<PluginDefinition>,
+): Promise<PluginDefinition[]> {
+  const results: PluginDefinition[] = new Array(items.length)
+  let nextIdx = 0
+
+  async function worker() {
+    while (nextIdx < items.length) {
+      const idx = nextIdx++
+      results[idx] = await fn(items[idx])
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(loadConcurrencyFor(items.length), items.length) },
+    () => worker(),
+  )
+  await Promise.all(workers)
+  return results
+}
+
 export async function loadAllPlugins(
   rustMetas: PluginMetadataRust[]
 ): Promise<PluginDefinition[]> {
   console.log(`[PluginLoader] loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
-  // Load all plugin modules in parallel; each dynamic import is async and
-  // independent so there's no benefit to serializing them. The fallback
-  // "placeholder" plugin is still emitted when loadPluginModule returns
-  // null, so the UI always shows an entry for every discovered plugin.
-  const results = await Promise.all(
-    rustMetas.map(async (meta) => {
+  return loadWithConcurrency(rustMetas, async (meta) => {
       const { manifest, module } = await loadPluginModuleWithRef(meta.plugin_path)
 
       if (manifest) {
@@ -416,7 +458,4 @@ export async function loadAllPlugins(
         permissions: [],
       } satisfies PluginDefinition
     })
-  )
-
-  return results
 }

@@ -328,10 +328,10 @@ body, #root {
      consistency. We re-bind those aliases here to the *application's*
      theme variables, so the plugin manager inherits the app's
      light / dark / system theme automatically — no independent
-     palette, no toggle, no `data-pa-theme` attribute. */
-  /* surfaces (paper → app backgrounds) */
-  --pa-paper: var(--bg-primary);
-  --pa-paper-2: var(--bg-secondary);
+     palette, no `data-pa-theme` attribute. */
+  /* surfaces (paper → content area background) */
+  --pa-paper: var(--bg-secondary);
+  --pa-paper-2: var(--bg-primary);
   --pa-paper-3: var(--bg-hover);
   /* text (ink → app text) */
   --pa-ink: var(--text-primary);
@@ -372,7 +372,7 @@ body, #root {
 
   font-family: var(--pa-font-ui);
   color: var(--text-primary);
-  background: var(--bg-primary);
+  background: var(--bg-secondary-gradient, var(--bg-secondary));
   position: relative;
   isolation: isolate;
 }
@@ -386,6 +386,7 @@ body, #root {
 .pa-hero {
   padding: 18px 28px;
   position: relative;
+  flex-shrink: 0;
 }
 .pa-title-row {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
@@ -553,9 +554,9 @@ body, #root {
   padding: 0 28px;
   border-bottom: 1px solid var(--pa-line);
   background: var(--pa-paper);
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 5;
+  flex-shrink: 0;
 }
 .pa-tab {
   display: inline-flex;
@@ -632,7 +633,7 @@ body, #root {
   flex: 1;
 }
 .pa-body.is-fullwidth { grid-template-columns: 1fr; }
-.pa-main { padding: 0 28px 20px; overflow-y: auto; min-width: 0; }
+.pa-main { padding: 0 28px 20px; overflow: hidden; min-width: 0; display: flex; flex-direction: column; }
 .pa-rail {
   padding: 18px 16px 20px;
   border-left: 1px solid var(--pa-line);
@@ -678,6 +679,7 @@ body, #root {
   padding: 20px 0 14px;
   border-bottom: 1px dashed var(--pa-line);
   margin-bottom: 14px;
+  flex-shrink: 0;
 }
 .pa-search {
   position: relative;
@@ -1329,6 +1331,7 @@ body, #root {
   position: relative;
   overflow: hidden;
   box-shadow: var(--pa-shadow-1);
+  flex-shrink: 0;
 }
 .pa-market-hero::before {
   content: '';
@@ -1387,6 +1390,35 @@ body, #root {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+
+/* Progress bar for market index fetch */
+.pa-market-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 0 2px;
+}
+.pa-market-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--pa-paper-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.pa-market-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--pa-accent), var(--pa-accent-2));
+  border-radius: 2px;
+  transition: width 0.2s ease-out;
+}
+.pa-market-progress-text {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  min-width: 28px;
+  text-align: right;
+}
 .pa-market-toolbar {
   display: flex;
   align-items: center;
@@ -1395,6 +1427,7 @@ body, #root {
   padding: 8px 0 14px;
   border-bottom: 1px dashed var(--pa-line);
   margin-bottom: 14px;
+  flex-shrink: 0;
 }
 .pa-market-meta {
   font-family: var(--pa-font-mono);
@@ -1528,13 +1561,22 @@ body, #root {
 .pa-installed-byline {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  /* Force the byline to a single line so the author/date/version
+     tuple doesn't wrap under the plugin id on narrow cards. Each
+     child gets `min-width: 0` to allow the inner text to ellipsise
+     (via `text-overflow: ellipsis` below) rather than push the
+     flex row onto a second line. */
+  flex-wrap: nowrap;
   gap: 6px;
   font-family: var(--pa-font-mono);
   font-size: 10px;
   color: var(--pa-mute);
   letter-spacing: 0.02em;
   margin-top: -2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .pa-installed-byline b { color: var(--pa-ink-2); font-weight: 600; }
 .pa-installed-byline .pa-sep { color: var(--pa-mute-2); }

@@ -18,8 +18,10 @@ import { create } from 'zustand'
 import type { PluginIndex, PluginIndexEntry, PluginUpdateInfo } from '@/types/plugin'
 import {
   fetchPluginIndexCached,
+  fetchWithProgress,
   checkPluginUpdates,
   invalidateIndexCache,
+  normaliseIndex,
 } from '@/lib/plugin-market'
 import { usePluginStore } from './plugin'
 
@@ -40,15 +42,28 @@ export interface PluginMarketState {
   /** Set the repo URL and persist it. */
   setRepoUrl: (url: string) => void
 
+  /** Plugin ID to auto-open in the detail dialog on next mount/render.
+   *  Set by `PluginManagerView.handleUpdatePlugin` and consumed by
+   *  `PluginMarketView` which clears it after opening the dialog. */
+  pendingDetailId: string | null
+  /** Set the pending detail ID (and clear it after consumption). */
+  setPendingDetailId: (id: string | null) => void
+
   /** The latest fetched index, or `null` before the first fetch. */
   index: PluginIndex | null
   /** `true` while a fetch is in flight. */
   isFetchingIndex: boolean
   /** Last error string from a fetch attempt. */
   fetchError: string | null
+  /** Download progress percentage (0-100) for index fetch. */
+  fetchProgress: number
 
-  /** Refresh the index for the current repo URL. */
-  refreshIndex: () => Promise<void>
+  /** Refresh the index for the current repo URL.
+   *  @param options.background - If true, refresh without setting loading state
+   */
+  refreshIndex: (options?: { background?: boolean }) => Promise<void>
+  /** Refresh the index with progress tracking. */
+  refreshIndexWithProgress: () => Promise<void>
 
   /** Search query (matches name/description/id/tags). */
   searchQuery: string
@@ -64,8 +79,10 @@ export interface PluginMarketState {
   isCheckingUpdates: boolean
   /** Map of `pluginId → localVersion` for installed plugins, used to
    *  mark a card "Installed" vs "Update available". Sourced from the
-   *  host's update info + the local plugin store. */
-  refreshUpdates: () => Promise<void>
+   *  host's update info + the local plugin store.
+   *  @param options.background - If true, refresh without setting loading state
+   */
+  refreshUpdates: (options?: { background?: boolean }) => Promise<void>
 
   /** All tag strings present in the current index. */
   allTags: () => string[]
@@ -90,23 +107,58 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
     set({ repoUrl: url, index: null, updates: [] })
   },
 
+  pendingDetailId: null,
+  setPendingDetailId: (id) => set({ pendingDetailId: id }),
+
   index: null,
   isFetchingIndex: false,
   fetchError: null,
-  refreshIndex: async () => {
+  fetchProgress: 0,
+  refreshIndex: async (options?: { background?: boolean }) => {
     const url = get().repoUrl
     if (!url) {
       set({ index: null, fetchError: null })
       return
     }
-    set({ isFetchingIndex: true, fetchError: null })
+    // If background refresh, don't clear isFetchingIndex to avoid UI flicker
+    if (!options?.background) {
+      set({ isFetchingIndex: true, fetchError: null, fetchProgress: 0 })
+    }
     try {
       const index = await fetchPluginIndexCached(url)
-      set({ index, isFetchingIndex: false, fetchError: null })
+      set({ index, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
       set({
         isFetchingIndex: false,
         fetchError: e?.message ?? String(e),
+        fetchProgress: 0,
+      })
+    }
+  },
+  refreshIndexWithProgress: async () => {
+    const url = get().repoUrl
+    if (!url) {
+      set({ index: null, fetchError: null, fetchProgress: 0 })
+      return
+    }
+    set({ isFetchingIndex: true, fetchError: null, fetchProgress: 0 })
+    try {
+      const text = await fetchWithProgress(url, (percent) => {
+        set({ fetchProgress: percent })
+      })
+      const raw = JSON.parse(text)
+      // Normalise the index using the shared normaliser so all fields
+      // (schemaVersion, pubkeyB64, signatureB64, versions, etc.) are
+      // present. The previous hand-rolled mapping missed critical
+      // fields like pubkeyB64 (breaking signature verification) and
+      // versions/dependencies (breaking the detail dialog).
+      const index = normaliseIndex(raw)
+      set({ index, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
+    } catch (e: any) {
+      set({
+        isFetchingIndex: false,
+        fetchError: e?.message ?? String(e),
+        fetchProgress: 0,
       })
     }
   },
@@ -125,13 +177,16 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
 
   updates: [],
   isCheckingUpdates: false,
-  refreshUpdates: async () => {
+  refreshUpdates: async (options?: { background?: boolean }) => {
     const url = get().repoUrl
     if (!url) {
       set({ updates: [] })
       return
     }
-    set({ isCheckingUpdates: true })
+    // If background refresh, don't set isCheckingUpdates to avoid UI flicker
+    if (!options?.background) {
+      set({ isCheckingUpdates: true })
+    }
     try {
       const updates = await checkPluginUpdates(url)
       set({ updates, isCheckingUpdates: false })

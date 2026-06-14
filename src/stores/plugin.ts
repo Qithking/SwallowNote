@@ -7,32 +7,13 @@ import type {
   PluginRegistry,
   IconPosition,
   ContentPosition,
-  PluginContext,
 } from '@/types/plugin'
 import { emptyRegistry } from '@/types/plugin'
 import { useUIStore } from './ui'
-import { dropPluginStorage, pluginEventBus } from '@/lib/plugin-host'
+import { dropPluginStorage, pluginEventBus, buildPluginContext } from '@/lib/plugin-host'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
 import { clearPluginMenuItems } from '@/lib/plugin-menu'
-
-/**
- * Build a PluginContext for invoking a plugin's lifecycle hooks.
- * `invokeBackend` is intentionally a no-op here: lifecycle hooks
- * are JS-side only and run on the same side as the plugin module.
- * Backend IPC is for the panel itself and is exposed via
- * `PluginPanelProps.invokeBackend`.
- */
-function buildPluginContext(plugin: PluginDefinition): PluginContext {
-  return {
-    pluginId: plugin.id,
-    pluginPath: plugin.pluginPath,
-    invokeBackend: async () => {
-      throw new Error(
-        `Backend IPC not available to lifecycle hooks (plugin_id=${plugin.id})`
-      )
-    },
-  }
-}
+import { clearGranted } from '@/lib/plugin-permission-guard'
 
 export interface PluginState {
   /** All registered plugins, indexed by iconPosition */
@@ -95,16 +76,14 @@ const sortByOrder = <T extends { order?: number }>(items: T[]): T[] =>
 function buildRegistry(plugins: PluginDefinition[]): PluginRegistry {
   const registry: PluginRegistry = { sidebar: [], editorToolbar: [], titleBar: [] }
   for (const plugin of plugins) {
-    if (!plugin.enabled) { console.log(`[PluginStore] Skipping disabled plugin: ${plugin.id}`); continue }
+    if (!plugin.enabled) continue
     const key = plugin.iconPosition
     if (key in registry) {
       registry[key].push(plugin)
-      console.log(`[PluginStore] Registered plugin ${plugin.id} in registry.${key}`)
     } else {
       console.warn(`[PluginStore] Plugin ${plugin.id} has unknown iconPosition: "${key}"`)
     }
   }
-  console.log(`[PluginStore] buildRegistry result:`, { sidebar: registry.sidebar.length, editorToolbar: registry.editorToolbar.length, titleBar: registry.titleBar.length })
   return registry
 }
 
@@ -257,7 +236,12 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     // Drop the plugin's persisted permissions (localStorage key +
     // in-memory guard). We do this last so a revoke UI that is
     // observing the plugin's grants still has a coherent snapshot
-    // until the unregister call returns.
+    // until the unregister call returns. The synchronous
+    // `clearGranted` is the security boundary — it stops the
+    // in-memory grant cache from leaking to a reinstall with the
+    // same id before the localStorage removeItem lands. The async
+    // `dropPluginPermissions` is the on-disk cleanup pass.
+    clearGranted(id)
     void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
       void dropPluginPermissions(id)
     })
@@ -268,13 +252,30 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     // means call onDisable, false→true means call onEnable).
     const target = get().plugins.find((p) => p.id === id)
     const wasEnabled = target?.enabled ?? false
+    if (!target) {
+      // setPluginEnabled is called from the plugin manager's toggle
+      // UI and from Rust-driven health-monitor auto-disable. Both
+      // paths assume the plugin still exists; if it doesn't, log
+      // loudly so we can trace the orphan call instead of failing
+      // silently and leaving the registry out of sync with disk.
+      console.warn(`[plugin-store] setPluginEnabled: plugin "${id}" not found in registry`)
+      return
+    }
     set((state) => {
       const plugins = state.plugins.map((p) =>
         p.id === id ? { ...p, enabled } : p
       )
       return { plugins, registry: buildRegistry(plugins) }
     })
-    if (target && wasEnabled !== enabled) {
+    if (wasEnabled !== enabled) {
+      // When re-enabling a previously disabled plugin, fire onLoad
+      // before onEnable. The lifecycle model is onLoad → onEnable,
+      // and a plugin that was disabled on cold start skipped onLoad
+      // (see `setPlugins`). Without this, the plugin's event
+      // subscriptions, storage seeding, and timers never run.
+      if (enabled && !wasEnabled) {
+        void runPluginLifecycleHook(target, target.hooks?.onLoad, buildPluginContext(target), 'onLoad')
+      }
       const hook = enabled ? target.hooks?.onEnable : target.hooks?.onDisable
       const hookName = enabled ? 'onEnable' : 'onDisable'
       void runPluginLifecycleHook(target, hook, buildPluginContext(target), hookName)
@@ -333,7 +334,33 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const newIds = new Set(deduped.map((p) => p.id))
     const removed = state.plugins.filter((p) => !newIds.has(p.id))
     const added = deduped.filter((p) => !oldIds.has(p.id))
-    set({ plugins: deduped, registry: buildRegistry(deduped) })
+
+    // Build active-state updates for removed plugins (same logic as
+    // `unregisterPlugin`). Without this, a plugin removed via
+    // `setPlugins` (e.g. after a marketplace uninstall + rescan)
+    // leaves stale IDs in the active-plugin fields and the UI store's
+    // sidebarView / rightPanelType pointing at a non-existent plugin.
+    const activeUpdates: Partial<PluginState> = {}
+    for (const target of removed) {
+      if (state.activeLeftPanelPluginId === target.id) activeUpdates.activeLeftPanelPluginId = null
+      if (state.activeRightPanelPluginId === target.id) activeUpdates.activeRightPanelPluginId = null
+      if (state.activeFullPanelPluginId === target.id) activeUpdates.activeFullPanelPluginId = null
+      if (state.activeEditorAreaPluginId === target.id) activeUpdates.activeEditorAreaPluginId = null
+    }
+    set({ plugins: deduped, registry: buildRegistry(deduped), ...activeUpdates })
+
+    // Synchronously clean up UI state for removed plugins
+    const ui = useUIStore.getState()
+    for (const target of removed) {
+      if (ui.sidebarView === `plugin:${target.id}`) {
+        ui.setSidebarView('explorer')
+        if (ui.settingsPanelVisible) ui.setSettingsPanelVisible(false)
+      }
+      if (ui.rightPanelType === `plugin:${target.id}`) {
+        ui.setRightPanelType(null)
+      }
+    }
+
     for (const target of removed) {
       void runPluginLifecycleHook(
         target,
@@ -344,6 +371,13 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       dropPluginStorage(target.id)
       pluginEventBus.removeAllListenersForPlugin(target.id)
       clearPluginMenuItems(target.id)
+      // Drop the in-memory grant cache synchronously so a freshly
+      // installed plugin with the same id cannot inherit the
+      // previous install's grants while the async `removeItem` is
+      // still in flight. The localStorage delete runs in the
+      // background — `clearGranted` is the security boundary,
+      // the disk write is just a tidiness pass.
+      clearGranted(target.id)
       void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
         void dropPluginPermissions(target.id)
       })

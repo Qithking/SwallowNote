@@ -139,6 +139,61 @@ export async function fetchPluginIndex(url: string): Promise<PluginIndex> {
 }
 
 /**
+ * Fetch with progress tracking. Returns the response text and
+ * calls `onProgress` with download percentage (0-100).
+ */
+export async function fetchWithProgress(
+  url: string,
+  onProgress: (percent: number) => void
+): Promise<string> {
+  if (!url) {
+    throw new Error('repo url is empty')
+  }
+
+  const res = await fetch(url, { cache: 'no-store' })
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} fetching plugin index`)
+  }
+
+  const contentLength = res.headers.get('content-length')
+  const total = contentLength ? parseInt(contentLength, 10) : 0
+
+  // If no content-length or body, fall back to normal fetch
+  if (!total || !res.body) {
+    const text = await res.text()
+    onProgress(100)
+    return text
+  }
+
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    chunks.push(value)
+    received += value.length
+
+    const percent = Math.round((received / total) * 100)
+    onProgress(percent)
+  }
+
+  // Concatenate chunks
+  const allChunks = new Uint8Array(received)
+  let position = 0
+  for (const chunk of chunks) {
+    allChunks.set(chunk, position)
+    position += chunk.length
+  }
+
+  const text = new TextDecoder().decode(allChunks)
+  onProgress(100)
+  return text
+}
+
+/**
  * SHA-256 of a byte buffer, returned as lowercase hex. Uses the
  * Web Crypto API so it works in any modern browser and (via the
  * Tauri webview) the desktop shell.
@@ -207,7 +262,7 @@ export function effectivePubkey(
  * caller and the shape is small enough that a generic key-mapping
  * dep would be more code than the explicit code below.
  */
-function normaliseIndex(raw: any): PluginIndex {
+export function normaliseIndex(raw: any): PluginIndex {
   if (!raw || typeof raw !== 'object') {
     throw new Error('plugin index is not an object')
   }
