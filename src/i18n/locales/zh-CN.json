@@ -951,6 +951,8 @@
         "activity": "活动",
         "diagnostics": "诊断",
         "logs": "日志",
+        "console": "管理控制台",
+        "consoleMeta": "{{events}} 事件 · {{errors}} 错误",
         "storage": "存储",
         "install": "安装插件",
         "refresh": "刷新",
@@ -972,12 +974,19 @@
         "hint": "上传一个 .zip 插件包以开始。"
       },
       "dialog": {
+        "console": {
+          "eyebrow": "任务管理器 · 24h 窗口",
+          "title": "插件管理控制台"
+        },
         "activity": {
           "eyebrow": "最近 24 小时",
           "title": "活动",
           "count": "{{count}} 条事件 · 24h",
           "clear": "清空",
-          "export": "导出"
+          "export": "导出",
+          "emptyHint": "暂无活动",
+          "rescan": "扫描完成：共加载 <b>{{count}}</b> 个插件。",
+          "perPlugin": "<b>{{name}}</b> · {{events}} 个事件 · {{storage}} 次存储 · {{hooks}} 个钩子 · {{ipc}} 次 IPC"
         },
         "diagnostics": {
           "eyebrow": "插件运行时 · 24h",
@@ -993,7 +1002,8 @@
             "backendIpc": "后端 IPC",
             "errorRate": "错误率"
           },
-          "perPluginLoad": "按插件负载"
+          "perPluginLoad": "按插件负载",
+          "eventUnit": "事件"
         },
         "logs": {
           "eyebrow": "tail -f · 实时",
@@ -1006,6 +1016,8 @@
           "exportTitle": "导出为 JSON Lines (.jsonl)",
           "conflictGroup": "⚠️ 冲突",
           "normalGroup": "活动",
+          "emptyHint": "暂无日志",
+          "emptyFilteredHint": "当前过滤条件下没有日志",
           "toast": {
             "copyEmpty": "没有可复制的日志",
             "copySuccess": "日志已复制到剪贴板",

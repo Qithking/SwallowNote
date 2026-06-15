@@ -441,6 +441,23 @@ class PluginStorageImpl implements PluginStorage {
 
   async delete(key: string): Promise<void> {
     this.requireStoragePermission('write storage')
+    await this._doDelete(key)
+  }
+
+  /**
+   * Host-only: same as `delete(key)` but skips the `storage`
+   * permission check. The host UI (storage inspector) acts on
+   * behalf of the user, not as the plugin — the `storage`
+   * permission gates plugin code paths, not the user's own
+   * introspection/cleanup. The same telemetry metric is recorded
+   * either way, so a host-initiated delete still shows up in the
+   * plugin's storage-ops history.
+   */
+  async deleteHost(key: string): Promise<void> {
+    await this._doDelete(key)
+  }
+
+  private async _doDelete(key: string): Promise<void> {
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
@@ -465,6 +482,18 @@ class PluginStorageImpl implements PluginStorage {
 
   async clear(): Promise<void> {
     this.requireStoragePermission('write storage')
+    await this._doClear()
+  }
+
+  /**
+   * Host-only: same as `clear()` but skips the `storage`
+   * permission check. See `deleteHost` for the rationale.
+   */
+  async clearHost(): Promise<void> {
+    await this._doClear()
+  }
+
+  private async _doClear(): Promise<void> {
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
@@ -514,6 +543,18 @@ class PluginStorageImpl implements PluginStorage {
    */
   async entries(): Promise<Array<{ key: string; size: number }>> {
     this.requireStoragePermission('read storage')
+    return this._doEntries()
+  }
+
+  /**
+   * Host-only: same as `entries()` but skips the `storage`
+   * permission check. See `deleteHost` for the rationale.
+   */
+  async entriesHost(): Promise<Array<{ key: string; size: number }>> {
+    return this._doEntries()
+  }
+
+  private async _doEntries(): Promise<Array<{ key: string; size: number }>> {
     const data = await this.load()
     const entries: Array<{ key: string; size: number }> = []
     for (const key of Object.keys(data)) {
@@ -549,7 +590,25 @@ class PluginStorageImpl implements PluginStorage {
 }
 
 /** Storage cache so a plugin asking twice for `getStorage(id)` reuses one impl. */
-const storageCache = new Map<string, PluginStorage>()
+const storageCache = new Map<string, PluginStorageImpl>()
+
+/**
+ * Look up (or materialise) the concrete `PluginStorageImpl` for
+ * a plugin. Used by the host-only storage functions below —
+ * `getPluginStorage()` returns the public `PluginStorage`
+ * interface, but the host bypass needs the concrete class to
+ * reach the `*Host` methods. Caching here keeps the disk cache
+ * and write-serialization state shared between host and plugin
+ * code paths.
+ */
+function getOrCreateImpl(pluginId: string): PluginStorageImpl {
+  let s = storageCache.get(pluginId)
+  if (!s) {
+    s = new PluginStorageImpl(pluginId)
+    storageCache.set(pluginId, s)
+  }
+  return s
+}
 
 /**
  * Get a per-plugin storage instance. Construction is lazy, so the
@@ -558,12 +617,7 @@ const storageCache = new Map<string, PluginStorage>()
  * reused on subsequent calls to keep disk caches warm.
  */
 export function getPluginStorage(pluginId: string): PluginStorage {
-  let s = storageCache.get(pluginId)
-  if (!s) {
-    s = new PluginStorageImpl(pluginId)
-    storageCache.set(pluginId, s)
-  }
-  return s
+  return getOrCreateImpl(pluginId)
 }
 
 /** Drop a plugin's storage from the cache. Called on uninstall. */
@@ -578,26 +632,42 @@ export function dropPluginStorage(pluginId: string): void {
  * eating the most space and clear individual ones or the whole
  * namespace.
  *
- * Falls back to an empty list if the plugin has no storage cache
- * (e.g. never been used). Throws on permission denial — the
- * caller is expected to be the host UI, not plugin code, so the
- * plugin must already have the `storage` permission for this to
- * succeed.
+ * Host-only: this entry point bypasses the `storage` permission
+ * check. The storage inspector is a user-facing debugging tool,
+ * not a plugin code path — the user should be able to inspect and
+ * clear storage for any plugin regardless of the plugin's current
+ * `storage` grant (a plugin that had the permission revoked, or
+ * was never granted it, may still have stale data on disk from a
+ * previous install/session). Falls back to an empty list if the
+ * plugin has no storage cache (e.g. never been used) or no
+ * storage file.
  */
 export async function getPluginStorageEntries(
   pluginId: string
 ): Promise<Array<{ key: string; size: number }>> {
-  const storage = storageCache.get(pluginId)
-  if (!storage) {
-    // Cold path: a plugin that never touched storage has no
-    // cache entry. The storage file might still exist on disk
-    // (from a prior install), so materialise an impl and read
-    // it. The first `entries` call also initialises the
-    // permission gate, which is what we want — the inspector
-    // needs to honour grants even for a brand-new session.
-    return getPluginStorage(pluginId).entries()
-  }
-  return storage.entries()
+  return getOrCreateImpl(pluginId).entriesHost()
+}
+
+/**
+ * Host-only: delete a single key from a plugin's storage
+ * namespace, bypassing the `storage` permission check. See
+ * `getPluginStorageEntries` for the rationale. Used by the
+ * storage inspector dialog's per-row "delete" action.
+ */
+export async function deletePluginStorageEntry(
+  pluginId: string,
+  key: string
+): Promise<void> {
+  await getOrCreateImpl(pluginId).deleteHost(key)
+}
+
+/**
+ * Host-only: clear every key in a plugin's storage namespace,
+ * bypassing the `storage` permission check. Used by the storage
+ * inspector's "clear all" action.
+ */
+export async function clearPluginStorage(pluginId: string): Promise<void> {
+  await getOrCreateImpl(pluginId).clearHost()
 }
 
 // ─── Lifecycle hook runner ────────────────────────────────────────────────────

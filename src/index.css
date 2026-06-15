@@ -1239,6 +1239,36 @@ body, #root {
 
 /* ── Popup (modal) styling ─────────────────────────────────── */
 .pa-popup {
+  /*
+   * Re-declare the pa-* alias tokens on `.pa-popup` itself so
+   * the popup paints correctly even when portalled outside
+   * the .pa-root tree. The Radix DialogContent uses Portal
+   * to render into `document.body`, which is outside
+   * `.pa-root`; without this rebind, `var(--pa-paper)` etc.
+   * resolve to `unset` on the portalled node and the popup
+   * background / border / shadow all collapse to `transparent`
+   * — making the dialog look "broken" (no surface, no border,
+   * overlay visible through it).
+   *
+   * We mirror the same alias values the `.pa-root` block
+   * defines, so a popup rendered inline inside `.pa-root`
+   * (the previous path) gets the same result.
+   */
+  --pa-paper: var(--bg-secondary);
+  --pa-paper-2: var(--bg-primary);
+  --pa-paper-3: var(--bg-hover);
+  --pa-ink: var(--text-primary);
+  --pa-ink-2: var(--text-secondary);
+  --pa-mute: var(--text-muted);
+  --pa-line: var(--border-color);
+  --pa-line-2: color-mix(in srgb, var(--border-color) 75%, transparent);
+  --pa-radius: 6px;
+  --pa-radius-lg: 10px;
+  --pa-shadow-3: 0 24px 60px rgba(0, 0, 0, 0.20), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --pa-accent: var(--theme-color);
+  --pa-accent-soft: color-mix(in srgb, var(--theme-color) 18%, transparent);
+  --pa-accent-glow: color-mix(in srgb, var(--theme-color) 18%, transparent);
+
   background: var(--pa-paper) !important;
   border: 1px solid var(--pa-line) !important;
   color: var(--pa-ink) !important;
@@ -1291,6 +1321,23 @@ body, #root {
   margin: 0;
 }
 .pa-popup-title em { font-style: italic; color: var(--pa-accent); }
+.pa-popup-tabs {
+  display: flex;
+  align-items: center;
+  padding: 0 18px 12px;
+  border-bottom: 1px dashed var(--pa-line);
+}
+.pa-popup-tabs .pa-segmented {
+  display: inline-flex;
+  align-items: center;
+}
+.pa-popup-tabs .pa-segmented button {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 11px;
+}
 .pa-popup-close {
   width: 28px; height: 28px;
   display: inline-flex; align-items: center; justify-content: center;

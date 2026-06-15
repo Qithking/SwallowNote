@@ -48,6 +48,8 @@ vi.doMock('@/lib/plugin-host', () => ({
         }
       }),
   ),
+  deletePluginStorageEntry: vi.fn().mockResolvedValue(undefined),
+  clearPluginStorage: vi.fn().mockResolvedValue(undefined),
   getPluginStorage: vi.fn().mockReturnValue({
     delete: vi.fn().mockResolvedValue(undefined),
     clear: vi.fn().mockResolvedValue(undefined),

@@ -25,7 +25,6 @@ import { useEffect, useState, useCallback } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import {
   Database,
-  X,
   Trash2,
   RefreshCw,
   AlertTriangle,
@@ -38,7 +37,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import type { PluginDefinition } from '@/types/plugin'
-import { getPluginStorage, getPluginStorageEntries } from '@/lib/plugin-host'
+import {
+  getPluginStorageEntries,
+  deletePluginStorageEntry,
+  clearPluginStorage,
+} from '@/lib/plugin-host'
 
 export interface PluginStorageInspectorProps {
   open: boolean
@@ -95,7 +98,7 @@ export function PluginStorageInspector({
       // closed cleanly. The next refresh after a permission fix
       // will repopulate the table.
       console.error('[PluginStorageInspector] failed to read storage:', err)
-      toast.error(t('plugin.storageInspector.loadFailed'), {
+      toast.error(t('plugin.pa.dialog.storageInspector.loadFailed'), {
         description: String(err),
       })
       setEntries([])
@@ -132,7 +135,7 @@ export function PluginStorageInspector({
       } catch (err) {
         if (cancelled) return
         console.error('[PluginStorageInspector] failed to read storage:', err)
-        toast.error(t('plugin.storageInspector.loadFailed'), {
+        toast.error(t('plugin.pa.dialog.storageInspector.loadFailed'), {
           description: String(err),
         })
         setEntries([])
@@ -152,8 +155,8 @@ export function PluginStorageInspector({
       if (!plugin) return
       setBusy(true)
       try {
-        await getPluginStorage(plugin.id).delete(key)
-        toast.success(t('plugin.storageInspector.keyDeleted', { key }))
+        await deletePluginStorageEntry(plugin.id, key)
+        toast.success(t('plugin.pa.dialog.storageInspector.keyDeleted', { key }))
         // Refresh the list so the size column and totals stay
         // accurate. We could do an optimistic update instead,
         // but `getEntries` is cheap and a real reload also
@@ -161,7 +164,7 @@ export function PluginStorageInspector({
         await refresh()
       } catch (err) {
         console.error('[PluginStorageInspector] delete failed:', err)
-        toast.error(t('plugin.storageInspector.deleteFailed'), {
+        toast.error(t('plugin.pa.dialog.storageInspector.deleteFailed'), {
           description: String(err),
         })
       } finally {
@@ -176,14 +179,14 @@ export function PluginStorageInspector({
     if (!plugin) return
     setBusy(true)
     try {
-      await getPluginStorage(plugin.id).clear()
-      toast.success(t('plugin.storageInspector.allCleared', {
+      await clearPluginStorage(plugin.id)
+      toast.success(t('plugin.pa.dialog.storageInspector.allCleared', {
         name: plugin.name,
       }))
       await refresh()
     } catch (err) {
       console.error('[PluginStorageInspector] clear failed:', err)
-      toast.error(t('plugin.storageInspector.clearFailed'), {
+      toast.error(t('plugin.pa.dialog.storageInspector.clearFailed'), {
         description: String(err),
       })
     } finally {
@@ -202,22 +205,14 @@ export function PluginStorageInspector({
         <header className="pa-popup-head">
           <div>
             <div className="pa-popup-eyebrow">
-              {t('plugin.storageInspector.eyebrow')}
+              {t('plugin.pa.dialog.storageInspector.eyebrow')}
             </div>
             <DialogTitle asChild>
               <h2 className="pa-popup-title">
-                {plugin?.name ?? ''} — {t('plugin.storageInspector.title')}
+                {plugin?.name ?? ''} — {t('plugin.pa.dialog.storageInspector.title')}
               </h2>
             </DialogTitle>
           </div>
-          <button
-            type="button"
-            className="pa-popup-close"
-            onClick={() => onOpenChange(false)}
-            aria-label="Close"
-          >
-            <X />
-          </button>
         </header>
 
         <div className="pa-popup-body">
@@ -240,17 +235,17 @@ export function PluginStorageInspector({
               <Database size={20} />
               <div className="pa-empty-title">—</div>
               <div className="pa-empty-hint">
-                {t('plugin.storageInspector.empty')}
+                {t('plugin.pa.dialog.storageInspector.empty')}
               </div>
             </div>
           ) : (
             <div className="psi-table" role="table" aria-label="Storage entries">
               <div className="psi-head" role="row">
                 <div className="psi-cell psi-cell-key" role="columnheader">
-                  {t('plugin.storageInspector.colKey')}
+                  {t('plugin.pa.dialog.storageInspector.colKey')}
                 </div>
                 <div className="psi-cell psi-cell-size" role="columnheader">
-                  {t('plugin.storageInspector.colSize')}
+                  {t('plugin.pa.dialog.storageInspector.colSize')}
                 </div>
                 <div className="psi-cell psi-cell-action" role="columnheader">
                   <span className="sr-only">Actions</span>
@@ -274,8 +269,8 @@ export function PluginStorageInspector({
                       className="psi-row-del"
                       disabled={busy}
                       onClick={() => setConfirm({ single: entry.key })}
-                      aria-label={t('plugin.storageInspector.deleteKey', { key: entry.key })}
-                      title={t('plugin.storageInspector.deleteKey', { key: entry.key })}
+                      aria-label={t('plugin.pa.dialog.storageInspector.deleteKey', { key: entry.key })}
+                      title={t('plugin.pa.dialog.storageInspector.deleteKey', { key: entry.key })}
                     >
                       <Trash2 size={11} />
                     </button>
@@ -290,7 +285,7 @@ export function PluginStorageInspector({
           <span>
             <HardDrive size={10} style={{ verticalAlign: -1, marginRight: 3 }} />
             <Trans
-              i18nKey="plugin.storageInspector.footer"
+              i18nKey="plugin.pa.dialog.storageInspector.footer"
               values={{
                 count: entries.length,
                 bytes: formatBytes(totalBytes),
@@ -305,7 +300,7 @@ export function PluginStorageInspector({
               disabled={loading || busy}
             >
               <RefreshCw size={11} />
-              {t('plugin.storageInspector.refresh')}
+              {t('plugin.pa.dialog.storageInspector.refresh')}
             </button>
             <button
               className="pa-btn pa-btn-outline psi-danger"
@@ -313,7 +308,7 @@ export function PluginStorageInspector({
               disabled={busy || entries.length === 0}
             >
               <Trash2 size={11} />
-              {t('plugin.storageInspector.clearAll')}
+              {t('plugin.pa.dialog.storageInspector.clearAll')}
             </button>
           </div>
         </footer>
@@ -352,15 +347,15 @@ function ConfirmPanel({
       <div className="psi-confirm-text">
         <div className="psi-confirm-title">
           {isAll
-            ? t('plugin.storageInspector.confirmClearAllTitle', { name: pluginName })
-            : t('plugin.storageInspector.confirmDeleteKeyTitle', {
+            ? t('plugin.pa.dialog.storageInspector.confirmClearAllTitle', { name: pluginName })
+            : t('plugin.pa.dialog.storageInspector.confirmDeleteKeyTitle', {
                 key: kind && typeof kind === 'object' ? kind.single : '',
               })}
         </div>
         <div className="psi-confirm-hint">
           {isAll
-            ? t('plugin.storageInspector.confirmClearAllHint')
-            : t('plugin.storageInspector.confirmDeleteKeyHint')}
+            ? t('plugin.pa.dialog.storageInspector.confirmClearAllHint')
+            : t('plugin.pa.dialog.storageInspector.confirmDeleteKeyHint')}
         </div>
       </div>
       <div className="psi-confirm-actions">
@@ -370,7 +365,7 @@ function ConfirmPanel({
           onClick={onCancel}
           disabled={busy}
         >
-          {t('plugin.storageInspector.confirmCancel')}
+          {t('plugin.pa.dialog.storageInspector.confirmCancel')}
         </button>
         <button
           type="button"
@@ -378,7 +373,7 @@ function ConfirmPanel({
           onClick={onConfirm}
           disabled={busy}
         >
-          {busy ? t('common.loading') : t('plugin.storageInspector.confirmProceed')}
+          {busy ? t('common.loading') : t('plugin.pa.dialog.storageInspector.confirmProceed')}
         </button>
       </div>
     </div>

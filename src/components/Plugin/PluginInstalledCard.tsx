@@ -28,7 +28,7 @@
  * unit with a 4px coloured stripe at the top, an italic
  * display name, a 2-line description clamp, and a tag row.
  */
-import { useMemo, useState, useEffect, memo, type ChangeEvent } from 'react'
+import { useMemo, useState, useEffect, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Calendar,
@@ -74,17 +74,6 @@ export interface PluginInstalledCardProps {
   hasUpdate?: boolean
   /** Optional host error to render in the error bar. */
   error?: string | null
-  /** Whether this card's row is in the multi-select set. */
-  selected?: boolean
-  /**
-   * Called when the user toggles the per-card checkbox. The
-   * parent owns the selection set so it can render the
-   * batch-action bar; the card itself just reports the intent.
-   * The change event is passed through (stopped from bubbling
-   * up the DOM tree) so a future card-level click handler
-   * can't double-fire.
-   */
-  onSelectChange?: (selected: boolean, e: ChangeEvent<HTMLInputElement>) => void
   onToggle?: (enabled: boolean) => void | Promise<void>
   onUninstall?: () => void
   onUpdate?: () => void
@@ -103,8 +92,6 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
   plugin,
   hasUpdate = false,
   error = null,
-  selected = false,
-  onSelectChange,
   onToggle,
   onUninstall,
   onUpdate,
@@ -307,48 +294,13 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
 
   return (
     <article
-      className={`pa-market-card ${spineClass} ${!plugin.enabled ? 'is-disabled' : ''} ${selected ? 'is-selected' : ''}`}
+      className={`pa-market-card ${spineClass} ${!plugin.enabled ? 'is-disabled' : ''}`}
       data-plugin-id={plugin.id}
     >
       <div className="pa-market-card-spine" />
 
       <div className="pa-market-card-body">
-        {/*
-          Per-row checkbox sits in the card head so the row
-          reuses the same vertical rhythm as a non-selected
-          row. The label is visually hidden but the input
-          still announces itself to screen readers; the
-          `stopPropagation` keeps the click from bubbling up
-          to a future article-level handler (none today, but
-          the design is mid-refactor).
-        */}
         <div className="pa-market-card-head">
-          <label
-            className="pa-card-check"
-            // Clicking the label passes through to the input
-            // by default; we add `onClick` stopPropagation as
-            // a belt-and-suspenders guard so the parent
-            // article (currently `cursor: pointer` only) can
-            // grow a click handler without us re-touching
-            // every card.
-            onClick={(e) => e.stopPropagation()}
-          >
-            <input
-              type="checkbox"
-              checked={selected}
-              onChange={(e) => onSelectChange?.(e.target.checked, e)}
-              // The card itself isn't clickable yet, but if a
-              // future commit adds an `onClick` to the
-              // <article>, the browser would fire it on
-              // space/enter on the checkbox too. Stopping
-              // propagation here keeps the toggle isolated.
-              onClick={(e) => e.stopPropagation()}
-              aria-label={t('plugin.pa.batch.selectOne', {
-                defaultValue: 'Select {{name}}',
-                name: plugin.name,
-              })}
-            />
-          </label>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="pa-market-card-name">{plugin.name}</div>
             <div className="pa-market-card-id">{plugin.id}</div>
@@ -392,47 +344,28 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
             </span>
           )}
           <span className={statusBadge.cls}>{statusBadge.label}</span>
-        </div>
+        </div>       
+
+        {plugin.description && (
+          <div className="pa-market-card-desc">{plugin.description}</div>
+        )}
 
         <div className="pa-installed-byline">
           {plugin.author && (
-            <span>
+            <span className="inline-flex items-center">
               <User size={9} style={ICON_STYLE} />
-              <b>{plugin.author}</b>
+              {plugin.author}
             </span>
           )}
           {plugin.author && dateText && <span className="pa-sep">·</span>}
           {dateText && (
-            <span>
+            <span className="inline-flex items-center">
               <Calendar size={9} style={ICON_STYLE} />
               {dateText}
             </span>
           )}
           <span className="pa-sep">·</span>
           <span>v{version}</span>
-        </div>
-
-        {plugin.description && (
-          <div className="pa-market-card-desc">{plugin.description}</div>
-        )}
-
-        <div className="pa-market-card-meta">
-          {tags.map((tag) => (
-            <span key={tag.key} className={tag.cls}>{tag.label}</span>
-          ))}
-          {/* Task 12 (G12) sparkline. Pushed to the right edge
-            of the meta row with `margin-left: auto`. The
-            component renders `null` when there's no metric
-            data for the plugin (per the "no data → don't
-            render" contract), so a freshly-installed plugin
-            simply has no chart on its card. */}
-          <PluginSparkline
-            buckets={sparklineBuckets}
-            style={{ marginLeft: 'auto' }}
-            ariaLabel={t('plugin.pa.card.sparklineAria', {
-              defaultValue: 'Startup time & error rate, last 30 minutes',
-            })}
-          />
         </div>
 
         {error && (

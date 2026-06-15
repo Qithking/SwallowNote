@@ -951,6 +951,8 @@
         "activity": "Activity",
         "diagnostics": "Diagnostics",
         "logs": "Logs",
+        "console": "Manager console",
+        "consoleMeta": "{{events}} evt · {{errors}} err",
         "storage": "Storage",
         "install": "Install Plugin",
         "refresh": "Refresh",
@@ -972,12 +974,19 @@
         "hint": "Upload a .zip package to get started."
       },
       "dialog": {
+        "console": {
+          "eyebrow": "Task manager · 24h window",
+          "title": "Plugin Manager Console"
+        },
         "activity": {
           "eyebrow": "Last 24 hours",
           "title": "Activity",
           "count": "{{count}} events · 24h",
           "clear": "Clear",
-          "export": "Export"
+          "export": "Export",
+          "emptyHint": "No activity yet",
+          "rescan": "Rescan complete: {{count}} plugins loaded.",
+          "perPlugin": "<b>{{name}}</b> · {{events}} events · {{storage}} storage ops · {{hooks}} hooks · {{ipc}} ipc"
         },
         "diagnostics": {
           "eyebrow": "Plugin runtime · 24h",
@@ -993,7 +1002,8 @@
             "backendIpc": "Backend IPC",
             "errorRate": "Error rate"
           },
-          "perPluginLoad": "Per-plugin load"
+          "perPluginLoad": "Per-plugin load",
+          "eventUnit": "evt"
         },
         "logs": {
           "eyebrow": "tail -f · live",
@@ -1006,6 +1016,8 @@
           "exportTitle": "Export as JSON Lines (.jsonl)",
           "conflictGroup": "⚠️ Conflict",
           "normalGroup": "Activity",
+          "emptyHint": "No log lines yet",
+          "emptyFilteredHint": "No log lines match the active filter",
           "toast": {
             "copyEmpty": "No log lines to copy",
             "copySuccess": "Logs copied to clipboard",

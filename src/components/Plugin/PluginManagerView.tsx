@@ -25,16 +25,10 @@ import {
   Upload,
   Store,
   List,
-  Activity,
   LineChart,
-  ScrollText,
   Search,
   ChevronUp,
   ChevronRight,
-  Power,
-  PowerOff,
-  Trash2,
-  X,
   AlertTriangle,
 } from 'lucide-react'
 import { useTranslation, Trans } from 'react-i18next'
@@ -67,9 +61,7 @@ import type { PluginDefinition, PluginPanelProps, PluginPermission } from '@/typ
 
 
 // Lazy load dialog components - only loaded when user clicks the corresponding button
-const PluginActivityDialog = lazy(() => import('./PluginActivityDialog').then(m => ({ default: m.PluginActivityDialog })))
-const PluginDiagnosticsDialog = lazy(() => import('./PluginDiagnosticsDialog').then(m => ({ default: m.PluginDiagnosticsDialog })))
-const PluginLogsDialog = lazy(() => import('./PluginLogsDialog').then(m => ({ default: m.PluginLogsDialog })))
+const PluginManagerConsoleDialog = lazy(() => import('./PluginManagerConsoleDialog').then(m => ({ default: m.PluginManagerConsoleDialog })))
 const PluginPermissionDialog = lazy(() => import('./PluginPermissionDialog'))
 // Task 6 (G6): per-plugin storage inspector. Mounted when a card's
 // "Storage" icon button fires. Lazy-loaded like the other dialogs so
@@ -95,7 +87,7 @@ type PluginManagerTab = 'manage' | 'market'
 type ListFilter = 'all' | 'active' | 'disabled' | 'updates'
 
 /** Which of the three plugin popups is currently open. */
-type DialogKind = 'activity' | 'diagnostics' | 'logs'
+type DialogKind = 'console'
 
 function PluginManagerView() {
   const { t } = useTranslation()
@@ -162,37 +154,6 @@ function PluginManagerView() {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 150)
   const [listFilter, setListFilter] = useState<ListFilter>('all')
-  // ── Multi-select state (G7 batch operations) ──────────────
-  // The selection set is intentionally kept as component-local
-  // state rather than pushed into the plugin store: selection is
-  // a view-only concern (the user is picking which rows to act
-  // on in the *current* filter), not a property of the plugin
-  // itself. Clearing on tab switch is the right escape hatch
-  // because switching to the Marketplace tab and back resets
-  // visiblePlugins to the default filter, and stale ids would
-  // dangle.
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  // Stable callback — the child card's identity is derived from
-  // the (plugin, selection) pair, and a new function reference
-  // on every render would defeat the memo wrapper. The handler
-  // updates an immutable copy of the set so React's reference
-  // equality detects the change.
-  const toggleSelected = useCallback((id: string, next: boolean) => {
-    setSelectedIds((prev) => {
-      const updated = new Set(prev)
-      if (next) updated.add(id)
-      else updated.delete(id)
-      return updated
-    })
-  }, [])
-  const clearSelection = useCallback(() => setSelectedIds(new Set()), [])
-  // Whenever the user flips the active tab we drop the
-  // selection — the marketplace tab has no concept of
-  // "selected installed plugin" and the work would otherwise
-  // sit around in memory.
-  useEffect(() => {
-    setSelectedIds(new Set())
-  }, [activeTab])
   // Last successful rescan / install / market refresh time. Drives
   // the small "— Latest sync 12:04" label on the right of the tab
   // strip. The label updates reactively when any of the three
@@ -351,25 +312,6 @@ function PluginManagerView() {
   // currently-visible plugin in the selection set. The
   // "visible" anchor matches what the user actually sees on
   // screen, so the toolbar checkbox stays in sync with the
-  // card grid. Mixed state (some visible rows selected, some
-  // not) is handled by the toolbar checkbox: if *all* visible
-  // rows are in the set we render checked; if *none* are we
-  // render unchecked; otherwise we render the indeterminate
-  // dash so the user knows the selection is partial.
-  const selectAllVisible = useCallback(
-    (next: boolean) => {
-      setSelectedIds((prev) => {
-        const updated = new Set(prev)
-        for (const p of visiblePlugins) {
-          if (next) updated.add(p.id)
-          else updated.delete(p.id)
-        }
-        return updated
-      })
-    },
-    [visiblePlugins],
-  )
-
   /**
    * Build the props passed to a plugin's settings component. The
    * settings dialog is not an "active panel", so `isActive` is
@@ -529,168 +471,6 @@ function PluginManagerView() {
       toast.error(t('plugin.toggleFailed'), { description: String(err) })
     }
   }, [t])
-
-  // ── G7 batch operations ──────────────────────────────────
-  // Each batch handler walks the current selection in
-  // declaration order (the order in which the user added rows
-  // to the set), awaits each operation, and tallies successes
-  // / failures independently. We deliberately do *not* abort
-  // on the first failure — the user expects "select 5 plugins,
-  // uninstall 4 of them, 1 fails" to report "4 成功 / 1 失败"
-  // rather than leave the other 3 untouched. The summary toast
-  // is fired once at the end so the user gets a single,
-  // easy-to-read status line.
-  //
-  // For uninstalls we batch the host-side `handleReload` so we
-  // don't re-scan the plugin directory N times; toggles don't
-  // need a reload (they're store-mutating only), so they get
-  // the cheaper path.
-  const runBatch = useCallback(
-    async (
-      label: string,
-      actions: Array<{ plugin: PluginDefinition; run: () => Promise<void> }>,
-    ): Promise<{ success: number; failure: number }> => {
-      let success = 0
-      let failure = 0
-      // Sequential, not parallel — the underlying tauri command
-      // touches a single mutex on the rust side, and stacking N
-      // concurrent calls just queues them. Awaiting in order
-      // also makes the "正在卸载第 3/N 项…" UX honest.
-      for (const { plugin, run } of actions) {
-        try {
-          await run()
-          success += 1
-        } catch (err) {
-          failure += 1
-          // Don't fail-silent on the per-item side: log the
-          // pair so the user can copy the id into the dev
-          // console if they want to dig in.
-          console.error(`[batch:${label}] failed for ${plugin.id}:`, err)
-        }
-      }
-      return { success, failure }
-    },
-    [],
-  )
-
-  // Snapshot of the selected plugins. We resolve ids against
-  // the *current* `plugins` array (not `visiblePlugins`) so a
-  // user can select across filters and still act on the full
-  // set. If a plugin disappears between selection and action
-  // (e.g. another flow uninstalled it), the lookup just skips
-  // the dangling id and the toast reports N success on a
-  // smaller-than-expected N — the user will see the missing
-  // card gone from the list anyway.
-  const selectedPlugins = useMemo<PluginDefinition[]>(() => {
-    if (selectedIds.size === 0) return []
-    const out: PluginDefinition[] = []
-    for (const p of plugins) {
-      if (selectedIds.has(p.id)) out.push(p)
-    }
-    return out
-  }, [plugins, selectedIds])
-
-  const handleBatchEnable = useCallback(async () => {
-    if (selectedIds.size === 0) return
-    const targets = selectedPlugins
-    const actions = targets.map((plugin) => ({
-      plugin,
-      run: async () => {
-        await togglePluginEnabled(plugin.id, true)
-        usePluginStore.getState().setPluginEnabled(plugin.id, true)
-      },
-    }))
-    const { success, failure } = await runBatch('enable', actions)
-    clearSelection()
-    toast.success(
-      t('plugin.pa.batch.summary', {
-        defaultValue: '成功 {{success}} 项，失败 {{failure}} 项',
-        success,
-        failure,
-      }),
-    )
-  }, [selectedIds, selectedPlugins, runBatch, clearSelection, t])
-
-  const handleBatchDisable = useCallback(async () => {
-    if (selectedIds.size === 0) return
-    const targets = selectedPlugins
-    const actions = targets.map((plugin) => ({
-      plugin,
-      run: async () => {
-        await togglePluginEnabled(plugin.id, false)
-        usePluginStore.getState().setPluginEnabled(plugin.id, false)
-      },
-    }))
-    const { success, failure } = await runBatch('disable', actions)
-    clearSelection()
-    toast.success(
-      t('plugin.pa.batch.summary', {
-        defaultValue: '成功 {{success}} 项，失败 {{failure}} 项',
-        success,
-        failure,
-      }),
-    )
-  }, [selectedIds, selectedPlugins, runBatch, clearSelection, t])
-
-  const handleBatchUninstall = useCallback(async () => {
-    if (selectedIds.size === 0) return
-    // Pre-flight: build a quick "is this id still in the
-    // registry?" map from the live store. We resolve through
-    // `plugins` (the source of truth) so a card that vanished
-    // mid-batch — say the host crashed and reloaded — is
-    // silently skipped instead of throwing.
-    const targets = selectedPlugins
-    const actions = targets.map((plugin) => ({
-      plugin,
-      run: async () => {
-        await uninstallPlugin(plugin.id)
-        // Mirror the per-card handleUninstall side-effects: if
-        // the removed plugin owned a sidebar/right-panel slot,
-        // yank the view back to the explorer so the user
-        // doesn't see a stale chrome after the reload.
-        const ui = useUIStore.getState()
-        if (ui.sidebarView === `plugin:${plugin.id}`) {
-          ui.setSidebarView('explorer')
-          if (ui.settingsPanelVisible) ui.setSettingsPanelVisible(false)
-        }
-        if (ui.rightPanelType === `plugin:${plugin.id}`) {
-          ui.setRightPanelType(null)
-        }
-      },
-    }))
-    const { success, failure } = await runBatch('uninstall', actions)
-    // One reload at the end, not N. The `scanPlugins` call
-    // hits the FS and is the slowest part of the uninstall
-    // path; the previous (per-item) implementation triggered
-    // it inside `handleUninstall`, which worked for a single
-    // uninstall but ballooned to N rescans for an N-row
-    // batch.
-    if (success > 0) {
-      try {
-        const rustMetas = await scanPlugins()
-        // `loadAllPlugins` returns a `PluginLoadResult` whose
-        // `plugins` field is the array we want to push into
-        // the store. The pre-existing `handleReload` passes
-        // the wrapper object directly (a pre-existing type
-        // bug); we extract the inner array here to keep the
-        // batch path type-clean.
-        const loaded = await loadAllPlugins(rustMetas)
-        setPlugins(loaded.plugins)
-        setLoaded(true)
-        setLastSyncAt(new Date())
-      } catch (err) {
-        console.error('[batch:uninstall] reload failed:', err)
-      }
-    }
-    clearSelection()
-    toast.success(
-      t('plugin.pa.batch.summary', {
-        defaultValue: '成功 {{success}} 项，失败 {{failure}} 项',
-        success,
-        failure,
-      }),
-    )
-  }, [selectedIds, selectedPlugins, runBatch, clearSelection, t, setPlugins, setLoaded])
 
   // Handle plugin update from marketplace
   const handleUpdatePlugin = useCallback(async (plugin: PluginDefinition) => {
@@ -861,14 +641,6 @@ function PluginManagerView() {
               onSettings={openSettings}
               onPermissions={openPermissions}
               onStorage={openStorage}
-              // ── G7 batch operations wiring ──
-              selectedIds={selectedIds}
-              onToggleSelect={toggleSelected}
-              onSelectAll={selectAllVisible}
-              onClearSelection={clearSelection}
-              onBatchEnable={() => void handleBatchEnable()}
-              onBatchDisable={() => void handleBatchDisable()}
-              onBatchUninstall={() => void handleBatchUninstall()}
             />
           </div>
           <div style={{ display: activeTab === 'market' ? 'block' : 'none', height: '100%' }}>
@@ -907,22 +679,14 @@ function PluginManagerView() {
               <span>{t('plugin.pa.rail.open')}</span>
             </div>
             <RailButton
-              icon={<Activity size={13} />}
-              label={t('plugin.pa.btn.activity')}
-              meta={String(eventCount)}
-              onClick={() => setOpenDialog('activity')}
-            />
-            <RailButton
               icon={<LineChart size={13} />}
-              label={t('plugin.pa.btn.diagnostics')}
-              meta={String(stats.errors)}
-              onClick={() => setOpenDialog('diagnostics')}
-            />
-            <RailButton
-              icon={<ScrollText size={13} />}
-              label={t('plugin.pa.btn.logs')}
-              meta="—"
-              onClick={() => setOpenDialog('logs')}
+              label={t('plugin.pa.btn.console', { defaultValue: 'Manager console' })}
+              meta={t('plugin.pa.btn.consoleMeta', {
+                defaultValue: '{{events}} · {{errors}}',
+                events: eventCount,
+                errors: stats.errors,
+              })}
+              onClick={() => setOpenDialog('console')}
             />
           </aside>
         )}
@@ -975,23 +739,11 @@ function PluginManagerView() {
         />
       </Suspense>
 
-      {/* ── Three plugin popups (Activity / Diagnostics / Logs) ── */}
+      {/* ── Plugin Manager Console (Activity / Diagnostics / Logs) ── */}
       <Suspense fallback={null}>
-        <PluginActivityDialog
-          open={openDialog === 'activity'}
-          onOpenChange={(o: boolean) => setOpenDialog(o ? 'activity' : null)}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <PluginDiagnosticsDialog
-          open={openDialog === 'diagnostics'}
-          onOpenChange={(o: boolean) => setOpenDialog(o ? 'diagnostics' : null)}
-        />
-      </Suspense>
-      <Suspense fallback={null}>
-        <PluginLogsDialog
-          open={openDialog === 'logs'}
-          onOpenChange={(o: boolean) => setOpenDialog(o ? 'logs' : null)}
+        <PluginManagerConsoleDialog
+          open={openDialog === 'console'}
+          onOpenChange={(o: boolean) => setOpenDialog(o ? 'console' : null)}
         />
       </Suspense>
 
@@ -1024,7 +776,7 @@ function PluginManagerView() {
         <PluginLoadFailuresDialog
           open={failuresDialogOpen}
           onOpenChange={setFailuresDialogOpen}
-          onViewLogs={() => setOpenDialog('logs')}
+          onViewLogs={() => setOpenDialog('console')}
         />
       </Suspense>
     </div>
@@ -1066,24 +818,6 @@ interface ManageTabProps {
    * mode is active.
    */
   onStorage: (plugin: PluginDefinition) => void
-  // ── G7 batch operations (Task 7.1–7.5) ──
-  /** Set of currently selected plugin ids. */
-  selectedIds: Set<string>
-  /** Toggle one row's membership in the selection set. */
-  onToggleSelect: (id: string, next: boolean) => void
-  /**
-   * Toggle the membership of *all currently visible* rows.
-   * Toolbar checkbox drives this; the parent decides whether
-   * to add or remove based on the "all visible already
-   * selected" check.
-   */
-  onSelectAll: (next: boolean) => void
-  /** Clear the selection (called after a batch finishes or
-   *  when the user clicks the X in the batch bar). */
-  onClearSelection: () => void
-  onBatchEnable: () => void
-  onBatchDisable: () => void
-  onBatchUninstall: () => void
 }
 
 function ManageTab({
@@ -1103,13 +837,6 @@ function ManageTab({
   onSettings,
   onPermissions,
   onStorage,
-  selectedIds,
-  onToggleSelect,
-  onSelectAll,
-  onClearSelection,
-  onBatchEnable,
-  onBatchDisable,
-  onBatchUninstall,
 }: ManageTabProps) {
   const { t } = useTranslation()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -1129,21 +856,6 @@ function ManageTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="pa-toolbar">
-        {/* ── Select-all checkbox (G7) ─────────────────────
-            Sits at the very left of the toolbar so it's the
-            first thing the user sees. The three-state logic
-            (checked / unchecked / indeterminate) is derived
-            purely from `visiblePlugins` and `selectedIds`,
-            so the parent doesn't have to track a separate
-            "indeterminate" flag. We compute the truthy
-            value at render time and pass it to the native
-            input's `checked` + `ref`-driven `indeterminate`
-            property. */}
-        <BatchSelectAll
-          visiblePlugins={visiblePlugins}
-          selectedIds={selectedIds}
-          onSelectAll={onSelectAll}
-        />
         <div className="pa-segmented" role="tablist">
           <SegmentButton
             active={listFilter === 'all'}
@@ -1197,27 +909,6 @@ function ManageTab({
         </button>
       </div>
 
-      {/* ── Batch action bar (G7.3) ───────────────────────
-           Rendered only when the user has at least one row
-           selected. Stays in the document flow (not
-           `position: sticky`) so it pushes the grid down
-           rather than overlapping it — the grid is its own
-           scroll container and a sticky overlay would be
-           cropped at the wrong edge. Three buttons:
-           enable / disable / uninstall, plus a count
-           summary and a clear (×) button. The bar uses the
-           existing `.pa-btn` / `.pa-btn-ghost` styles so it
-           blends in with the toolbar above. */}
-      {selectedIds.size > 0 && (
-        <BatchActionBar
-          count={selectedIds.size}
-          onEnable={onBatchEnable}
-          onDisable={onBatchDisable}
-          onUninstall={onBatchUninstall}
-          onClear={onClearSelection}
-        />
-      )}
-
       {isScanning && visiblePlugins.length === 0 ? (
         <div className="pa-market-grid" style={{ padding: '0 28px' }}>
           <PluginCardSkeletonGrid count={6} />
@@ -1234,8 +925,6 @@ function ManageTab({
                 plugin={plugin}
                 index={idx + 1}
                 hasUpdate={hasUpdate(plugin.id)}
-                selected={selectedIds.has(plugin.id)}
-                onSelectChange={(next) => onToggleSelect(plugin.id, next)}
                 onToggle={(enabled: boolean) => onToggle(plugin, enabled)}
                 onUninstall={() => onUninstall(plugin)}
                 onUpdate={onUpdate ? () => onUpdate(plugin) : undefined}
@@ -1257,163 +946,6 @@ function EmptyListHint() {
     <div className="pa-empty">
       <div className="pa-empty-title">{t('plugin.pa.empty.title')}</div>
       <div className="pa-empty-hint">{t('plugin.pa.empty.hint')}</div>
-    </div>
-  )
-}
-
-/**
- * Toolbar select-all checkbox (G7.3). A native `<input
- * type="checkbox">` is good enough here — the visual is a
- * 14×14 checkbox, the only state we need is the
- * indeterminate flag (some-but-not-all visible rows
- * selected), and that's a property on the DOM input that
- * React doesn't track in props. We compute the "indeterminate"
- * flag at render time and write it via a ref to the DOM node.
- *
- * The "all visible" anchor matches the rows the user can see
- * in the grid; clicking the checkbox adds *every* visible
- * row to the set, or removes all of them. Selected rows that
- * are currently hidden by the filter are left untouched.
- */
-function BatchSelectAll({
-  visiblePlugins,
-  selectedIds,
-  onSelectAll,
-}: {
-  visiblePlugins: PluginDefinition[]
-  selectedIds: Set<string>
-  onSelectAll: (next: boolean) => void
-}) {
-  const { t } = useTranslation()
-  const inputRef = useRef<HTMLInputElement>(null)
-  // Derive the three states from the visible rows + the
-  // current selection. We compare membership one-by-one
-  // instead of using `every` / `some` with the same predicate
-  // because we need the "mixed" case (some yes, some no) to
-  // render as indeterminate.
-  const visibleCount = visiblePlugins.length
-  let selectedVisible = 0
-  for (const p of visiblePlugins) {
-    if (selectedIds.has(p.id)) selectedVisible += 1
-  }
-  const allSelected = visibleCount > 0 && selectedVisible === visibleCount
-  const noneSelected = selectedVisible === 0
-  // The DOM `indeterminate` property is not a React prop, so
-  // we drive it through a ref. The effect re-fires whenever
-  // the derived state changes.
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.indeterminate = !allSelected && !noneSelected
-    }
-  }, [allSelected, noneSelected])
-  // Clicking the checkbox when fully selected removes the
-  // visible rows; otherwise (none or partial) it adds them
-  // all. This matches the standard "tri-state checkbox"
-  // behaviour in macOS Finder, Gmail, etc.
-  const handleClick = () => {
-    onSelectAll(!allSelected)
-  }
-  return (
-    <label
-      className="pa-select-all"
-      title={t('plugin.pa.batch.selectAllTitle', {
-        defaultValue: 'Select all visible plugins',
-      })}
-    >
-      <input
-        ref={inputRef}
-        type="checkbox"
-        checked={allSelected}
-        // We don't need `onChange` — `onClick` is enough to
-        // capture the user's intent before the browser
-        // toggles the checkbox's internal `checked` (which
-        // we override via the ref above on the next render).
-        onClick={handleClick}
-        // Read-only: suppress the warning about a controlled
-        // checkbox without an onChange handler.
-        readOnly
-        aria-label={t('plugin.pa.batch.selectAll', { defaultValue: 'Select all' })}
-      />
-      <span className="pa-select-all-text">
-        {t('plugin.pa.batch.selected', {
-          defaultValue: '已选 {{count}}',
-          count: selectedIds.size,
-        })}
-      </span>
-    </label>
-  )
-}
-
-/**
- * Batch action bar (G7.3). Renders below the toolbar when at
- * least one row is selected. Three primary actions
- * (enable / disable / uninstall) plus a count summary on the
- * left and a "×" clear button on the right. The styling
- * reuses the existing `.pa-btn` button family plus a new
- * `.pa-batch-bar` container that gives the bar a soft
- * accent-tinted background so it stands out as a transient
- * mode of interaction.
- */
-function BatchActionBar({
-  count,
-  onEnable,
-  onDisable,
-  onUninstall,
-  onClear,
-}: {
-  count: number
-  onEnable: () => void
-  onDisable: () => void
-  onUninstall: () => void
-  onClear: () => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <div className="pa-batch-bar" role="toolbar" aria-label={t('plugin.pa.batch.barAria', { defaultValue: 'Batch actions' })}>
-      <span className="pa-batch-count">
-        {t('plugin.pa.batch.selectedCount', {
-          defaultValue: '已选 {{count}} 项',
-          count,
-        })}
-      </span>
-      <div className="pa-batch-actions">
-        <button
-          type="button"
-          className="pa-btn"
-          onClick={onEnable}
-          title={t('plugin.pa.batch.enableTitle', { defaultValue: 'Enable selected plugins' })}
-        >
-          <Power size={12} />
-          {t('plugin.pa.batch.enable', { defaultValue: '启用' })}
-        </button>
-        <button
-          type="button"
-          className="pa-btn"
-          onClick={onDisable}
-          title={t('plugin.pa.batch.disableTitle', { defaultValue: 'Disable selected plugins' })}
-        >
-          <PowerOff size={12} />
-          {t('plugin.pa.batch.disable', { defaultValue: '禁用' })}
-        </button>
-        <button
-          type="button"
-          className="pa-btn pa-btn-danger"
-          onClick={onUninstall}
-          title={t('plugin.pa.batch.uninstallTitle', { defaultValue: 'Uninstall selected plugins' })}
-        >
-          <Trash2 size={12} />
-          {t('plugin.pa.batch.uninstall', { defaultValue: '卸载' })}
-        </button>
-      </div>
-      <button
-        type="button"
-        className="pa-btn pa-btn-ghost pa-btn-icon"
-        onClick={onClear}
-        title={t('plugin.pa.batch.clear', { defaultValue: 'Clear selection' })}
-        aria-label={t('plugin.pa.batch.clear', { defaultValue: 'Clear selection' })}
-      >
-        <X size={14} />
-      </button>
     </div>
   )
 }

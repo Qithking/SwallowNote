@@ -193,17 +193,20 @@ describe('TC-WaveD-M11: plugin.pa.dialog.logs.toast.* keys', () => {
     expect(t.exportSuccess).toContain('{{count}}')
   })
 
-  it('PluginLogsDialog source no longer hardcodes English toast strings', async () => {
+  it('PluginManagerConsoleDialog source no longer hardcodes English toast strings', async () => {
     // Regression net for the original Wave D finding: 7
     // `toast.*` calls used to pass a plain English string
     // literal. After the fix, every `toast.*` first argument
-    // must be a `t(...)` call. We scan the source for the
+    // must be a `t(...)` call. The Logs tab moved into
+    // `PluginManagerConsoleDialog` (which subsumes Activity /
+    // Diagnostics / Logs in one popup), so we read the new
+    // file path. We scan the source for the
     // `toast.{info|success|error}(` pattern and check the
     // character after the opening paren is `t`.
     const fs = await import('fs/promises')
     const path = await import('path')
     const src = await fs.readFile(
-      path.join(process.cwd(), 'src/components/Plugin/PluginLogsDialog.tsx'),
+      path.join(process.cwd(), 'src/components/Plugin/PluginManagerConsoleDialog.tsx'),
       'utf8',
     )
     const calls = [...src.matchAll(/toast\.(?:info|success|error)\(/g)]
