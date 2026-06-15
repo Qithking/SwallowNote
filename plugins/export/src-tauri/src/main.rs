@@ -21,6 +21,7 @@ mod convert;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
 /// JSON-RPC 2.0 request. `id` is typed as `serde_json::Value` for
@@ -116,7 +117,25 @@ fn handle_request(req: &JsonRpcRequest) -> Value {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
 
-            match convert::markdown_to_docx(markdown.to_string()) {
+            // `image_assets` is an optional `{ url: base64-no-prefix }`
+            // map. The frontend collects the bytes of every relative
+            // image it can read from disk (or its `asset:` protocol
+            // equivalent) and sends them in one go so the DOCX
+            // renderer can embed them as real drawings. Missing or
+            // malformed entries silently fall back to the textual
+            // placeholder in [`convert::Inline::Image`].
+            let image_assets: HashMap<String, String> = req
+                .params
+                .get("image_assets")
+                .and_then(|v| v.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            match convert::markdown_to_docx(markdown.to_string(), image_assets) {
                 Ok(b64) => {
                     let resp = JsonRpcSuccess {
                         jsonrpc: "2.0",

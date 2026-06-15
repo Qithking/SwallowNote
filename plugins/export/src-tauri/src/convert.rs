@@ -21,9 +21,19 @@ use docx_rs::*;
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
 };
+use std::collections::HashMap;
 use std::io::Cursor;
 use base64::Engine;
 use thiserror::Error;
+
+/// English Metric Units per inch. The OOXML drawing spec measures
+/// image dimensions in EMUs (1 inch = 914 400 EMUs); the
+/// `Pic::size` method takes a width/height pair in EMU.
+const EMU_PER_INCH: u32 = 914_400;
+/// Default DOCX image width in inches. The image height is
+/// computed by `Pic::new` from the image bytes themselves, so
+/// we only specify the width and let the height be derived.
+const DEFAULT_IMAGE_WIDTH_INCH: u32 = 6;
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -82,14 +92,34 @@ const MAX_MARKDOWN_BYTES: usize = 5 * 1024 * 1024;
 // ─── Core functions ──────────────────────────────────────────────────────────
 
 /// Convert a Markdown string to a DOCX file and return base64-encoded bytes.
-pub fn markdown_to_docx(markdown: String) -> Result<String, ExportError> {
+///
+/// `image_assets` is an optional map from image URL (as it appears
+/// in the markdown) to base64-encoded image bytes (no `data:`
+/// prefix). When a `Inline::Image` is rendered and its `url` is
+/// present in the map, the bytes are decoded and embedded as a
+/// real DOCX drawing element; otherwise the renderer falls back
+/// to the textual placeholder. The map is consumed up-front to
+/// decode the base64 strings — invalid entries are silently
+/// dropped so a partial asset set still produces a usable DOCX.
+pub fn markdown_to_docx(
+    markdown: String,
+    image_assets: HashMap<String, String>,
+) -> Result<String, ExportError> {
     if markdown.len() > MAX_MARKDOWN_BYTES {
         return Err(ExportError::MarkdownTooLarge {
             size: markdown.len(),
             max: MAX_MARKDOWN_BYTES,
         });
     }
-    let doc = build_docx(&markdown)?;
+    // Decode base64 → raw bytes up-front so the renderer can hand
+    // `&[u8]` straight to `Pic::new` without re-decoding per image.
+    let mut decoded_assets: HashMap<String, Vec<u8>> = HashMap::new();
+    for (k, v) in image_assets {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&v) {
+            decoded_assets.insert(k, bytes);
+        }
+    }
+    let doc = build_docx(&markdown, &decoded_assets)?;
     let mut buf = Cursor::new(Vec::new());
     doc.build()
         .pack(&mut buf)
@@ -308,7 +338,10 @@ fn cjk_run_fonts() -> RunFonts {
     RunFonts::new().east_asia(CJK_FONT).ascii(LATIN_FONT)
 }
 
-fn build_docx(markdown: &str) -> Result<Docx, ExportError> {
+fn build_docx(
+    markdown: &str,
+    image_assets: &HashMap<String, Vec<u8>>,
+) -> Result<Docx, ExportError> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -319,7 +352,7 @@ fn build_docx(markdown: &str) -> Result<Docx, ExportError> {
 
     let mut doc = Docx::new();
     for block in &blocks {
-        doc = render_block(block, 0, doc);
+        doc = render_block(block, 0, image_assets, doc);
     }
     Ok(doc)
 }
@@ -331,19 +364,24 @@ fn build_docx(markdown: &str) -> Result<Docx, ExportError> {
 /// does not increase the list depth — the items inside a quote
 /// are visually rendered with the quote's own indent, not a list
 /// indent.
-fn render_block(block: &Block, depth: usize, doc: Docx) -> Docx {
+fn render_block(
+    block: &Block,
+    depth: usize,
+    image_assets: &HashMap<String, Vec<u8>>,
+    doc: Docx,
+) -> Docx {
     match block {
         Block::Heading { level, inlines } => {
             let style = format!("Heading{}", level.min(&6));
-            let para = append_inlines(Paragraph::new().style(&style), inlines);
+            let para = append_inlines(Paragraph::new().style(&style), inlines, image_assets);
             doc.add_paragraph(para)
         }
         Block::Paragraph(inlines) => {
-            let para = append_inlines(Paragraph::new(), inlines);
+            let para = append_inlines(Paragraph::new(), inlines, image_assets);
             doc.add_paragraph(para)
         }
         Block::CodeBlock { code, lang } => render_code_block(code, lang, doc),
-        Block::List(list) => render_list(list, depth, doc),
+        Block::List(list) => render_list(list, depth, image_assets, doc),
         Block::BlockQuote(children) => {
             // A block quote is a structural container in v3.1:
             // the `Block::BlockQuote(Vec<Block>)` shape lets
@@ -365,10 +403,10 @@ fn render_block(block: &Block, depth: usize, doc: Docx) -> Docx {
                             .italic()
                             .fonts(cjk_run_fonts()),
                     );
-                    para = append_inlines(para, inlines);
+                    para = append_inlines(para, inlines, image_assets);
                     doc = doc.add_paragraph(para);
                 } else {
-                    doc = render_block(&child, depth, doc);
+                    doc = render_block(&child, depth, image_assets, doc);
                 }
             }
             doc
@@ -386,7 +424,27 @@ fn render_code_block(code: &str, lang: &Option<String>, doc: Docx) -> Docx {
         if !lang.is_empty() {
             para = para.add_run(
                 Run::new()
-                    .add_text(format!("[{}]\n", lang))
+                    .add_text(format!("[{}]", lang))
+                    .size(14)
+                    .color("888888"),
+            );
+            // For "rendered-client-side" languages, append a
+            // "(前端渲染)" marker so the reader knows the PDF /
+            // HTML pipeline produces a rendered figure for this
+            // block while the DOCX path keeps the source. The
+            // marker is the contract with the frontend's
+            // `renderCustomBlocksForPdf` helper.
+            if matches!(lang.as_str(), "mermaid" | "katex" | "markmap") {
+                para = para.add_run(
+                    Run::new()
+                        .add_text(" (前端渲染)")
+                        .size(14)
+                        .color("999999"),
+                );
+            }
+            para = para.add_run(
+                Run::new()
+                    .add_text("\n")
                     .size(14)
                     .color("888888"),
             );
@@ -405,7 +463,12 @@ fn render_code_block(code: &str, lang: &Option<String>, doc: Docx) -> Docx {
     doc.add_paragraph(para)
 }
 
-fn render_list(list: &List, depth: usize, doc: Docx) -> Docx {
+fn render_list(
+    list: &List,
+    depth: usize,
+    image_assets: &HashMap<String, Vec<u8>>,
+    doc: Docx,
+) -> Docx {
     // `depth` is 0-indexed. The previous flat representation
     // used a 1-indexed `list_depth` so top-level items indented
     // at `1 * 360` twips; we add 1 here to preserve the same
@@ -426,13 +489,13 @@ fn render_list(list: &List, depth: usize, doc: Docx) -> Docx {
         let mut para = Paragraph::new()
             .add_run(Run::new().add_text(marker).fonts(cjk_run_fonts()))
             .indent(Some(indent_val), None, None, None);
-        para = append_inlines(para, &item.inlines);
+        para = append_inlines(para, &item.inlines, image_assets);
         doc = doc.add_paragraph(para);
         // Render the item's nested children (sub-lists,
         // paragraphs, sub-quotes) at depth + 1 so a nested
         // list indents further than its parent.
         for child in &item.children {
-            doc = render_block(child, depth + 1, doc);
+            doc = render_block(child, depth + 1, image_assets, doc);
         }
     }
     doc
@@ -476,12 +539,29 @@ fn render_table(
                 .size(4)
                 .color("auto"),
         );
-    let mut table = Table::new(Vec::new());
+    // Column widths. docx-rs 0.4's `Table::set_grid` accepts a
+    // `Vec<usize>` of column widths in twips (1/20 of a point).
+    // We aim for a 9000-twip table (≈ 6.25 inch) that matches
+    // the printable width of an A4 page with the same side
+    // margins the host's PDF stylesheet uses. If a row has more
+    // cells than columns (e.g. an extra trailing blank), the
+    // extra cell renders in the trailing-edge region but still
+    // shows up — Word reads past grid without complaining.
+    let col_count = headers
+        .iter()
+        .map(|c| c.len())
+        .chain(rows.iter().filter_map(|r| r.first().map(|c| c.len())))
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let per_col_twips: usize = 9000 / col_count;
+    let grid: Vec<usize> = (0..col_count).map(|_| per_col_twips).collect();
+    let mut table = Table::new(Vec::new()).set_grid(grid.clone());
     if !headers.is_empty() {
         let cells: Vec<TableCell> = headers
             .iter()
             .map(|cell_inlines| {
-                let para = append_inlines(Paragraph::new(), cell_inlines);
+                let para = append_inlines(Paragraph::new(), cell_inlines, &HashMap::new());
                 TableCell::new()
                     .add_paragraph(para)
                     .set_borders(borders.clone())
@@ -498,7 +578,7 @@ fn render_table(
         let cells: Vec<TableCell> = row_inlines
             .iter()
             .map(|cell_inlines| {
-                let para = append_inlines(Paragraph::new(), cell_inlines);
+                let para = append_inlines(Paragraph::new(), cell_inlines, &HashMap::new());
                 TableCell::new()
                     .add_paragraph(para)
                     .set_borders(borders.clone())
@@ -509,7 +589,11 @@ fn render_table(
     doc.add_table(table)
 }
 
-fn append_inlines(mut para: Paragraph, inlines: &[Inline]) -> Paragraph {
+fn append_inlines(
+    mut para: Paragraph,
+    inlines: &[Inline],
+    image_assets: &HashMap<String, Vec<u8>>,
+) -> Paragraph {
     for inline in inlines {
         match inline {
             Inline::Text(t) => {
@@ -570,30 +654,44 @@ fn append_inlines(mut para: Paragraph, inlines: &[Inline]) -> Paragraph {
                 }
             }
             Inline::Image { alt, url } => {
-                // Render the placeholder as a single segment so we
-                // never produce nested labels like "[图片: [图片]]".
-                // With an alt we show the alt verbatim; without
-                // an alt we fall back to the generic "[图片]".
-                let label = if alt.is_empty() {
-                    "[图片]".to_string()
+                // If the caller passed the image bytes, embed a real
+                // drawing element; otherwise fall back to the textual
+                // placeholder that was the only option in v3.1.
+                if let Some(bytes) = image_assets.get(url) {
+                    // `Pic::new` accepts `&[u8]` and internally converts
+                    // to PNG. We set a default width of 6 inches; the
+                    // height is auto-computed from the image's aspect
+                    // ratio so we don't distort photos.
+                    let pic = Pic::new(bytes)
+                        .size(EMU_PER_INCH * DEFAULT_IMAGE_WIDTH_INCH, EMU_PER_INCH * 4)
+                        .id(url.clone());
+                    para = para.add_run(Run::new().add_image(pic));
                 } else {
-                    alt.clone()
-                };
-                para = para.add_run(
-                    Run::new()
-                        .add_text(label)
-                        .italic()
-                        .color("666666")
-                        .fonts(cjk_run_fonts()),
-                );
-                if !url.is_empty() {
+                    // Fall back to the v3.1 placeholder text. Render
+                    // the alt verbatim if present, otherwise the generic
+                    // "[图片]" label, so we never nest the label inside
+                    // itself ("[图片: [图片]]").
+                    let label = if alt.is_empty() {
+                        "[图片]".to_string()
+                    } else {
+                        alt.clone()
+                    };
                     para = para.add_run(
                         Run::new()
-                            .add_text(format!(" ({})", url))
-                            .color("888888")
-                            .size(18)
+                            .add_text(label)
+                            .italic()
+                            .color("666666")
                             .fonts(cjk_run_fonts()),
                     );
+                    if !url.is_empty() {
+                        para = para.add_run(
+                            Run::new()
+                                .add_text(format!(" ({})", url))
+                                .color("888888")
+                                .size(18)
+                                .fonts(cjk_run_fonts()),
+                        );
+                    }
                 }
             }
             Inline::SoftBreak => {
@@ -1178,7 +1276,7 @@ mod tests {
     }
 
     fn round_trip(md: &str) -> String {
-        let b64 = markdown_to_docx(md.to_string()).expect("markdown_to_docx");
+        let b64 = markdown_to_docx(md.to_string(), HashMap::new()).expect("markdown_to_docx");
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&b64)
             .expect("base64 decode");
@@ -1366,7 +1464,7 @@ mod tests {
         // the code stands out inside a sentence. The test
         // asserts the run-level font name is present in the
         // packed bytes.
-        let bytes = pack(build_docx("| a |\n| - |\n| `x` |\n").expect("build"));
+        let bytes = pack(build_docx("| a |\n| - |\n| `x` |\n", &HashMap::new()).expect("build"));
         let text = docx_text(&bytes);
         assert!(
             text.contains("x"),
@@ -1385,7 +1483,7 @@ mod tests {
     #[test]
     fn oversized_markdown_is_rejected() {
         let md = "a".repeat(MAX_MARKDOWN_BYTES + 1);
-        let err = markdown_to_docx(md).unwrap_err();
+        let err = markdown_to_docx(md, HashMap::new()).unwrap_err();
         assert!(
             matches!(err, ExportError::MarkdownTooLarge { .. }),
             "expected MarkdownTooLarge, got {err:?}"
@@ -1406,7 +1504,7 @@ mod tests {
     fn no_lint_smoke() {
         // Just exercise the docx build for an empty input; the
         // produced file should be a valid zip (starts with PK).
-        let bytes = pack(build_docx("").expect("build"));
+        let bytes = pack(build_docx("", &HashMap::new()).expect("build"));
         let mut head = [0u8; 2];
         let mut cur = std::io::Cursor::new(&bytes);
         cur.read_exact(&mut head).unwrap();
@@ -1538,5 +1636,83 @@ mod tests {
         );
         // The inner anchor text "text" must also appear.
         assert!(text.contains("text"), "inner anchor text missing: {text}");
+    }
+
+    // ── v0.2.0 tests for image embedding & custom block markers ──
+
+    /// Image embedding — when the caller supplies base64
+    /// bytes for an image URL, the rendered DOCX must contain
+    /// an actual drawing element (not the `[图片]` textual
+    /// placeholder). We assert on the packed bytes for the
+    /// presence of `<w:drawing>` which is what docx-rs emits
+    /// for `Run::add_image(Pic)`. The text-projection helper
+    /// above can't see this because drawings are not `<w:t>`
+    /// elements.
+    #[test]
+    fn image_with_inlined_asset_renders_drawing() {
+        // 1x1 transparent PNG (smallest valid PNG).
+        // Bytes source: a known-good constant; not generated
+        // at runtime to keep this test deterministic.
+        let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        let url = "https://cdn.example.com/dot.png".to_string();
+        let mut assets = HashMap::new();
+        assets.insert(url.clone(), png_b64.to_string());
+
+        let b64 = markdown_to_docx(
+            format!("![alt]({})\n", url),
+            assets,
+        )
+        .expect("markdown_to_docx");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&b64)
+            .expect("base64 decode");
+        let packed = String::from_utf8_lossy(&bytes);
+
+        // The drawing element is what docx-rs emits for `Run::add_image`.
+        assert!(
+            packed.contains("<w:drawing"),
+            "expected <w:drawing> in packed DOCX; asset was not embedded"
+        );
+        // The placeholder must NOT be present in this case.
+        assert!(
+            !packed.contains("[图片]"),
+            "[图片] placeholder should be skipped when asset is provided"
+        );
+    }
+
+    /// Image embedding — when no asset is supplied for an image
+    /// URL, the renderer must fall back to the v3.1 placeholder
+    /// text. This is the "graceful degradation" path that keeps
+    /// the export pipeline working for notes that reference
+    /// unreachable (e.g. broken-path) images.
+    #[test]
+    fn image_with_missing_asset_falls_back_to_placeholder() {
+        let text = round_trip("![alt](https://nope.example.com/x.png)\n");
+        assert!(text.contains("alt"), "alt text missing: {text}");
+        assert!(
+            text.contains("https://nope.example.com/x.png"),
+            "image url missing: {text}"
+        );
+    }
+
+    /// Custom-block marker — a `mermaid` / `katex` / `markmap`
+    /// fenced code block must produce a `"(前端渲染)"`
+    /// annotation right after the language tag in the DOCX.
+    /// This is the contract with the frontend's
+    /// `renderCustomBlocksForPdf` helper: the PDF / HTML
+    /// pipeline replaces the original `<pre>` with a rendered
+    /// figure, while the DOCX path keeps the source verbatim
+    /// plus a marker so the reader knows the diagram was
+    /// rendered elsewhere.
+    #[test]
+    fn mermaid_code_block_marked_for_frontend() {
+        let text = round_trip("```mermaid\ngraph TD; A-->B;\n```\n");
+        assert!(text.contains("[mermaid]"), "language tag missing: {text}");
+        assert!(
+            text.contains("(前端渲染)"),
+            "frontend-render marker missing: {text}"
+        );
+        // And the body must still survive (DOCX keeps the source).
+        assert!(text.contains("graph TD"), "code body missing: {text}");
     }
 }

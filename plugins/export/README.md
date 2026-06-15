@@ -88,8 +88,8 @@ com.swallownote.export.zip  # 最终可安装的插件包
 {
   "id": "com.swallownote.export",
   "name": "文档导出",
-  "description": "将 Markdown 文档导出为 Word (.docx) 或 PDF 格式",
-  "version": "0.1.0",
+  "description": "将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式",
+  "version": "0.2.0",
   "author": "SwallowNote",
   "publishedAt": "2026-06-13",
   "iconPosition": "editorToolbar",
@@ -272,9 +272,9 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
     return () => document.removeEventListener('mousedown', handler)
   }, [menuOpen])
 
-  // 共用导出流程：toast 生命周期 + 保存对话框 + base64 落盘
+  // 共用导出流程:toast 生命周期 + 保存对话框 + base64 落盘
   const runExport = useCallback(
-    async (format: 'docx' | 'pdf', produce: () => Promise<Uint8Array | string>) => {
+    async (format: 'docx' | 'pdf' | 'html', produce: () => Promise<Uint8Array | string>) => {
       if (exportingRef.current) return        // 同步锁
       if (!hasContent) {
         toast.info(strings.emptyNote)
@@ -324,6 +324,15 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
     })
   }, [activeNoteContent, activeNotePath, invokeBackend, runExport])
 
+  // HTML 导出:复用后端 markdown_to_html 的响应,直接保存为 .html 文件,
+  // 不走 PDF 多段渲染 —— 浏览器打开样式与 PDF 等同。
+  const handleExportHtml = useCallback(async () => {
+    const markdown = compactMarkdown(activeNoteContent)
+    await runExport('html', async () => {
+      return (await invokeBackend('markdown_to_html', { markdown })) as string
+    })
+  }, [activeNoteContent, invokeBackend, runExport])
+
   return (
     <div ref={menuRef} className="relative">
       <button onClick={() => setMenuOpen(!menuOpen)} ...>
@@ -336,6 +345,9 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
           </button>
           <button onClick={handleExportPdf} disabled={isExporting || !hasContent} ...>
             {strings.pdfMenu}
+          </button>
+          <button onClick={handleExportHtml} disabled={isExporting || !hasContent} ...>
+            {strings.htmlMenu}
           </button>
         </div>
       )}
@@ -355,19 +367,43 @@ const manifest: PluginManifest = {
 }
 ```
 
-#### 4.4.1 PDF 导出机制（多段渲染）
+#### 4.4.1 PDF 导出机制(多段渲染)
 
-`generatePdfFromHtml` 实现**多段渲染**，避免单 canvas OOM：
+`generatePdfFromHtml` 实现**多段渲染**,避免单 canvas OOM:
 
-1. 后端 `markdown_to_html` 返回拼好的完整 HTML 文档（内置 `<style>`，含 A4 宽度、字体、分页规则）
-2. 前端把 HTML 挂到隐藏容器，**真实等待所有 `<img>` load 完毕**（**全局共享 8s 超时**；`asset:` 协议由 `convertFileSrc` 重写）
-3. 把 `body` 的直接子元素按高度累加，**每 `A4_HEIGHT_PX - 40` 像素分一页**;超高元素（典型:长代码块）走 [`splitOversizedChild`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/src/index.tsx#L260-L291) 按行切分
-4. 每页用 `cloneNode(true)` **深拷贝**出独立容器，**单独 `domToCanvas`**（canvas 高度被容器 `height` 锁在 `A4_HEIGHT_PX × 2`，百页文档也只占一页内存）
+1. 后端 `markdown_to_html` 返回拼好的完整 HTML 文档(内置 `<style>`,含 A4 宽度、字体、分页规则)
+2. 前端把 HTML 挂到隐藏容器,**真实等待所有 `<img>` load 完毕**(**全局共享 8s 超时**;`asset:` 协议由 `convertFileSrc` 重写)
+3. 把 `body` 的直接子元素按高度累加,**每 `A4_HEIGHT_PX - 40` 像素分一页**;超高元素(典型:长代码块)走 [`splitOversizedChild`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/src/index.tsx#L260-L291) 按行切分
+4. 每页用 `cloneNode(true)` **深拷贝**出独立容器,**单独 `domToCanvas`**(canvas 高度被容器 `height` 锁在 `A4_HEIGHT_PX × 2`,百页文档也只占一页内存)
 5. `pdf.addImage` + `pdf.addPage` 逐页入栈
+
+#### 4.4.1.1 PDF 自定义块渲染(mermaid / katex / markmap)
+
+`renderCustomBlocksForPdf` 在第 2 步(`resolveImageSources` 之后、`waitForImages` 之前)被调用,**用动态 `import()` 加载** 3 个第三方库(放 `devDependencies`,首屏 bundle 不增体积):
+
+```ts
+const [mermaid, katex, markmap] = await Promise.all([
+  import('mermaid' as any).catch(() => null),
+  import('katex' as any).catch(() => null),
+  import('markmap-view' as any).catch(() => null),
+])
+```
+
+对每个 `<pre><code class="language-mermaid|katex|markmap">` 块,替换为对应的渲染产物:
+
+- **mermaid** —— `mermaid.render(id, source)` → `<svg>` 字符串,塞进 `<div class="export-mermaid">`
+- **katex** —— `katex.renderToString(source, { displayMode: true, throwOnError: false })` → HTML 字符串
+- **markmap** —— `new Markmap().create(svg, undefined, source)` + `mm.fit()` + 200ms 延时
+
+任何一步 `try/catch` 失败都会**保留原 `<pre>`**(显示源码),不影响主流程导出。HTML 导出走的是浏览器原生 mermaid.js(由 `markdown_to_html` 输出的 `<style>` 触发),无需前端额外处理。
+
+DOCX 端的同名代码块保留源码并追加 `"(前端渲染)"` 标记(由 `convert.rs::render_code_block` 渲染),提示读者该图在 PDF/HTML 端有渲染产物。
 
 #### 4.4.2 图片资源解析
 
-`resolveImageSources` 把 Markdown 原文里的相对路径 `<img src="./x.png">` 重写成 `asset:localhost/...`，Tauri 协议处理器会去读本地文件并以 `data:` URL 返回。`http(s):` / `data:` / `blob:` 不动。
+**PDF / HTML 路径**:`resolveImageSources` 把 Markdown 原文里的相对路径 `<img src="./x.png">` 重写成 `asset:localhost/...`,Tauri 协议处理器会去读本地文件并以 `data:` URL 返回。`http(s):` / `data:` / `blob:` 不动。
+
+**DOCX 路径**:`collectImageAssets(markdown, notePath)` 在 `handleExportDocx` 中被调用,正则提取所有 `![alt](url)` 的相对 URL,**逐个 fetch 字节** → base64 编码 → 通过 JSON-RPC `image_assets` 参数传给 Rust 后端。后端 `convert.rs::markdown_to_docx` 收到 map 后,base64 解码出原始字节,通过 `docx_rs::Pic::new(&bytes)` **嵌入为真实图片**;未命中走 `alt` + URL 占位文字(降级路径,与旧版本兼容)。总量上限 50 MB(`MAX_EMBEDDED_IMAGE_BYTES`),超出跳过剩余图片;单图失败不阻塞整体导出。
 
 #### 4.4.3 私有 i18n
 
@@ -822,18 +858,20 @@ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path src-taur
 
 | 验证项 | 预期结果 |
 |---|---|
-| 编辑器工具栏出现下载图标 | 图标可见，hover 有背景变化 |
-| 点击图标出现下拉菜单 | 显示「导出为 Word」和「导出为 PDF」 |
-| 空笔记 | 两个导出按钮均 `disabled`（鼠标变 not-allowed） |
-| 点击「导出为 Word」 | 弹出保存对话框，保存后 `.docx` 可在 Word/WPS 打开 |
-| 点击「导出为 PDF」 | 弹出保存对话框，保存后多页 PDF 可正常打开 |
-| 含 mermaid/katex/markmap 代码块 | DOCX 中保留语言标签（如 `[mermaid]`），PDF 渲染为对应图表 |
-| 含中文段落 | DOCX 中显示为宋体（SimSun）；PDF 同等字体 |
-| 含相对路径图片 | DOCX 显示 `[图片: alt]`，PDF 中图片正常显示（asset: 协议） |
-| 100 页+ 长文档 | PDF 不 OOM（多段 canvas 渲染）；DOCX 正常生成 |
-| 快速双击「导出为 Word」 | 只触发一次保存对话框（同步锁 `exportingRef`） |
+| 编辑器工具栏出现下载图标 | 图标可见,hover 有背景变化 |
+| 点击图标出现下拉菜单 | 显示「导出为 Word」「导出为 PDF」「导出为 HTML」 |
+| 空笔记 | 三个导出按钮均 `disabled`(鼠标变 not-allowed) |
+| 点击「导出为 Word」 | 弹出保存对话框,保存后 `.docx` 可在 Word/WPS 打开 |
+| 点击「导出为 PDF」 | 弹出保存对话框,保存后多页 PDF 可正常打开 |
+| 点击「导出为 HTML」 | 弹出保存对话框,保存后浏览器打开样式与 PDF 一致(包含 `<style>` 内置 CSS) |
+| 含 mermaid/katex/markmap 代码块 | DOCX 中保留语言标签 + `(前端渲染)` 标记(如 `[mermaid] (前端渲染)`),PDF 渲染为对应图表,HTML 浏览器内由 mermaid.js 渲染 |
+| 含中文段落 | DOCX 中显示为宋体(SimSun);PDF 同等字体 |
+| 含相对路径图片 | DOCX 嵌入真实图片(`<w:drawing>`);PDF / HTML 通过 `asset:` 协议加载 |
+| 含表格 5 列 | DOCX 表格列宽 ≈ 1.25 inch/列(总 6.25 inch),Word/WPS 显示正常边框 |
+| 100 页+ 长文档 | PDF / DOCX / HTML 三格式均不抛 `RangeError`;PDF 多段 canvas 渲染不 OOM |
+| 快速双击「导出为 Word」 | 只触发一次保存对话框(同步锁 `exportingRef`) |
 | 禁用插件后 | 工具栏图标消失 |
-| 卸载插件后 | 无残留，主应用正常运行 |
+| 卸载插件后 | 无残留,主应用正常运行 |
 
 ---
 
@@ -940,7 +978,16 @@ invoke('invoke_plugin', {
 generatePdfFromHtml(html, notePath)  — 关键的多段渲染
   │
   ├─ 把 HTML 挂到隐藏容器，resolveImageSources 把 <img src> 改成 asset: 协议
-  ├─ waitForImages(...) 真实等待所有 <img> load 完毕（全局共享 8s deadline）
+  │
+  ├─ renderCustomBlocksForPdf(container)  — 自定义块渲染(post-process)
+  │   ├─ 动态 import('mermaid' / 'katex' / 'markmap-view') — devDeps,首屏不进 bundle
+  │   ├─ 对每个 <pre><code class="language-mermaid|katex|markmap">:
+  │   │   mermaid  → mermaid.render(id, src) → <svg>
+  │   │   katex    → katex.renderToString(src, { displayMode: true }) → HTML
+  │   │   markmap  → new Markmap().create(svg, undefined, src) → <svg> + fit
+  │   └─ 任何一步失败 → 保留原 <pre>(降级路径)
+  │
+  ├─ waitForImages(...) 真实等待所有 <img> load 完毕(全局共享 8s deadline)
   │
   ├─ 按高度把 body 直接子元素分组到多页
   │   each child measured with getBoundingClientRect().height
@@ -963,7 +1010,7 @@ runExport('pdf', ...) 共用流程：
   save() — 弹出保存对话框
   │
   ▼
-uint8ToBase64(bytes)  — 32KB 分块编码，避开 String.fromCharCode.apply 栈限制
+uint8ToBase64(bytes)  — FileReader.readAsDataURL 异步编码,避开 String.fromCharCode.apply 栈限制
   │
   ▼
 invoke('write_binary_file', { path, data: b64 }) — 写入文件
@@ -972,7 +1019,70 @@ invoke('write_binary_file', { path, data: b64 }) — 写入文件
 toast.success(strings.exportSuccess)
 ```
 
-### 8.3 笔记内容获取（v2 起不再订阅事件）
+### 8.3 DOCX 导出链路(含图片嵌入)
+
+```
+用户点击「导出为 Word」
+  │
+  ▼
+ExportToolbarButton.handleExportDocx()
+  │
+  ▼
+collectImageAssets(markdown, notePath)  — 收集所有相对路径图片
+  │  ├─ 正则提取 ![alt](url) 的 url,跳过 http(s)/data/blob/asset
+  │  ├─ resolveRelativePath + convertFileSrc 走 Tauri asset: 协议
+  │  ├─ fetch → Blob → ArrayBuffer → FileReader base64
+  │  └─ 总量超 50 MB → 终止(MAX_EMBEDDED_IMAGE_BYTES)
+  │
+  ▼
+invokeBackend('markdown_to_docx', { markdown, imageAssets })
+  │  imageAssets = { url: base64-no-prefix, ... }
+  │
+  ▼
+[插件后端] convert::markdown_to_docx(markdown, image_assets)
+  │  ├─ base64 解码出 raw bytes → HashMap<url, Vec<u8>>
+  │  ├─ build_docx(&markdown, &decoded_assets)
+  │  │   ├─ Inline::Image { url } 命中 → Pic::new(&bytes).size(EMU 6×4 inch)
+  │  │   └─ 未命中 → 维持 v3.1 占位文字(alt + URL)
+  │  ├─ render_table 加列宽 (9000 / col_count twips ≈ 6.25 inch)
+  │  ├─ render_code_block 检测 mermaid/katex/markmap lang 时追加 "(前端渲染)"
+  │  └─ 8 + 2 = 10 个测试用例覆盖
+  │
+  ▼
+return base64(DOCX zip) → runExport 流程同上
+```
+
+### 8.4 HTML 导出链路
+
+```
+用户点击「导出为 HTML」
+  │
+  ▼
+ExportToolbarButton.handleExportHtml()
+  │
+  ▼
+invokeBackend('markdown_to_html', { markdown })
+  │
+  ▼
+[后端] convert::markdown_to_html()  — 与 PDF 路径**完全相同**的 HTML 响应
+  │
+  ▼
+return html string
+  │
+  ▼
+runExport('html', ...):
+  save() — 弹出保存对话框 (filter: html/htm)
+  │
+  ▼
+invoke('write_binary_file', { path, data: htmlB64 }) — 写入文件
+  │
+  ▼
+toast.success(strings.exportSuccess)
+```
+
+**没有** PDF 多段渲染 / canvas / jsPDF,只有 `markdown_to_html` → `write_binary_file`。浏览器打开的样式与 PDF 完全一致(同一份 HTML + 内置 CSS),但 mermaid.js 渲染由浏览器端触发(通过 `markdown_to_html` 输出的 `<script>` 标签或宿主页面预加载)。
+
+### 8.5 笔记内容获取(v2 起不再订阅事件)
 
 本插件**不**订阅宿主事件总线——宿主在每次 `toolbarButton` 渲染时直接通过 props 注入当前笔记的 Markdown 文本和路径：
 

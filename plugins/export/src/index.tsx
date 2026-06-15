@@ -132,23 +132,114 @@ function ExportIcon({ size = 18 }: { size?: number }): ReactNode {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Concatenate the contents of a `Uint8Array` into a base64 string.
+ * Encode a `Uint8Array` to a base64 string.
  *
  * The naïve `btoa(String.fromCharCode(...bytes))` blows the JS call
- * stack at around 120 KB; long documents can produce multi-megabyte
- * PDF buffers. This chunks at 32 KB (well under the V8 limit) and
- * materialises the binary string in linear time.
+ * stack at around 120 KB, and even the chunked variant
+ * `String.fromCharCode.apply(null, Array.from(chunk))` repeatedly
+ * stacks 32K frames per call — some V8 builds report
+ * `RangeError: Maximum call stack size exceeded` for multi-megabyte
+ * PDF buffers. We delegate to `FileReader.readAsDataURL`, which
+ * copies bytes through the browser's native encoder without
+ * touching the JS stack. The `data:*;base64,` prefix is stripped
+ * before returning so the result is a pure base64 string the
+ * rest of the pipeline can pass to `write_binary_file`.
  */
-function uint8ToBase64(bytes: Uint8Array): string {
-  const CHUNK = 0x8000
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    // `Array.from` materialises the chunk as a regular array so
-    // `apply` doesn't trip on the typed-array view.
-    const slice = bytes.subarray(i, i + CHUNK)
-    binary += String.fromCharCode.apply(null, Array.from(slice))
+function uint8ToBase64(bytes: Uint8Array): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      const comma = dataUrl.indexOf(',')
+      resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'))
+    // `Uint8Array<ArrayBufferLike>` (the default for `new
+    // Uint8Array(buf)`) is structurally compatible with
+    // `BlobPart`, but recent TS DOM lib versions narrowed the
+    // type to exclude `SharedArrayBuffer`. The cast satisfies
+    // the strictest lib check while the runtime behaviour is
+    // identical to passing the bytes directly.
+    reader.readAsDataURL(new Blob([bytes as BlobPart]))
+  })
+}
+
+/// Maximum total size of all embedded images, in bytes. We
+/// pre-cap before reading each one so a 100 MB image doesn't
+/// OOM the webview on its own. The 50 MB budget is roughly
+/// 100 images at 500 KB each — enough for the long documents
+/// we already support (the markdown size limit is 5 MB) while
+/// leaving headroom for the rest of the export pipeline.
+const MAX_EMBEDDED_IMAGE_BYTES = 50 * 1024 * 1024
+
+/**
+ * Collect every image referenced by the markdown and read the
+ * bytes so the DOCX backend can embed them as real drawings.
+ *
+ * Strategy:
+ *  1. Regex-extract every `![alt](url)` URL.
+ *  2. Skip http(s) / data: / asset: URLs (they go through
+ *     Tauri's protocol handler at render time and the backend
+ *     can't embed remote bytes anyway).
+ *  3. For each remaining relative path, resolve against
+ *     `notePath`, route through `convertFileSrc` so the host's
+ *     asset protocol reads the file, fetch the bytes, and
+ *     base64-encode them.
+ *  4. Stop adding to the output once the running total
+ *     exceeds [`MAX_EMBEDDED_IMAGE_BYTES`]; the per-image
+ *     error path is `try/catch` so a single broken image
+ *     doesn't fail the whole export.
+ *
+ * Returns a `url → base64-no-prefix` map keyed by the
+ * original markdown URL (NOT the absolute filesystem path)
+ * so the backend can look up by the URL it sees in
+ * `Inline::Image { url }`.
+ */
+async function collectImageAssets(
+  markdown: string,
+  notePath: string,
+): Promise<Record<string, string>> {
+  const re = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  const urls = new Set<string>()
+  let m: RegExpExecArray | null
+  while ((m = re.exec(markdown)) !== null) {
+    const url = m[1]
+    if (!url) continue
+    // Skip absolute / pre-resolved URLs.
+    if (/^(https?|data|blob|asset):/i.test(url)) continue
+    urls.add(url)
   }
-  return btoa(binary)
+  if (urls.size === 0) return {}
+
+  const out: Record<string, string> = {}
+  let totalBytes = 0
+  for (const url of urls) {
+    if (totalBytes >= MAX_EMBEDDED_IMAGE_BYTES) {
+      // Budget exhausted; stop adding more images. The user
+      // can still get the rest of the document and the
+      // skipped images fall back to the `[图片]` placeholder.
+      break
+    }
+    try {
+      const abs = resolveRelativePath(notePath, url)
+      const assetUrl = convertFileSrc(abs)
+      const resp = await fetch(assetUrl)
+      if (!resp.ok) continue
+      const blob = await resp.blob()
+      if (totalBytes + blob.size > MAX_EMBEDDED_IMAGE_BYTES) continue
+      const buf = await blob.arrayBuffer()
+      const bytes = new Uint8Array(buf)
+      out[url] = await uint8ToBase64(bytes)
+      totalBytes += bytes.byteLength
+    } catch (e) {
+      // Single-image failures are non-fatal; the rest of the
+      // document still exports. We log a warning so the host
+      // console can surface the cause if the user reports a
+      // problem.
+      console.warn('[export] collectImageAssets: skip', url, e)
+    }
+  }
+  return out
 }
 
 /**
@@ -303,6 +394,137 @@ function splitOversizedChild(
 }
 
 /**
+ * Languages that have a client-side renderer we want to swap into
+ * the hidden container before screenshotting. We only post-process
+ * the three most common ones; anything else is left as the
+ * raw `<pre>` produced by `markdown_to_html`. The list is the
+ * contract with the backend's `convert.rs::render_code_block`
+ * marker, which appends `"(前端渲染)"` to the same language tags
+ * in the DOCX so the reader knows the PDF / HTML pipeline
+ * produces a rendered figure.
+ */
+const CUSTOM_BLOCK_LANGS = ['mermaid', 'katex', 'markmap'] as const
+
+/**
+ * Post-process the hidden HTML container so that every
+ * `<pre><code class="language-mermaid|katex|markmap">` block is
+ * replaced with the corresponding rendered figure (SVG / HTML
+ * fragment). The three renderers (`mermaid`, `katex`,
+ * `markmap-view`) are loaded via dynamic `import()` from the
+ * `devDependencies` declared in `package.json` — they don't
+ * end up in the production bundle, only the import shim
+ * Vite emits for them. The first call to a renderer triggers
+ * module resolution and adds ~200ms to that export; subsequent
+ * calls hit the module cache.
+ *
+ * Failure policy: any single block (or the entire post-process)
+ * that throws is logged and the original `<pre>` is kept. The
+ * main `generatePdfFromHtml` flow is never blocked by a
+ * custom-block failure — a broken diagram should not stop the
+ * rest of the document from being exported.
+ */
+async function renderCustomBlocksForPdf(root: HTMLElement): Promise<void> {
+  // Select every fenced code block whose language tag is one of
+  // the three we know how to render. The selector intentionally
+  // targets `<pre><code>` (not bare `<code>`) so we never touch
+  // inline code spans, which can't be rendered as figures.
+  const blocks = Array.from(
+    root.querySelectorAll<HTMLPreElement>(
+      'pre > code.language-mermaid, pre > code.language-katex, pre > code.language-markmap',
+    ),
+  )
+  if (blocks.length === 0) return
+
+  // Dynamic import. The `as any` cast keeps TypeScript happy
+  // without forcing us to add `@types/mermaid` etc — these
+  // modules don't ship types and the cast is the same shape
+  // every other plugin uses. `.catch(() => null)` degrades
+  // gracefully when CSP blocks the import: the matching
+  // `if (mermaid)` / `if (katex)` / `if (markmap)` guards
+  // below then keep the original `<pre>` in place.
+  const [mermaid, katex, markmap] = await Promise.all([
+    import('mermaid' as any).catch(() => null),
+    import('katex' as any).catch(() => null),
+    import('markmap-view' as any).catch(() => null),
+  ])
+
+  // mermaid needs a one-time `initialize` per webview; we
+  // ignore re-init errors (the config is idempotent).
+  if (mermaid) {
+    try {
+      mermaid.default.initialize({
+        startOnLoad: false,
+        securityLevel: 'loose',
+      })
+    } catch (e) {
+      console.warn('[export] mermaid init failed', e)
+    }
+  }
+
+  for (const codeEl of blocks) {
+    const lang = CUSTOM_BLOCK_LANGS.find((l) =>
+      codeEl.classList.contains(`language-${l}`),
+    )
+    if (!lang) continue
+    const source = codeEl.textContent ?? ''
+    if (!source.trim()) continue
+
+    try {
+      if (lang === 'mermaid' && mermaid) {
+        // mermaid needs a unique id per render; we generate a
+        // short random suffix to avoid clashes when the same
+        // document is exported multiple times in one session.
+        const id = `mermaid-export-${Math.random().toString(36).slice(2, 8)}`
+        const { svg } = await mermaid.default.render(id, source)
+        const wrap = document.createElement('div')
+        wrap.className = 'export-mermaid'
+        wrap.innerHTML = svg
+        codeEl.parentElement?.replaceWith(wrap)
+      } else if (lang === 'katex' && katex) {
+        // `displayMode: true` so multi-line equations render as
+        // a centered block (matches how KaTeX shows them in
+        // BlockNote). `throwOnError: false` renders an
+        // unsupported macro as the literal source — much
+        // friendlier than a runtime crash.
+        const html = katex.default.renderToString(source, {
+          displayMode: true,
+          throwOnError: false,
+        })
+        const wrap = document.createElement('div')
+        wrap.className = 'export-katex'
+        wrap.innerHTML = html
+        codeEl.parentElement?.replaceWith(wrap)
+      } else if (lang === 'markmap' && markmap) {
+        // markmap needs an explicit SVG size; without it the
+        // node sees `clientWidth = 0` in the hidden container
+        // and the layout silently fails. We then `mm.fit()` +
+        // a 200ms timer to let markmap's internal d3 transition
+        // settle before the canvas snapshot.
+        const { Markmap } = markmap
+        const svg = document.createElementNS(
+          'http://www.w3.org/2000/svg',
+          'svg',
+        )
+        svg.setAttribute('class', 'export-markmap')
+        svg.style.width = '720px'
+        svg.style.height = '400px'
+        const mm = Markmap.create(svg, undefined, source)
+        await mm.fit()
+        await new Promise((r) => setTimeout(r, 200))
+        const wrap = document.createElement('div')
+        wrap.className = 'export-markmap-wrap'
+        wrap.appendChild(svg)
+        codeEl.parentElement?.replaceWith(wrap)
+      }
+    } catch (e) {
+      // Per-block failure: log and leave the original <pre>.
+      // The loop continues with the next block.
+      console.warn(`[export] ${lang} render failed`, e)
+    }
+  }
+}
+
+/**
  * Render the HTML produced by the backend into a multi-page PDF
  * buffer. The implementation:
  *
@@ -341,14 +563,32 @@ async function generatePdfFromHtml(
   // <style> rules in the template's <head> are in scope for the
   // entire document, which is what we want — they style the cloned
   // children we render per page below.
+  //
+  // **Off-screen strategy (the previous `left: -9999px` was a
+  // trap)**: a layout-changing offset like `left: -9999px` makes
+  // the browser repaint the page geometry, and Tauri 2.0's
+  // `Window::on_window_event` then misidentifies the resulting
+  // scroll-area re-layout as a window-resize event, aborting
+  // the export with "Application size must not change during
+  // operation". We move the container off-screen with a
+  // `transform: translateX(-200vw)` instead — transforms are
+  // paint-only (no layout reflow, no scroll-area change), so
+  // Tauri's resize detection never fires. `visibility: hidden`
+  // and `pointer-events: none` are belt-and-braces so the
+  // container can't accidentally steal focus or hover events.
+  // `getBoundingClientRect` still returns the un-transformed
+  // layout rect, so the page-grouping logic below is unaffected.
   const container = document.createElement('div')
   container.style.cssText = [
     'position: fixed',
-    'left: -9999px',
+    'left: 0',
     'top: 0',
+    'transform: translateX(-200vw)',
     `width: ${A4_WIDTH_PX}px`,
     'z-index: -1',
     'background: #fff',
+    'pointer-events: none',
+    'visibility: hidden',
   ].join(';')
   container.innerHTML = htmlContent
   document.body.appendChild(container)
@@ -359,6 +599,21 @@ async function generatePdfFromHtml(
   try {
     // Pre-flight: rewrite <img> refs and wait for them to load.
     resolveImageSources(container, notePath)
+    // Custom-block post-process: render every mermaid / katex /
+    // markmap fenced block into the hidden container so the
+    // canvas snapshot picks up the figure instead of the raw
+    // source. The renderer libraries are dynamically imported
+    // from `devDependencies` (see `renderCustomBlocksForPdf`),
+    // so this only pays the module-resolution cost on the
+    // first export that contains such a block. The whole call
+    // is wrapped in try/catch so a broken diagram never blocks
+    // the rest of the PDF — we fall through to the unmodified
+    // `<pre>` and let the screenshot capture the source.
+    try {
+      await renderCustomBlocksForPdf(container)
+    } catch (e) {
+      console.warn('[export] renderCustomBlocksForPdf failed', e)
+    }
     await waitForImages(container)
 
     // Locate the document body produced by the markdown-to-html
@@ -416,11 +671,17 @@ async function generatePdfFromHtml(
       // multi-segment strategy. `overflow: hidden` clips content
       // that doesn't fit, which is what we want for a fixed-size
       // page anyway.
+      //
+      // Same off-screen strategy as the master container above:
+      // `transform: translateX(-200vw)` is paint-only, so the
+      // browser's layout / scroll-area stays unchanged and Tauri's
+      // resize-event detection can't flag the export.
       const pageEl = document.createElement('div')
       pageEl.style.cssText = [
         'position: fixed',
-        'left: -9999px',
+        'left: 0',
         'top: 0',
+        'transform: translateX(-200vw)',
         `width: ${A4_WIDTH_PX}px`,
         `height: ${A4_HEIGHT_PX}px`,
         'background: #fff',
@@ -428,6 +689,8 @@ async function generatePdfFromHtml(
         'box-sizing: border-box',
         'overflow: hidden',
         'z-index: -1',
+        'pointer-events: none',
+        'visibility: hidden',
       ].join(';')
       // Deep-clone the children. The CSS rules from the master's
       // <head><style> apply globally to the document, so the
@@ -519,14 +782,19 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   }, [menuOpen])
 
   /**
-   * Shared scaffolding for the two export flows. Centralises the
+   * Shared scaffolding for the export flows. Centralises the
    * synchronous guard, the toast lifecycle, the save dialog, and
    * the base64 file write. The actual conversion happens inside
-   * `produce` so the two formats can share the same UX plumbing.
+   * `produce` so the three formats can share the same UX plumbing.
+   * HTML is wired through the same path as DOCX/PDF — the backend
+   * already produces a complete HTML document via `markdown_to_html`
+   * (the same one the PDF path feeds into `domToCanvas`), so we
+   * reuse it for the direct-save variant instead of going through
+   * the PDF rasteriser.
    */
   const runExport = useCallback(
     async (
-      format: 'docx' | 'pdf',
+      format: 'docx' | 'pdf' | 'html',
       produce: () => Promise<Uint8Array | string>,
     ) => {
       // Synchronous guard: a second click inside the same
@@ -551,7 +819,9 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
         const filters =
           format === 'docx'
             ? [{ name: 'Word Document', extensions: ['docx'] }]
-            : [{ name: 'PDF Document', extensions: ['pdf'] }]
+            : format === 'pdf'
+              ? [{ name: 'PDF Document', extensions: ['pdf'] }]
+              : [{ name: 'HTML Document', extensions: ['html', 'htm'] }]
         const selected = await save({ defaultPath, filters })
         if (!selected) {
           // User cancelled the save dialog. The loading toast must
@@ -562,7 +832,12 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
           return
         }
         const filePath = (selected as string).replace(/\\/g, '/')
-        const b64 = typeof result === 'string' ? result : uint8ToBase64(result)
+        // DOCX / PDF come back as base64 strings (or Uint8Array for
+        // PDF) from the backend. HTML is already a string and is
+        // uploaded as-is. `uint8ToBase64` is now async (FileReader)
+        // — the previous `String.fromCharCode.apply` path
+        // stack-overflowed on multi-megabyte PDF buffers.
+        const b64 = typeof result === 'string' ? result : await uint8ToBase64(result)
         await invoke('write_binary_file', { path: filePath, data: b64 })
         toast.success(strings.exportSuccess, { id: toastId })
       } catch (err) {
@@ -576,6 +851,8 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
           toast.error(strings.tooLarge, { id: toastId, description: message })
         } else if (format === 'pdf') {
           toast.error(strings.pdfExportFailed, { id: toastId, description: message })
+        } else if (format === 'html') {
+          toast.error(strings.htmlExportFailed, { id: toastId, description: message })
         } else {
           toast.error(strings.exportFailed, { id: toastId, description: message })
         }
@@ -590,12 +867,21 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   const handleExportDocx = useCallback(async () => {
     const markdown = compactMarkdown(activeNoteContent)
     await runExport('docx', async () => {
+      // Collect image bytes up front so the backend can embed
+      // them as real DOCX drawings instead of `[图片]` text
+      // placeholders. `collectImageAssets` is bounded by
+      // `MAX_EMBEDDED_IMAGE_BYTES` (50 MB) and silently skips
+      // unreachable / malformed URLs, so a failed read here
+      // can't abort the export — those images just fall back
+      // to the placeholder branch in `convert.rs`.
+      const imageAssets = await collectImageAssets(markdown, activeNotePath)
       const b64 = (await invokeBackend('markdown_to_docx', {
         markdown,
+        imageAssets,
       })) as string
       return b64
     })
-  }, [activeNoteContent, invokeBackend, runExport])
+  }, [activeNoteContent, activeNotePath, invokeBackend, runExport])
 
   const handleExportPdf = useCallback(async () => {
     const markdown = compactMarkdown(activeNoteContent)
@@ -606,6 +892,22 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
       return await generatePdfFromHtml(html, activeNotePath)
     })
   }, [activeNoteContent, activeNotePath, invokeBackend, runExport])
+
+  // HTML export reuses the backend's `markdown_to_html` response
+  // (the same one the PDF path uses internally to drive the
+  // rasteriser) and saves it directly as a `.html` file. No
+  // canvas / pagination logic needed — the file the user opens
+  // in a browser will be a pixel-perfect mirror of what the
+  // editor previewed (modulo fonts / stylesheet differences on
+  // the viewing machine).
+  const handleExportHtml = useCallback(async () => {
+    const markdown = compactMarkdown(activeNoteContent)
+    await runExport('html', async () => {
+      return (await invokeBackend('markdown_to_html', {
+        markdown,
+      })) as string
+    })
+  }, [activeNoteContent, invokeBackend, runExport])
 
   return (
     <div ref={menuRef} className="relative">
@@ -657,6 +959,21 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
             <span style={{ fontSize: 10 }}>P</span>
             {strings.pdfMenu}
           </button>
+          <button
+            onClick={handleExportHtml}
+            disabled={isExporting || !hasContent}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-left text-[11px] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+            style={{
+              color: 'var(--text-primary)',
+              background: 'transparent',
+              border: 'none',
+              cursor: isExporting || !hasContent ? 'not-allowed' : 'pointer',
+            }}
+            aria-busy={isExporting}
+          >
+            <span style={{ fontSize: 10 }}>H</span>
+            {strings.htmlMenu}
+          </button>
         </div>
       )}
     </div>
@@ -674,8 +991,8 @@ function ExportPanel(_props: PluginPanelProps): ReactNode {
 const manifest: PluginManifest = {
   id: 'com.swallownote.export',
   name: '文档导出',
-  description: '将 Markdown 文档导出为 Word (.docx) 或 PDF 格式',
-  version: '0.1.0',
+  description: '将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式',
+  version: '0.2.0',
   author: 'SwallowNote',
   publishedAt: '2026-06-13',
   iconPosition: 'editorToolbar',
