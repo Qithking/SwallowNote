@@ -11,14 +11,14 @@
       "author": "SwallowNote",
       "tags": ["export", "document", "pdf", "docx", "html"],
       "download_url": "./export/com.swallownote.export.zip",
-      "sha256": "de3fff4e3ca45e597a181dfd155133d119266c0ac3f9d986181f0c2a4525f11c",
+      "sha256": "c814c93ba66e697bd4ee140191e109f566a5d347f416d9d1514acddceaf7cecd",
       "signature_b64": "",
       "pubkey_b64": "",
       "versions": [
         {
           "version": "0.2.0",
           "download_url": "./export/com.swallownote.export.zip",
-          "sha256": "de3fff4e3ca45e597a181dfd155133d119266c0ac3f9d986181f0c2a4525f11c",
+          "sha256": "c814c93ba66e697bd4ee140191e109f566a5d347f416d9d1514acddceaf7cecd",
           "changelog": "v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
           "published_at": "2026-06-15T00:00:00Z"
         },

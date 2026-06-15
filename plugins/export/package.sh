@@ -41,7 +41,30 @@ VERSION=$(python3 -c "import json; print(json.load(open('$DIST_DIR/manifest.json
 cd "$DIST_DIR"
 ZIP_NAME="${PLUGIN_ID}.zip"
 rm -f "$SCRIPT_DIR/$PLUGIN_ID"*.zip
-zip -r "$SCRIPT_DIR/$ZIP_NAME" index.js manifest.json backend/
+
+# Deterministic zip: pin the mtime of every file we are about to
+# archive to a fixed epoch, then use `zip -X` to strip extra
+# attributes (uid / gid / atime / extended timestamps) from the
+# local file headers. Without this, two consecutive `vite build`
+# + `cargo build` runs produce zips with different SHA-256 even
+# though the *contents* are byte-identical — the host's plugin
+# installer compares the on-the-wire zip hash against the value
+# declared in `plugins/repo.json`, and a non-deterministic
+# build means we have to bump `repo.json`'s `sha256` on every
+# rebuild, even when no code changed.
+#
+# We touch the directory entries too (`dist/backend/`, `dist/`)
+# because `zip` records the directory's mtime in the central
+# directory and that field is *not* stripped by `-X` — leaving
+# it alone would still leak the current system clock into the
+# final hash.
+touch -d '2020-01-01T00:00:00Z' \
+  "$DIST_DIR/index.js" \
+  "$DIST_DIR/manifest.json" \
+  "$DIST_DIR/backend/plugin_$PLUGIN_ID" \
+  "$DIST_DIR" \
+  "$DIST_DIR/backend"
+zip -X -r "$SCRIPT_DIR/$ZIP_NAME" index.js manifest.json backend/ > /dev/null
 
 echo ""
 echo "✓ Plugin package created: $SCRIPT_DIR/$ZIP_NAME"

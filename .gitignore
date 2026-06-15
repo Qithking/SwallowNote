@@ -9,7 +9,6 @@ dist/
 plugins/*/dist/
 plugins/*/node_modules/
 plugins/*/src-tauri/target/
-plugins/*/*.zip
 
 # Tauri
 src-tauri/target/
