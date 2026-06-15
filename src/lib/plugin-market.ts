@@ -209,19 +209,67 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 }
 
 /**
+ * Resolve a `download_url` from the index against the repo URL.
+ *
+ * `fetch()` resolves relative URLs against the *document's* base
+ * URL — inside the Tauri webview that base is `tauri://localhost/`
+ * (or whatever the host shell binds), not the URL the index was
+ * loaded from. Passing `./export/foo.zip` straight through to
+ * `fetch` therefore lands on `tauri://localhost/export/foo.zip`,
+ * which is either a 404 (most builds) or worse, an unrelated file
+ * that happens to be served from the app's static dir (read
+ * through the same response body and we'd hash-verify the wrong
+ * bytes). The safe path is to always run the relative URL
+ * through `new URL(downloadUrl, repoUrl)` *before* `fetch`. An
+ * absolute `downloadUrl` passes through unchanged because
+ * `URL`'s second-arg semantics only kick in for relative
+ * inputs. The trailing path-segment rules (`.` / `..` / `?` / `#`)
+ * are also handled correctly by the platform `URL` parser, so
+ * `repo.json` can use any of them without us re-implementing
+ * RFC 3986 normalisation.
+ */
+function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
+  if (!downloadUrl) return downloadUrl
+  try {
+    // Absolute URL → returned as-is. Relative URL → resolved
+    // against the repo URL, mirroring how a `<base href="…">`
+    // tag would behave in a browser loading the index document.
+    return new URL(downloadUrl, repoUrl).toString()
+  } catch {
+    // Malformed input from a hand-edited repo.json. Fall back
+    // to the literal string so the caller surfaces a network
+    // error (HTTP 4xx / 5xx) rather than a confusing URL parse
+    // exception — the SHA-256 verification that runs on the
+    // downloaded bytes will still reject a wrong file even if
+    // the URL was bogus.
+    return downloadUrl
+  }
+}
+
+/**
  * Download a plugin zip, hitting the IndexedDB cache first. The
  * returned `ArrayBuffer` is the *raw* zip bytes — they're what the
  * host's `install_plugin_from_bytes` hashes and verifies.
+ *
+ * `repoUrl` is the URL the `PluginIndex` was loaded from; it
+ * serves as the base for resolving `entry.downloadUrl` (which
+ * the index protocol documents as relative to the index).
+ * Without it, relative paths land on the app's own server and
+ * every install fails with a sha256 mismatch.
  */
 export async function downloadPluginZip(
-  entry: PluginIndexEntry
+  entry: PluginIndexEntry,
+  repoUrl: string,
 ): Promise<ArrayBuffer> {
   // 1) Cache lookup. Cheap and bypasses the network entirely.
   const cached = await readZipFromCache(entry.sha256)
   if (cached) return cached
 
-  // 2) Network download.
-  const res = await fetch(entry.downloadUrl, { cache: 'no-store' })
+  // 2) Network download. The URL is resolved against `repoUrl`
+  //    so `./export/foo.zip` in the index becomes
+  //    `<repo>/export/foo.zip`, not `<tauri-localhost>/export/foo.zip`.
+  const url = resolveDownloadUrl(entry.downloadUrl, repoUrl)
+  const res = await fetch(url, { cache: 'no-store' })
   if (!res.ok) {
     throw new Error(
       `HTTP ${res.status} downloading ${entry.id}@${entry.version}`
@@ -259,12 +307,18 @@ export async function downloadPluginZip(
  */
 export async function downloadPluginVersion(
   pluginId: string,
-  version: { version: string; downloadUrl: string; sha256: string }
+  version: { version: string; downloadUrl: string; sha256: string },
+  repoUrl: string,
 ): Promise<ArrayBuffer> {
   const cached = await readZipFromCache(version.sha256)
   if (cached) return cached
 
-  const res = await fetch(version.downloadUrl, { cache: 'no-store' })
+  // Same relative-URL trap as `downloadPluginZip`: the per-
+  // version `downloadUrl` is also documented as relative to
+  // the index, so we have to re-anchor it to `repoUrl` before
+  // handing the string to `fetch`.
+  const url = resolveDownloadUrl(version.downloadUrl, repoUrl)
+  const res = await fetch(url, { cache: 'no-store' })
   if (!res.ok) {
     throw new Error(
       `HTTP ${res.status} downloading ${pluginId}@${version.version}`

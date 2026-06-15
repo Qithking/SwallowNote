@@ -191,7 +191,7 @@ export async function runAutoUpdateOnStartup(
       continue
     }
     try {
-      const result = await installOnePlugin(plugin, entry, index)
+      const result = await installOnePlugin(plugin, entry, index, repoUrl)
       if (result) {
         report.installed.push(result)
       }
@@ -401,6 +401,7 @@ async function installOnePlugin(
   plugin: PluginDefinition,
   entry: PluginIndexEntry,
   index: PluginIndex,
+  repoUrl: string,
 ): Promise<AutoUpdateInstall | null> {
   // Sanity: the host's version list is the most reliable way
   // to detect "this is the *currently active* version on
@@ -416,7 +417,14 @@ async function installOnePlugin(
   }
 
   // Download (honours the IndexedDB cache + sha256 check).
-  const bytes = await downloadPluginZip(entry)
+  // `repoUrl` is forwarded to `downloadPluginZip` so the
+  // `download_url` recorded in the index is resolved against
+  // the *repo* base, not the Tauri webview's document base —
+  // see `resolveDownloadUrl` in plugin-market.ts for the full
+  // rationale (relative `./export/foo.zip` would otherwise
+  // become `tauri://localhost/export/foo.zip` and hit the
+  // wrong file).
+  const bytes = await downloadPluginZip(entry, repoUrl)
 
   // Install via the host — same path the marketplace UI uses,
   // so the verification pipeline (sha256 + ed25519) runs.

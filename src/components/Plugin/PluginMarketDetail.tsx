@@ -152,6 +152,15 @@ export function PluginMarketDetail({
 }) {
   const { t } = useTranslation()
   const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
+  // The repo URL the `PluginIndex` was loaded from. We have to
+  // thread it through to `downloadPluginZip` / `downloadPluginVersion`
+  // because both `downloadUrl` fields in the index are documented
+  // as *relative* to that URL — `fetch()` on its own resolves
+  // them against the Tauri webview's document base, which is the
+  // host shell (`tauri://localhost/…`) and yields a 404 + sha256
+  // mismatch on every install. Capturing it here once keeps the
+  // call sites below from re-reading the store on every click.
+  const repoUrl = usePluginMarketStore((s) => s.repoUrl)
 
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [versions, setVersions] = useState<PluginVersionInfo[]>([])
@@ -260,7 +269,7 @@ export function PluginMarketDetail({
   const installEntry = async (
     e: PluginIndexEntry
   ): Promise<PluginMetadataRust | null> => {
-    const bytes = await downloadPluginZip(e)
+    const bytes = await downloadPluginZip(e, repoUrl)
     const pubkeyB64 = effectivePubkey(index, e)
     return installPluginFromBytes({
       pluginId: e.id,
@@ -425,7 +434,7 @@ export function PluginMarketDetail({
     setInstallingVersion(version.version)
     let installedMeta: PluginMetadataRust | null = null
     try {
-      const bytes = await downloadPluginVersion(entry.id, version)
+      const bytes = await downloadPluginVersion(entry.id, version, repoUrl)
       const pubkeyB64 = effectivePubkey(index, entry)
       installedMeta = await installPluginFromBytes({
         pluginId: entry.id,
