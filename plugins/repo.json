@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-13T00:00:00Z",
+  "updated_at": "2026-06-14T00:00:00Z",
   "pubkey_b64": "TIJJekgAX+EAyx3OsQGDskNPrtpkr2YW+rqtb73QqVk=",
   "plugins": [
     {
@@ -10,17 +10,39 @@
       "description": "将 Markdown 文档导出为 Word (.docx) 或 PDF 格式",
       "author": "SwallowNote",
       "tags": ["export", "document", "pdf", "docx"],
-      "download_url": "./com.swallownote.export-0.1.0.zip",
-      "sha256": "edf8ac83073521a01350c20c629c42ca133fac59de2904cd5d9739029cb93a39",
+      "download_url": "./export/com.swallownote.export.zip",
+      "sha256": "751d27219d67bb63928e52d3d63d27f0e50f2bf9e2eb7c6f0bb0db8341a2bb9a",
       "signature_b64": "L1xXAavpcZyoo+dq3QqmMoLCxyFm8gwf+cY3tYNNkMJrLXi7AlElNob+BwPzLVyMkrsXCcB31dFFf5u7hsYeDg==",
       "pubkey_b64": "",
       "versions": [
         {
           "version": "0.1.0",
-          "download_url": "./com.swallownote.export-0.1.0.zip",
-          "sha256": "edf8ac83073521a01350c20c629c42ca133fac59de2904cd5d9739029cb93a39",
+          "download_url": "./export/com.swallownote.export.zip",
+          "sha256": "751d27219d67bb63928e52d3d63d27f0e50f2bf9e2eb7c6f0bb0db8341a2bb9a",
           "changelog": "初版发布：支持 Markdown 导出为 Word (.docx) 和 PDF",
           "published_at": "2026-06-13T00:00:00Z"
+        }
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "com.swallownote.typist",
+      "name": "公众号排版",
+      "version": "0.1.0",
+      "description": "将 Markdown 文档按微信公众号等平台主题排版，一键复制带样式的富文本到公众号编辑器",
+      "author": "SwallowNote",
+      "tags": ["typist", "wechat", "editor", "markdown"],
+      "download_url": "./typist/com.swallownote.typist.zip",
+      "sha256": "7af8c27d42a726a530e38ec7fda613c6bee2138a0c042db58486441bd227db37",
+      "signature_b64": "",
+      "pubkey_b64": "",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "download_url": "./typist/com.swallownote.typist.zip",
+          "sha256": "7af8c27d42a726a530e38ec7fda613c6bee2138a0c042db58486441bd227db37",
+          "changelog": "初版发布：5 套公众号主题、剪贴板三级降级、表格/代码/引用等 Markdown 元素支持",
+          "published_at": "2026-06-14T00:00:00Z"
         }
       ],
       "dependencies": []

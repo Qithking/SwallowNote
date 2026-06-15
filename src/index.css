@@ -1211,6 +1211,31 @@ body, #root {
 .pa-log-lvl.is-err { background: var(--pa-negative-soft); color: var(--pa-negative); }
 .pa-log-msg { flex: 1; color: var(--pa-ink-2); }
 .pa-log-msg b { color: var(--pa-ink); font-weight: 600; }
+/* Conflict group header (Task 13 / G13). Renders a sticky
+   band above the conflict log lines so a user scanning the
+   stream can tell the "⚠️ Conflict" section apart from the
+   plain metric feed without reading each line. Lives inside
+   the `.pa-log-stream` so the rounded corners of the parent
+   container clip the header's top edge cleanly. */
+.pa-log-group {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pa-warn);
+  background: var(--pa-warn-soft);
+  border: 1px solid var(--pa-warn-soft);
+  border-radius: 2px;
+  padding: 3px 8px;
+  margin: 6px 0 4px 0;
+}
+.pa-log-group .pa-log-group-count {
+  margin-left: auto;
+  color: var(--pa-ink-2);
+  font-weight: 500;
+}
 
 /* ── Popup (modal) styling ─────────────────────────────────── */
 .pa-popup {
@@ -1296,6 +1321,39 @@ body, #root {
 }
 .pa-popup-foot .pa-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .pa-popup-foot .pa-btn { height: 26px; padding: 0 10px; font-size: 11px; }
+
+/* ── Logs dialog actions (Task 8 / G8) ────────────────────
+   The footer of the Logs popup carries three controls (filter
+   dropdown / Copy / Export). The container pins to the right
+   edge via `margin-left: auto` so it lines up with the other
+   popup footers. The filter wrapper is an inline group (icon +
+   `<select>`) that keeps the visual height of a single `.pa-btn`
+   so the footer's vertical rhythm doesn't break. */
+.pa-popup-foot .pa-logs-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pa-logs-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pa-mute);
+}
+.pa-logs-filter-trigger {
+  height: 26px;
+  min-width: 140px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-family: var(--pa-font-mono);
+  background: var(--pa-paper);
+  border: 1px solid var(--pa-line);
+  color: var(--pa-ink);
+  border-radius: var(--pa-radius);
+}
+.pa-logs-filter-trigger[data-state="open"] { border-color: var(--pa-ink); }
+.pa-logs-filter-trigger[data-disabled] { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Marketplace (light restyle using pa tokens) ──────────── */
 /*
@@ -1547,6 +1605,17 @@ body, #root {
 .pa-market-badge.is-update { background: var(--pa-accent-soft); color: var(--pa-accent); border-color: var(--pa-accent-soft); }
 .pa-market-badge.is-installed { background: var(--pa-positive-soft); color: var(--pa-positive); border-color: var(--pa-positive-soft); }
 .pa-market-badge.is-install { background: var(--pa-paper-3); color: var(--pa-ink-2); }
+/* Health badge palette (Task 3 / G3). Each variant maps to a
+   semantic CSS variable already used by the marketplace card
+   chrome so the three states share a visual language with
+   the rest of the card. The conflict variant (Task 13 / G13)
+   reuses the warn palette so a "Conflict" badge reads as a
+   higher-severity cousin of the "Unhealthy" pulse, not a
+   separate colour family. */
+.pa-market-badge.is-healthy { background: var(--pa-positive-soft); color: var(--pa-positive); border-color: var(--pa-positive-soft); }
+.pa-market-badge.is-unhealthy { background: var(--pa-danger-soft, #fde2e1); color: var(--pa-danger, #c4302b); border-color: var(--pa-danger-soft, #fde2e1); }
+.pa-market-badge.is-unknown { background: var(--pa-paper-3); color: var(--pa-ink-2); border-color: var(--pa-line); }
+.pa-market-badge.is-conflict { background: var(--pa-warn-soft, #fff4d6); color: var(--pa-warn, #b46a00); border-color: var(--pa-warn-soft, #fff4d6); }
 
 /* ── Installed-card specifics (`.pa-market-card` + plugin ops) ─
    The Installed view reuses the marketplace card chrome
@@ -1601,6 +1670,66 @@ body, #root {
   border-top: 1px dashed var(--pa-line);
 }
 
+/* ── Installed-card sparkline (Task 12 / G12) ─────────────
+   The sparkline is a 18px-tall, auto-width SVG that sits on
+   the right edge of the meta row. It visualises per-plugin
+   "startup time" (avg hook duration) over the most recent
+   30 buckets, with the line's stroke colour shifting from
+   green → amber → red as the peak error rate climbs.
+
+   The component sets a `data-sparkline-level` attribute
+   (`ok` / `warn` / `err`) on the `<svg>` so this stylesheet
+   can tint a soft background pill around the chart without
+   the JSX having to inline a colour. The three CSS
+   variables are aliased to the existing `--pa-positive` /
+   `--pa-warn` / `--pa-negative` tokens so the chart
+   automatically follows light / dark / system themes. */
+.pa-market-card-meta {
+  /* The meta row is `display: flex` already; the sparkline
+     pushed in by the card uses `margin-left: auto` to
+     sit on the right edge. We make the flex alignment
+     `center` so the sparkline's 18px height doesn't push
+     the row taller than the badges want. */
+  align-items: center;
+}
+.pa-sparkline {
+  /* The wrapper SVG itself has no decoration – the line
+     inside it is the only visible element. `display: block`
+     is already set inline; we re-state it here so a future
+     edit to the JSX's inline `style` doesn't accidentally
+     revert the layout. */
+  display: block;
+  flex-shrink: 0;
+  /* The polyline is 1.2px; we let the GPU do the
+     smoothing. `vector-effect: non-scaling-stroke` would
+     crisp the line at any rendered size, but the chart
+     is small enough that the default scaling looks fine. */
+}
+.pa-sparkline.is-ok   { --pa-sparkline-ok:   var(--pa-positive); }
+.pa-sparkline.is-warn { --pa-sparkline-warn: var(--pa-warn); }
+.pa-sparkline.is-err  { --pa-sparkline-err:  var(--pa-negative); }
+
+/* The baseline guides the eye to "0ms" without taking up
+   the chart's full height. We use `currentColor` and a low
+   opacity so the line inherits the card's text colour and
+   fades against the paper background. */
+.pa-sparkline-baseline {
+  stroke: currentColor;
+  stroke-width: 0.5;
+  opacity: 0.18;
+  vector-effect: non-scaling-stroke;
+}
+/* The trend line's `stroke` is set inline by the component
+   (so a single line can switch colours mid-array via
+   per-segment overrides in the future). Today every
+   segment shares the same colour picked by
+   `classifyErrorRate`. */
+.pa-sparkline-line {
+  /* Nothing here – the JSX owns the stroke. We keep the
+     selector so a future dark-mode override can target
+     the polyline class without us renaming it. */
+}
+
 /* ── Marketplace primary CTA ───────────────────────────────
    The marketplace card shares the Installed card's
    `.pa-installed-actions` row layout (dashed divider, icon
@@ -1651,6 +1780,139 @@ body, #root {
 }
 .pa-market-cta.is-installed:hover { opacity: 1; }
 
+/* ── Plugin Storage Inspector (.psi-*) ────────────────────
+   The inspector dialog uses a 3-column table: key (truncated,
+   full path on hover), right-aligned size, and a single icon
+   button for per-row delete. The design language stays in the
+   pa-* family: the same paper / line / ink tokens, the same
+   mono font for sizes, and a danger colour reserved for the
+   destructive actions (single delete + "clear all" + the
+   inline confirm panel). */
+.psi-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  overflow: hidden;
+  background: var(--pa-paper);
+}
+.psi-head, .psi-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 36px;
+  align-items: center;
+  font-size: 12px;
+}
+.psi-head {
+  background: var(--pa-paper-2);
+  color: var(--pa-mute);
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--pa-line);
+  padding: 8px 10px;
+}
+.psi-row {
+  border-top: 1px solid var(--pa-line);
+  padding: 6px 10px;
+  transition: background 0.12s;
+}
+.psi-row:first-of-type { border-top: none; }
+.psi-row:hover { background: var(--pa-paper-2); }
+.psi-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--pa-ink);
+}
+.psi-cell-key { font-family: var(--pa-font-mono); font-size: 11.5px; }
+.psi-key-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  display: block;
+}
+.psi-cell-size {
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  color: var(--pa-mute);
+  justify-content: flex-end;
+  text-align: right;
+}
+.psi-cell-action { justify-content: flex-end; }
+.psi-row-del {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--pa-mute);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.psi-row-del:hover {
+  background: var(--pa-negative-soft);
+  color: var(--pa-negative);
+  border-color: var(--pa-negative-soft);
+}
+.psi-row-del:disabled { opacity: 0.4; cursor: not-allowed; }
+.psi-row-del:disabled:hover { background: transparent; color: var(--pa-mute); border-color: transparent; }
+
+/* Danger-tinted button variant for the inspector's "clear all"
+   footer action and the destructive primary in the confirm
+   panel. Reuses the .pa-btn-outline chrome so it stays on
+   brand; only the hover state is shifted to the negative family
+   so the user gets a "this is destructive" cue without us
+   inventing a new button shape. */
+.psi-danger { color: var(--pa-negative); border-color: var(--pa-negative-soft); }
+.psi-danger:hover {
+  background: var(--pa-negative-soft);
+  color: var(--pa-negative);
+  border-color: var(--pa-negative);
+}
+.psi-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.psi-danger:disabled:hover { background: transparent; color: var(--pa-negative); border-color: var(--pa-negative-soft); }
+
+/* Inline confirm panel. Lives inside the popup body — keeps a
+   single focus trap, avoids the a11y cost of nested dialogs. */
+.psi-confirm {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 18px 18px;
+  background: var(--pa-negative-soft);
+  border: 1px solid var(--pa-negative-soft);
+  border-radius: var(--pa-radius);
+}
+.psi-confirm-icon {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--pa-paper);
+  color: var(--pa-negative);
+  border: 1px solid var(--pa-negative);
+  border-radius: 999px;
+}
+.psi-confirm-text { min-width: 0; }
+.psi-confirm-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink);
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+.psi-confirm-hint {
+  font-size: 11.5px;
+  color: var(--pa-ink-2);
+  line-height: 1.5;
+}
+.psi-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ── Misc helpers ──────────────────────────────────────────── */
 .pa-flex-col { display: flex; flex-direction: column; }
 .pa-flex-row { display: flex; align-items: center; }
@@ -1670,3 +1932,180 @@ body, #root {
 .pa-empty .pa-empty-title { font-size: 13px; font-weight: 500; color: var(--pa-ink-2); }
 .pa-empty .pa-empty-hint { font-size: 11px; }
 .pa-error { color: var(--pa-negative); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+
+/* ── Plugin load-failure banner (Task 2 / G2) ─────────────
+   A clickable warning strip that surfaces at the very top of
+   the plugin manager whenever the load-time scan captured one
+   or more per-plugin failures. Tapping the strip opens the
+   failure list dialog. Rendered conditionally (the manager
+   only mounts it when `loadFailures` is non-empty), so the
+   styles are scoped to `.pa-loadfailures-banner` to avoid
+   leaking into the rest of the manager. */
+.pa-loadfailures-banner {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 28px 0;
+  margin-top: 8px;
+  padding: 9px 14px;
+  font-size: 12.5px;
+  font-family: var(--pa-font-ui);
+  color: var(--pa-negative);
+  background: var(--pa-negative-soft);
+  border: 1px solid color-mix(in srgb, var(--pa-negative) 22%, transparent);
+  border-radius: var(--pa-radius);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+}
+.pa-loadfailures-banner:hover {
+  background: color-mix(in srgb, var(--pa-negative) 18%, transparent);
+  border-color: color-mix(in srgb, var(--pa-negative) 35%, transparent);
+}
+.pa-loadfailures-banner-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  color: var(--pa-negative);
+}
+.pa-loadfailures-banner-text {
+  flex: 1;
+  font-weight: 500;
+  color: var(--pa-ink);
+}
+.pa-loadfailures-banner-text b { color: var(--pa-negative); font-weight: 600; }
+.pa-loadfailures-banner-arrow {
+  color: var(--pa-mute);
+  display: inline-flex; align-items: center;
+}
+
+/* ── Plugin load-failure dialog (Task 2 / G2) ─────────────
+   Popover body. Each row is a single-plugin failure card with
+   three regions: a left icon (warning), a centred main block
+   (name / reason / meta), and a right action stack (Dismiss /
+   Uninstall). The .is-confirming modifier swaps the action
+   stack for an inline Cancel/Confirm strip so a destructive
+   uninstall never needs a second modal. */
+.pa-popup-desc {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--pa-ink-2);
+}
+.pa-loadfailures-body { padding-top: 12px; }
+.pa-loadfailures-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px;
+  padding: 36px 20px;
+  color: var(--pa-mute);
+  font-size: 12.5px;
+  text-align: center;
+}
+.pa-loadfailures-empty svg { color: var(--pa-mute); }
+.pa-loadfailures-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column;
+  gap: 8px;
+}
+.pa-loadfailures-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+}
+.pa-loadfailures-row.is-confirming {
+  border-color: color-mix(in srgb, var(--pa-negative) 45%, transparent);
+  background: var(--pa-negative-soft);
+}
+.pa-loadfailures-icon {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--pa-paper);
+  color: var(--pa-negative);
+  border: 1px solid color-mix(in srgb, var(--pa-negative) 35%, transparent);
+  border-radius: 999px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.pa-loadfailures-main { min-width: 0; }
+.pa-loadfailures-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink);
+  margin-bottom: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pa-loadfailures-reason {
+  font-size: 12px;
+  color: var(--pa-ink-2);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  margin-bottom: 4px;
+}
+.pa-loadfailures-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+}
+.pa-loadfailures-meta-id { font-weight: 500; }
+.pa-loadfailures-meta-sep { opacity: 0.6; }
+.pa-loadfailures-actions {
+  display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0;
+  align-self: center;
+}
+.pa-loadfailures-actions .pa-btn { height: 28px; padding: 0 10px; font-size: 11px; }
+.pa-loadfailures-count {
+  font-weight: 500;
+  color: var(--pa-ink-2);
+}
+
+/* Danger variant of `.pa-btn`. Reused by the batch action bar
+   and the failure dialog's Uninstall button. Pairs with the
+   app's `--pa-negative` token so light / dark / system theme
+   automatically pick up the right shade. */
+.pa-btn-danger {
+  color: var(--pa-negative);
+  border-color: color-mix(in srgb, var(--pa-negative) 35%, transparent);
+}
+.pa-btn-danger:hover {
+  background: var(--pa-negative-soft);
+  color: var(--pa-negative);
+  border-color: var(--pa-negative);
+}
+.pa-btn-danger svg { color: var(--pa-negative); }
+.pa-btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Batch action bar (G7.3). Sits between the toolbar and the
+   card grid; the parent renders it only when the user has
+   selected at least one row. Tinted background reads as a
+   transient mode without overpowering the rest of the page. */
+.pa-batch-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 28px 8px;
+  padding: 8px 14px;
+  background: var(--pa-accent-soft);
+  border: 1px solid var(--pa-accent-soft);
+  border-radius: var(--pa-radius);
+}
+.pa-batch-count {
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--pa-accent);
+  letter-spacing: 0.04em;
+}
+.pa-batch-actions {
+  display: flex; align-items: center; gap: 6px;
+  margin-left: 8px;
+}
+.pa-batch-bar .pa-right { margin-left: auto; }
+.pa-batch-bar .pa-btn { height: 28px; padding: 0 10px; font-size: 11px; }

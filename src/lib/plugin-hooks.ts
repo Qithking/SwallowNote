@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
+  PluginCommand,
   PluginEvent,
   PluginEventBus,
   PluginEventHandler,
@@ -20,6 +21,10 @@ import type {
   PluginPanelProps,
   PluginStorage,
 } from '@/types/plugin'
+import {
+  listPluginCommands,
+  subscribePluginCommands,
+} from './plugin-commands'
 
 // ─── Storage hook ──────────────────────────────────────────────────────────────
 
@@ -190,4 +195,55 @@ export function usePluginServices(panel: PluginPanelProps): {
   events: PluginEventBus
 } {
   return { store: panel.store, events: panel.events }
+}
+
+// ─── Command palette hook ────────────────────────────────────────────────────
+
+/**
+ * Live snapshot of every plugin command currently registered.
+ *
+ * The host's `pluginCommandRegistry` is a singleton that lives
+ * outside React; this hook re-renders on every register /
+ * unregister / clearPlugin by subscribing to the registry's
+ * notifier. Callers (the command palette, the settings panel)
+ * use this to render plugin contributions without having to
+ * import the registry singleton directly.
+ *
+ * Filters out entries whose `when()` predicate returns false
+ * (e.g. a "Commit" command hiding outside a git workspace). The
+ * registry keeps the hidden entry so a later re-render with a
+ * changed `when()` flips visibility back on without re-registering.
+ */
+export function usePluginCommands(): PluginCommand[] {
+  const [commands, setCommands] = useState<PluginCommand[]>(() =>
+    listPluginCommands()
+  )
+
+  useEffect(() => {
+    // Re-read the snapshot every time the registry notifies. We
+    // re-derive the filtered list (when() can change between
+    // calls) rather than caching it in the registry so a plugin
+    // that closes itself out of a workspace at runtime drops out
+    // of the command palette in the same tick.
+    const refresh = () => {
+      const next = listPluginCommands().filter((cmd) => {
+        if (cmd.when) {
+          try {
+            return cmd.when()
+          } catch {
+            // A buggy `when()` must not blow up the whole palette.
+            // Treat it as "show" so the user can still see and
+            // re-trigger the entry; the next tick will retry.
+            return true
+          }
+        }
+        return true
+      })
+      setCommands(next)
+    }
+    refresh()
+    return subscribePluginCommands(refresh)
+  }, [])
+
+  return commands
 }

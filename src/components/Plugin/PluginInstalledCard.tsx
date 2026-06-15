@@ -28,7 +28,7 @@
  * unit with a 4px coloured stripe at the top, an italic
  * display name, a 2-line description clamp, and a tag row.
  */
-import { useMemo, useState, useEffect, memo } from 'react'
+import { useMemo, useState, useEffect, memo, type ChangeEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Calendar,
@@ -38,8 +38,20 @@ import {
   Trash2,
   Download,
   AlertCircle,
+  HeartPulse,
+  CheckCircle2,
+  HelpCircle,
+  Database,
+  RefreshCw,
 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import type { PluginDefinition } from '@/types/plugin'
+import { usePluginStore } from '@/stores'
+import {
+  aggregateTelemetryByTimeWindow,
+  type TelemetryBucket,
+} from '@/lib/plugin-telemetry'
+import { PluginSparkline } from './PluginSparkline'
 
 const SPINE_CLASSES = [
   'pa-spine-c1', 'pa-spine-c2', 'pa-spine-c3', 'pa-spine-c4',
@@ -62,22 +74,43 @@ export interface PluginInstalledCardProps {
   hasUpdate?: boolean
   /** Optional host error to render in the error bar. */
   error?: string | null
+  /** Whether this card's row is in the multi-select set. */
+  selected?: boolean
+  /**
+   * Called when the user toggles the per-card checkbox. The
+   * parent owns the selection set so it can render the
+   * batch-action bar; the card itself just reports the intent.
+   * The change event is passed through (stopped from bubbling
+   * up the DOM tree) so a future card-level click handler
+   * can't double-fire.
+   */
+  onSelectChange?: (selected: boolean, e: ChangeEvent<HTMLInputElement>) => void
   onToggle?: (enabled: boolean) => void | Promise<void>
   onUninstall?: () => void
   onUpdate?: () => void
   onSettings?: () => void
   onPermissions?: () => void
+  /**
+   * Opens the per-plugin storage inspector (Task 6). Rendered
+   * only when the prop is supplied so the card stays usable
+   * from contexts that don't need storage affordances (e.g.
+   * the marketplace "Installed" preview).
+   */
+  onStorage?: () => void
 }
 
 const PluginInstalledCardInner = memo(function PluginInstalledCard({
   plugin,
   hasUpdate = false,
   error = null,
+  selected = false,
+  onSelectChange,
   onToggle,
   onUninstall,
   onUpdate,
   onSettings,
   onPermissions,
+  onStorage,
 }: PluginInstalledCardProps) {
   const { t } = useTranslation()
   // Local switch state. The host's `plugin.enabled` is the
@@ -96,6 +129,46 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
       setSwitchOn(plugin.enabled)
     }
   }, [plugin.enabled, error, switchOn])
+
+  // Subscribe to the health slice via a shallow selector so
+  // the card re-renders only when *this* plugin's health
+  // changes (or when the slice reference itself changes).
+  // Reading `getPluginHealth` directly via the snapshot would
+  // cause every plugin in the grid to re-render whenever the
+  // `pluginHealth` record gets a new reference; the selector
+  // returns a string (the resolved value) which Zustand
+  // compares by value, so unrelated plugins are unaffected.
+  const health = usePluginStore(useShallow((s) => s.getPluginHealth(plugin.id)))
+
+  // Task 13 / G13: read the per-plugin conflict slice. The
+  // detector runs once per registry refresh (see
+  // `stores/plugin.ts::setPlugins`) and the result is cached
+  // in `pluginConflicts`; this selector returns a string for
+  // `length > 0` so the comparison stays value-based and a
+  // sibling plugin's conflict change doesn't re-render this
+  // card. The actual conflict list (used for the title
+  // tooltip) is read once via `getPluginConflicts(plugin.id)`
+  // — both reads happen off the same store snapshot.
+  const hasConflicts = usePluginStore(
+    useShallow((s) => (s.pluginConflicts[plugin.id]?.length ?? 0) > 0),
+  )
+  const conflictTooltip = usePluginStore(
+    useShallow((s) => {
+      const list = s.pluginConflicts[plugin.id]
+      if (!list || list.length === 0) return ''
+      return list
+        .map((c) => `${c.kind} "${c.value}" → [${c.peerIds.join(', ')}]`)
+        .join('\n')
+    }),
+  )
+
+  // Task 11 / G11: the auto-update opt-in is mirrored from
+  // the store onto the runtime definition (see
+  // `setPluginAutoUpdate` / `setPlugins`), so the card can
+  // render the toggle state synchronously from `plugin.autoUpdate`
+  // without re-querying the store. A missing / `false` value
+  // reads as "off" — the feature is strictly opt-in.
+  const autoUpdateOn = plugin.autoUpdate === true
 
   // Use plugin id hash for stable spine color instead of filtered index
   // to prevent color jumping when filtering/searching
@@ -176,19 +249,148 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
     ? { cls: 'pa-market-badge is-installed', label: t('plugin.pa.card.statusOn', { defaultValue: 'On' }) }
     : { cls: 'pa-market-badge', label: t('plugin.pa.card.statusOff', { defaultValue: 'Off' }) }
 
+  // Health badge next to the title. The icon and colour pick
+  // up the resolved `health` value:
+  //   - healthy   → green check, "Healthy"
+  //   - unhealthy → red pulse, "Unhealthy" (with a tooltip
+  //                pointing to the lastError in telemetry)
+  //   - unknown   → muted help, "Unknown"
+  //
+  // We use `useMemo` here too — the badge object is
+  // re-allocated only when the health value or the i18n
+  // function actually changes, so a re-render of the card
+  // for some other reason (e.g. parent filter) doesn't churn
+  // the icon instance.
+  const healthBadge = useMemo(() => {
+    if (health === 'unhealthy') {
+      return {
+        cls: 'pa-market-badge is-unhealthy',
+        label: t('plugin.pa.card.healthUnhealthy', { defaultValue: 'Unhealthy' }),
+        Icon: HeartPulse,
+      }
+    }
+    if (health === 'healthy') {
+      return {
+        cls: 'pa-market-badge is-healthy',
+        label: t('plugin.pa.card.healthHealthy', { defaultValue: 'Healthy' }),
+        Icon: CheckCircle2,
+      }
+    }
+    return {
+      cls: 'pa-market-badge is-unknown',
+      label: t('plugin.pa.card.healthUnknown', { defaultValue: 'Unknown' }),
+      Icon: HelpCircle,
+    }
+  }, [health, t])
+
+  // ── Sparkline data (Task 12 / G12) ─────────────────────
+  // Aggregate the in-memory metric buffers into 30 one-minute
+  // buckets. The aggregator walks four ring buffers (events,
+  // storage, hooks, backend) and rolls counts + average
+  // durations into the buckets the sparkline consumes. We
+  // memoize the result on `plugin.id` so a re-render of the
+  // card for some other reason (search filter, parent state
+  // change) doesn't re-walk the buffers. Note: the aggregator
+  // reads from the in-memory store directly, so the sparkline
+  // is *not* live-updated when a new metric is recorded mid-
+  // session — it snapshots at card-mount time. That's the
+  // same trade-off the existing `getAllPluginMetrics` callers
+  // make, and keeps the render path allocation-free.
+  const sparklineBuckets: readonly TelemetryBucket[] = useMemo(
+    () => aggregateTelemetryByTimeWindow({
+      pluginId: plugin.id,
+      windowMs: 60_000,
+      bucketCount: 30,
+    }),
+    [plugin.id],
+  )
+
   return (
     <article
-      className={`pa-market-card ${spineClass} ${!plugin.enabled ? 'is-disabled' : ''}`}
+      className={`pa-market-card ${spineClass} ${!plugin.enabled ? 'is-disabled' : ''} ${selected ? 'is-selected' : ''}`}
       data-plugin-id={plugin.id}
     >
       <div className="pa-market-card-spine" />
 
       <div className="pa-market-card-body">
+        {/*
+          Per-row checkbox sits in the card head so the row
+          reuses the same vertical rhythm as a non-selected
+          row. The label is visually hidden but the input
+          still announces itself to screen readers; the
+          `stopPropagation` keeps the click from bubbling up
+          to a future article-level handler (none today, but
+          the design is mid-refactor).
+        */}
         <div className="pa-market-card-head">
-          <div style={{ minWidth: 0 }}>
+          <label
+            className="pa-card-check"
+            // Clicking the label passes through to the input
+            // by default; we add `onClick` stopPropagation as
+            // a belt-and-suspenders guard so the parent
+            // article (currently `cursor: pointer` only) can
+            // grow a click handler without us re-touching
+            // every card.
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={(e) => onSelectChange?.(e.target.checked, e)}
+              // The card itself isn't clickable yet, but if a
+              // future commit adds an `onClick` to the
+              // <article>, the browser would fire it on
+              // space/enter on the checkbox too. Stopping
+              // propagation here keeps the toggle isolated.
+              onClick={(e) => e.stopPropagation()}
+              aria-label={t('plugin.pa.batch.selectOne', {
+                defaultValue: 'Select {{name}}',
+                name: plugin.name,
+              })}
+            />
+          </label>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div className="pa-market-card-name">{plugin.name}</div>
             <div className="pa-market-card-id">{plugin.id}</div>
           </div>
+          {/* Health badge sits next to the title (per Task 3 G3).
+            The icon + colour pick up the resolved `health` value
+            from the store: green check for healthy, red pulse for
+            unhealthy, muted help for unknown. The
+            `data-plugin-health` attribute is a stable hook for
+            CSS / e2e tests that need to assert on a card's
+            current health without consulting the i18n label. */}
+          <span
+            className={healthBadge.cls}
+            title={healthBadge.label}
+            aria-label={healthBadge.label}
+            data-plugin-health={health}
+          >
+            <healthBadge.Icon size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+            {healthBadge.label}
+          </span>
+          {/* Task 13 / G13: conflict badge. Sits to the right
+            of the health badge so a user scanning the head row
+            sees the "health + conflict" pair as a single chip
+            cluster. The badge only renders when the plugin is
+            part of at least one collision group (iconSlot /
+            contentPosition / commandPalette) — see
+            `detectPluginConflicts`. The tooltip lists every
+            conflict the plugin is currently involved in so a
+            dev can read the cause without opening the Logs
+            popup. `data-plugin-conflict` is a stable test hook
+            mirroring the `data-plugin-health` pattern. */}
+          {hasConflicts && (
+            <span
+              className="pa-market-badge is-conflict"
+              title={conflictTooltip}
+              aria-label={t('plugin.pa.card.conflict', { defaultValue: 'Conflict' })}
+              data-plugin-conflict="yes"
+            >
+              <AlertCircle size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+              {t('plugin.pa.card.conflict', { defaultValue: 'Conflict' })}
+            </span>
+          )}
           <span className={statusBadge.cls}>{statusBadge.label}</span>
         </div>
 
@@ -218,6 +420,19 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
           {tags.map((tag) => (
             <span key={tag.key} className={tag.cls}>{tag.label}</span>
           ))}
+          {/* Task 12 (G12) sparkline. Pushed to the right edge
+            of the meta row with `margin-left: auto`. The
+            component renders `null` when there's no metric
+            data for the plugin (per the "no data → don't
+            render" contract), so a freshly-installed plugin
+            simply has no chart on its card. */}
+          <PluginSparkline
+            buckets={sparklineBuckets}
+            style={{ marginLeft: 'auto' }}
+            ariaLabel={t('plugin.pa.card.sparklineAria', {
+              defaultValue: 'Startup time & error rate, last 30 minutes',
+            })}
+          />
         </div>
 
         {error && (
@@ -255,6 +470,26 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
             <span className="pa-switch-label">{switchOn ? 'on' : 'off'}</span>
           </button>
           <div className="pa-icon-row">
+            <button
+              type="button"
+              className={`pa-icon-btn ${autoUpdateOn ? 'is-on' : ''}`}
+              title={t('plugin.pa.autoUpdate.labelTitle', {
+                defaultValue: 'Allow SwallowNote to install newer versions on startup',
+              })}
+              aria-label={t('plugin.pa.autoUpdate.label', { defaultValue: 'Auto-update' })}
+              aria-pressed={autoUpdateOn}
+              data-plugin-auto-update={autoUpdateOn ? 'on' : 'off'}
+              onClick={() => {
+                // The store mirrors the new value back onto
+                // the plugin definition (see
+                // `setPluginAutoUpdate`), so the next render
+                // already reflects the change without a
+                // separate re-read.
+                usePluginStore.getState().setPluginAutoUpdate(plugin.id, !autoUpdateOn)
+              }}
+            >
+              <RefreshCw />
+            </button>
             {hasUpdate && onUpdate && (
               <button
                 type="button"
@@ -273,6 +508,16 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
                 onClick={onSettings}
               >
                 <SettingsIcon />
+              </button>
+            )}
+            {onStorage && (
+              <button
+                type="button"
+                className="pa-icon-btn"
+                title={t('plugin.pa.btn.storage', { defaultValue: 'Storage' })}
+                onClick={onStorage}
+              >
+                <Database />
               </button>
             )}
             {plugin.permissions.length > 0 && onPermissions && (

@@ -405,6 +405,14 @@ export interface UIState {
   showAllFiles: boolean
   markdownOnly: boolean
   customShortcuts: Record<string, string>
+  /**
+   * User-bound keyboard shortcuts for plugin commands. Keyed by
+   * `<pluginId>:<commandId>` so two plugins can contribute
+   * commands with the same id without colliding. Persisted to
+   * localStorage via `saveAppSettings({ pluginCommandShortcuts })`
+   * so the bindings survive an app restart.
+   */
+  pluginCommandShortcuts: Record<string, string>
   syncInterval: number
   autoSyncPush: boolean
   uploadPath: string
@@ -470,6 +478,16 @@ export interface UIState {
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
   resetAllShortcuts: () => void
+  setPluginCommandShortcut: (bindingKey: string, value: string) => void
+  resetPluginCommandShortcut: (bindingKey: string) => void
+  resetAllPluginCommandShortcuts: () => void
+  /**
+   * Drop every plugin-command shortcut that points at a plugin id
+   * the user no longer has installed. Called by the plugin store
+   * on unregister / setPlugins diff to keep the persisted map from
+   * accumulating stale bindings.
+   */
+  prunePluginCommandShortcuts: (validPluginIds: Set<string>) => void
   setActiveCustomThemeId: (themeType: 'light' | 'dark', id: string) => void
   addCustomTheme: (name: string, themeType: 'light' | 'dark') => void
   deleteCustomTheme: (id: string) => void
@@ -502,6 +520,7 @@ export const useUIStore = create<UIState>((set) => ({
   showAllFiles: false,
   markdownOnly: false,
   customShortcuts: {},
+  pluginCommandShortcuts: {},
   syncInterval: 10,
   autoSyncPush: false,
   uploadPath: '',
@@ -762,6 +781,63 @@ export const useUIStore = create<UIState>((set) => ({
     set({ customShortcuts: {} })
     saveAppSettings({ customShortcuts: '{}' })
   },
+  setPluginCommandShortcut: (bindingKey, value) => {
+    set((state) => {
+      // If the user re-binds an already-bound command, the new
+      // value simply overwrites the old. We don't attempt to
+      // resolve conflicts at the store level – the settings panel
+      // runs the conflict check first and only calls us on accept.
+      const next = { ...state.pluginCommandShortcuts, [bindingKey]: value }
+      saveAppSettings({ pluginCommandShortcuts: JSON.stringify(next) })
+      return { pluginCommandShortcuts: next }
+    })
+  },
+  resetPluginCommandShortcut: (bindingKey) => {
+    set((state) => {
+      if (!(bindingKey in state.pluginCommandShortcuts)) return state
+      const next = { ...state.pluginCommandShortcuts }
+      delete next[bindingKey]
+      saveAppSettings({ pluginCommandShortcuts: JSON.stringify(next) })
+      return { pluginCommandShortcuts: next }
+    })
+  },
+  resetAllPluginCommandShortcuts: () => {
+    set({ pluginCommandShortcuts: {} })
+    saveAppSettings({ pluginCommandShortcuts: '{}' })
+  },
+  prunePluginCommandShortcuts: (validPluginIds) => {
+    set((state) => {
+      const next: Record<string, string> = {}
+      let changed = false
+      for (const [bindingKey, value] of Object.entries(state.pluginCommandShortcuts)) {
+        // bindingKey format: "<pluginId>:<commandId>". The plugin
+        // id may itself contain colons (e.g. reverse-DNS style
+        // "com.foo.bar:baz"), so we use the *last* colon as the
+        // separator. That's the same convention the settings
+        // panel uses to render the row.
+        const lastColon = bindingKey.lastIndexOf(':')
+        if (lastColon <= 0) continue
+        const pluginId = bindingKey.slice(0, lastColon)
+        if (validPluginIds.has(pluginId)) {
+          // `value` is typed `unknown` from `Object.entries`;
+          // the map's `string` value type is enforced by the
+          // surrounding Record. A non-string here would mean
+          // someone wrote garbage to the persisted map, which
+          // we silently drop to keep this prune idempotent.
+          if (typeof value === 'string') {
+            next[bindingKey] = value
+          } else {
+            changed = true
+          }
+        } else {
+          changed = true
+        }
+      }
+      if (!changed) return state
+      saveAppSettings({ pluginCommandShortcuts: JSON.stringify(next) })
+      return { pluginCommandShortcuts: next }
+    })
+  },
   setActiveCustomThemeId: (themeType, id) => {
     if (themeType === 'light') {
       set({ activeLightCustomThemeId: id })
@@ -834,6 +910,20 @@ export const useUIStore = create<UIState>((set) => ({
           customShortcuts = JSON.parse(s.customShortcuts)
         } catch {
           customShortcuts = {}
+        }
+      }
+      // Plugin-command shortcuts live in the same Tauri session
+      // store as `customShortcuts` but with a separate key so a
+      // bad payload from one doesn't nuke the other. We parse
+      // defensively (a malformed entry would otherwise crash
+      // app startup on the `pluginCommandShortcuts[key]` reads
+      // scattered through the keyboard handler).
+      let pluginCommandShortcuts: Record<string, string> = {}
+      if (s.pluginCommandShortcuts) {
+        try {
+          pluginCommandShortcuts = JSON.parse(s.pluginCommandShortcuts)
+        } catch {
+          pluginCommandShortcuts = {}
         }
       }
       let customThemes: CustomTheme[] = [...BUILT_IN_THEMES]
@@ -924,6 +1014,7 @@ export const useUIStore = create<UIState>((set) => ({
         showAllFiles: s.showAllFiles === 'true',
         markdownOnly: s.markdownOnly === 'true',
         customShortcuts,
+        pluginCommandShortcuts,
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
         autoSyncPush: s.autoSyncPush === 'true',
         uploadPath: s.uploadPath || '',

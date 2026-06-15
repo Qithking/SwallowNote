@@ -30,6 +30,12 @@ import {
   ScrollText,
   Search,
   ChevronUp,
+  ChevronRight,
+  Power,
+  PowerOff,
+  Trash2,
+  X,
+  AlertTriangle,
 } from 'lucide-react'
 import { useTranslation, Trans } from 'react-i18next'
 import { usePluginStore, useUIStore, usePluginMarketStore } from '@/stores'
@@ -54,6 +60,7 @@ import { memo } from 'react'
 import { PluginErrorBoundary } from './PluginErrorBoundary'
 import { PluginCardSkeletonGrid } from './PluginCardSkeleton'
 import { useDebounce } from './useDebounce'
+import { usePluginTelemetryVersion } from '@/hooks'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
 import { getAllPluginMetrics } from '@/lib/plugin-telemetry'
 import type { PluginDefinition, PluginPanelProps, PluginPermission } from '@/types/plugin'
@@ -64,8 +71,20 @@ const PluginActivityDialog = lazy(() => import('./PluginActivityDialog').then(m 
 const PluginDiagnosticsDialog = lazy(() => import('./PluginDiagnosticsDialog').then(m => ({ default: m.PluginDiagnosticsDialog })))
 const PluginLogsDialog = lazy(() => import('./PluginLogsDialog').then(m => ({ default: m.PluginLogsDialog })))
 const PluginPermissionDialog = lazy(() => import('./PluginPermissionDialog'))
+// Task 6 (G6): per-plugin storage inspector. Mounted when a card's
+// "Storage" icon button fires. Lazy-loaded like the other dialogs so
+// the storage-inspector bundle (Tauri bridge + a ~6 KB table) doesn't
+// bloat the initial manager render.
+const PluginStorageInspector = lazy(() => import('./PluginStorageInspector').then(m => ({ default: m.PluginStorageInspector })))
 // Lazy load PluginMarketView - only loaded when user switches to market tab
 const PluginMarketView = lazy(() => import('./PluginMarketView').then(m => ({ default: m.PluginMarketView })))
+// Task 2 (G2): failure list dialog. Mounted from the top-of-page
+// warning banner; lazy-loaded so the dialog's uninstall path
+// (which pulls in the plugin-host utilities) doesn't land on disk
+// for users who never see a failure.
+const PluginLoadFailuresDialog = lazy(() =>
+  import('./PluginLoadFailuresDialog').then((m) => ({ default: m.PluginLoadFailuresDialog })),
+)
 
 /** Active tab. Kept as a string-literal union so the value can be
  *  serialised (e.g. if we ever decide to persist the active tab
@@ -90,9 +109,21 @@ function PluginManagerView() {
   const plugins = usePluginStore(useShallow((s) => s.plugins))
   const setPlugins = usePluginStore((s) => s.setPlugins)
   const setLoaded = usePluginStore((s) => s.setLoaded)
+  // Task 2 (G2): subscribe to the per-plugin load-failure map.
+  // The store replaces the map atomically after every rescan;
+  // useShallow + a stable key keeps the banner's render scope
+  // narrow (we only want to re-render the banner, not the whole
+  // manager, when an entry is added or removed).
+  const loadFailures = usePluginStore(useShallow((s) => s.loadFailures))
   const [isUploading, setIsUploading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
   const [activeTab, setActiveTab] = useState<PluginManagerTab>('manage')
+  // Failure list dialog state (Task 2 / G2). The dialog is
+  // mounted but hidden until the user clicks the top-of-page
+  // banner; reusing the same controlled pattern as the other
+  // plugin popups (Activity / Diagnostics / Logs / Storage
+  // Inspector) keeps state predictable.
+  const [failuresDialogOpen, setFailuresDialogOpen] = useState(false)
   // Settings dialog state. We keep the plugin reference (not just the
   // id) so we don't depend on store re-selection while the dialog is
   // open. Opening a settings dialog for a plugin that was just
@@ -103,6 +134,13 @@ function PluginManagerView() {
   // the full reference so a concurrent uninstall can't take the
   // plugin out from under the dialog.
   const [permissionsPlugin, setPermissionsPlugin] = useState<PluginDefinition | null>(null)
+  // Storage inspector target (Task 6 / G6). Same lifecycle
+  // guard as the other per-plugin dialogs: we keep the full
+  // plugin reference so a concurrent uninstall can't take the
+  // plugin out from under an open inspector. The dialog reads
+  // `plugin` to render the header and to call into the
+  // per-plugin storage on confirm.
+  const [storagePlugin, setStoragePlugin] = useState<PluginDefinition | null>(null)
   // Permissions-to-grant queue. When the install flow finishes
   // extracting a plugin package, we open the dialog with the
   // declared permissions and let the user opt in/out before any
@@ -124,6 +162,37 @@ function PluginManagerView() {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 150)
   const [listFilter, setListFilter] = useState<ListFilter>('all')
+  // ── Multi-select state (G7 batch operations) ──────────────
+  // The selection set is intentionally kept as component-local
+  // state rather than pushed into the plugin store: selection is
+  // a view-only concern (the user is picking which rows to act
+  // on in the *current* filter), not a property of the plugin
+  // itself. Clearing on tab switch is the right escape hatch
+  // because switching to the Marketplace tab and back resets
+  // visiblePlugins to the default filter, and stale ids would
+  // dangle.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // Stable callback — the child card's identity is derived from
+  // the (plugin, selection) pair, and a new function reference
+  // on every render would defeat the memo wrapper. The handler
+  // updates an immutable copy of the set so React's reference
+  // equality detects the change.
+  const toggleSelected = useCallback((id: string, next: boolean) => {
+    setSelectedIds((prev) => {
+      const updated = new Set(prev)
+      if (next) updated.add(id)
+      else updated.delete(id)
+      return updated
+    })
+  }, [])
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), [])
+  // Whenever the user flips the active tab we drop the
+  // selection — the marketplace tab has no concept of
+  // "selected installed plugin" and the work would otherwise
+  // sit around in memory.
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [activeTab])
   // Last successful rescan / install / market refresh time. Drives
   // the small "— Latest sync 12:04" label on the right of the tab
   // strip. The label updates reactively when any of the three
@@ -185,8 +254,22 @@ function PluginManagerView() {
   //
   // We use a deferred state to avoid blocking the initial render.
   // Metrics are computed after the UI is visible.
+  //
+  // **M15 (Wave D review):** the previous `useEffect([plugins.length])`
+  // only re-ran the metrics recomputation when the plugin *count*
+  // changed. A busy host emitting hundreds of metrics while the
+  // user was looking at the stats ribbon would see frozen error
+  // counts / event totals / storage size — the snapshot was a
+  // one-shot computed at mount. We now subscribe to
+  // `usePluginTelemetryVersion()`, a monotonic counter bumped on
+  // every recorder call, so the recompute fires whenever the host
+  // actually records something. The effect deps become
+  // `[plugins.length, metricsVersion]`, and the version itself
+  // changes only on real recorder activity, so we don't pay a
+  // constant-rate re-render cost.
+  const metricsVersion = usePluginTelemetryVersion()
   const [metricsSnapshot, setMetricsSnapshot] = useState<ReturnType<typeof getAllPluginMetrics>>([])
-  
+
   useEffect(() => {
     // Defer metrics calculation to one tick so the first paint lands
     // before we recompute. The old code used a 300ms setTimeout
@@ -212,7 +295,7 @@ function PluginManagerView() {
       const timer = setTimeout(calculateMetrics, 0)
       return () => clearTimeout(timer)
     }
-  }, [plugins.length])
+  }, [plugins.length, metricsVersion])
   const stats = useMemo(() => {
     const enabled = plugins.filter((p) => p.enabled).length
     const disabled = plugins.length - enabled
@@ -264,6 +347,29 @@ function PluginManagerView() {
     })
   }, [plugins, debouncedSearch, listFilter, marketUpdates])
 
+  // "Select all (visible)" — toggles the membership of every
+  // currently-visible plugin in the selection set. The
+  // "visible" anchor matches what the user actually sees on
+  // screen, so the toolbar checkbox stays in sync with the
+  // card grid. Mixed state (some visible rows selected, some
+  // not) is handled by the toolbar checkbox: if *all* visible
+  // rows are in the set we render checked; if *none* are we
+  // render unchecked; otherwise we render the indeterminate
+  // dash so the user knows the selection is partial.
+  const selectAllVisible = useCallback(
+    (next: boolean) => {
+      setSelectedIds((prev) => {
+        const updated = new Set(prev)
+        for (const p of visiblePlugins) {
+          if (next) updated.add(p.id)
+          else updated.delete(p.id)
+        }
+        return updated
+      })
+    },
+    [visiblePlugins],
+  )
+
   /**
    * Build the props passed to a plugin's settings component. The
    * settings dialog is not an "active panel", so `isActive` is
@@ -292,8 +398,13 @@ function PluginManagerView() {
     try {
       setIsScanning(true)
       const rustMetas = await scanPlugins()
-      const loadedPlugins = await loadAllPlugins(rustMetas)
+      const { plugins: loadedPlugins, failures } = await loadAllPlugins(rustMetas)
       setPlugins(loadedPlugins)
+      // G2: forward any per-plugin load failures to the store.
+      // The manager subscribes to `loadFailures` to render a
+      // top-of-page warning banner; clearing / replacing the
+      // map keeps the banner in sync with the on-disk state.
+      usePluginStore.getState().setLoadFailures(failures)
       setLoaded(true)
       // Bump the "latest sync" label so the user can see the
       // scan/refresh is fresh.
@@ -366,6 +477,20 @@ function PluginManagerView() {
     await initializePluginPermissions(plugin.id, plugin.permissions)
   }, [])
 
+  /**
+   * Open the per-plugin storage inspector (Task 6 / G6). We
+   * intentionally don't gate this on the `storage` permission
+   * — the inspector is a *browse* tool and a plugin author
+   * who hasn't been granted storage should still be able to see
+   * the empty state. The per-row `entries()` call inside the
+   * dialog runs through the same permission gate, so a revoked
+   * plugin surfaces a clear "permission required" error rather
+   * than a silent empty list.
+   */
+  const openStorage = useCallback((plugin: PluginDefinition) => {
+    setStoragePlugin(plugin)
+  }, [])
+
   const handleUninstall = useCallback(async (plugin: PluginDefinition) => {
     try {
       await uninstallPlugin(plugin.id)
@@ -405,6 +530,168 @@ function PluginManagerView() {
     }
   }, [t])
 
+  // ── G7 batch operations ──────────────────────────────────
+  // Each batch handler walks the current selection in
+  // declaration order (the order in which the user added rows
+  // to the set), awaits each operation, and tallies successes
+  // / failures independently. We deliberately do *not* abort
+  // on the first failure — the user expects "select 5 plugins,
+  // uninstall 4 of them, 1 fails" to report "4 成功 / 1 失败"
+  // rather than leave the other 3 untouched. The summary toast
+  // is fired once at the end so the user gets a single,
+  // easy-to-read status line.
+  //
+  // For uninstalls we batch the host-side `handleReload` so we
+  // don't re-scan the plugin directory N times; toggles don't
+  // need a reload (they're store-mutating only), so they get
+  // the cheaper path.
+  const runBatch = useCallback(
+    async (
+      label: string,
+      actions: Array<{ plugin: PluginDefinition; run: () => Promise<void> }>,
+    ): Promise<{ success: number; failure: number }> => {
+      let success = 0
+      let failure = 0
+      // Sequential, not parallel — the underlying tauri command
+      // touches a single mutex on the rust side, and stacking N
+      // concurrent calls just queues them. Awaiting in order
+      // also makes the "正在卸载第 3/N 项…" UX honest.
+      for (const { plugin, run } of actions) {
+        try {
+          await run()
+          success += 1
+        } catch (err) {
+          failure += 1
+          // Don't fail-silent on the per-item side: log the
+          // pair so the user can copy the id into the dev
+          // console if they want to dig in.
+          console.error(`[batch:${label}] failed for ${plugin.id}:`, err)
+        }
+      }
+      return { success, failure }
+    },
+    [],
+  )
+
+  // Snapshot of the selected plugins. We resolve ids against
+  // the *current* `plugins` array (not `visiblePlugins`) so a
+  // user can select across filters and still act on the full
+  // set. If a plugin disappears between selection and action
+  // (e.g. another flow uninstalled it), the lookup just skips
+  // the dangling id and the toast reports N success on a
+  // smaller-than-expected N — the user will see the missing
+  // card gone from the list anyway.
+  const selectedPlugins = useMemo<PluginDefinition[]>(() => {
+    if (selectedIds.size === 0) return []
+    const out: PluginDefinition[] = []
+    for (const p of plugins) {
+      if (selectedIds.has(p.id)) out.push(p)
+    }
+    return out
+  }, [plugins, selectedIds])
+
+  const handleBatchEnable = useCallback(async () => {
+    if (selectedIds.size === 0) return
+    const targets = selectedPlugins
+    const actions = targets.map((plugin) => ({
+      plugin,
+      run: async () => {
+        await togglePluginEnabled(plugin.id, true)
+        usePluginStore.getState().setPluginEnabled(plugin.id, true)
+      },
+    }))
+    const { success, failure } = await runBatch('enable', actions)
+    clearSelection()
+    toast.success(
+      t('plugin.pa.batch.summary', {
+        defaultValue: '成功 {{success}} 项，失败 {{failure}} 项',
+        success,
+        failure,
+      }),
+    )
+  }, [selectedIds, selectedPlugins, runBatch, clearSelection, t])
+
+  const handleBatchDisable = useCallback(async () => {
+    if (selectedIds.size === 0) return
+    const targets = selectedPlugins
+    const actions = targets.map((plugin) => ({
+      plugin,
+      run: async () => {
+        await togglePluginEnabled(plugin.id, false)
+        usePluginStore.getState().setPluginEnabled(plugin.id, false)
+      },
+    }))
+    const { success, failure } = await runBatch('disable', actions)
+    clearSelection()
+    toast.success(
+      t('plugin.pa.batch.summary', {
+        defaultValue: '成功 {{success}} 项，失败 {{failure}} 项',
+        success,
+        failure,
+      }),
+    )
+  }, [selectedIds, selectedPlugins, runBatch, clearSelection, t])
+
+  const handleBatchUninstall = useCallback(async () => {
+    if (selectedIds.size === 0) return
+    // Pre-flight: build a quick "is this id still in the
+    // registry?" map from the live store. We resolve through
+    // `plugins` (the source of truth) so a card that vanished
+    // mid-batch — say the host crashed and reloaded — is
+    // silently skipped instead of throwing.
+    const targets = selectedPlugins
+    const actions = targets.map((plugin) => ({
+      plugin,
+      run: async () => {
+        await uninstallPlugin(plugin.id)
+        // Mirror the per-card handleUninstall side-effects: if
+        // the removed plugin owned a sidebar/right-panel slot,
+        // yank the view back to the explorer so the user
+        // doesn't see a stale chrome after the reload.
+        const ui = useUIStore.getState()
+        if (ui.sidebarView === `plugin:${plugin.id}`) {
+          ui.setSidebarView('explorer')
+          if (ui.settingsPanelVisible) ui.setSettingsPanelVisible(false)
+        }
+        if (ui.rightPanelType === `plugin:${plugin.id}`) {
+          ui.setRightPanelType(null)
+        }
+      },
+    }))
+    const { success, failure } = await runBatch('uninstall', actions)
+    // One reload at the end, not N. The `scanPlugins` call
+    // hits the FS and is the slowest part of the uninstall
+    // path; the previous (per-item) implementation triggered
+    // it inside `handleUninstall`, which worked for a single
+    // uninstall but ballooned to N rescans for an N-row
+    // batch.
+    if (success > 0) {
+      try {
+        const rustMetas = await scanPlugins()
+        // `loadAllPlugins` returns a `PluginLoadResult` whose
+        // `plugins` field is the array we want to push into
+        // the store. The pre-existing `handleReload` passes
+        // the wrapper object directly (a pre-existing type
+        // bug); we extract the inner array here to keep the
+        // batch path type-clean.
+        const loaded = await loadAllPlugins(rustMetas)
+        setPlugins(loaded.plugins)
+        setLoaded(true)
+        setLastSyncAt(new Date())
+      } catch (err) {
+        console.error('[batch:uninstall] reload failed:', err)
+      }
+    }
+    clearSelection()
+    toast.success(
+      t('plugin.pa.batch.summary', {
+        defaultValue: '成功 {{success}} 项，失败 {{failure}} 项',
+        success,
+        failure,
+      }),
+    )
+  }, [selectedIds, selectedPlugins, runBatch, clearSelection, t, setPlugins, setLoaded])
+
   // Handle plugin update from marketplace
   const handleUpdatePlugin = useCallback(async (plugin: PluginDefinition) => {
     // Find update info from market updates
@@ -427,6 +714,14 @@ function PluginManagerView() {
   const handleRescan = useCallback(() => {
     void handleReload()
   }, [handleReload])
+
+  // Task 2 (G2): count of currently-failed plugin loads. We
+  // recompute it on every render of the manager because the
+  // `loadFailures` map is cheap to iterate (one shallow-equality
+  // check per key) and the banner needs an up-to-date number.
+  // We don't bother memoising — `Object.keys` is O(n) and n is
+  // usually 0–1.
+  const failureCount = Object.keys(loadFailures).length
 
   return (
     <div className="pa-root flex flex-col h-full">
@@ -451,6 +746,44 @@ function PluginManagerView() {
           )}
         </div>
       </header>
+
+      {/* ── Load-failure banner (Task 2 / G2) ─────────────
+            Top-of-page warning strip. Rendered conditionally —
+            when `loadFailures` is empty the whole `<div>` is
+            unmounted and the rest of the page (tab strip, body
+            grid, etc.) shifts up to fill the slot. The banner
+            is the *only* entry point the user has for the
+            failure list dialog; clicking anywhere on it opens
+            the popup. We use a `<div role="button">` rather
+            than a `<button>` so the inner arrow icon can be
+            positioned absolutely without being part of the
+            keyboard tab order, and the parent grid cell can
+            grow to the strip's full width. */}
+      {failureCount > 0 && (
+        <div
+          className="pa-loadfailures-banner"
+          role="button"
+          tabIndex={0}
+          aria-label={t('plugin.pa.loadFailures.banner', { count: failureCount })}
+          onClick={() => setFailuresDialogOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setFailuresDialogOpen(true)
+            }
+          }}
+        >
+          <span className="pa-loadfailures-banner-icon" aria-hidden="true">
+            <AlertTriangle size={14} />
+          </span>
+          <span className="pa-loadfailures-banner-text">
+            {t('plugin.pa.loadFailures.banner', { count: failureCount })}
+          </span>
+          <span className="pa-loadfailures-banner-arrow" aria-hidden="true">
+            <ChevronRight size={14} />
+          </span>
+        </div>
+      )}
 
       {/* ── Tab strip (Installed / Marketplace) — the spine of the page.
              Each tab carries a leading 01 / 02 mono number and a count
@@ -527,6 +860,15 @@ function PluginManagerView() {
               onUpdate={handleUpdatePlugin}
               onSettings={openSettings}
               onPermissions={openPermissions}
+              onStorage={openStorage}
+              // ── G7 batch operations wiring ──
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelected}
+              onSelectAll={selectAllVisible}
+              onClearSelection={clearSelection}
+              onBatchEnable={() => void handleBatchEnable()}
+              onBatchDisable={() => void handleBatchDisable()}
+              onBatchUninstall={() => void handleBatchUninstall()}
             />
           </div>
           <div style={{ display: activeTab === 'market' ? 'block' : 'none', height: '100%' }}>
@@ -652,6 +994,39 @@ function PluginManagerView() {
           onOpenChange={(o: boolean) => setOpenDialog(o ? 'logs' : null)}
         />
       </Suspense>
+
+      {/* ── Storage inspector (Task 6 / G6) ─────────────
+            Scoped to a single plugin (passed via `plugin`),
+            so we only mount it while a target is selected.
+            The dialog resets its internal state on open/close
+            transitions so a fresh entry list is loaded every
+            time the user re-opens it. */}
+      <Suspense fallback={null}>
+        <PluginStorageInspector
+          open={storagePlugin !== null}
+          plugin={storagePlugin}
+          onOpenChange={(o: boolean) => {
+            if (!o) setStoragePlugin(null)
+          }}
+        />
+      </Suspense>
+
+      {/* ── Load-failures dialog (Task 2 / G2) ────────
+            Opened from the top-of-page warning banner. The
+            dialog owns its own confirm/uninstall state but
+            delegates the "View logs" action to the manager
+            so we reuse the same `openDialog === 'logs'`
+            slot that the rail button already populates —
+            no second logs instance. Lazy chunk so users
+            who never see a failure don't pay for the
+            dialog's tauri bridge bundle. */}
+      <Suspense fallback={null}>
+        <PluginLoadFailuresDialog
+          open={failuresDialogOpen}
+          onOpenChange={setFailuresDialogOpen}
+          onViewLogs={() => setOpenDialog('logs')}
+        />
+      </Suspense>
     </div>
   )
 }
@@ -683,6 +1058,32 @@ interface ManageTabProps {
   onUpdate?: (plugin: PluginDefinition) => void
   onSettings: (plugin: PluginDefinition) => void
   onPermissions: (plugin: PluginDefinition) => void
+  /**
+   * Open the per-plugin storage inspector (Task 6 / G6).
+   * Required because every installed card now has a "Storage"
+   * icon button; the manager view owns the dialog state so a
+   * user can still open the inspector while the bulk-select
+   * mode is active.
+   */
+  onStorage: (plugin: PluginDefinition) => void
+  // ── G7 batch operations (Task 7.1–7.5) ──
+  /** Set of currently selected plugin ids. */
+  selectedIds: Set<string>
+  /** Toggle one row's membership in the selection set. */
+  onToggleSelect: (id: string, next: boolean) => void
+  /**
+   * Toggle the membership of *all currently visible* rows.
+   * Toolbar checkbox drives this; the parent decides whether
+   * to add or remove based on the "all visible already
+   * selected" check.
+   */
+  onSelectAll: (next: boolean) => void
+  /** Clear the selection (called after a batch finishes or
+   *  when the user clicks the X in the batch bar). */
+  onClearSelection: () => void
+  onBatchEnable: () => void
+  onBatchDisable: () => void
+  onBatchUninstall: () => void
 }
 
 function ManageTab({
@@ -701,6 +1102,14 @@ function ManageTab({
   onUpdate,
   onSettings,
   onPermissions,
+  onStorage,
+  selectedIds,
+  onToggleSelect,
+  onSelectAll,
+  onClearSelection,
+  onBatchEnable,
+  onBatchDisable,
+  onBatchUninstall,
 }: ManageTabProps) {
   const { t } = useTranslation()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -719,7 +1128,22 @@ function ManageTab({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div className="pa-toolbar">        
+      <div className="pa-toolbar">
+        {/* ── Select-all checkbox (G7) ─────────────────────
+            Sits at the very left of the toolbar so it's the
+            first thing the user sees. The three-state logic
+            (checked / unchecked / indeterminate) is derived
+            purely from `visiblePlugins` and `selectedIds`,
+            so the parent doesn't have to track a separate
+            "indeterminate" flag. We compute the truthy
+            value at render time and pass it to the native
+            input's `checked` + `ref`-driven `indeterminate`
+            property. */}
+        <BatchSelectAll
+          visiblePlugins={visiblePlugins}
+          selectedIds={selectedIds}
+          onSelectAll={onSelectAll}
+        />
         <div className="pa-segmented" role="tablist">
           <SegmentButton
             active={listFilter === 'all'}
@@ -773,6 +1197,27 @@ function ManageTab({
         </button>
       </div>
 
+      {/* ── Batch action bar (G7.3) ───────────────────────
+           Rendered only when the user has at least one row
+           selected. Stays in the document flow (not
+           `position: sticky`) so it pushes the grid down
+           rather than overlapping it — the grid is its own
+           scroll container and a sticky overlay would be
+           cropped at the wrong edge. Three buttons:
+           enable / disable / uninstall, plus a count
+           summary and a clear (×) button. The bar uses the
+           existing `.pa-btn` / `.pa-btn-ghost` styles so it
+           blends in with the toolbar above. */}
+      {selectedIds.size > 0 && (
+        <BatchActionBar
+          count={selectedIds.size}
+          onEnable={onBatchEnable}
+          onDisable={onBatchDisable}
+          onUninstall={onBatchUninstall}
+          onClear={onClearSelection}
+        />
+      )}
+
       {isScanning && visiblePlugins.length === 0 ? (
         <div className="pa-market-grid" style={{ padding: '0 28px' }}>
           <PluginCardSkeletonGrid count={6} />
@@ -789,11 +1234,14 @@ function ManageTab({
                 plugin={plugin}
                 index={idx + 1}
                 hasUpdate={hasUpdate(plugin.id)}
+                selected={selectedIds.has(plugin.id)}
+                onSelectChange={(next) => onToggleSelect(plugin.id, next)}
                 onToggle={(enabled: boolean) => onToggle(plugin, enabled)}
                 onUninstall={() => onUninstall(plugin)}
                 onUpdate={onUpdate ? () => onUpdate(plugin) : undefined}
                 onSettings={() => onSettings(plugin)}
                 onPermissions={() => onPermissions(plugin)}
+                onStorage={() => onStorage(plugin)}
               />
             </PluginErrorBoundary>
           )}
@@ -809,6 +1257,163 @@ function EmptyListHint() {
     <div className="pa-empty">
       <div className="pa-empty-title">{t('plugin.pa.empty.title')}</div>
       <div className="pa-empty-hint">{t('plugin.pa.empty.hint')}</div>
+    </div>
+  )
+}
+
+/**
+ * Toolbar select-all checkbox (G7.3). A native `<input
+ * type="checkbox">` is good enough here — the visual is a
+ * 14×14 checkbox, the only state we need is the
+ * indeterminate flag (some-but-not-all visible rows
+ * selected), and that's a property on the DOM input that
+ * React doesn't track in props. We compute the "indeterminate"
+ * flag at render time and write it via a ref to the DOM node.
+ *
+ * The "all visible" anchor matches the rows the user can see
+ * in the grid; clicking the checkbox adds *every* visible
+ * row to the set, or removes all of them. Selected rows that
+ * are currently hidden by the filter are left untouched.
+ */
+function BatchSelectAll({
+  visiblePlugins,
+  selectedIds,
+  onSelectAll,
+}: {
+  visiblePlugins: PluginDefinition[]
+  selectedIds: Set<string>
+  onSelectAll: (next: boolean) => void
+}) {
+  const { t } = useTranslation()
+  const inputRef = useRef<HTMLInputElement>(null)
+  // Derive the three states from the visible rows + the
+  // current selection. We compare membership one-by-one
+  // instead of using `every` / `some` with the same predicate
+  // because we need the "mixed" case (some yes, some no) to
+  // render as indeterminate.
+  const visibleCount = visiblePlugins.length
+  let selectedVisible = 0
+  for (const p of visiblePlugins) {
+    if (selectedIds.has(p.id)) selectedVisible += 1
+  }
+  const allSelected = visibleCount > 0 && selectedVisible === visibleCount
+  const noneSelected = selectedVisible === 0
+  // The DOM `indeterminate` property is not a React prop, so
+  // we drive it through a ref. The effect re-fires whenever
+  // the derived state changes.
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = !allSelected && !noneSelected
+    }
+  }, [allSelected, noneSelected])
+  // Clicking the checkbox when fully selected removes the
+  // visible rows; otherwise (none or partial) it adds them
+  // all. This matches the standard "tri-state checkbox"
+  // behaviour in macOS Finder, Gmail, etc.
+  const handleClick = () => {
+    onSelectAll(!allSelected)
+  }
+  return (
+    <label
+      className="pa-select-all"
+      title={t('plugin.pa.batch.selectAllTitle', {
+        defaultValue: 'Select all visible plugins',
+      })}
+    >
+      <input
+        ref={inputRef}
+        type="checkbox"
+        checked={allSelected}
+        // We don't need `onChange` — `onClick` is enough to
+        // capture the user's intent before the browser
+        // toggles the checkbox's internal `checked` (which
+        // we override via the ref above on the next render).
+        onClick={handleClick}
+        // Read-only: suppress the warning about a controlled
+        // checkbox without an onChange handler.
+        readOnly
+        aria-label={t('plugin.pa.batch.selectAll', { defaultValue: 'Select all' })}
+      />
+      <span className="pa-select-all-text">
+        {t('plugin.pa.batch.selected', {
+          defaultValue: '已选 {{count}}',
+          count: selectedIds.size,
+        })}
+      </span>
+    </label>
+  )
+}
+
+/**
+ * Batch action bar (G7.3). Renders below the toolbar when at
+ * least one row is selected. Three primary actions
+ * (enable / disable / uninstall) plus a count summary on the
+ * left and a "×" clear button on the right. The styling
+ * reuses the existing `.pa-btn` button family plus a new
+ * `.pa-batch-bar` container that gives the bar a soft
+ * accent-tinted background so it stands out as a transient
+ * mode of interaction.
+ */
+function BatchActionBar({
+  count,
+  onEnable,
+  onDisable,
+  onUninstall,
+  onClear,
+}: {
+  count: number
+  onEnable: () => void
+  onDisable: () => void
+  onUninstall: () => void
+  onClear: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="pa-batch-bar" role="toolbar" aria-label={t('plugin.pa.batch.barAria', { defaultValue: 'Batch actions' })}>
+      <span className="pa-batch-count">
+        {t('plugin.pa.batch.selectedCount', {
+          defaultValue: '已选 {{count}} 项',
+          count,
+        })}
+      </span>
+      <div className="pa-batch-actions">
+        <button
+          type="button"
+          className="pa-btn"
+          onClick={onEnable}
+          title={t('plugin.pa.batch.enableTitle', { defaultValue: 'Enable selected plugins' })}
+        >
+          <Power size={12} />
+          {t('plugin.pa.batch.enable', { defaultValue: '启用' })}
+        </button>
+        <button
+          type="button"
+          className="pa-btn"
+          onClick={onDisable}
+          title={t('plugin.pa.batch.disableTitle', { defaultValue: 'Disable selected plugins' })}
+        >
+          <PowerOff size={12} />
+          {t('plugin.pa.batch.disable', { defaultValue: '禁用' })}
+        </button>
+        <button
+          type="button"
+          className="pa-btn pa-btn-danger"
+          onClick={onUninstall}
+          title={t('plugin.pa.batch.uninstallTitle', { defaultValue: 'Uninstall selected plugins' })}
+        >
+          <Trash2 size={12} />
+          {t('plugin.pa.batch.uninstall', { defaultValue: '卸载' })}
+        </button>
+      </div>
+      <button
+        type="button"
+        className="pa-btn pa-btn-ghost pa-btn-icon"
+        onClick={onClear}
+        title={t('plugin.pa.batch.clear', { defaultValue: 'Clear selection' })}
+        aria-label={t('plugin.pa.batch.clear', { defaultValue: 'Clear selection' })}
+      >
+        <X size={14} />
+      </button>
     </div>
   )
 }

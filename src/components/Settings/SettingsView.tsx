@@ -11,6 +11,9 @@ import {
   Check,
   X,
   Bot,
+  Puzzle,
+  Download,
+  Upload,
 } from 'lucide-react'
 import { useUIStore, Theme, NoteWidth, CustomThemeColors } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -34,8 +37,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { DEFAULT_SHORTCUTS } from '@/lib/shortcuts'
 import { getProviderById, getProvidersByCategory, AiProviderCategory } from '@/lib/ai'
-import { testAiModel, restartAiProxy, loadAiRolePrompts, addAiRolePrompt, deleteAiRolePrompt, updateAiRolePrompt, updateAiRolePromptName, resetAiRolePrompt, type AiRolePrompt } from '@/lib/tauri'
+import { testAiModel, restartAiProxy, loadAiRolePrompts, addAiRolePrompt, deleteAiRolePrompt, updateAiRolePrompt, updateAiRolePromptName, resetAiRolePrompt, exportPluginConfigs, importPluginConfigs, savePluginConfigsDialog, openPluginConfigsDialog, type AiRolePrompt } from '@/lib/tauri'
 import { ShortcutRecorder } from './ShortcutRecorder'
+import { PluginCommandsSection } from './PluginCommandsSection'
 import { GradientEditor } from './GradientEditor'
 import {
   AlertDialog,
@@ -48,7 +52,7 @@ import {
   AlertDialogAction,
 } from '@/components/ui/alert-dialog'
 
-type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts'
+type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins'
 
 function SettingRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
   return (
@@ -109,6 +113,17 @@ function SettingsView() {
   const [newRoleKey, setNewRoleKey] = useState('')
   const [newRoleName, setNewRoleName] = useState('')
 
+  // Plugin config import/export (Task 10 / G10). The export /
+  // import calls each go through the Tauri `export_plugin_configs`
+  // and `import_plugin_configs` commands. We track per-button
+  // busy state so the UI can disable the button while the host
+  // is doing IO, and surface the per-plugin report as a toast.
+  const [pluginConfigsExporting, setPluginConfigsExporting] = useState(false)
+  const [pluginConfigsImporting, setPluginConfigsImporting] = useState(false)
+  const [pluginImportConfirm, setPluginImportConfirm] = useState<{
+    srcPath: string
+  } | null>(null)
+
   // Load role prompts on mount
   useEffect(() => {
     loadAiRolePrompts()
@@ -136,6 +151,7 @@ function SettingsView() {
     { id: 'appearance', icon: Palette, labelKey: 'settings.appearance' },
     { id: 'ai', icon: Bot, labelKey: 'settings.ai' },
     { id: 'shortcuts', icon: Keyboard, labelKey: 'settings.shortcuts' },
+    { id: 'plugins', icon: Puzzle, labelKey: 'settings.plugins' },
   ]
 
   const scrollToSection = useCallback((sectionId: SettingsSection) => {
@@ -169,6 +185,71 @@ function SettingsView() {
     { value: 30, label: '30' },
     { value: 60, label: '60' },
   ]
+
+  // Export every plugin's storage.json to a user-chosen zip file.
+  // The host's `export_plugin_configs` does the heavy lifting
+  // (zips the live storage files, writes the version manifest);
+  // we only handle the save dialog and the toast.
+  const handleExportPluginConfigs = useCallback(async () => {
+    if (pluginConfigsExporting) return
+    setPluginConfigsExporting(true)
+    try {
+      const destPath = await savePluginConfigsDialog()
+      if (!destPath) return
+      const manifest = await exportPluginConfigs(destPath)
+      toast.success(
+        t('settings.plugins.configs.exportSuccess', { count: manifest.plugin_count }),
+      )
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.error(t('settings.plugins.configs.exportSuccess', { count: 0 }) + ' · ' + message)
+    } finally {
+      setPluginConfigsExporting(false)
+    }
+  }, [pluginConfigsExporting, t])
+
+  // Pick a bundle zip and show a confirmation dialog before
+  // committing the import. The host is destructive (overwrites
+  // existing `storage.json` files for installed plugins), so we
+  // always want a confirmation step in the UI — a misclick on
+  // "Import" should not silently nuke the user's storage.
+  const handlePickImportBundle = useCallback(async () => {
+    if (pluginConfigsImporting) return
+    const srcPath = await openPluginConfigsDialog()
+    if (!srcPath) return
+    setPluginImportConfirm({ srcPath })
+  }, [pluginConfigsImporting])
+
+  // Run the actual import. Called from the confirmation dialog.
+  // The host's `import_plugin_configs` performs the schema-version
+  // compatibility check (SubTask 10.4) before touching any
+  // storage file, so by the time we see a result back the
+  // filesystem state is already up to date.
+  const handleConfirmImport = useCallback(async () => {
+    const target = pluginImportConfirm
+    if (!target) return
+    setPluginImportConfirm(null)
+    setPluginConfigsImporting(true)
+    try {
+      const result = await importPluginConfigs(target.srcPath)
+      if (result.imported === 0 && result.entries.length === 0) {
+        toast.info(t('settings.plugins.configs.importNone'))
+      } else {
+        toast.success(
+          t('settings.plugins.configs.importSuccess', {
+            imported: result.imported,
+            total: result.plugin_count,
+            skipped: result.skipped,
+          }),
+        )
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      toast.error(message)
+    } finally {
+      setPluginConfigsImporting(false)
+    }
+  }, [pluginImportConfirm, t])
 
   return (
     <div className="flex flex-col h-full max-full">
@@ -968,6 +1049,77 @@ function SettingsView() {
                   ))}
                 </CardContent>
               </Card>
+              {/* 插件命令快捷键 (Task 9 / G9). Lists every command
+                  contributed by an installed plugin and lets the
+                  user bind / unbind a keyboard shortcut. The
+                  recorder handles the conflict check inline. */}
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold">
+                      {t('settings.pluginCommands.title')}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {t('settings.pluginCommands.desc')}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => useUIStore.getState().resetAllPluginCommandShortcuts()}
+                  >
+                    {t('settings.pluginCommands.resetAll')}
+                  </Button>
+                </div>
+                <PluginCommandsSection />
+              </div>
+            </section>
+
+            {/* ===== 插件 ===== */}
+            <section id="section-plugins" className="space-y-4">
+              <h2 className="text-base font-semibold">{t('settings.plugins')}</h2>
+              <Card>
+                <CardContent className="p-0 divide-y divide-border">
+                  <div className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <Label className="text-sm font-medium">{t('settings.plugins.configs')}</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {t('settings.plugins.configs.desc')}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 pt-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={pluginConfigsExporting || pluginConfigsImporting}
+                          onClick={handleExportPluginConfigs}
+                        >
+                          {pluginConfigsExporting ? (
+                            <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5 mr-1" />
+                          )}
+                          {t('settings.plugins.configs.export')}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={pluginConfigsExporting || pluginConfigsImporting}
+                          onClick={handlePickImportBundle}
+                        >
+                          {pluginConfigsImporting ? (
+                            <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          ) : (
+                            <Upload className="h-3.5 w-3.5 mr-1" />
+                          )}
+                          {t('settings.plugins.configs.import')}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </section>
           </div>
         </ScrollArea>
@@ -1040,6 +1192,39 @@ function SettingsView() {
               setDeleteRoleTarget(null)
             }}>
               {t('common.confirm', 'Delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Import confirmation (Task 10 / G10). The host's import
+          is destructive (overwrites storage.json for installed
+          plugins) so we always want a confirmation step before
+          committing. The dialog is also where the version-
+          compatibility mismatch is surfaced when the host raises
+          an InvalidInput error — but the host's check happens
+          server-side, so by the time we get here the user has
+          already picked a file we believe to be compatible. */}
+      <AlertDialog
+        open={!!pluginImportConfirm}
+        onOpenChange={(open) => { if (!open) setPluginImportConfirm(null) }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.plugins.configs.import')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pluginImportConfirm?.srcPath ?? ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPluginImportConfirm(null)}>
+              {t('common.cancel', 'Cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmImport} disabled={pluginConfigsImporting}>
+              {pluginConfigsImporting ? (
+                <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" />
+              ) : null}
+              {t('common.confirm', 'Import')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -24,13 +24,16 @@ import {
   registerContextMenu as sdkRegisterContextMenu,
   getPluginStorage as sdkGetPluginStorage,
   getStubMenuRegistry,
+  emitNoteOpened as sdkEmitNoteOpened,
 } from '@swallow-note/plugin-sdk'
+import type { HostOverrides } from '@swallow-note/plugin-sdk'
 import {
   registerContextMenu as hostRegisterContextMenu,
   pluginMenuRegistry,
 } from '@/lib/plugin-menu'
 import { PluginPermissionDeniedError } from '@/lib/plugin-permission-guard'
 import { setGranted as setGrantedSync, clearGranted, clearAll } from '@/lib/plugin-permission-guard'
+import { pluginEventBus } from '@/lib/plugin-host'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
 import type { PluginContext, PluginDefinition } from '@/types/plugin'
 
@@ -375,5 +378,199 @@ describe('TC-09.6-03: host takeover wires the permission check on registerContex
         onClick: () => {},
       })
     ).not.toThrow()
+  })
+})
+
+// ─── Emit permission gate ─────────────────────────────────────────────────────
+
+/**
+ * Bug-fix tests for C1 critical: the takeover's `emit` override
+ * was a raw `pluginEventBus.emit(...)` and skipped the
+ * `assertPermission` check that `on`/`off` get for free via the
+ * per-plugin bus. An unauthorized plugin could therefore spoof
+ * any host event into every other plugin's handlers. These cases
+ * pin the gate in place.
+ */
+describe('TC-09.6-04: emit() is gated by the events permission (C1 fix)', () => {
+  beforeEach(() => {
+    sdkClearHost()
+    // Reset every plugin the tests touch so a grant from one case
+    // doesn't satisfy the next.
+    clearAll()
+    for (const id of [
+      'com.test.perm-emit-a',
+      'com.test.perm-emit-b',
+      'com.test.perm-emit-c',
+    ]) {
+      clearGranted(id)
+      pluginEventBus.removeAllListenersForPlugin(id)
+    }
+  })
+  afterEach(() => {
+    sdkClearHost()
+    clearAll()
+    for (const id of [
+      'com.test.perm-emit-a',
+      'com.test.perm-emit-b',
+      'com.test.perm-emit-c',
+    ]) {
+      pluginEventBus.removeAllListenersForPlugin(id)
+    }
+  })
+
+  it('TC-09.6-04a: emit without the events grant throws inside the hook', async () => {
+    const mod = makeModule()
+    const plugin = makePlugin({
+      id: 'com.test.perm-emit-a',
+      permissions: ['events'],
+    })
+    // No grant set. The takeover's `emit` should call
+    // `assertPermission` and throw `PluginPermissionDeniedError`
+    // before the dispatch ever reaches the global bus.
+    let captureError: unknown = null
+    const hook = vi.fn(() => {
+      const overrides = mod.setHost.mock.calls.at(-1)![0] as HostOverrides
+      try {
+        overrides.emit!('note:open', { noteId: 'n1', path: '/tmp/n1.md' })
+      } catch (e) {
+        captureError = e
+        throw e
+      }
+    })
+
+    // Swallow the runLifecycleHook stderr so the test runner
+    // doesn't print a stack trace for the expected rejection.
+    const originalError = console.error
+    console.error = () => {}
+    try {
+      await runPluginLifecycleHook(
+        { ...plugin, __pluginModule: mod } as PluginDefinition,
+        hook,
+        ctx,
+        'onLoad'
+      )
+    } finally {
+      console.error = originalError
+    }
+    expect(captureError).toBeInstanceOf(PluginPermissionDeniedError)
+    const denied = captureError as PluginPermissionDeniedError
+    expect(denied.pluginId).toBe('com.test.perm-emit-a')
+    expect(denied.permission).toBe('events')
+    expect(denied.operation).toBe('emit "note:open"')
+  })
+
+  it('TC-09.6-04b: emit with the events grant dispatches to subscribers', async () => {
+    const mod = makeModule()
+    const plugin = makePlugin({
+      id: 'com.test.perm-emit-b',
+      permissions: ['events'],
+    })
+    setGrantedSync('com.test.perm-emit-b', ['events'])
+
+    // Subscribe a host-side listener (tagged with __pluginId so the
+    // host bus's `on` permission gate accepts it; we grant this
+    // listener-id the `events` permission too).
+    setGrantedSync('com.test.perm-listener', ['events'])
+    const received: Array<{ noteId: string; path: string }> = []
+    const handler = (payload: { noteId: string; path: string }) => {
+      received.push(payload)
+    }
+    ;(handler as unknown as { __pluginId: string }).__pluginId = 'com.test.perm-listener'
+    const unsub = pluginEventBus.on('note:open', handler)
+
+    try {
+      const hook = vi.fn(() => {
+        const overrides = mod.setHost.mock.calls.at(-1)![0] as HostOverrides
+        overrides.emit!('note:open', { noteId: 'n2', path: '/tmp/n2.md' })
+      })
+      await runPluginLifecycleHook(
+        { ...plugin, __pluginModule: mod } as PluginDefinition,
+        hook,
+        ctx,
+        'onLoad'
+      )
+      expect(received).toEqual([{ noteId: 'n2', path: '/tmp/n2.md' }])
+    } finally {
+      unsub()
+    }
+  })
+
+  it('TC-09.6-04c: SDK emitNoteOpened() helper does not reach the global bus', async () => {
+    // The SDK's per-event emit helpers (emitNoteOpened, …) funnel
+    // through `hostOverrides.emit` and *swallow* the gate's error
+    // (the SDK logs it and returns rather than letting the plugin
+    // crash). The observable guarantee we need to pin is therefore
+    // not "the helper throws" but "the helper does not reach the
+    // global bus". Subscribe a host-side listener and verify it
+    // never sees the unauthorized emit.
+    const mod = makeModule()
+    const plugin = makePlugin({
+      id: 'com.test.perm-emit-c',
+      permissions: ['events'],
+    })
+    setGrantedSync('com.test.perm-listener', ['events'])
+    const received: Array<{ noteId: string; path: string }> = []
+    const handler = (p: { noteId: string; path: string }) => received.push(p)
+    ;(handler as unknown as { __pluginId: string }).__pluginId = 'com.test.perm-listener'
+    const unsub = pluginEventBus.on('note:open', handler)
+    const originalError = console.error
+    // The SDK logs the swallowed permission error via console.error;
+    // silence it so the test runner doesn't print the stack.
+    console.error = () => {}
+    try {
+      await runPluginLifecycleHook(
+        { ...plugin, __pluginModule: mod } as PluginDefinition,
+        vi.fn(() => {
+          // No grant for 'events' on com.test.perm-emit-c, so
+          // the gate should reject this dispatch and the
+          // subscriber must stay silent.
+          sdkEmitNoteOpened('n3', '/tmp/n3.md')
+        }),
+        ctx,
+        'onLoad'
+      )
+    } finally {
+      console.error = originalError
+      unsub()
+    }
+    expect(received).toEqual([])
+  })
+
+  it('TC-09.6-04d: a sibling plugin does not receive a rejected emit', async () => {
+    // Defence in depth: even if a buggy implementation forgot the
+    // gate, the bus dispatch would still be a no-op for the
+    // unauthorized plugin's emit. Pin the *observable* behaviour:
+    // a sibling subscriber never sees an event that the gate
+    // rejected. This catches a future regression where the
+    // permission check moves but the dispatch still runs.
+    const mod = makeModule()
+    const plugin = makePlugin({
+      id: 'com.test.perm-emit-a',
+      permissions: ['events'],
+    })
+    setGrantedSync('com.test.perm-listener', ['events'])
+    const received: unknown[] = []
+    const handler = (p: unknown) => received.push(p)
+    ;(handler as unknown as { __pluginId: string }).__pluginId = 'com.test.perm-listener'
+    const unsub = pluginEventBus.on('note:open', handler)
+    const originalError = console.error
+    console.error = () => {}
+    try {
+      await runPluginLifecycleHook(
+        { ...plugin, __pluginModule: mod } as PluginDefinition,
+        vi.fn(() => {
+          const overrides = mod.setHost.mock.calls.at(-1)![0] as HostOverrides
+          expect(() =>
+            overrides.emit!('note:open', { noteId: 'n', path: '/p' })
+          ).toThrow(PluginPermissionDeniedError)
+        }),
+        ctx,
+        'onLoad'
+      )
+    } finally {
+      console.error = originalError
+      unsub()
+    }
+    expect(received).toEqual([])
   })
 })

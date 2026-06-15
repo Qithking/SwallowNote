@@ -452,6 +452,27 @@ class PluginStorageImpl implements PluginStorage {
     }
   }
 
+  /**
+   * Read-only snapshot of every key with its estimated JSON size.
+   * Returns the entries sorted by `size` descending so a host UI
+   * (e.g. the storage inspector) can show the biggest offenders
+   * first. Performs a single `load()` and one `JSON.stringify`
+   * per key — `O(n)` over the namespace, no extra disk I/O.
+   *
+   * Exposed for host-side debugging tooling. Not part of the
+   * `PluginStorage` public interface so plugin code can't see it.
+   */
+  async entries(): Promise<Array<{ key: string; size: number }>> {
+    this.requireStoragePermission('read storage')
+    const data = await this.load()
+    const entries: Array<{ key: string; size: number }> = []
+    for (const key of Object.keys(data)) {
+      entries.push({ key, size: this.estimateSize(data[key]) })
+    }
+    entries.sort((a, b) => b.size - a.size)
+    return entries
+  }
+
   /** Record a storage operation metric. Lazy-imports telemetry to keep
    *  the storage path independent of the metrics layer. */
   private recordMetric(
@@ -498,6 +519,35 @@ export function getPluginStorage(pluginId: string): PluginStorage {
 /** Drop a plugin's storage from the cache. Called on uninstall. */
 export function dropPluginStorage(pluginId: string): void {
   storageCache.delete(pluginId)
+}
+
+/**
+ * Return the per-plugin storage contents as a list of `{ key, size }`
+ * entries, sorted by `size` descending. Used by the host's storage
+ * inspector dialog (Task 6) so the user can see which keys are
+ * eating the most space and clear individual ones or the whole
+ * namespace.
+ *
+ * Falls back to an empty list if the plugin has no storage cache
+ * (e.g. never been used). Throws on permission denial — the
+ * caller is expected to be the host UI, not plugin code, so the
+ * plugin must already have the `storage` permission for this to
+ * succeed.
+ */
+export async function getPluginStorageEntries(
+  pluginId: string
+): Promise<Array<{ key: string; size: number }>> {
+  const storage = storageCache.get(pluginId)
+  if (!storage) {
+    // Cold path: a plugin that never touched storage has no
+    // cache entry. The storage file might still exist on disk
+    // (from a prior install), so materialise an impl and read
+    // it. The first `entries` call also initialises the
+    // permission gate, which is what we want — the inspector
+    // needs to honour grants even for a brand-new session.
+    return getPluginStorage(pluginId).entries()
+  }
+  return storage.entries()
 }
 
 // ─── Lifecycle hook runner ────────────────────────────────────────────────────

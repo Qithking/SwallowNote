@@ -110,6 +110,39 @@ export async function saveWorkspaceFileDialog(defaultPath?: string): Promise<str
   return normalizePath(selected)
 }
 
+/**
+ * Save dialog filtered to `.zip` for the plugin-configs export.
+ * Defaults the file name to `swallownote-plugin-configs.zip` so a
+ * user who hits the dialog cold still ends up with a sensible
+ * destination.
+ */
+export async function savePluginConfigsDialog(defaultPath?: string): Promise<string | null> {
+  const selected = await save({
+    defaultPath: defaultPath ?? 'swallownote-plugin-configs.zip',
+    filters: [
+      { name: 'Zip archive', extensions: ['zip'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  })
+  return normalizePath(selected)
+}
+
+/**
+ * Open dialog filtered to `.zip` for the plugin-configs import.
+ * Multiple selection is disabled — a bundle is a single archive.
+ */
+export async function openPluginConfigsDialog(): Promise<string | null> {
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    filters: [
+      { name: 'Zip archive', extensions: ['zip'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  })
+  return normalizePath(selected as string | null)
+}
+
 // File System APIs (using Tauri commands)
 export async function pathExists(path: string): Promise<boolean> {
   return await invoke('path_exists', { path })
@@ -481,6 +514,7 @@ export interface AppSettings {
   syncInterval: string
   autoSyncPush: string
   customShortcuts: string
+  pluginCommandShortcuts: string
   customThemes: string
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
@@ -511,6 +545,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     syncInterval: get('syncInterval', '10'),
     autoSyncPush: get('autoSyncPush', 'false'),
     customShortcuts: get('customShortcuts', '{}'),
+    pluginCommandShortcuts: get('pluginCommandShortcuts', '{}'),
     customThemes: get('customThemes', '[]'),
     activeLightCustomThemeId: get('activeLightCustomThemeId', 'builtin-light'),
     activeDarkCustomThemeId: get('activeDarkCustomThemeId', 'builtin-dark'),
@@ -773,9 +808,22 @@ export async function scanPlugins(): Promise<PluginMetadataRust[]> {
   return await invoke('scan_plugins')
 }
 
-/** Install a plugin from a .zip file */
-export async function installPlugin(zipPath: string): Promise<PluginMetadataRust> {
-  return await invoke('install_plugin', { zipPath })
+/**
+ * Install a plugin from a .zip file.
+ *
+ * `expectedSha256` is the optional integrity-check digest. When
+ * supplied, the host extracts the zip, then hashes the resulting
+ * plugin directory (recursive, sorted) and refuses to commit the
+ * install on mismatch. Callers that have a marketplace-published
+ * digest (e.g. `PluginIndexEntry.sha256`) should pass it through;
+ * the user-upload path leaves it `undefined` because no third
+ * party vouches for the bytes.
+ */
+export async function installPlugin(
+  zipPath: string,
+  expectedSha256?: string
+): Promise<PluginMetadataRust> {
+  return await invoke('install_plugin', { zipPath, expectedSha256 })
 }
 
 /** Uninstall a plugin by id */
@@ -799,4 +847,65 @@ export async function togglePluginEnabled(pluginId: string, enabled: boolean): P
  */
 export async function killPlugin(pluginId: string): Promise<boolean> {
   return await invoke<boolean>('kill_plugin', { pluginId })
+}
+
+/**
+ * Per-plugin import report (Task 10 / G10).
+ *
+ * `status` is one of:
+ *   - `'ok'`      — storage was written
+ *   - `'missing'` — plugin is not installed locally
+ *   - `'error'`   — extraction / parse / write failure
+ *                   (human-readable details in `message`)
+ */
+export interface PluginConfigImportEntry {
+  plugin_id: string
+  status: 'ok' | 'missing' | 'error'
+  message: string
+}
+
+/** Outcome of an `importPluginConfigs` call. */
+export interface PluginConfigImportResult {
+  swallow_version: string
+  schema_version: number
+  plugin_count: number
+  /** Number of storages successfully written. */
+  imported: number
+  /** Number of entries that were skipped (missing / error). */
+  skipped: number
+  entries: PluginConfigImportEntry[]
+}
+
+/** Manifest at the root of an export bundle. */
+export interface ExportManifest {
+  schema_version: number
+  swallow_version: string
+  exported_at: string
+  plugin_count: number
+  plugin_ids: string[]
+}
+
+/**
+ * Bundle every installed plugin's `storage.json` into a zip at
+ * `destPath` and return the manifest describing what was written.
+ *
+ * Used by the Settings → "Export plugin configs" button. The user
+ * picks the destination via Tauri's `save` dialog; the returned
+ * `plugin_count` is what the settings page echoes back in a
+ * toast ("exported 3 plugin configs").
+ */
+export async function exportPluginConfigs(destPath: string): Promise<ExportManifest> {
+  return await invoke<ExportManifest>('export_plugin_configs', { destPath })
+}
+
+/**
+ * Import a previously-exported zip of plugin configs and merge
+ * the contained `storage.json` files into the local plugin tree.
+ *
+ * Used by the Settings → "Import plugin configs" button. The host
+ * refuses bundles whose `schema_version` doesn't match the current
+ * build — that's the version-compatibility check (SubTask 10.4).
+ */
+export async function importPluginConfigs(srcPath: string): Promise<PluginConfigImportResult> {
+  return await invoke<PluginConfigImportResult>('import_plugin_configs', { srcPath })
 }

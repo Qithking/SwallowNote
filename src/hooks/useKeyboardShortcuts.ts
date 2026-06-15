@@ -5,10 +5,149 @@ import { openFolderDialog, openWorkspaceDialog, createFile } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
 import { invoke } from '@tauri-apps/api/core'
 import { emitLocaleChanged } from '@/lib/plugin-host'
+import { listPluginCommands } from '@/lib/plugin-commands'
+import { toast } from 'sonner'
 import i18n from 'i18next'
 
 function getShortcut(key: ShortcutKey): string {
   return getShortcutKey(key, useUIStore.getState().customShortcuts)
+}
+
+/**
+ * Return the first `<pluginId>:<commandId>` key whose stored
+ * shortcut string matches `e`, or `null` if no plugin command
+ * is bound to this key combination. Used by the
+ * `useKeyboardShortcuts` built-in matcher to surface a
+ * "shadows a plugin command" warning toast — the user
+ * rebound a built-in shortcut but a plugin command was
+ * already sitting on the same key, and the host silently
+ * favoured the built-in (the previous behaviour). The
+ * toast gives the user a chance to fix the conflict
+ * instead of wondering why their plugin command stopped
+ * firing.
+ *
+ * We return only the binding key (not the full command
+ * object) so the caller doesn't have to know how to look
+ * up the registered command — the toast is generic and
+ * only needs to know "something is here".
+ *
+ * Exported (not just module-level) so the matching logic
+ * can be unit-tested without standing up a React tree.
+ * The function reads from the live `useUIStore` snapshot,
+ * which is fine for tests because the test setup already
+ * calls `setState` on the store before invoking the
+ * function.
+ */
+export function findConflictingPluginCommandKey(e: KeyboardEvent): string | null {
+  const bindings = useUIStore.getState().pluginCommandShortcuts
+  for (const [bindingKey, value] of Object.entries(bindings)) {
+    if (!value) continue
+    if (matchShortcut(e, value)) return bindingKey
+  }
+  return null
+}
+
+/**
+ * Match a built-in shortcut key against the current event and
+ * dispatch its handler. When a plugin command is bound to the
+ * same key combination we surface a sonner toast warning
+ * (fourth-round review / M16) so the user knows their plugin
+ * command is being shadowed. The built-in action still runs —
+ * changing the precedence here would silently break every
+ * existing user's muscle memory. The toast is short
+ * (1.5s) and de-duplicated per keypress; we don't pre-check
+ * whether the user already saw it because a fresh toast on
+ * every press gives the user a chance to fix the conflict
+ * the moment they start wondering why their plugin command
+ * isn't firing.
+ *
+ * `e.preventDefault()` is called only after we know the
+ * match is real so we never consume a keypress that the
+ * editor / CodeMirror / BlockNote would have wanted.
+ *
+ * Exported for the same reason as
+ * `findConflictingPluginCommandKey`: the dispatch helper
+ * is a pure function of `(event, key, action, useUIStore
+ * state, sonner)`, and standing up a React tree to test
+ * the "toast appears on conflict" contract would be both
+ * fragile and slow.
+ *
+ * Wave B / M1: the toast now carries an explicit
+ * description that names the built-in action that
+ * "won" the keystroke (e.g. "已执行 commandPalette,请在
+ * 设置中解绑"). Without it the user sees "插件 X 的
+ * 快捷键被占用" in the toast body *and* the action's
+ * side effect (palette opening, file saving, …) and has
+ * to guess why both happened.
+ *
+ * Wave B / M2: in addition to the stable sonner `id`
+ * (Wave A / C1) we throttle re-shows of the same
+ * conflict within a 200ms window. A user who holds
+ * Ctrl+S to spam-save would otherwise still queue a
+ * fresh toast (with the same id) on every keydown —
+ * sonner does *not* dedupe on the message string, only
+ * on the explicit `id`; and the `id` collapse still
+ * costs a render. The throttle keeps the toast corner
+ * quiet when the user is consciously rapid-pressing.
+ */
+const PLUGIN_CONFLICT_THROTTLE_MS = 200
+const lastPluginConflictShownAt = new Map<string, number>()
+
+export function dispatchBuiltin(
+  e: KeyboardEvent,
+  key: ShortcutKey,
+  action: () => void | Promise<void>,
+): boolean {
+  if (!matchShortcut(e, getShortcut(key))) return false
+  e.preventDefault()
+  const pluginBinding = findConflictingPluginCommandKey(e)
+  if (pluginBinding) {
+    // Strip the trailing `:<commandId>` so the toast reads
+    // "<pluginId> 命令 与内置快捷键冲突" instead of
+    // dumping the raw "<pluginId>:<commandId>" key. The
+    // plugin id may itself contain colons (reverse-DNS
+    // style "com.foo.bar:baz"), so we split on the *last*
+    // colon only — same convention the settings panel uses
+    // to render the row (see
+    // `useUIStore.prunePluginCommandShortcuts`).
+    const lastColon = pluginBinding.lastIndexOf(':')
+    const pluginId =
+      lastColon > 0 ? pluginBinding.slice(0, lastColon) : pluginBinding
+    // Wave B / M2: same-key rapid presses would otherwise
+    // re-render the toast on every keydown even though the
+    // sonner `id` collapses the queue. We additionally
+    // short-circuit when the last toast for this binding
+    // key was shown within `PLUGIN_CONFLICT_THROTTLE_MS`,
+    // so a user holding Ctrl+S for 1s doesn't get a visible
+    // toast refresh. The flag is per binding key (not
+    // global) so a Ctrl+S conflict and a Ctrl+P conflict
+    // can each still surface independently.
+    const now = Date.now()
+    const lastShown = lastPluginConflictShownAt.get(pluginBinding) ?? 0
+    if (now - lastShown >= PLUGIN_CONFLICT_THROTTLE_MS) {
+      lastPluginConflictShownAt.set(pluginBinding, now)
+      // Wave B / M1: surface the built-in action that just
+      // ran in the toast description. Without it the toast
+      // reads as a contradiction: "plugin X's shortcut is
+      // shadowed" *and* the palette opens / file saves —
+      // the user has to guess which side won. The
+      // description text is sourced from i18n (zh-CN / en)
+      // so translators can adjust the wording.
+      toast(i18n.t('settings.pluginCommandShadowed', { id: pluginId }), {
+        // Wave A / C1: stable id so the same conflict
+        // doesn't stack a new toast on every keypress.
+        id: `plugin-conflict-${key}`,
+        description: i18n.t('settings.pluginCommandShadowedDesc', {
+          action: key,
+        }),
+        // Wave B / M1: 1.5s is too short to read both the
+        // title and the new description. Bump to 3s.
+        duration: 3000,
+      })
+    }
+  }
+  void action()
+  return true
 }
 
 function findNodeByPath(nodes: FileNode[], path: string): FileNode | null {
@@ -240,88 +379,73 @@ export function useKeyboardShortcuts() {
       // or browser/editor built-in shortcuts. This ensures BlockNote, CodeMirror,
       // and the system clipboard all work normally.
 
-      if (matchShortcut(e, getShortcut('newFile'))) {
-        e.preventDefault()
-        handleNewFile()
+      if (dispatchBuiltin(e, 'newFile', handleNewFile)) return
+      if (dispatchBuiltin(e, 'newFolder', handleNewFolder)) return
+      if (dispatchBuiltin(e, 'openFile', handleOpenFile)) return
+      if (dispatchBuiltin(e, 'saveFile', handleSaveFile)) return
+      if (dispatchBuiltin(e, 'saveAll', handleSaveAll)) return
+      if (dispatchBuiltin(e, 'saveWorkspace', handleSaveWorkspace)) return
+      if (dispatchBuiltin(e, 'closeFile', handleCloseFile)) return
+      if (dispatchBuiltin(e, 'closeAll', handleCloseAll)) return
+      if (dispatchBuiltin(e, 'toggleTheme', handleToggleTheme)) return
+      if (
+        dispatchBuiltin(e, 'toggleLanguage', () => {
+          const currentLang = i18n.language
+          const newLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN'
+          i18n.changeLanguage(newLang)
+          queueMicrotask(() => emitLocaleChanged(newLang))
+        })
+      )
         return
-      }
-      if (matchShortcut(e, getShortcut('newFolder'))) {
-        e.preventDefault()
-        handleNewFolder()
-        return
-      }
-      if (matchShortcut(e, getShortcut('openFile'))) {
-        e.preventDefault()
-        handleOpenFile()
-        return
-      }
-      if (matchShortcut(e, getShortcut('saveFile'))) {
-        e.preventDefault()
-        handleSaveFile()
-        return
-      }
-      if (matchShortcut(e, getShortcut('saveAll'))) {
-        e.preventDefault()
-        handleSaveAll()
-        return
-      }
-      if (matchShortcut(e, getShortcut('saveWorkspace'))) {
-        e.preventDefault()
-        handleSaveWorkspace()
-        return
-      }
-      if (matchShortcut(e, getShortcut('closeFile'))) {
-        e.preventDefault()
-        handleCloseFile()
-        return
-      }
-      if (matchShortcut(e, getShortcut('closeAll'))) {
-        e.preventDefault()
-        handleCloseAll()
-        return
-      }
-      if (matchShortcut(e, getShortcut('toggleTheme'))) {
-        e.preventDefault()
-        handleToggleTheme()
-        return
-      }
-      if (matchShortcut(e, getShortcut('toggleLanguage'))) {
-        e.preventDefault()
-        const currentLang = i18n.language
-        const newLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN'
-        i18n.changeLanguage(newLang)
-        queueMicrotask(() => emitLocaleChanged(newLang))
-        return
-      }
-      if (matchShortcut(e, getShortcut('openExplorer'))) {
-        e.preventDefault()
-        handleOpenExplorer()
-        return
-      }
+      if (dispatchBuiltin(e, 'openExplorer', handleOpenExplorer)) return
 
       // Customizable global shortcuts (user can rebind in Settings)
 
-      if (matchShortcut(e, getShortcut('commandPalette'))) {
-        e.preventDefault()
-        toggleCommandPalette()
+      if (dispatchBuiltin(e, 'commandPalette', toggleCommandPalette)) return
+      if (dispatchBuiltin(e, 'searchPanel', toggleSearchPanel)) return
+      if (dispatchBuiltin(e, 'toggleSidebar', toggleSidebar)) return
+      if (
+        dispatchBuiltin(e, 'settings', () => setSidebarView('settings'))
+      )
         return
-      }
 
-      if (matchShortcut(e, getShortcut('searchPanel'))) {
+      // Plugin commands (Task 9 / G9): after the built-in
+      // shortcuts we let plugin-registered commands claim any
+      // remaining key combination the user has bound. We look up
+      // the binding in `useUIStore().pluginCommandShortcuts` on
+      // every keypress so a freshly bound / unbound shortcut is
+      // picked up without rebuilding the listener. The `when()`
+      // predicate is intentionally not re-checked here — a
+      // command that's currently hidden via `when()` should still
+      // be triggerable by a direct shortcut if the user
+      // explicitly bound one. Plugins that want state-aware
+      // gating are expected to do it inside `onTrigger`.
+      const bindings = useUIStore.getState().pluginCommandShortcuts
+      for (const [bindingKey, value] of Object.entries(bindings)) {
+        if (!value) continue
+        if (!matchShortcut(e, value)) continue
+        const lastColon = bindingKey.lastIndexOf(':')
+        if (lastColon <= 0) continue
+        const commandId = bindingKey.slice(lastColon + 1)
+        const registered = listPluginCommands().find(
+          (cmd) =>
+            cmd.id === commandId &&
+            // Stamp carried on the registry entry; see
+            // `RegisteredPluginCommand` in
+            // `src/lib/plugin-commands.ts`.
+            (cmd as { __pluginId?: string }).__pluginId ===
+              bindingKey.slice(0, lastColon)
+        )
+        if (!registered) continue
         e.preventDefault()
-        toggleSearchPanel()
-        return
-      }
-
-      if (matchShortcut(e, getShortcut('toggleSidebar'))) {
-        e.preventDefault()
-        toggleSidebar()
-        return
-      }
-
-      if (matchShortcut(e, getShortcut('settings'))) {
-        e.preventDefault()
-        setSidebarView('settings')
+        try {
+          void registered.onTrigger()
+        } catch (err) {
+          // A buggy plugin must not break the global keydown
+          // listener. Log and let the next keystroke through.
+          // eslint-disable-next-line no-console
+          console.error('[useKeyboardShortcuts] plugin onTrigger threw:', err)
+        }
         return
       }
 

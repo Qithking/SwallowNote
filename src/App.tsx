@@ -127,11 +127,25 @@ function App() {
       // plugins stream in.
       const { scanPlugins } = await import('@/lib/tauri')
       const { loadAllPlugins } = await import('@/lib/plugin-loader')
-      const { usePluginStore } = await import('@/stores/plugin')
+      // Wave A / C3: `usePluginStore` is already statically
+      // imported at the top of this file (see the `@/stores`
+      // import on the first batch of imports). Re-importing the
+      // same module dynamically here is dead weight on the
+      // critical path: Vite would have to walk the dynamic
+      // import graph (and serialize the resulting promise) for
+      // a module that's already part of the eagerly-loaded
+      // initial bundle. Use the static binding instead.
       scanPlugins()
         .then(loadAllPlugins)
-        .then(async (defs) => {
+        .then(async (result) => {
+          const { plugins: defs, failures } = result
           usePluginStore.getState().setPlugins(defs)
+          // Record per-plugin load failures (G2). The plugin
+          // manager reads this to render a top-of-page warning
+          // banner. `setLoadFailures` replaces the whole map, so
+          // a successful rescan automatically drops entries for
+          // plugins that are now loading cleanly.
+          usePluginStore.getState().setLoadFailures(failures)
           usePluginStore.getState().setLoaded(true)
           // Hydrate the in-memory permission guard from localStorage
           // now that we know the full installed-plugin set. The guard
@@ -145,8 +159,31 @@ function App() {
           // the in-flight hydration via the guard's own check path.
           const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
           void hydratePermissionGuard(defs.map((d) => d.id))
+          // Task 11 / G11: hydrate the per-plugin "auto-update"
+          // opt-in map from localStorage and fire the background
+          // auto-update chain. Both calls are fire-and-forget:
+          //   - `hydrateAutoUpdateFromLocalStorage` is a single
+          //     `Object.keys(localStorage)` walk and finishes
+          //     in well under 1ms.
+          //   - `runAutoUpdateOnStartup` makes at most one
+          //     network round-trip (the marketplace index
+          //     refresh) plus one download per opted-in
+          //     plugin. None of that is on the startup critical
+          //     path: a failed / slow marketplace call must
+          //     never block the user from working with the
+          //     rest of the app.
+          const { hydrateAutoUpdateFromLocalStorage, runAutoUpdateOnStartup } =
+            await import('@/lib/plugin-auto-update')
+          hydrateAutoUpdateFromLocalStorage()
+          void runAutoUpdateOnStartup()
         })
         .catch((err) => {
+          // `loadAllPlugins` no longer rejects on per-plugin
+          // failures (G2) – the only paths that reach this
+          // catch are transport-level errors (e.g. the Rust
+          // scanner itself returned nothing). Log and mark
+          // the store loaded so the manager doesn't spin
+          // forever.
           console.error('[App] Failed to load plugins on startup:', err)
           usePluginStore.getState().setLoaded(true)
         })

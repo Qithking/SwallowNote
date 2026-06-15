@@ -190,6 +190,12 @@ export interface PluginStorage {
   /** List all keys in this plugin's namespace. Useful for debug
    *  tooling and "export all" features. */
   keys(): Promise<string[]>
+  /** Read-only snapshot of every key with its estimated JSON
+   *  size. Returns `[{ key, size }]` sorted by `size` desc.
+   *  Useful for host-side storage inspectors and the plugin
+   *  "export all" flow. Size is the JSON-encoded byte count of
+   *  the value, not the in-memory object size. */
+  entries(): Promise<Array<{ key: string; size: number }>>
 }
 
 /**
@@ -202,6 +208,30 @@ export interface PluginEventBus {
   off<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void
   /** Remove all handlers belonging to a specific plugin (called on uninstall). */
   removeAllListenersForPlugin(pluginId: string): void
+}
+
+/**
+ * A single plugin-to-plugin dependency declaration.
+ *
+ * The `version` field follows npm-style semver ranges
+ * (https://github.com/npm/node-semver#ranges), e.g.:
+ *   - `"1.2.3"`        exact pin
+ *   - `"^1.2.3"`       compatible with 1.x.y (>=1.2.3, <2.0.0)
+ *   - `"~1.2.3"`       patch-level changes only (>=1.2.3, <1.3.0)
+ *   - `">=1.2.3"`      floor only
+ *   - `"1.2.x"` / `"*"`  wildcards
+ *
+ * Use the `*` or empty range to declare a "any version" dependency.
+ * Validation of the range is performed in `resolveDependencies`
+ * (see `src/lib/plugin-dependencies.ts`); an invalid range
+ * surfaces as a resolver error so the user sees a clear failure
+ * at install time, not a silent accept.
+ */
+export interface PluginDependency {
+  /** Unique plugin identifier, e.g. "com.example.other-plugin". */
+  id: string
+  /** Semver range string. Empty / "*" matches any version. */
+  version: string
 }
 
 /**
@@ -266,6 +296,36 @@ export interface PluginManifest {
    * Users will be asked to grant these permissions during installation.
    */
   permissions?: PluginPermission[]
+  /**
+   * Other plugins this manifest requires. The host runs
+   * `resolveDependencies` over this list at install time; missing
+   * or version-mismatched entries block the install and surface
+   * an "auto-resolve" affordance in the UI. See
+   * `src/lib/plugin-dependencies.ts` for the resolver contract.
+   */
+  dependencies?: PluginDependency[]
+  /**
+   * Command palette ids contributed by this plugin. The host
+   * merges these into its Ctrl+P palette; two plugins declaring
+   * the same id collide, and the conflict is surfaced via the
+   * plugin conflict detector (Task 13 / G13). Optional —
+   * a plugin that doesn't speak to the command palette simply
+   * omits the field.
+   */
+  commandPalette?: string[]
+  /**
+   * Whether the user has opted in to automatic background
+   * updates for this plugin (Task 11 / G11). When `true` the
+   * app silently downloads and installs newer marketplace
+   * versions on startup; the user is notified via a toast
+   * with an "撤销" (undo) action that rolls back to the
+   * previously-installed version. The flag is *not* read from
+   * the on-disk plugin manifest (which is a build artefact);
+   * it is persisted in the plugin metadata store under
+   * `plugin_auto_update_<id>` and is opt-in per plugin. A
+   * missing value (the common case) is treated as `false`.
+   */
+  autoUpdate?: boolean
   // ── Lifecycle hooks (all optional) ────────────────────────────────────────
   /** Called once after the plugin module has been loaded. */
   onLoad?: PluginLifecycleHook
@@ -327,6 +387,28 @@ export interface PluginDefinition {
   hasBackend: boolean
   /** Permissions declared by the plugin. These are requested during installation. */
   permissions: PluginPermission[]
+  /** Plugin-to-plugin dependencies, normalised from the manifest
+   *  (or merged from the marketplace index entry's `dependencies`
+   *  string list). Consumed by `resolveDependencies` at install time
+   *  to block installs that would otherwise crash on a missing
+   *  peer plugin. See `src/lib/plugin-dependencies.ts`. */
+  dependencies?: PluginDependency[]
+  /** Command palette ids contributed by this plugin. Carried
+   *  over from the manifest; consumed by `detectPluginConflicts`
+   *  (Task 13 / G13) to flag two plugins fighting over the same
+   *  palette id. Omitted when the plugin doesn't speak to the
+   *  command palette. */
+  commandPalette?: string[]
+  /**
+   * Mirror of the user-managed "auto-update" opt-in (Task 11 /
+   * G11). The store keeps the authoritative value (persisted to
+   * localStorage) but copies it onto the runtime definition so
+   * the installed-card toggle can render synchronously without
+   * re-querying the store on every keystroke. A plugin whose
+   * store record is missing or `false` reads as `false` here as
+   * well — the flag is opt-in, never opt-out by default.
+   */
+  autoUpdate?: boolean
   /** Lifecycle hooks carried over from the original manifest. The store
    *  invokes these at register / unregister / enable / disable. All are
    *  optional; missing hooks are simply skipped. */
@@ -366,7 +448,49 @@ export interface PluginMetadata {
   hasBackend: boolean
 }
 
-// ─── Plugin Marketplace / Phase 9.2 ───────────────────────────────────────────
+// ─── Plugin load failures (per-plugin bypass) ───────────────────────────────
+
+/**
+ * A single failed-to-load plugin. Stored in the plugin store under
+ * `loadFailures` and surfaced to the user via a top-of-manager
+ * warning banner. The shape is intentionally small and
+ * serializable: id, name, the failure reason, and a timestamp.
+ * `pluginPath` is included so the UI can offer a "show in folder"
+ * affordance in the future without re-querying the Rust side.
+ */
+export interface PluginLoadFailure {
+  /** Plugin id (from Rust metadata, since the manifest may be unreadable). */
+  id: string
+  /** Display name (from Rust metadata fallback). */
+  name: string
+  /** Human-readable reason for the failure. */
+  reason: string
+  /** Unix epoch milliseconds when the failure was recorded. */
+  ts: number
+  /** Absolute on-disk path of the plugin package, for diagnostics. */
+  pluginPath: string
+}
+
+// ─── Plugin load result (loader → caller) ───────────────────────────────────
+
+/**
+ * Result of a `loadAllPlugins` call. `plugins` holds the successfully
+ * hydrated plugin definitions (including a placeholder "broken plugin"
+ * entry for failed packages so the user can still see and uninstall
+ * them in the main grid). `failures` is a parallel list of
+ * per-plugin failure records keyed by plugin id.
+ *
+ * The two lists are *intentionally* independent: a failed plugin
+ * can still produce a placeholder `PluginDefinition` (so the
+ * uninstall button is reachable), and `failures` carries the
+ * diagnostic reason that the banner UI needs.
+ */
+export interface PluginLoadResult {
+  plugins: PluginDefinition[]
+  failures: PluginLoadFailure[]
+}
+
+// ─── Plugin marketplace / Phase 9.2 ───────────────────────────────────────────
 
 /**
  * One row in a remote plugin repository index. Shape mirrors
@@ -397,6 +521,14 @@ export interface PluginIndexEntryVersion {
   changelog: string
   publishedAt: string
 }
+
+/**
+ * Alias kept for the marketplace detail UI / Task 5 spec; the
+ * canonical name in the wire format is `PluginIndexEntryVersion`.
+ * Both refer to the same per-version record carried in the
+ * `versions` array of a `PluginIndexEntry`.
+ */
+export type PluginIndexVersion = PluginIndexEntryVersion
 
 export interface PluginIndex {
   schemaVersion: number
@@ -553,4 +685,72 @@ export interface ContextMenuItem {
 
 /** Registry of menu items by location, indexed for O(1) lookup. */
 export type ContextMenuRegistry = Record<ContextMenuLocation, ContextMenuItem[]>
+
+// ─── Command palette contributions ─────────────────────────────────────────────
+
+/**
+ * A single command contributed by a plugin. Appears in the host's
+ * command palette (Ctrl/Cmd+P) and is dispatchable via a
+ * user-configurable keyboard shortcut set in the settings panel
+ * (Task 9 / G9). The host keeps the registry of these entries; the
+ * settings panel renders the binding UI by reading
+ * `useUIStore().pluginCommandShortcuts` for the actual key string.
+ *
+ * `id` must be stable across reloads because user-bound shortcuts
+ * are keyed by `<pluginId>:<id>` and need to survive plugin
+ * reloads without losing the user's customization.
+ */
+export interface PluginCommand {
+  /** Stable id; required for deduping, settings keying, and updates. */
+  id: string
+  /** Display label, also used as the search term in the command palette. */
+  label: string
+  /**
+   * Optional lucide-react icon name, mapped by the host. Same
+   * convention as `ContextMenuItem.iconName`. Falls back to a
+   * generic "zap" icon when omitted.
+   */
+  iconName?: string
+  /**
+   * Optional category for grouping inside the command palette.
+   * Plugins that share a category are grouped under the same
+   * heading. Defaults to the plugin's display name.
+   */
+  category?: string
+  /**
+   * Optional predicate. Return false to hide the entry. Useful
+   * for commands that only make sense in a specific state (e.g.
+   * "Commit" needs a git repo).
+   */
+  when?: () => boolean
+  /**
+   * Click / shortcut handler. Receives no arguments; the entry
+   * owns its own state via the panel/storage handles captured in
+   * its closure.
+   */
+  onTrigger: () => void | Promise<void>
+}
+
+/**
+ * Listener fired whenever the command registry changes (register
+ * / unregister / clearPlugin). Components that want a live view
+ * (settings panel, command palette) call `subscribePluginCommands`
+ * and re-read the registry inside the callback.
+ */
+export type PluginCommandsListener = () => void
+
+/**
+ * Public surface of the host-side registry. Plugins should not
+ * import this directly — they use the `registerCommand` /
+ * `unregisterCommand` helpers from `@/lib/plugin-commands` (host)
+ * or `@swallow-note/plugin-sdk` (standalone).
+ */
+export interface PluginCommandRegistry {
+  register(pluginId: string, command: PluginCommand): void
+  unregister(pluginId: string, commandId: string): void
+  clearPlugin(pluginId: string): void
+  /** Read-only snapshot. Callers must not mutate the array. */
+  list(): PluginCommand[]
+  subscribe(listener: PluginCommandsListener): () => void
+}
 

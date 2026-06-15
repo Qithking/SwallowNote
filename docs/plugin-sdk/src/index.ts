@@ -89,6 +89,10 @@ export interface PluginStorage {
   /** List all keys in this plugin's namespace. Useful for debug
    *  tooling and "export all" features. */
   keys(): Promise<string[]>
+  /** Read-only snapshot of every key with its estimated JSON
+   *  size, sorted by `size` descending. Mirrors the host API
+   *  so plugin code can introspect its own namespace. */
+  entries(): Promise<Array<{ key: string; size: number }>>
 }
 
 /** Event subscription API. The host bus is one-way: the host
@@ -127,6 +131,23 @@ export interface ContextMenuItem {
 }
 
 export type ContextMenuRegistry = Record<ContextMenuLocation, ContextMenuItem[]>
+
+/**
+ * A single command contributed by a plugin. Appears in the host's
+ * command palette (Ctrl/Cmd+P) and is dispatchable via a
+ * user-configurable keyboard shortcut set in the settings panel.
+ * `id` must be stable across reloads because the host keys
+ * user-bound shortcuts by `<pluginId>:<id>`.
+ */
+export interface PluginCommand {
+  id: string
+  label: string
+  iconName?: string
+  /** Optional category for grouping in the command palette. */
+  category?: string
+  when?: () => boolean
+  onTrigger: () => void | Promise<void>
+}
 
 /**
  * Plugin permission types. The host's grant model has a fixed
@@ -336,6 +357,17 @@ function createStubStorage(pluginId: string): PluginStorage {
     async keys(): Promise<string[]> {
       return Array.from(mem.keys()).sort()
     },
+    async entries(): Promise<Array<{ key: string; size: number }>> {
+      const out: Array<{ key: string; size: number }> = []
+      for (const [k, v] of mem) {
+        try {
+          out.push({ key: k, size: JSON.stringify(v).length })
+        } catch {
+          out.push({ key: k, size: 0 })
+        }
+      }
+      return out.sort((a, b) => b.size - a.size)
+    },
   }
 }
 
@@ -507,9 +539,113 @@ export function getContextMenuItems(
   )
 }
 
-/** Read-only access to the in-process registry (for debugging) */
+/** Read-only access to the in-process menu registry (for debugging) */
 export function getStubMenuRegistry(): StubMenuRegistry {
   return stubMenuRegistry
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Command palette registry – in-process Map
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Internal per-entry type with the owning plugin id stamped on. */
+type RegisteredCommand = PluginCommand & { __pluginId: string }
+
+class StubCommandRegistry {
+  private readonly byPlugin = new Map<string, RegisteredCommand[]>()
+  private readonly listeners = new Set<() => void>()
+
+  register(pluginId: string, command: PluginCommand): void {
+    this.unregister(pluginId, command.id)
+    const owned: RegisteredCommand = { ...command, __pluginId: pluginId }
+    let list = this.byPlugin.get(pluginId)
+    if (!list) {
+      list = []
+      this.byPlugin.set(pluginId, list)
+    }
+    list.push(owned)
+    this.notify()
+  }
+
+  unregister(pluginId: string, commandId: string): void {
+    const list = this.byPlugin.get(pluginId)
+    if (!list) return
+    const idx = list.findIndex((c) => c.id === commandId)
+    if (idx < 0) return
+    list.splice(idx, 1)
+    if (list.length === 0) this.byPlugin.delete(pluginId)
+    this.notify()
+  }
+
+  clearPlugin(pluginId: string): void {
+    if (!this.byPlugin.has(pluginId)) return
+    this.byPlugin.delete(pluginId)
+    this.notify()
+  }
+
+  list(): PluginCommand[] {
+    const out: PluginCommand[] = []
+    for (const list of this.byPlugin.values()) {
+      for (const entry of list) out.push(entry)
+    }
+    return out
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[plugin-sdk stub] command listener threw:', err)
+      }
+    }
+  }
+}
+
+const stubCommandRegistry = new StubCommandRegistry()
+
+/** Register a command-palette entry. Falls back to the in-process
+ *  stub when running outside the host. The owning `pluginId` is
+ *  stamped automatically — callers do not have to track it. */
+export function registerCommand(pluginId: string, command: PluginCommand): void {
+  currentHostOverrides().registerCommand?.(pluginId, command) ??
+    stubCommandRegistry.register(pluginId, command)
+}
+
+export function unregisterCommand(pluginId: string, commandId: string): void {
+  currentHostOverrides().unregisterCommand?.(pluginId, commandId) ??
+    stubCommandRegistry.unregister(pluginId, commandId)
+}
+
+export function clearPluginCommands(pluginId: string): void {
+  currentHostOverrides().clearPluginCommands?.(pluginId) ??
+    stubCommandRegistry.clearPlugin(pluginId)
+}
+
+export function listPluginCommands(): PluginCommand[] {
+  return currentHostOverrides().listPluginCommands?.() ?? stubCommandRegistry.list()
+}
+
+export function subscribePluginCommands(listener: () => void): () => void {
+  // The standalone stub has no host bridge; if the host provides
+  // its own subscription, use it instead. In practice the host
+  // override always exists by the time a plugin is loaded, so the
+  // fallback path is only for `npm run dev` previews.
+  return currentHostOverrides().subscribePluginCommands?.(listener) ??
+    stubCommandRegistry.subscribe(listener)
+}
+
+/** Read-only access to the in-process command registry (for debugging) */
+export function getStubCommandRegistry(): StubCommandRegistry {
+  return stubCommandRegistry
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -562,6 +698,18 @@ export interface HostOverrides {
     location: ContextMenuLocation,
     ctx: ContextMenuContext
   ) => ContextMenuItem[]
+  /**
+   * Optional command-palette bridge (Task 9 / G9). When the host
+   * provides these, the SDK's `registerCommand` /
+   * `unregisterCommand` / `clearPluginCommands` forward into the
+   * host's permission-checked registry; otherwise the in-process
+   * stub registry backs them so standalone previews keep working.
+   */
+  registerCommand?: (pluginId: string, command: PluginCommand) => void
+  unregisterCommand?: (pluginId: string, commandId: string) => void
+  clearPluginCommands?: (pluginId: string) => void
+  listPluginCommands?: () => PluginCommand[]
+  subscribePluginCommands?: (listener: () => void) => () => void
   invokeBackend?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
   /**
    * Optional full event-bus replacement. If the host provides only
@@ -609,6 +757,26 @@ const EMPTY_HOST_OVERRIDES: HostOverrides = Object.freeze({}) as HostOverrides
  * Internal helper: dispatch an event through the host if a
  * takeover has been installed, otherwise through the standalone
  * stub bus. Used by the per-event emit helpers below.
+ *
+ * Wave B / M4: the host's `emit` override runs
+ * `assertPermission(pluginId, 'events', ...)` before forwarding
+ * the call into the global bus. If the plugin lacks the `events`
+ * grant the call throws a `PluginPermissionDeniedError`, which
+ * the previous implementation silently swallowed in this
+ * try/catch. That hid a very real problem from plugin authors:
+ * their `emitNoteChanged(...)` looked like it succeeded (no
+ * exception) but no other plugin's handler ever saw the event.
+ * We now log a `console.warn` (not `error` — the SDK does not
+ * treat a missing grant as a programming bug) with a clear,
+ * actionable message. We don't re-throw, because the existing
+ * public surface is "emit is fire-and-forget" and a hard throw
+ * would break plugins that wrap emits in their own try/catch.
+ *
+ * We can't `instanceof` the host's error class directly (the
+ * SDK is intentionally host-agnostic) so we detect by `name`
+ * instead — the class lives in
+ * `src/lib/plugin-permission-guard.ts` and is the only Error
+ * subclass named `PluginPermissionDeniedError` in this app.
  */
 function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPayloadMap[E]): void {
   const hostEmit = currentHostOverrides().emit
@@ -616,6 +784,29 @@ function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPaylo
     try {
       hostEmit(event, payload)
     } catch (err) {
+      // Wave B / M4: a permission denial is the most likely
+      // cause of a throw here, and the most likely cause of
+      // "why isn't my event being seen?" bug reports from
+      // plugin authors. Surface it loudly so the devtools
+      // console points straight at the missing grant.
+      if (
+        err &&
+        typeof err === 'object' &&
+        (err as { name?: string }).name === 'PluginPermissionDeniedError'
+      ) {
+        const op = (err as { operation?: string }).operation ?? `emit "${event}"`
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[plugin-sdk] ${op} was denied: this plugin is missing the "events" permission. ` +
+            `Add "events" to the manifest's "permissions" array and ensure the user has granted it ` +
+            `(see Settings → Plugins → Permissions). The emit was dropped silently — no other ` +
+            `plugin's handler will see event "${event}".`,
+        )
+        return
+      }
+      // Any other throw is a genuine bug (host implementation
+      // problem, payload shape mismatch, etc.). Keep the old
+      // error log so the dev sees the stack.
       // eslint-disable-next-line no-console
       console.error(`[plugin-sdk] host emit for "${event}" threw:`, err)
     }

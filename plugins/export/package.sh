@@ -16,13 +16,6 @@ MODE="${1:-debug}"
 PLUGIN_ID="com.swallownote.export"
 DIST_DIR="$SCRIPT_DIR/dist"
 
-# Read version from manifest.json for package naming
-VERSION=$(python3 -c "import json; print(json.load(open('$DIST_DIR/manifest.json'))['version'])" 2>/dev/null || echo "")
-if [ -z "$VERSION" ]; then
-  # Fallback: read from source manifest before build
-  VERSION=$(python3 -c "import json; print(json.load(open('$SCRIPT_DIR/manifest.json'))['version'])" 2>/dev/null || echo "0.0.0")
-fi
-
 echo "==> Building frontend (Vite ES module bundle)..."
 cd "$SCRIPT_DIR"
 npx vite build
@@ -46,7 +39,7 @@ echo "==> Creating zip package..."
 # Re-read version from dist/manifest.json (post-build, guaranteed up-to-date)
 VERSION=$(python3 -c "import json; print(json.load(open('$DIST_DIR/manifest.json'))['version'])" 2>/dev/null || echo "0.0.0")
 cd "$DIST_DIR"
-ZIP_NAME="${PLUGIN_ID}-${VERSION}.zip"
+ZIP_NAME="${PLUGIN_ID}.zip"
 rm -f "$SCRIPT_DIR/$PLUGIN_ID"*.zip
 zip -r "$SCRIPT_DIR/$ZIP_NAME" index.js manifest.json backend/
 

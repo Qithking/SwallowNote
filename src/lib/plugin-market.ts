@@ -244,6 +244,49 @@ export async function downloadPluginZip(
 }
 
 /**
+ * Download a specific historical version of a plugin. Mirrors
+ * {@link downloadPluginZip} but takes the per-version fields from
+ * the index's `versions` array (G5) so the marketplace detail UI
+ * can let users roll back to / install an old release.
+ *
+ * Cache key is the per-version `sha256` so a downgrade doesn't
+ * collide with the latest-version cache entry, and a follow-up
+ * `update_plugin` call to the same version is a single IndexedDB
+ * read. The signature is taken from the parent entry (the index
+ * protocol attaches one signature per `PluginIndexEntry`, not per
+ * version) — if the host rejects the signature for an older
+ * version, the caller surfaces that as an install error.
+ */
+export async function downloadPluginVersion(
+  pluginId: string,
+  version: { version: string; downloadUrl: string; sha256: string }
+): Promise<ArrayBuffer> {
+  const cached = await readZipFromCache(version.sha256)
+  if (cached) return cached
+
+  const res = await fetch(version.downloadUrl, { cache: 'no-store' })
+  if (!res.ok) {
+    throw new Error(
+      `HTTP ${res.status} downloading ${pluginId}@${version.version}`
+    )
+  }
+  const bytes = await res.arrayBuffer()
+
+  // Same G1 invariant as the latest-version path: never persist a
+  // mismatched digest.
+  const actual = await sha256Hex(bytes)
+  if (actual.toLowerCase() === version.sha256.toLowerCase()) {
+    await writeZipToCache(version.sha256, bytes, version.downloadUrl)
+  } else {
+    throw new Error(
+      `sha256 mismatch for ${pluginId}@${version.version}: expected ${version.sha256}, got ${actual}`
+    )
+  }
+
+  return bytes
+}
+
+/**
  * Resolve which pubkey to use for an entry. Falls back to the
  * repo-level key when the entry leaves `pubkeyB64` empty.
  */

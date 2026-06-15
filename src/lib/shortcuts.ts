@@ -103,6 +103,80 @@ export function findShortcutConflict(
   return null
 }
 
+/**
+ * Sources we can collide against when a shortcut is being bound.
+ * Used by the plugin-command recorder (and potentially by future
+ * rebind flows) to give the user a clear "this clashes with X"
+ * message instead of silently letting two commands claim the
+ * same key.
+ */
+export type ShortcutConflictSource =
+  | { kind: 'builtin'; key: ShortcutKey; label: string }
+  | { kind: 'plugin-command'; bindingKey: string; label: string }
+  | { kind: 'custom-builtin'; key: ShortcutKey; label: string }
+
+export interface ShortcutConflict {
+  source: ShortcutConflictSource
+  /** Localised description of the conflict, suitable for direct
+   *  display in the UI. */
+  message: string
+}
+
+export function findShortcutConflictDetailed(
+  /**
+   * Optional identity of the binding being recorded. Pass the
+   * same value here that you'll pass to `setPluginCommandShortcut`
+   * so we can exclude the current command from its own conflict
+   * scan (re-binding to the same key is a no-op, not a conflict).
+   * For built-in shortcut recording, pass the `ShortcutKey` value.
+   */
+  selfId: string | null,
+  value: string,
+  customShortcuts: Record<string, string>,
+  pluginCommandShortcuts: Record<string, string>,
+  pluginCommandLabels: Record<string, string>
+): ShortcutConflict | null {
+  // 1. Built-in shortcuts (customised or default).
+  for (const def of DEFAULT_SHORTCUTS) {
+    if (selfId === def.key) continue
+    const currentKey = customShortcuts[def.key] ?? def.defaultKey
+    if (currentKey === value) {
+      return {
+        source: { kind: 'builtin', key: def.key, label: def.key },
+        message: `与「${def.key}」冲突`,
+      }
+    }
+  }
+  // 2. Custom-bound built-in shortcuts that are *only* in the
+  //    `customShortcuts` map (a user rebound to the same value as
+  //    a different default key). This branch is mostly defensive:
+  //    the previous loop already catches the "current value
+  //    equals the candidate" case for any customShortcuts[key]
+  //    that's also a default. Kept for clarity.
+  for (const [key, currentKey] of Object.entries(customShortcuts)) {
+    if (selfId === key) continue
+    if (currentKey !== value) continue
+    // Skip if the value is also the default of some other built-in
+    // – that case is already covered by branch 1.
+    const def = DEFAULT_SHORTCUTS.find((d) => d.key === key)
+    if (def && def.defaultKey === value) continue
+    return {
+      source: { kind: 'custom-builtin', key: key as ShortcutKey, label: key },
+      message: `与「${key}」冲突`,
+    }
+  }
+  // 3. Plugin-command shortcuts.
+  for (const [bindingKey, currentKey] of Object.entries(pluginCommandShortcuts)) {
+    if (selfId !== null && selfId === bindingKey) continue
+    if (currentKey !== value) continue
+    return {
+      source: { kind: 'plugin-command', bindingKey, label: pluginCommandLabels[bindingKey] ?? bindingKey },
+      message: `与插件命令「${pluginCommandLabels[bindingKey] ?? bindingKey}」冲突`,
+    }
+  }
+  return null
+}
+
 export function formatShortcutForDisplay(shortcut: string): string {
   const isMac = navigator.platform.toUpperCase().includes('MAC')
   if (!isMac) return shortcut

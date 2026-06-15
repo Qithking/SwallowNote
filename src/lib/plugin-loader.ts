@@ -10,7 +10,13 @@
  * The index.js may also contain a special comment for Rust-side parsing:
  *   // @swallow-manifest { "id": "...", "name": "...", ... }
  */
-import type { PluginDefinition, PluginManifest, PluginMetadata } from '@/types/plugin'
+import type {
+  PluginDefinition,
+  PluginLoadFailure,
+  PluginLoadResult,
+  PluginManifest,
+  PluginMetadata,
+} from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
 import { createElement, type ReactNode } from 'react'
 import { PlugZap } from 'lucide-react'
@@ -323,17 +329,49 @@ function loadConcurrencyFor(count: number): number {
   return LOAD_CONCURRENCY_BASE
 }
 
-async function loadWithConcurrency<T>(
-  items: T[],
-  fn: (item: T) => Promise<PluginDefinition>,
-): Promise<PluginDefinition[]> {
-  const results: PluginDefinition[] = new Array(items.length)
+async function loadWithConcurrency(
+  items: PluginMetadataRust[],
+  fn: (item: PluginMetadataRust) => Promise<PluginLoadOutcome>,
+): Promise<PluginLoadResult> {
+  const plugins: PluginDefinition[] = new Array(items.length)
   let nextIdx = 0
+  const failureSlots: (PluginLoadFailure | null)[] = new Array(items.length).fill(null)
 
+  // Per-worker loop. Each worker pulls the next index off the
+  // shared counter and processes it with the loader function.
+  // We use an "allSettled" pattern (per-item try/catch + index
+  // slot) so a single broken manifest cannot abort the rest of
+  // the batch. The previous implementation was a `Promise.all`
+  // over a single `fn` per item; any thrown error would reject
+  // the whole batch and the user would see "no plugins" instead
+  // of "1 plugin failed, 49 loaded".
   async function worker() {
     while (nextIdx < items.length) {
       const idx = nextIdx++
-      results[idx] = await fn(items[idx])
+      try {
+        const outcome = await fn(items[idx])
+        if (outcome.definition) {
+          plugins[idx] = outcome.definition
+        }
+        if (outcome.failure) {
+          failureSlots[idx] = outcome.failure
+        }
+      } catch (err) {
+        // Defensive net: a synchronous throw inside the loader
+        // body (e.g. building the placeholder def with a bad
+        // iconPosition cast) is treated as a load failure for
+        // that plugin only, not for the whole batch.
+        const meta = items[idx]
+        const reason = err instanceof Error ? `${err.message}` : String(err)
+        console.error(`[PluginLoader] Unexpected throw loading plugin ${meta.id}:`, err)
+        failureSlots[idx] = {
+          id: meta.id,
+          name: meta.name,
+          reason,
+          ts: Date.now(),
+          pluginPath: meta.plugin_path,
+        }
+      }
     }
   }
 
@@ -342,14 +380,60 @@ async function loadWithConcurrency<T>(
     () => worker(),
   )
   await Promise.all(workers)
-  return results
+
+  // Compact the per-index slots into dense arrays. We use the
+  // dedicated counters (instead of `filter(Boolean)`) so the
+  // result preserves the original load order — useful for log
+  // readability and stable failure keys across re-scans.
+  const densePlugins: PluginDefinition[] = []
+  for (let i = 0; i < items.length; i++) {
+    const def = plugins[i]
+    if (def) densePlugins.push(def)
+  }
+  const denseFailures: PluginLoadFailure[] = []
+  for (let i = 0; i < items.length; i++) {
+    const fail = failureSlots[i]
+    if (fail) denseFailures.push(fail)
+  }
+  return { plugins: densePlugins, failures: denseFailures }
 }
 
+/**
+ * The result of attempting to load a single plugin. Either
+ * `definition` is set (with or without `failure`), or the loader
+ * decided to omit the def (rare; reserved for future "skip"
+ * optimizations). We keep both fields on the same struct so the
+ * caller doesn't have to merge two parallel arrays.
+ */
+interface PluginLoadOutcome {
+  definition: PluginDefinition | null
+  failure: PluginLoadFailure | null
+}
+
+/**
+ * Load all plugins: scan metadata from Rust, then load JS modules.
+ *
+ * Returns a `PluginLoadResult` with both the successfully hydrated
+ * `PluginDefinition[]` (including a placeholder "broken plugin"
+ * entry for any plugin that failed to load, so the user can still
+ * see and uninstall it from the main grid) and a parallel
+ * `PluginLoadFailure[]` keyed by plugin id.
+ *
+ * The implementation uses an "allSettled" pattern internally: a
+ * single broken manifest no longer aborts the rest of the batch.
+ * The other 49 plugins load normally and the failure surfaces in
+ * the top-of-manager warning banner. This is the G2 fix from
+ * `.trae/specs/plugin-management-gap-analysis/spec.md`.
+ */
 export async function loadAllPlugins(
   rustMetas: PluginMetadataRust[]
-): Promise<PluginDefinition[]> {
+): Promise<PluginLoadResult> {
   console.log(`[PluginLoader] loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
   return loadWithConcurrency(rustMetas, async (meta) => {
+      // loadPluginModuleWithRef already catches synchronous and
+      // async errors and returns `{ manifest: null, module: null }`
+      // — we still treat that as a "load failure" so the banner
+      // and a placeholder entry are produced.
       const { manifest, module } = await loadPluginModuleWithRef(meta.plugin_path)
 
       if (manifest) {
@@ -396,9 +480,14 @@ export async function loadAllPlugins(
             onActivate: manifest.onActivate,
             onDeactivate: manifest.onDeactivate,
           },
+          // Task 13 / G13: command-palette ids contribute to
+          // the conflict detector (see `plugin-conflicts.ts`).
+          // Pass-through verbatim from the manifest; omitted
+          // when the plugin author didn't declare any entries.
+          commandPalette: manifest.commandPalette,
         } satisfies PluginDefinition
         attachPluginModule(def, module)
-        return def
+        return { definition: def, failure: null }
       }
       // Plugin without a valid manifest - create a placeholder that
       // surfaces a clear, visible icon (PlugZap) and a short panel
@@ -440,7 +529,7 @@ export async function loadAllPlugins(
           ' 对象。请检查插件包是否完整、是否被部分删除，或联系插件作者。',
         ),
       )
-      return {
+      const def = {
         id: meta.id,
         name: meta.name,
         description: meta.description,
@@ -457,5 +546,20 @@ export async function loadAllPlugins(
         hasBackend: meta.has_backend,
         permissions: [],
       } satisfies PluginDefinition
+      // The placeholder def is returned so the user can see and
+      // uninstall the broken package from the main grid. The
+      // failure record is what the banner surfaces.
+      return {
+        definition: def,
+        failure: {
+          id: meta.id,
+          name: meta.name,
+          reason:
+            'manifest missing or invalid: index.js did not export a valid `manifest` object. ' +
+            'The plugin package may be incomplete or corrupted.',
+          ts: Date.now(),
+          pluginPath: meta.plugin_path,
+        },
+      }
     })
 }

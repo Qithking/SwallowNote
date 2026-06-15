@@ -108,7 +108,7 @@ com.swallownote.export.zip  # 最终可安装的插件包
 | `id` | `com.swallownote.export` | 全局唯一标识，反向域名格式。ZIP 包名必须与此一致 |
 | `iconPosition` | `editorToolbar` | 图标显示在编辑器工具栏（也可选 `sidebar`、`titleBar`） |
 | `contentPosition` | `editorArea` | 面板内容区域（本插件无面板，但字段必填） |
-| `hasBackend` | `true` | **必须设为 true**，否则宿主不会查找 `backend/` 目录 |
+| `hasBackend` | `true` | **必须设为 true**（写在 [`manifest.json`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/manifest.json) 中），否则宿主不会查找 `backend/` 目录。前端 `PluginManifest` 类型不含此字段,由宿主在加载 manifest.json 时填充到 `PluginDefinition` |
 | `entry` | `index.tsx` | 源码入口，构建后宿主加载的是 `index.js` |
 
 ---
@@ -140,8 +140,6 @@ com.swallownote.export.zip  # 最终可安装的插件包
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "i18next": "^23.0.0",
-    "react-i18next": "^14.0.0",
     "sonner": "^1.0.0",
     "typescript": "^5.5.0",
     "vite": "^5.4.0"
@@ -153,7 +151,8 @@ com.swallownote.export.zip  # 最终可安装的插件包
 
 - `@swallow-note/plugin-sdk`：通过 `file:` 协议链接到本地 SDK，提供类型和运行时 stub
 - `@tauri-apps/api`、`@tauri-apps/plugin-dialog`：Tauri 公共 API，放在 `devDependencies` 中避免打包进 IIFE
-- `sonner`、`react-i18next`：宿主已提供的库，放在 `devDependencies` 中（IIFE bundle 在宿主环境运行时可访问）
+- `sonner`：宿主已提供的库，放在 `devDependencies` 中（IIFE bundle 在宿主环境运行时可访问）
+- 插件 i18n **不依赖** `react-i18next` / `i18next`（见 [`i18n.ts`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/src/i18n.ts) 私有词条）
 
 ### 4.2 vite.config.ts
 
@@ -233,131 +232,146 @@ export default defineConfig(({ mode }) => {
 
 ### 4.4 src/index.tsx — 前端入口
 
-完整代码结构：
+`src/index.tsx` 暴露一个 `toolbarButton`（下拉菜单）和占位 `panel`，并把当前笔记的 `activeNoteContent` / `activeNotePath` 直接当作 props 拿到——**不再需要 `events.on('note:change')` 同步内容**。关键代码骨架如下：
 
 ```tsx
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import type { PluginManifest, PluginPanelProps, ToolbarButtonProps } from '@swallow-note/plugin-sdk'
 import { save } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
-import { useTranslation } from 'react-i18next'
-
-// ─── 图标组件 ────────────────────────────────────────────────
-function ExportIcon({ size = 18 }: { size?: number }): ReactNode {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" strokeWidth="2">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
-    </svg>
-  )
-}
+import { jsPDF } from 'jspdf'
+import { domToCanvas } from 'modern-screenshot'
+import { compactMarkdown } from './markdown-normalize'
+import { getStrings } from './i18n'
 
 // ─── 工具栏按钮组件（下拉菜单） ──────────────────────────────
 function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
-  const { size, pluginId, invokeBackend, events } = props
+  const { size, invokeBackend, activeNoteContent, activeNotePath } = props
   const [menuOpen, setMenuOpen] = useState(false)
+  // 同步锁：双击/连点会在同一 microtask 内被丢弃
+  const exportingRef = useRef(false)
   const [isExporting, setIsExporting] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const [noteContent, setNoteContent] = useState<string>('')
-  const [noteName, setNoteName] = useState<string>('')
+  // 插件私有词条，不再依赖宿主 react-i18next catalog
+  const strings = getStrings(navigator.language)
 
-  // 通过事件总线跟踪当前笔记内容
-  useEffect(() => {
-    const unsub1 = events.on('note:change', ({ content, path }) => {
-      setNoteContent(content ?? '')
-      if (path) setNoteName(path.split('/').pop() || path)
-    })
-    const unsub2 = events.on('note:open', ({ path }) => {
-      if (path) setNoteName(path.split('/').pop() || path)
-      setNoteContent('')
-    })
-    return () => { unsub1(); unsub2() }
-  }, [events])
+  const hasContent = activeNoteContent.trim().length > 0
+  const noteName = activeNotePath?.split('/').pop() || 'untitled'
 
-  // 点击外部关闭菜单
+  // 关闭菜单的全局 click 监听
   useEffect(() => {
     if (!menuOpen) return
     const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node))
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false)
+      }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [menuOpen])
 
-  // 导出为 Word
-  const handleExportDocx = useCallback(async () => {
-    setMenuOpen(false)
-    if (isExporting) return
-    setIsExporting(true)
-    try {
-      // 调用后端：invokeBackend → invoke('invoke_plugin', { pluginId, command, args })
-      const b64 = await invokeBackend('markdown_to_docx', { markdown: noteContent }) as string
-      const fileName = noteName.replace(/\.(md|markdown)$/i, '') + '.docx'
-      const selected = await save({
-        defaultPath: fileName,
-        filters: [{ name: 'Word Document', extensions: ['docx'] }],
-      })
-      if (!selected) { setIsExporting(false); return }
-      await invoke('write_binary_file', { path: selected, data: b64 })
-      toast.success('导出成功')
-    } catch (err) {
-      toast.error('导出失败', { description: String(err) })
-    } finally {
-      setIsExporting(false)
-    }
-  }, [noteContent, noteName, isExporting, invokeBackend])
+  // 共用导出流程：toast 生命周期 + 保存对话框 + base64 落盘
+  const runExport = useCallback(
+    async (format: 'docx' | 'pdf', produce: () => Promise<Uint8Array | string>) => {
+      if (exportingRef.current) return        // 同步锁
+      if (!hasContent) {
+        toast.info(strings.emptyNote)
+        return
+      }
+      exportingRef.current = true
+      setIsExporting(true)
+      setMenuOpen(false)
+      const toastId = toast.loading(strings.generating)
+      try {
+        const result = await produce()
+        const fileName = (noteName || 'untitled').replace(/\.(md|markdown)$/i, '') + `.${format}`
+        const selected = await save({ defaultPath: fileName, filters: [...] })
+        if (!selected) return
+        const b64 = typeof result === 'string' ? result : uint8ToBase64(result)
+        await invoke('write_binary_file', { path: selected, data: b64 })
+        toast.success(strings.exportSuccess, { id: toastId })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.includes('too large')) {
+          toast.error(strings.tooLarge, { id: toastId, description: msg })
+        } else if (format === 'pdf') {
+          toast.error(strings.pdfExportFailed, { id: toastId, description: msg })
+        } else {
+          toast.error(strings.exportFailed, { id: toastId, description: msg })
+        }
+      } finally {
+        exportingRef.current = false
+        setIsExporting(false)
+      }
+    },
+    [hasContent, noteName, strings],
+  )
 
-  // 导出为 PDF
-  const handleExportPdf = useCallback(() => {
-    setMenuOpen(false)
-    window.print()  // 浏览器原生打印 API
-  }, [])
+  const handleExportDocx = useCallback(async () => {
+    const markdown = compactMarkdown(activeNoteContent)
+    await runExport('docx', async () => {
+      return (await invokeBackend('markdown_to_docx', { markdown })) as string
+    })
+  }, [activeNoteContent, invokeBackend, runExport])
+
+  const handleExportPdf = useCallback(async () => {
+    const markdown = compactMarkdown(activeNoteContent)
+    await runExport('pdf', async () => {
+      const html = (await invokeBackend('markdown_to_html', { markdown })) as string
+      return await generatePdfFromHtml(html, activeNotePath)
+    })
+  }, [activeNoteContent, activeNotePath, invokeBackend, runExport])
 
   return (
     <div ref={menuRef} className="relative">
-      <button onClick={() => setMenuOpen(!menuOpen)}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)]">
+      <button onClick={() => setMenuOpen(!menuOpen)} ...>
         <ExportIcon size={size} />
       </button>
       {menuOpen && (
-        <div className="absolute right-0 top-full mt-1 z-50 rounded-lg py-1 min-w-[140px]"
-             style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-          <button onClick={handleExportDocx}>导出为 Word</button>
-          <button onClick={handleExportPdf}>导出为 PDF</button>
+        <div className="absolute right-0 top-full mt-1 z-50 rounded-lg py-1 min-w-[140px]" ...>
+          <button onClick={handleExportDocx} disabled={isExporting || !hasContent} ...>
+            {strings.wordMenu}
+          </button>
+          <button onClick={handleExportPdf} disabled={isExporting || !hasContent} ...>
+            {strings.pdfMenu}
+          </button>
         </div>
       )}
     </div>
   )
 }
 
-// ─── 面板（本插件无面板内容） ────────────────────────────────
-function ExportPanel(_props: PluginPanelProps): ReactNode { return null }
-
-// ─── 导出清单 ────────────────────────────────────────────────
 const manifest: PluginManifest = {
   id: 'com.swallownote.export',
-  name: '文档导出',
-  description: '将 Markdown 文档导出为 Word (.docx) 或 PDF 格式',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-13',
-  iconPosition: 'editorToolbar',
-  contentPosition: 'editorArea',
-  order: 50,
-  enabled: true,
-  hasBackend: true,
+  // ... 其余字段
+  // hasBackend 由宿主在加载 manifest.json 时填充到 PluginDefinition,
+  // 不属于前端 PluginManifest 类型。
   icon: ExportIcon,
-  panel: ExportPanel,
-  toolbarButton: ExportToolbarButton,  // 自定义工具栏按钮
-  permissions: ['events', 'backend'],   // 声明所需权限
+  panel: ExportPanel,                    // 占位，本插件无面板
+  toolbarButton: ExportToolbarButton,    // 自定义工具栏按钮
+  permissions: ['backend'],              // 不再需要 'events'（已改用 activeNoteContent prop）
 }
-
-export default manifest
 ```
+
+#### 4.4.1 PDF 导出机制（多段渲染）
+
+`generatePdfFromHtml` 实现**多段渲染**，避免单 canvas OOM：
+
+1. 后端 `markdown_to_html` 返回拼好的完整 HTML 文档（内置 `<style>`，含 A4 宽度、字体、分页规则）
+2. 前端把 HTML 挂到隐藏容器，**真实等待所有 `<img>` load 完毕**（**全局共享 8s 超时**；`asset:` 协议由 `convertFileSrc` 重写）
+3. 把 `body` 的直接子元素按高度累加，**每 `A4_HEIGHT_PX - 40` 像素分一页**;超高元素（典型:长代码块）走 [`splitOversizedChild`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/src/index.tsx#L260-L291) 按行切分
+4. 每页用 `cloneNode(true)` **深拷贝**出独立容器，**单独 `domToCanvas`**（canvas 高度被容器 `height` 锁在 `A4_HEIGHT_PX × 2`，百页文档也只占一页内存）
+5. `pdf.addImage` + `pdf.addPage` 逐页入栈
+
+#### 4.4.2 图片资源解析
+
+`resolveImageSources` 把 Markdown 原文里的相对路径 `<img src="./x.png">` 重写成 `asset:localhost/...`，Tauri 协议处理器会去读本地文件并以 `data:` URL 返回。`http(s):` / `data:` / `blob:` 不动。
+
+#### 4.4.3 私有 i18n
+
+插件不再依赖宿主 `react-i18next` catalog。`getStrings(locale)` 在 [`i18n.ts`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/src/i18n.ts) 中按 `zh/en` 返回词条,含 `tooltip` 字段(用于工具栏按钮 `title` / `aria-label`)。当前语言通过宿主注入的 `window.__SWALLOW_LOCALE__` 全局变量读取(优先)或回退到 `navigator.language` / `'zh-CN'`,由 [`readLocale()`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/src/index.tsx#L65-L74) 统一处理。
 
 ### 4.5 关键概念
 
@@ -399,14 +413,16 @@ invokeBackend('markdown_to_docx', { markdown: '...' })
 
 #### 事件订阅
 
-```typescript
-// 订阅笔记内容变化
-events.on('note:change', ({ content, path }) => { ... })
-// 订阅笔记打开
-events.on('note:open', ({ path }) => { ... })
-```
-
-可用事件：`note:open`、`note:close`、`note:save`、`note:change`、`theme:change`、`locale:change`、`settings:change`、`app:ready`、`app:exit`
+> **本插件已改用 prop 注入链路**（见 §4.4 `ToolbarButtonProps.activeNoteContent` / `activeNotePath`），**不订阅事件总线**。下面的 `events.on` 示例保留作为通用参考——其他需要响应笔记变更的插件可以这样用。
+>
+> ```typescript
+> // 订阅笔记内容变化
+> events.on('note:change', ({ content, path }) => { ... })
+> // 订阅笔记打开
+> events.on('note:open', ({ path }) => { ... })
+> ```
+>
+> 可用事件：`note:open`、`note:close`、`note:save`、`note:change`、`theme:change`、`locale:change`、`settings:change`、`app:ready`、`app:exit`
 
 ---
 
@@ -448,11 +464,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 
-/// JSON-RPC 2.0 请求
+/// JSON-RPC 2.0 请求。`id` 用 `serde_json::Value` 是为了 spec
+/// 兼容（接受 number / string / null），宿主当前只发数字 id
+/// （内部用 `Arc<AtomicU64>` 计数），Value 透传是 0 成本防御。
 #[derive(Deserialize)]
 struct JsonRpcRequest {
     jsonrpc: String,
-    id: u64,
+    id: Value,
     method: String,
     #[serde(default)]
     params: Value,
@@ -462,7 +480,7 @@ struct JsonRpcRequest {
 #[derive(Serialize)]
 struct JsonRpcSuccess {
     jsonrpc: &'static str,
-    id: u64,
+    id: Value,
     result: Value,
 }
 
@@ -470,7 +488,7 @@ struct JsonRpcSuccess {
 #[derive(Serialize)]
 struct JsonRpcError {
     jsonrpc: &'static str,
-    id: u64,
+    id: Value,
     error: JsonRpcErrorDetail,
 }
 
@@ -498,8 +516,15 @@ fn main() {
         let req: JsonRpcRequest = match serde_json::from_str(line) {
             Ok(r) => r,
             Err(e) => {
-                // 返回解析错误
-                let resp = JsonRpcError { /* ... */ };
+                // 返回解析错误（id 用 Null,因为从未收到有效 id）
+                let resp = JsonRpcError {
+                    jsonrpc: "2.0",
+                    id: Value::Null,
+                    error: JsonRpcErrorDetail {
+                        code: -32700,
+                        message: format!("Parse error: {}", e),
+                    },
+                };
                 let _ = writeln!(stdout, "{}", serde_json::to_string(&resp).unwrap());
                 let _ = stdout.flush();
                 continue;
@@ -688,8 +713,18 @@ npm run build
 ```
 
 构建产物：
-- `dist/index.js` — IIFE bundle，约 500KB（包含 React、SDK 等）
+- `dist/index.js` — **ES module** bundle（`format: 'es'`），约 1.2MB（含 jspdf、modern-screenshot、SDK、组件代码）
 - `dist/manifest.json` — 从项目根目录复制
+- `dist/index.js` 头部会被注入 `// @swallow-manifest {…}` 注释，宿主的 `scan_plugins` 解析该注释来发现插件元信息
+
+**关键 Vite 配置**（见 [`vite.config.ts`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/vite.config.ts)）：
+
+| 配置 | 值 | 原因 |
+|---|---|---|
+| `formats` | `['es']` | 宿主通过 `import()` 动态加载，期望 ES module |
+| `inlineDynamicImports` | `true` | 宿主用 blob URL 加载，不能解析相对 chunk 引用 |
+| `external` | `['react', 'react-dom', 'sonner', '@tauri-apps/api', '@tauri-apps/plugin-dialog', '@swallow-note/plugin-sdk']` | 共享宿主实例，避免多 React dispatcher 崩溃 |
+| 头部 manifest 注释 | `// @swallow-manifest {...}` | 注入插件元信息到 bundle 头部 |
 
 ### 6.2 后端构建
 
@@ -732,12 +767,12 @@ bash package.sh release
 
 `package.sh` 做了什么：
 
-1. `npx vite build` — 构建前端
+1. `npx vite build` — 构建前端（ES module bundle + manifest 头部注释）
 2. `cargo build --release` — 构建后端
 3. 复制后端二进制到 `dist/backend/plugin_com.swallownote.export`
-4. `zip -r com.swallownote.export.zip index.js manifest.json backend/`
+4. `zip -r com.swallownote.export-${version}.zip index.js manifest.json backend/`
 
-最终产物：`plugins/export/com.swallownote.export.zip`
+最终产物：`plugins/export/com.swallownote.export-0.1.0.zip`（版本号来自 `manifest.json`）
 
 ### 6.4 跨平台构建
 
@@ -789,8 +824,14 @@ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path src-taur
 |---|---|
 | 编辑器工具栏出现下载图标 | 图标可见，hover 有背景变化 |
 | 点击图标出现下拉菜单 | 显示「导出为 Word」和「导出为 PDF」 |
-| 点击「导出为 Word」 | 弹出保存对话框，保存后文件可正常打开 |
-| 点击「导出为 PDF」 | 弹出浏览器打印对话框 |
+| 空笔记 | 两个导出按钮均 `disabled`（鼠标变 not-allowed） |
+| 点击「导出为 Word」 | 弹出保存对话框，保存后 `.docx` 可在 Word/WPS 打开 |
+| 点击「导出为 PDF」 | 弹出保存对话框，保存后多页 PDF 可正常打开 |
+| 含 mermaid/katex/markmap 代码块 | DOCX 中保留语言标签（如 `[mermaid]`），PDF 渲染为对应图表 |
+| 含中文段落 | DOCX 中显示为宋体（SimSun）；PDF 同等字体 |
+| 含相对路径图片 | DOCX 显示 `[图片: alt]`，PDF 中图片正常显示（asset: 协议） |
+| 100 页+ 长文档 | PDF 不 OOM（多段 canvas 渲染）；DOCX 正常生成 |
+| 快速双击「导出为 Word」 | 只触发一次保存对话框（同步锁 `exportingRef`） |
 | 禁用插件后 | 工具栏图标消失 |
 | 卸载插件后 | 无残留，主应用正常运行 |
 
@@ -868,26 +909,90 @@ toast.success('导出成功')
 ExportToolbarButton.handleExportPdf()
   │
   ▼
-window.print() — 浏览器原生打印 API
+compactMarkdown(activeNoteContent) — 归一化 Markdown
   │
   ▼
-系统打印对话框 → 选择「另存为 PDF」
+invokeBackend('markdown_to_html', { markdown }) — 后端拼好完整 HTML 文档
+  │  ← ToolbarButtonProps.invokeBackend
+  │
+  ▼
+invoke('invoke_plugin', {
+  pluginId: 'com.swallownote.export',
+  command: 'markdown_to_html',
+  args: { markdown: '...' }
+})
+  │  ← @tauri-apps/api/core
+  │
+  ▼
+[插件后端] main.rs → handle_request('markdown_to_html')
+  │
+  ├─ convert::markdown_to_html()  用 pulldown-cmark 解析 + 拼 <style> + <body>
+  │   ├─ ENABLE_TABLES / ENABLE_STRIKETHROUGH / ENABLE_TASKLISTS
+  │   ├─ 内置 CSS：A4 宽度、字体、分页规则（page-break-inside: avoid）
+  │   └─ 返回完整 HTML 字符串
+  │
+  └─ stdout: {"jsonrpc":"2.0","id":N,"result":"<!DOCTYPE html>..."}
+      │
+      ▼
+[前端] html = await invokeBackend(...)
+  │
+  ▼
+generatePdfFromHtml(html, notePath)  — 关键的多段渲染
+  │
+  ├─ 把 HTML 挂到隐藏容器，resolveImageSources 把 <img src> 改成 asset: 协议
+  ├─ waitForImages(...) 真实等待所有 <img> load 完毕（全局共享 8s deadline）
+  │
+  ├─ 按高度把 body 直接子元素分组到多页
+  │   each child measured with getBoundingClientRect().height
+  │   accumulate until running total > A4_HEIGHT_PX - 40
+  │
+  └─ for each page:
+       ├─ cloneNode(true) 拷贝该页 children 到独立容器
+       ├─ 容器 height = A4_HEIGHT_PX + overflow: hidden
+       ├─ resolveImageSources + waitForImages (re-resolve for cloned imgs)
+       ├─ domToCanvas(pageEl, { scale: 2, width: A4_WIDTH_PX, height: A4_HEIGHT_PX })
+       │   ← canvas 高度被锁在 A4_HEIGHT_PX * 2 = 2166px，百页不 OOM
+       ├─ canvas.toDataURL('image/png')  →  base64 PNG
+       └─ pdf.addImage(...)  →  pdf.addPage() (除最后一页)
+  │
+  ▼
+return new Uint8Array(pdf.output('arraybuffer'))
+  │
+  ▼
+runExport('pdf', ...) 共用流程：
+  save() — 弹出保存对话框
+  │
+  ▼
+uint8ToBase64(bytes)  — 32KB 分块编码，避开 String.fromCharCode.apply 栈限制
+  │
+  ▼
+invoke('write_binary_file', { path, data: b64 }) — 写入文件
+  │
+  ▼
+toast.success(strings.exportSuccess)
 ```
 
-### 8.3 事件订阅链路
+### 8.3 笔记内容获取（v2 起不再订阅事件）
+
+本插件**不**订阅宿主事件总线——宿主在每次 `toolbarButton` 渲染时直接通过 props 注入当前笔记的 Markdown 文本和路径：
 
 ```
-宿主编辑器内容变化
+[宿主] useEditorStore → currentTab.content
   │
   ▼
-pluginEventBus.emit('note:change', { noteId, path, content })
+createToolbarButtonProps(plugin, store)
   │
   ▼
-[宿主] events.on 回调触发
+<ToolbarButtonProps>.activeNoteContent : string
+<ToolbarButtonProps>.activeNotePath   : string | null
   │
   ▼
-ExportToolbarButton.setNoteContent(content)
+ExportToolbarButton(props)  — 直接解构
 ```
+
+> 历史：本插件 v1 实现里用过 `events.on('note:change', ...)` 同步笔记内容，但 v2 起改用 prop 注入，避免插件在挂载/卸载边界处漏掉事件或 race condition。`manifest.permissions` 也因此去掉了 `'events'`。
+
+如果插件确实需要响应笔记变化（例如想持续轮询），仍然可以订阅事件总线。SDK 暴露的 `ToolbarButtonProps` 同时保留 `events: PluginEventBus` 字段。
 
 ---
 
