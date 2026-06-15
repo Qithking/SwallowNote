@@ -53,12 +53,6 @@ import {
 } from '@/lib/plugin-telemetry'
 import { PluginSparkline } from './PluginSparkline'
 
-const SPINE_CLASSES = [
-  'pa-spine-c1', 'pa-spine-c2', 'pa-spine-c3', 'pa-spine-c4',
-  'pa-spine-c5', 'pa-spine-c6', 'pa-spine-c7', 'pa-spine-c8',
-  'pa-spine-c9', 'pa-spine-c10', 'pa-spine-c11', 'pa-spine-c12',
-] as const
-
 // Stable style objects — pulled out of the render path so a card
 // re-render doesn't allocate two new `style` literals per card.
 // Inline-style allocation in the byline is intentional, but
@@ -157,17 +151,6 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
   // reads as "off" — the feature is strictly opt-in.
   const autoUpdateOn = plugin.autoUpdate === true
 
-  // Use plugin id hash for stable spine color instead of filtered index
-  // to prevent color jumping when filtering/searching
-  const spineClass = useMemo(() => {
-    let hash = 0
-    for (let i = 0; i < plugin.id.length; i++) {
-      hash = ((hash << 5) - hash) + plugin.id.charCodeAt(i)
-      hash = hash & hash // Convert to 32bit integer
-    }
-    const index = Math.abs(hash) % SPINE_CLASSES.length
-    return SPINE_CLASSES[index]
-  }, [plugin.id])
   const version = plugin.version || '—'
   // Memoize the byline date string. The plugin object's
   // `publishedAt` doesn't change after the plugin is loaded, so
@@ -294,11 +277,9 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
 
   return (
     <article
-      className={`pa-market-card ${spineClass} ${!plugin.enabled ? 'is-disabled' : ''}`}
+      className={`pa-market-card ${!plugin.enabled ? 'is-disabled' : ''}`}
       data-plugin-id={plugin.id}
     >
-      <div className="pa-market-card-spine" />
-
       <div className="pa-market-card-body">
         <div className="pa-market-card-head">
           <div style={{ minWidth: 0, flex: 1 }}>

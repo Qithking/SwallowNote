@@ -759,7 +759,13 @@ body, #root {
 .pa-card.is-focused .pa-name::after { content: ' →'; color: var(--pa-accent); font-style: normal; }
 .pa-card.is-disabled { opacity: 0.55; }
 
-/* spine colors (12 hues) */
+/* spine colors (12 hues) — only used by the legacy
+ * `pa-market-card-spine` decorative 4px bar that sat on
+ * top of each plugin card. The bar and its color map were
+ * removed in 2026-06-15; the color classes are kept for
+ * the standalone `.pa-spine` book-spine list element below
+ * (which still reads `--pa-spine-color`) but are not used
+ * by the plugin-card system any more. */
 .pa-spine-c1  { --pa-spine-color: #c73e1d; }
 .pa-spine-c2  { --pa-spine-color: #d4a017; }
 .pa-spine-c3  { --pa-spine-color: #2d6a4f; }
@@ -1609,10 +1615,6 @@ body, #root {
   border-color: var(--pa-line-2);
   transform: translateY(-1px);
   box-shadow: var(--pa-shadow-2);
-}
-.pa-market-card-spine {
-  height: 4px;
-  background: var(--pa-spine-color, var(--pa-accent));
 }
 .pa-market-card-body {
   padding: 12px 14px 14px;

@@ -13,7 +13,6 @@ export function PluginCardSkeleton() {
         pointerEvents: 'none',
       }}
     >
-      <div className="pa-market-card-spine" style={{ background: 'var(--pa-line)' }} />
       <div className="pa-market-card-body">
         <div className="pa-market-card-head">
           <div style={{ minWidth: 0, flex: 1 }}>

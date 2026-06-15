@@ -19,7 +19,7 @@
  *   │  pa-segmented (all / editor / ai / …)         │
  *   └──────────────────────────────────────────────┘
  *   pa-market-grid
- *     pa-market-card × N (4px spine + body + badge)
+ *     pa-market-card × N (body + badge)
  *
  * State lives in `usePluginMarketStore` so the install state
  * survives navigation away from the marketplace tab. The detail
@@ -52,12 +52,6 @@ import type {
   PluginPermissionStatus,
 } from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
-
-const SPINE_CLASSES = [
-  'pa-spine-c1', 'pa-spine-c2', 'pa-spine-c3', 'pa-spine-c4',
-  'pa-spine-c5', 'pa-spine-c6', 'pa-spine-c7', 'pa-spine-c8',
-  'pa-spine-c9', 'pa-spine-c10', 'pa-spine-c11', 'pa-spine-c12',
-] as const
 
 // Stable style objects — pulled out of the render path so the
 // `byline` icons (User, Calendar) don't allocate a fresh
@@ -458,11 +452,10 @@ function PluginMarketView() {
           items={filteredEntries}
           estimatedRowHeight={220}
           className="pa-market-grid"
-          renderItem={(entry, idx) => (
+          renderItem={(entry) => (
             <PluginMarketCard
               key={entry.id}
               entry={entry}
-              spineClass={SPINE_CLASSES[idx % SPINE_CLASSES.length]}
               localVersion={localVersionFor(entry.id)}
               updateInfo={updateInfoMap.get(entry.id)}
               onClick={() => openDetail(entry.id)}
@@ -553,13 +546,11 @@ function EmptyState({
  */
 const PluginMarketCard = memo(function PluginMarketCard({
   entry,
-  spineClass,
   localVersion,
   updateInfo,
   onClick,
 }: {
   entry: PluginIndexEntry
-  spineClass: string
   localVersion: string | undefined
   updateInfo?: { localVersion: string; remoteVersion: string; sha256: string }
   onClick: () => void
@@ -642,12 +633,10 @@ const PluginMarketCard = memo(function PluginMarketCard({
 
   return (
     <article
-      className={`pa-market-card ${spineClass}`}
+      className="pa-market-card"
       data-plugin-id={entry.id}
       onClick={onClick}
     >
-      <div className="pa-market-card-spine" />
-
       <div className="pa-market-card-body">
         <div className="pa-market-card-head">
           <div style={{ minWidth: 0 }}>
