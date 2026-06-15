@@ -4464,6 +4464,7 @@ dependencies = [
  "grep-searcher",
  "jwalk",
  "keyring",
+ "libc",
  "notify",
  "notify-debouncer-full",
  "objc",

@@ -180,6 +180,8 @@ pub fn run() {
             commands::plugin::uninstall_plugin,
             commands::plugin::toggle_plugin_enabled,
             commands::plugin::get_plugin_storage_path,
+            commands::plugin::get_all_plugin_storage_sizes,
+            commands::plugin::get_storage_cap,
             commands::plugin::install_plugin_from_bytes,
             commands::plugin::check_plugin_updates,
             commands::plugin::update_plugin,
@@ -209,6 +211,12 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle.clone());
+            // Plan B: start a dedicated watch on the plugins
+            // tree so external `storage.json` mutations
+            // (import, manual edit, restore from backup)
+            // surface a `plugin-storage-changed` event the
+            // frontend can subscribe to. Idempotent.
+            services::file_watcher::watch_plugin_storage(app_handle.clone());
 
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
             // Per-plugin backend subprocess state. See

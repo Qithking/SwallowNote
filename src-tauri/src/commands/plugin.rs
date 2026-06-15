@@ -50,6 +50,7 @@ use crate::commands::error::PluginError;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -801,6 +802,248 @@ pub fn get_plugin_storage_path(
         .ok_or_else(|| PluginError::NotFound(format!("Plugin '{}' not found", plugin_id)))?;
     let plugin_storage = plugin_dir.join("storage.json");
     Ok(plugin_storage.to_string_lossy().to_string())
+}
+
+/**
+ * Return the on-disk size of every installed plugin's
+ * `storage.json` as a `plugin_id -> bytes` map. Plugins without
+ * a `storage.json` yet (never written to) are reported as
+ * `0` — they're installed but have never used storage.
+ *
+ * The frontend uses this to **seed** the in-memory
+ * `pluginStorageSize` counter at app startup. The counter is
+ * normally maintained by the JS-side `set/delete/clear` path
+ * (deltas tracked in `recordStorageMetric`), but that path
+ * starts at `0` on every fresh app launch — a plugin that
+ * already has a 2 MB `storage.json` from a previous session
+ * would otherwise show as `0 B` in the manager view's storage
+ * meter until the next write triggers a delta update.
+ *
+ * Performance: one `fs::metadata` per plugin directory (no
+ * file reads). For the realistic upper bound of a few hundred
+ * plugins this is sub-millisecond. Returns `Err` only on the
+ * rare case where the app-data dir itself is unreachable —
+ * individual missing/broken files are silently treated as 0
+ * bytes (a corrupt file is a storage bug, not a size-query
+ * bug; the next `PluginStorageImpl.load()` will surface it).
+ */
+#[tauri::command]
+pub fn get_all_plugin_storage_sizes(
+    app_handle: tauri::AppHandle,
+) -> Result<HashMap<String, u64>, PluginError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
+    let plugins_root = plugins_dir(&app_data_dir);
+
+    let mut sizes: HashMap<String, u64> = HashMap::new();
+
+    // Mirror `resolve_plugin_dir`'s fallback strategy: prefer an
+    // exact directory match, but also accept dirs whose
+    // manifest declares the same id (handles versioned-zip
+    // directory names like `com.example.foo-1.0.0`).
+    let entries = match fs::read_dir(&plugins_root) {
+        Ok(e) => e,
+        Err(err) => {
+            // No plugins dir yet (fresh install) → return empty
+            // map. The frontend's seeder should treat this as a
+            // no-op rather than an error.
+            if err.kind() == std::io::ErrorKind::NotFound {
+                return Ok(sizes);
+            }
+            return Err(PluginError::Io(format!(
+                "Failed to read plugins dir: {}",
+                err
+            )));
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        // Skip hidden bookkeeping dirs (`.cache`, `.versions`).
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map_or(false, |n| n.starts_with('.'))
+        {
+            continue;
+        }
+
+        // Resolve the plugin id — exact dir name first, then
+        // fall back to parsing the manifest inside the active
+        // version dir.
+        let plugin_id = if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            // Try the cheap path first: dir name == id.
+            let candidate = name.to_string();
+            if validate_plugin_id(&candidate).is_ok() {
+                candidate
+            } else {
+                // Fall back to manifest lookup. Same code path
+                // as `resolve_plugin_dir` so the seed matches
+                // the path the frontend would otherwise use.
+                match find_plugin_id_from_dir(&path) {
+                    Some(id) => id,
+                    None => continue, // not a valid plugin dir; skip
+                }
+            }
+        } else {
+            continue;
+        };
+
+        let storage = path.join("storage.json");
+        let size = match fs::metadata(&storage) {
+            Ok(meta) if meta.is_file() => meta.len(),
+            // Missing or not a regular file → never written to,
+            // size 0. This is the common case for newly-
+            // installed plugins that haven't called `store.set`
+            // yet.
+            _ => 0,
+        };
+        sizes.insert(plugin_id, size);
+    }
+
+    Ok(sizes)
+}
+
+/// Resolve a plugin id from a directory by parsing the manifest
+/// of the currently-active version (mirrors `resolve_plugin_dir`
+/// for the versioned-zip fallback case). Returns `None` if the
+/// dir doesn't contain a parseable manifest.
+fn find_plugin_id_from_dir(plugin_dir: &Path) -> Option<String> {
+    let active_dir = active_version_dir(plugin_dir)?;
+    let index_js = active_dir.join("index.js");
+    if !index_js.exists() {
+        return None;
+    }
+    parse_manifest_from_index_js(&index_js).map(|m| m.id)
+}
+
+/**
+ * Return the **real** available bytes on the volume that
+ * hosts the plugin-storage tree.
+ *
+ * Replaces a previously hardcoded `100 * 1024 * 1024` literal
+ * in the frontend (which the plugin manager's storage meter
+ * displayed as "soft cap 100 MB" with no actual enforcement
+ * or measurement). The user-visible cap is now the host's
+ * own `statvfs` / `GetDiskFreeSpaceExW` answer — the
+ * denominator is real data, not a magic number, so the
+ * "X used / Y available" pair is internally consistent.
+ *
+ * Implementation:
+ * - **Unix (macOS / Linux)**: `libc::statvfs` on the
+ *   plugins-root parent. The `f_bavail` × `f_frsize` product
+ *   is the bytes **available to a non-privileged user** —
+ *   i.e. not counting the 5% headroom root reserves on
+ *   ext-family filesystems. That's the right number for
+ *   "how much can plugins actually write" — using
+ *   `f_blocks` (total) would over-report by a factor of
+ *   thousands on a typical desktop volume.
+ * - **Windows**: `GetDiskFreeSpaceExW` with
+ *   `free_bytes_available_to_caller`, equivalent semantics.
+ *
+ * `Err` only if the volume can't be queried (path missing,
+ * permission denied, etc.). The frontend treats this as
+ * "unknown" and falls back to a UI-only baseline; the
+ * real fallback lives in `PluginManagerView.storageMeter`'s
+ * useMemo.
+ */
+#[tauri::command]
+pub fn get_storage_cap(app_handle: tauri::AppHandle) -> Result<u64, PluginError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
+    let plugins_root = plugins_dir(&app_data_dir);
+
+    // `statvfs` / `GetDiskFreeSpaceExW` operate on a path —
+    // they report the **volume** that path lives on, not the
+    // path itself. We pass the plugins-root itself; if the
+    // root doesn't exist yet (fresh install, no plugins
+    // installed), the OS will resolve the parent volume
+    // through the path traversal.
+    let probe = if plugins_root.exists() {
+        plugins_root.as_path()
+    } else {
+        app_data_dir.as_path()
+    };
+
+    available_bytes(probe)
+}
+
+#[cfg(unix)]
+fn available_bytes(path: &Path) -> Result<u64, PluginError> {
+    // CString: statvfs takes `*const c_char` and Rust paths
+    // can contain non-UTF-8 bytes (rare on macOS/Linux but
+    // possible — ext4 is a byte string, not unicode).
+    use std::os::unix::ffi::OsStrExt;
+    let cpath = match std::ffi::CString::new(path.as_os_str().as_bytes()) {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(PluginError::Io(format!(
+                "Path contains an interior NUL byte: {:?}",
+                path
+            )))
+        }
+    };
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `cpath` outlives the call and `stat` is a
+    // valid mutable pointer to a stack-allocated struct of
+    // the right size.
+    let rc = unsafe { libc::statvfs(cpath.as_ptr(), &mut stat) };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        return Err(PluginError::Io(format!(
+            "statvfs({:?}) failed: {}",
+            path, err
+        )));
+    }
+    // `f_bavail` is "blocks available to non-privileged
+    // user"; `f_frsize` is the fragment size in bytes
+    // (block size for byte counts; `f_bsize` is the
+    // block size for `f_blocks` / `f_bfree`). On
+    // modern systems they're typically equal, but use
+    // `f_frsize` per POSIX.
+    let bytes = (stat.f_bavail as u128).saturating_mul(stat.f_frsize as u128);
+    // Clamp to u64 range; even on a 1 ZiB yottabyte volume
+    // (≈ 2^80) this is well below u64::MAX (2^64). The
+    // `u128` intermediate is just paranoia.
+    Ok(u64::try_from(bytes).unwrap_or(u64::MAX))
+}
+
+#[cfg(windows)]
+fn available_bytes(path: &Path) -> Result<u64, PluginError> {
+    use std::os::windows::ffi::OsStrExt;
+    // `GetDiskFreeSpaceExW` takes a wide-string path. We
+    // append a null terminator (the `OsStrExt` encoding
+    // doesn't include one — it's a C-style API).
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.push(0);
+    let mut free_bytes_available_to_caller: u64 = 0;
+    let mut _total: u64 = 0;
+    let mut _free: u64 = 0;
+    // SAFETY: `wide` is a valid null-terminated UTF-16
+    // string, and the three `*mut u64` out-params are
+    // stack-allocated aligned to the API's expectation.
+    let ok = unsafe {
+        windows::Win32_System_Storage::FileSystem::GetDiskFreeSpaceExW(
+            windows::core::PCWSTR(wide.as_ptr()),
+            Some(&mut free_bytes_available_to_caller),
+            Some(&mut _total),
+            Some(&mut _free),
+        )
+    };
+    match ok {
+        Ok(()) => Ok(free_bytes_available_to_caller),
+        Err(e) => Err(PluginError::Io(format!(
+            "GetDiskFreeSpaceExW({:?}) failed: {}",
+            path, e
+        ))),
+    }
 }
 
 // ─── Marketplace / Phase 9.2 ────────────────────────────────────────────────────

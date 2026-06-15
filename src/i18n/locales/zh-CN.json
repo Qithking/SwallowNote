@@ -963,7 +963,13 @@
       "rail": {
         "stats": "安装统计",
         "storage": "插件存储",
-        "open": "打开"
+        "open": "打开",
+        "storageMeter": {
+          "usedPct": "{{pct}}% 已用",
+          "available": "剩余空间",
+          "capUnknown": "容量未知",
+          "capUnknownPct": "—"
+        }
       },
       "manifestPath": "清单位置 <b>{{path}}</b>",
       "update": {

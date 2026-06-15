@@ -9,6 +9,7 @@
  */
 
 import type { PluginEvent, PluginEventPayloadMap } from '@/types/plugin'
+import { getPluginStorageSize } from './tauri'
 
 // ─── Metric types ─────────────────────────────────────────────────────────────
 
@@ -538,6 +539,174 @@ export function clearPluginMetrics(pluginId: string): void {
   // action". Mirrors the same `bumpMetricsVersion()` call in
   // `clearAllMetrics` and every `recordX` function.
   bumpMetricsVersion()
+}
+
+/**
+ * Seed (or overwrite) the per-plugin storage size tracker with
+ * authoritative byte counts from the host.
+ *
+ * The JS-side `recordStorageMetric` only knows about *deltas*
+ * (size of a value just set, size of a value just deleted).
+ * Across an app restart, those deltas start at 0 — so a plugin
+ * with a pre-existing 2 MB `storage.json` from a previous
+ * session would otherwise show `0 B` in the manager view's
+ * storage meter until the next `set` triggers an update.
+ *
+ * This function is called from two places:
+ * - **App startup** (after the plugin list loads): full seed
+ *   with `getAllPluginStorageSizes()`.
+ * - **Storage file change event** (the host's file watcher
+ *   noticed a `storage.json` modify/remove): single-plugin
+ *   re-stat with `getPluginStorageSize(id)`.
+ *
+ * `bumpMetricsVersion()` is called at most once per invocation
+ * so a single call with many plugins collapses to one re-
+ * render (the typical startup case).
+ */
+export function seedPluginStorageSizes(sizes: Record<string, number>): void {
+  let changed = false
+  for (const [pluginId, bytes] of Object.entries(sizes)) {
+    const prev = pluginStorageSize.get(pluginId) ?? 0
+    // Always overwrite — the host's stat is the source of
+    // truth. The JS-side delta tracker can be ahead (pending
+    // `set` not yet flushed) but that's bounded by the size
+    // of one in-flight value, and a future set/delete will
+    // reconcile it.
+    if (prev !== bytes) {
+      pluginStorageSize.set(pluginId, Math.max(0, bytes))
+      changed = true
+    }
+  }
+  if (changed) {
+    bumpMetricsVersion()
+  }
+}
+
+/**
+ * Re-stat a single plugin's `storage.json` and update the
+ * tracker. Used by the file-watcher handler in `App.tsx` when
+ * a `storage.json` mutation is observed that the JS-side
+ * delta path wouldn't notice (external import, manual edit).
+ * Returns the new size, or `null` if the host couldn't stat
+ * (e.g. plugin was uninstalled between the event emission and
+ * our handler running).
+ */
+export async function refreshPluginStorageSize(pluginId: string): Promise<number | null> {
+  const size = await getPluginStorageSize(pluginId)
+  const prev = pluginStorageSize.get(pluginId) ?? 0
+  if (size !== prev) {
+    pluginStorageSize.set(pluginId, size)
+    bumpMetricsVersion()
+  }
+  return size
+}
+
+/**
+ * Subscribe to host-emitted `plugin-storage-changed` events
+ * and reconcile the in-memory `pluginStorageSize` tracker
+ * with the new file size.
+ *
+ * The host's file watcher (in `services/file_watcher.rs`)
+ * watches `<app_data>/plugins/` and emits one event per
+ * `storage.json` mutation, with the resolved plugin id and
+ * current file size. The JS-side delta tracker
+ * (`recordStorageMetric`) is unaware of writes that bypass
+ * the JS layer — e.g. an `import_plugin_configs` from a
+ * bundle zip, or a manual edit while the app is running.
+ * This subscription is what closes that gap.
+ *
+ * Returns the unsubscribe function. Safe to call multiple
+ * times — each call subscribes exactly once. The dynamic
+ * `import('@tauri-apps/api/event')` keeps the telemetry
+ * module free of a hard dep on `@tauri-apps/api/event` at
+ * module-evaluation time (it isn't always available in
+ * test environments).
+ */
+export async function subscribeToPluginStorageChanges(): Promise<() => void> {
+  if (pluginStorageChangesUnsub) return pluginStorageChangesUnsub
+  const { listen } = await import('@tauri-apps/api/event')
+  const unlisten = await listen<{ pluginId: string; size: number }>(
+    'plugin-storage-changed',
+    (event) => {
+      const { pluginId, size } = event.payload
+      if (!pluginId) return
+      const prev = pluginStorageSize.get(pluginId) ?? 0
+      if (size !== prev) {
+        pluginStorageSize.set(pluginId, Math.max(0, size))
+        bumpMetricsVersion()
+      }
+    }
+  )
+  pluginStorageChangesUnsub = unlisten
+  return unlisten
+}
+
+let pluginStorageChangesUnsub: (() => void) | null = null
+
+/**
+ * Read the total storage size (bytes) used by every plugin
+ * currently tracked. The number is the sum of the entries
+ * in `pluginStorageSize` — i.e. **only** plugins the
+ * `seedPluginStorageSizes` seeder has touched (or that
+ * have run at least one `set/delete/clear` recorded
+ * through `recordStorageMetric`).
+ *
+ * The result is **NOT** the same as
+ * `getAllPluginMetrics().reduce((s, m) => s + m.storageSizeBytes, 0)`
+ * — that reduce only sees plugins that have a metrics
+ * entry, and `getAllPluginMetrics` constructs entries from
+ * `eventMetrics` / `storageMetrics` / `hookMetrics` /
+ * `backendMetrics` via lazy `ensure(id)`, so a plugin that
+ * has never run a single recorded metric is invisible to
+ * the reduce. The manager view's storage meter was
+ * previously hitting that branch and silently reporting
+ * 0 B for newly-installed plugins — see the inline
+ * discussion in `PluginManagerView`'s `storageMeter`
+ * useMemo before this fix.
+ */
+export function getTotalPluginStorageBytes(): number {
+  let total = 0
+  for (const bytes of pluginStorageSize.values()) {
+    total += bytes
+  }
+  return total
+}
+
+/** Read the cached storage size for a single plugin (0
+ *  if the plugin has no record in the tracker). */
+export function getPluginStorageBytes(pluginId: string): number {
+  return pluginStorageSize.get(pluginId) ?? 0
+}
+
+/**
+ * Return a snapshot of every plugin the tracker knows
+ * about, as `id -> bytes`. The returned object is a
+ * defensive shallow copy — callers may mutate it freely
+ * without affecting internal state. Used by tests and by
+ * debug overlays; the manager view's hot path uses
+ * `getTotalPluginStorageBytes` directly.
+ */
+export function getAllPluginStorageBytesSnapshot(): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [id, bytes] of pluginStorageSize) {
+    out[id] = bytes
+  }
+  return out
+}
+
+/**
+ * Test-only: tear down any module-level subscriptions so a
+ * fresh `subscribeToPluginStorageChanges` call registers a
+ * new listener. Not exported via the public surface — only
+ * used by the `plugin-storage-size-tracking` test suite,
+ * which needs to verify the subscribe path without the
+ * singleton short-circuit kicking in.
+ */
+export function __resetPluginStorageChangesForTests(): void {
+  if (pluginStorageChangesUnsub) {
+    pluginStorageChangesUnsub()
+    pluginStorageChangesUnsub = null
+  }
 }
 
 // ─── Health-monitor integration ─────────────────────────────────────────────

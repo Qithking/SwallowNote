@@ -963,7 +963,13 @@
       "rail": {
         "stats": "Install stats",
         "storage": "Plugin storage",
-        "open": "Open"
+        "open": "Open",
+        "storageMeter": {
+          "usedPct": "{{pct}}% used",
+          "available": "available",
+          "capUnknown": "cap unknown",
+          "capUnknownPct": "—"
+        }
       },
       "manifestPath": "Manifests at <b>{{path}}</b>",
       "update": {

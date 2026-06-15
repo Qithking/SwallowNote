@@ -56,7 +56,8 @@ import { PluginCardSkeletonGrid } from './PluginCardSkeleton'
 import { useDebounce } from './useDebounce'
 import { usePluginTelemetryVersion } from '@/hooks'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
-import { getAllPluginMetrics } from '@/lib/plugin-telemetry'
+import { getAllPluginMetrics, getTotalPluginStorageBytes } from '@/lib/plugin-telemetry'
+import { getStorageCap } from '@/lib/tauri'
 import type { PluginDefinition, PluginPanelProps, PluginPermission } from '@/types/plugin'
 
 
@@ -265,19 +266,50 @@ function PluginManagerView() {
     return { total: plugins.length, active: enabled, disabled, updates, errors }
   }, [plugins, marketUpdates, metricsSnapshot])
 
-  // Total bytes used by all plugin storage, and a 100 MB soft
-  // quota. The host's per-plugin size tracker is in
-  // `plugin-telemetry`, but the per-plugin metric only has
-  // `storageSizeBytes` for plugins that have already had a
-  // `set` recorded. To avoid an awkward "0 KB" display for
-  // freshly-installed plugins, we fall back to a 0-byte
-  // baseline and let the meter render a thin sliver.
+  // Total bytes used by all plugin storage, against the
+  // host-reported free bytes on the volume that hosts the
+  // plugin-storage tree. The previous version of this
+  // meter used a hardcoded `100 * 1024 * 1024` literal as
+  // the denominator — the user-visible cap was a magic
+  // number with no relationship to the filesystem. Now
+  // `cap` is fetched from the host (`statvfs` on Unix,
+  // `GetDiskFreeSpaceExW` on Windows) once on mount. If
+  // the host can't query the volume, `cap` is `null` and
+  // the meter shows the real used bytes against an
+  // "unknown" cap. The "soft cap 100 MB" subtitle is
+  // replaced with "available" once a real cap is known.
+  const [cap, setCap] = useState<number | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void getStorageCap()
+      .then((bytes) => {
+        if (!cancelled) setCap(bytes)
+      })
+      .catch(() => {
+        if (!cancelled) setCap(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const storageMeter = useMemo(() => {
-    const usedBytes = metricsSnapshot.reduce((sum, m) => sum + m.storageSizeBytes, 0)
-    const maxBytes = 100 * 1024 * 1024 // 100 MB
-    const pct = Math.min(100, (usedBytes / maxBytes) * 100)
+    const usedBytes = getTotalPluginStorageBytes()
+    const maxBytes = cap // real free bytes, or null on host failure
+    const pct = maxBytes && maxBytes > 0 ? Math.min(100, (usedBytes / maxBytes) * 100) : 0
     return { usedBytes, maxBytes, pct }
-  }, [metricsSnapshot])
+    // The body doesn't reference `metricsVersion` /
+    // `plugins.length` directly — they're *triggers*, not
+    // inputs. `metricsVersion` is the version-bump handle
+    // from `usePluginTelemetryVersion()`; `plugins.length`
+    // changes when a plugin is installed or uninstalled
+    // (the only path that adds / removes entries in the
+    // `pluginStorageSize` tracker, via `clearPluginMetrics`).
+    // The function reads from the tracker directly, so we
+    // only need it to re-run on those triggers. Disable
+    // the lint rule — this is the established pattern in
+    // this file (see lines 207, 245, 259 for siblings).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metricsVersion, plugins.length])
 
   // Total events over the last 24h (drives the `Activity`
   // rail-button meta chip).
@@ -670,10 +702,10 @@ function PluginManagerView() {
             <div className="pa-rail-title" style={{ marginTop: 18 }}>
               <span>{t('plugin.pa.rail.storage')}</span>
               <span>
-                {formatBytes(storageMeter.usedBytes)} / {formatBytes(storageMeter.maxBytes)}
+                {formatBytes(storageMeter.usedBytes)} / {storageMeter.maxBytes != null ? formatBytes(storageMeter.maxBytes) : '—'}
               </span>
             </div>
-            <StorageMeter pct={storageMeter.pct} />
+            <StorageMeter pct={storageMeter.pct} cap={storageMeter.maxBytes} />
 
             <div className="pa-rail-title" style={{ marginTop: 18 }}>
               <span>{t('plugin.pa.rail.open')}</span>
@@ -950,19 +982,51 @@ function EmptyListHint() {
   )
 }
 
-function StorageMeter({ pct }: { pct: number }) {
+function StorageMeter({ pct, cap }: { pct: number; cap: number | null }) {
   // We render the bar ourselves (not via `.pa-meter` whose
   // gradient is fixed at 34%) so the bar actually reflects
-  // the user's plugin footprint. The host doesn't yet expose
-  // a quota, so we render a soft cap at 100 MB.
+  // the user's plugin footprint. The denominator is the
+  // **host-reported free bytes** on the volume that hosts
+  // the plugin-storage tree — see `getStorageCap` /
+  // `get_storage_cap` in the Tauri command layer.
+  //
+  // **CSS gotcha** (was the source of "still shows a 34%
+  // green sliver" feedback): `.pa-meter-bar` in
+  // `index.css:999` has a `::after` pseudo-element with
+  // `width: 34%` and the same gradient as our fill. That
+  // pseudo is the **default** for the class (used by the
+  // other meters elsewhere in this file — user activity,
+  // etc.), so we can't remove the rule. We *do* reuse the
+  // `.pa-meter-bar` class for consistent rail styling
+  // (height, radius, overflow), but we suppress its `::after`
+  // with a local class — otherwise the rail would always
+  // show a hardcoded 34% green sliver regardless of our
+  // own fill width. This was a regression the previous
+  // version missed: my inline `width: 0%` div was correct,
+  // but the `::after` was drawn **on top of** (well, next
+  // to) it and dominated the visual.
+  //
+  // Bar width policy:
+  // - `cap != null` (real denominator): render the actual
+  //   percent. No `Math.max(2, pct)` floor — that floor was
+  //   a visual placeholder for the previous hardcoded
+  //   "soft cap 100 MB" UI, and it was a lie (it forced a
+  //   2% sliver even when usage was 0). With a real
+  //   denominator, "0 B used" should literally be 0% wide.
+  // - `cap == null` (host query failed): render **no fill
+  //   at all** (0% wide, just the rail visible). The footer
+  //   renders the "cap unknown" hint so the empty rail is
+  //   understood as "data unavailable", not "0% used".
+  const { t } = useTranslation()
+  const fillWidth = cap != null ? pct : 0
   return (
     <div className="pa-meter">
-      <div className="pa-meter-bar" style={{ position: 'relative' }}>
+      <div className="pa-meter-bar pa-meter-bar--storage" style={{ position: 'relative' }}>
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            width: `${Math.max(2, pct)}%`,
+            width: `${fillWidth}%`,
             background: 'linear-gradient(to right, var(--pa-accent), var(--pa-accent-2))',
             borderRadius: 999,
             transition: 'width 0.3s ease',
@@ -970,8 +1034,17 @@ function StorageMeter({ pct }: { pct: number }) {
         />
       </div>
       <div className="pa-meter-foot">
-        <span>{pct.toFixed(0)}% used</span>
-        <span>soft cap 100 MB</span>
+        {cap != null ? (
+          <>
+            <span>{t('plugin.pa.rail.storageMeter.usedPct', { pct: pct.toFixed(2) })}</span>
+            <span>{t('plugin.pa.rail.storageMeter.available')}</span>
+          </>
+        ) : (
+          <>
+            <span>{t('plugin.pa.rail.storageMeter.capUnknownPct')}</span>
+            <span>{t('plugin.pa.rail.storageMeter.capUnknown')}</span>
+          </>
+        )}
       </div>
     </div>
   )

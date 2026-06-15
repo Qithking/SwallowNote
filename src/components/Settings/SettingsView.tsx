@@ -243,6 +243,35 @@ function SettingsView() {
           }),
         )
       }
+      // Plan C: reconcile the JS-side storage meter with
+      // the post-import filesystem state. The import wrote
+      // fresh `storage.json` files outside the JS delta
+      // path, so the tracker would otherwise keep showing
+      // the pre-import size. We re-seed the whole tracker
+      // (`get_all_plugin_storage_sizes` is one metadata
+      // stat per plugin — sub-millisecond) rather than
+      // re-statting just the imported ones: the import may
+      // have *removed* `storage.json` for plugins not in
+      // the bundle, and re-seeding catches that case too.
+      //
+      // Plan B's file watcher will also fire here, but with
+      // a 500 ms debounce and a per-event roundtrip; doing
+      // a single bulk re-seed is faster and idempotent.
+      const ok = result.entries
+        .filter((entry) => entry.status === 'ok')
+        .map((entry) => entry.plugin_id)
+      if (ok.length > 0) {
+        const { seedPluginStorageSizes } = await import('@/lib/plugin-telemetry')
+        const { getAllPluginStorageSizes } = await import('@/lib/tauri')
+        try {
+          const sizes = await getAllPluginStorageSizes()
+          seedPluginStorageSizes(sizes)
+        } catch (err) {
+          // Non-fatal — the file-watcher subscription
+          // (Plan B) will catch up within ~500 ms.
+          console.warn('[Settings] failed to re-seed storage sizes after import:', err)
+        }
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       toast.error(message)

@@ -1004,6 +1004,14 @@ body, #root {
   background: linear-gradient(to right, var(--pa-accent), var(--pa-accent-2));
   border-radius: 999px;
 }
+/* StorageMeter: a "real" data-driven bar that draws its
+ * own fill via an absolutely-positioned inner div, so the
+ * default 34% ::after would lie about usage. Suppress it
+ * — we want the rail to be empty when there's no fill
+ * (cap unknown) and show 0% when usage is genuinely 0. */
+.pa-meter-bar--storage::after {
+  content: none;
+}
 .pa-meter-foot {
   font-family: var(--pa-font-mono);
   font-size: 9.5px;

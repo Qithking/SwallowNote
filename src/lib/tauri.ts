@@ -203,6 +203,94 @@ export async function getPluginStoragePath(pluginId: string): Promise<string> {
   return await invoke('get_plugin_storage_path', { pluginId })
 }
 
+/**
+ * Query the host for the on-disk size of every installed
+ * plugin's `storage.json`. Used at app startup to **seed** the
+ * in-memory `pluginStorageSize` counter in `plugin-telemetry` —
+ * the JS-side delta tracking starts at `0` on every fresh
+ * launch, so a plugin with a pre-existing `storage.json` from
+ * a previous session would otherwise show as `0 B` in the
+ * manager view's storage meter until the next write.
+ *
+ * Plugins without a `storage.json` (never written to) are
+ * returned as `0` and may be absent from the map. The host
+ * is best-effort: a missing `plugins/` dir is treated as
+ * "no plugins", not an error.
+ */
+export async function getAllPluginStorageSizes(): Promise<Record<string, number>> {
+  const raw = await invoke<Record<string, number>>('get_all_plugin_storage_sizes')
+  return raw ?? {}
+}
+
+/**
+ * Query the host for the **real** available bytes on the
+ * volume that hosts the plugin-storage tree. Replaces a
+ * previously hardcoded `100 * 1024 * 1024` literal in the
+ * plugin manager's storage meter — the user-visible cap is
+ * now `statvfs` / `GetDiskFreeSpaceExW` on the host side,
+ * not a magic number. Returns `null` if the host can't
+ * query the volume (path missing, permission denied, etc.),
+ * which the manager view treats as "unknown" and falls back
+ * to a UI-only baseline.
+ *
+ * Diagnostics: errors are logged to `console.warn` so the
+ * cause is visible in DevTools — historically the most
+ * common failure mode is a stale Rust binary (the command
+ * isn't registered, `invoke` throws "command not found",
+ * and the manager view silently shows "cap unknown"). The
+ * log line tells the user (or us, in a bug report) to
+ * rebuild the host binary.
+ */
+export async function getStorageCap(): Promise<number | null> {
+  try {
+    const raw = await invoke<number>('get_storage_cap')
+    if (typeof raw !== 'number' || raw <= 0) return null
+    return raw
+  } catch (err) {
+    // Log the underlying error rather than swallowing it.
+    // The previous version silently returned `null`, which
+    // made a stale-binary or permission issue look
+    // indistinguishable from a sandboxed environment.
+    // Common causes:
+    //   1. Stale Rust binary (most common during dev):
+    //      `get_storage_cap` not registered → invoke
+    //      throws. Rebuild the host: `cargo tauri dev`
+    //      (auto-rebuild) or `cargo build --release`.
+    //   2. Permission denied on the volume root (rare;
+    //      macOS sandboxed bundle without `com.apple.security.files.user-selected.read-only`).
+    //   3. Unsupported filesystem (e.g. some network mounts
+    //      return `ENOSYS` for `statvfs`).
+    // The UI cannot recover from any of these, but a
+    // visible log line is essential for debugging.
+    console.warn(
+      '[plugin-storage] getStorageCap() failed — storage meter will show "cap unknown". ' +
+        'If this is unexpected, try rebuilding the host binary (cargo tauri dev).',
+      err,
+    )
+    return null
+  }
+}
+
+/**
+ * Stat a single plugin's `storage.json` and return its size in
+ * bytes. Used by the file-watcher handler in `App.tsx` to
+ * refresh the meter on external changes. Returns `0` if the
+ * file doesn't exist (e.g. plugin just uninstalled).
+ */
+export async function getPluginStorageSize(pluginId: string): Promise<number> {
+  try {
+    const path = await getPluginStoragePath(pluginId)
+    const meta = await invoke<{ file_size: number }>('get_file_metadata', { path })
+    return meta?.file_size ?? 0
+  } catch {
+    // Plugin may have been uninstalled mid-flight, or the file
+    // may not exist yet for newly-installed plugins. Either
+    // way, treat as 0 — the next refresh will pick up real
+    // values.
+    return 0
+  }
+}
+
 export async function writeBinaryFile(path: string, data: string): Promise<void> {
   await invoke('write_binary_file', { path, data })
 }

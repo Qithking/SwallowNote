@@ -251,20 +251,20 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
   const healthBadge = useMemo(() => {
     if (health === 'unhealthy') {
       return {
-        cls: 'pa-market-badge is-unhealthy',
+        cls: 'pa-market-badge is-unhealthy inline-flex items-center',
         label: t('plugin.pa.card.healthUnhealthy', { defaultValue: 'Unhealthy' }),
         Icon: HeartPulse,
       }
     }
     if (health === 'healthy') {
       return {
-        cls: 'pa-market-badge is-healthy',
+        cls: 'pa-market-badge is-healthy inline-flex items-center',
         label: t('plugin.pa.card.healthHealthy', { defaultValue: 'Healthy' }),
         Icon: CheckCircle2,
       }
     }
     return {
-      cls: 'pa-market-badge is-unknown',
+      cls: 'pa-market-badge is-unknown inline-flex items-center',
       label: t('plugin.pa.card.healthUnknown', { defaultValue: 'Unknown' }),
       Icon: HelpCircle,
     }

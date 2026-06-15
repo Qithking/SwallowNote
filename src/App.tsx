@@ -147,6 +147,36 @@ function App() {
           // plugins that are now loading cleanly.
           usePluginStore.getState().setLoadFailures(failures)
           usePluginStore.getState().setLoaded(true)
+          // Plan A: seed the per-plugin storage size tracker
+          // with authoritative byte counts from the host. The
+          // JS-side delta tracker starts at 0 on every fresh
+          // launch, so without this seed a plugin with a pre-
+          // existing `storage.json` would show `0 B` in the
+          // manager view's storage meter until its next write.
+          // See `seedPluginStorageSizes` for the rationale.
+          const { seedPluginStorageSizes } = await import('@/lib/plugin-telemetry')
+          const { getAllPluginStorageSizes } = await import('@/lib/tauri')
+          void getAllPluginStorageSizes()
+            .then((sizes) => seedPluginStorageSizes(sizes))
+            .catch((err) => {
+              // Non-fatal: the meter will still come up at 0 B
+              // and populate on the next `set/delete/clear`.
+              // Don't surface to the user — this is a host
+              // probe, not a plugin operation.
+              console.warn('[App] failed to seed plugin storage sizes:', err)
+            })
+          // Plan B: subscribe to host-emitted
+          // `plugin-storage-changed` events so the meter
+          // reconciles after any write that bypasses the
+          // JS-side delta path (import from a bundle zip,
+          // manual edit, restore from backup). The
+          // subscription is module-singleton inside
+          // `plugin-telemetry`, so multiple calls collapse
+          // to one listen handle.
+          const { subscribeToPluginStorageChanges } = await import('@/lib/plugin-telemetry')
+          void subscribeToPluginStorageChanges().catch((err) => {
+            console.warn('[App] failed to subscribe to plugin storage changes:', err)
+          })
           // Hydrate the in-memory permission guard from localStorage
           // now that we know the full installed-plugin set. The guard
           // is what the event bus, storage, and backend IPC consult
