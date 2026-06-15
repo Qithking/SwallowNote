@@ -289,6 +289,13 @@ export interface PluginDefinition {
   settings?: ComponentType<PluginPanelProps>
   pluginPath: string
   hasBackend: boolean
+  /**
+   * Permissions this plugin needs from the host. Listed values must
+   * match `PluginPermission`; the host shows the user a grant/revoke
+   * dialog at install time and re-checks on every protected call.
+   * A plugin that omits this field gets a default of `[]`.
+   */
+  permissions?: PluginPermission[]
   hooks?: {
     onLoad?: PluginLifecycleHook
     onUnload?: PluginLifecycleHook
@@ -671,17 +678,86 @@ export function buildPluginContext(plugin: Pick<PluginDefinition, 'id' | 'plugin
   }
 }
 
-/** Run a lifecycle hook, await async ones, swallow errors. */
+/** Options for `runLifecycleHook`. */
+export interface RunLifecycleHookOptions {
+  /**
+   * If set, the hook is rejected with a `PluginLifecycleTimeoutError`
+   * after this many milliseconds. The host uses a 5s default to
+   * bound the damage a wedged plugin can do; standalone previews
+   * can leave it unset (no timeout) so a `debugger` statement in a
+   * dev session doesn't immediately throw.
+   */
+  timeoutMs?: number
+  /**
+   * If provided, called *before* the timeout fires — useful for
+   * surfacing the timeout as a toast / log line so the plugin
+   * author knows their hook overran. The default behaviour (no
+   * callback) still throws the timeout error after the wait.
+   */
+  onTimeout?: (elapsedMs: number) => void
+}
+
+/** Thrown by `runLifecycleHook` when the hook exceeds `timeoutMs`. */
+export class PluginLifecycleTimeoutError extends Error {
+  readonly name = 'PluginLifecycleTimeoutError'
+  constructor(public readonly elapsedMs: number, public readonly timeoutMs: number) {
+    super(`Plugin lifecycle hook exceeded ${timeoutMs}ms (elapsed ${elapsedMs}ms)`)
+  }
+}
+
+/**
+ * Run a lifecycle hook, await async ones, swallow errors. The hook
+ * receives a `PluginContext` so plugin authors can do meaningful
+ * work (e.g. register context-menu items, load persisted settings)
+ * without reaching for host-specific globals.
+ *
+ * When `opts.timeoutMs` is set, the hook is raced against a
+ * `setTimeout` — if the hook doesn't settle in time we throw
+ * `PluginLifecycleTimeoutError` so the host can mark the plugin
+ * unhealthy. Errors thrown synchronously by the hook are caught
+ * and logged (the SDK's policy is "lifecycle is best-effort,
+ * errors don't break the host"), matching the previous behaviour.
+ */
 export async function runLifecycleHook(
   hook: PluginLifecycleHook | undefined,
-  ctx: PluginContext
+  ctx: PluginContext,
+  opts: RunLifecycleHookOptions = {}
 ): Promise<void> {
   if (!hook) return
+  const { timeoutMs, onTimeout } = opts
+  if (timeoutMs === undefined) {
+    try {
+      await hook(ctx)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[plugin-sdk] lifecycle hook failed:`, err)
+    }
+    return
+  }
+  const start = Date.now()
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      const elapsed = Date.now() - start
+      onTimeout?.(elapsed)
+      reject(new PluginLifecycleTimeoutError(elapsed, timeoutMs))
+    }, timeoutMs)
+  })
   try {
-    await hook(ctx)
+    await Promise.race([hook(ctx), timeoutPromise])
   } catch (err) {
+    if (err instanceof PluginLifecycleTimeoutError) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[plugin-sdk] lifecycle hook timed out after ${timeoutMs}ms:`,
+        err
+      )
+      return
+    }
     // eslint-disable-next-line no-console
     console.error(`[plugin-sdk] lifecycle hook failed:`, err)
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
   }
 }
 
@@ -916,6 +992,63 @@ export function usePluginStorage<T = unknown>(
   )
 
   return [value, set]
+}
+
+/**
+ * Convenience helper for narrowing a panel prop down to the two
+ * handles plugins reach for most often (`store` and `events`).
+ *
+ * Equivalent to `const { store, events } = panel` but type-narrowed
+ * so accidental access to `close` / `invokeBackend` etc. doesn't
+ * leak into a hook body.
+ */
+export function usePluginServices(panel: PluginPanelProps): {
+  store: PluginStorage
+  events: PluginEventBus
+} {
+  return { store: panel.store, events: panel.events }
+}
+
+/**
+ * Live snapshot of every plugin command currently registered.
+ *
+ * In standalone mode this is backed by the in-process command
+ * registry (the same one `registerCommand` writes to). In host
+ * mode the host installs an override via `setHost` so the hook
+ * sees every command registered through the host's
+ * permission-checked registry — including those from plugins that
+ * use the host's internal `plugin-commands` module directly.
+ *
+ * Filters out entries whose `when()` predicate returns false
+ * (e.g. a "Commit" command hiding outside a git workspace). The
+ * registry keeps the hidden entry so a later re-render with a
+ * changed `when()` flips visibility back on without re-registering.
+ */
+export function usePluginCommands(): PluginCommand[] {
+  const [commands, setCommands] = useState<PluginCommand[]>(() =>
+    listPluginCommands()
+  )
+
+  useEffect(() => {
+    const refresh = () => {
+      const next = listPluginCommands().filter((cmd) => {
+        if (cmd.when) {
+          try {
+            return cmd.when()
+          } catch {
+            // A buggy `when()` must not blow up the whole palette.
+            return true
+          }
+        }
+        return true
+      })
+      setCommands(next)
+    }
+    refresh()
+    return subscribePluginCommands(refresh)
+  }, [])
+
+  return commands
 }
 
 /** Subscribe to a single host event. */

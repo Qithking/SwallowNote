@@ -25,6 +25,7 @@ import type {
 } from '@/types/plugin'
 import { getPluginStoragePath, pathExists, readFile, writeFile } from './tauri'
 import { assertPermission } from './plugin-permission-guard'
+import { buildPluginContext as sdkBuildPluginContext } from '@swallow-note/plugin-sdk'
 
 // ─── Event bus ─────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,20 @@ type AnyHandler = PluginEventHandler<PluginEvent>
  */
 class PluginEventBusImpl implements PluginEventBus {
   private readonly handlers = new Map<PluginEvent, Set<AnyHandler>>()
+  /**
+   * Monotonic counter incremented every time a plugin's handlers
+   * are torn down via `removeAllListenersForPlugin`. Captured at
+   * the start of `emit`; the async telemetry callback compares the
+   * captured value against the *current* value for each plugin and
+   * skips the record if the plugin was uninstalled between the
+   * synchronous dispatch and the async import completing.
+   *
+   * We track per-plugin "torn down since" counts (not a single
+   * global epoch) because one plugin being uninstalled must not
+   * invalidate telemetry for other plugins' handlers that were
+   * dispatched in the same `emit` call.
+   */
+  private readonly tornDownSince = new Map<string, number>()
   // Optional per-handler metadata stashed by callers (e.g. usePluginEvent)
   // for metrics attribution. The bus only reads this in emit(); it never
   // writes. We use a duck-typed `__pluginId` field on the handler itself
@@ -119,6 +134,30 @@ class PluginEventBusImpl implements PluginEventBus {
         }
       }
     }
+    // Bump the per-plugin "torn down since" counter so any in-flight
+    // async `emit` telemetry callback can detect it was uninstalled
+    // mid-dispatch and skip the record. (The handler set is the
+    // authoritative state; the counter is a derived accounting
+    // signal for the async path that runs after `set` is empty.)
+    this.tornDownSince.set(
+      pluginId,
+      (this.tornDownSince.get(pluginId) ?? 0) + 1,
+    )
+  }
+
+  /**
+   * Snapshot the "torn down since" counter for a plugin at the
+   * moment of dispatch. Telemetry callbacks compare the captured
+   * value against the *current* one and skip if it advanced (i.e.
+   * the plugin was uninstalled between the sync dispatch and the
+   * async import completing).
+   */
+  private snapshotTornDown(pluginId: string): number {
+    return this.tornDownSince.get(pluginId) ?? 0
+  }
+
+  private wasTornDownSince(pluginId: string, snapshot: number): boolean {
+    return (this.tornDownSince.get(pluginId) ?? 0) !== snapshot
   }
 
   /**
@@ -132,13 +171,17 @@ class PluginEventBusImpl implements PluginEventBus {
     // We aggregate durations/errors across the handler loop and emit one
     // record per (pluginId, event) pair at the end.
     const dispatchStart = performance.now()
-    const perPlugin = new Map<string, { durationMs: number; errors: number }>()
+    const perPlugin = new Map<string, { durationMs: number; errors: number; tornDownSnap: number }>()
     const hostOwner = 'host' // default attribution when handler has no plugin meta
     // Snapshot the set so handlers that subscribe/unsubscribe during
     // dispatch don't mutate the iteration target.
     for (const handler of Array.from(set)) {
       const owner = this.readPluginId(handler as unknown as { __pluginId?: string }) ?? hostOwner
-      const stats = perPlugin.get(owner) ?? { durationMs: 0, errors: 0 }
+      const stats = perPlugin.get(owner) ?? {
+        durationMs: 0,
+        errors: 0,
+        tornDownSnap: this.snapshotTornDown(owner),
+      }
       const start = performance.now()
       try {
         ;(handler as PluginEventHandler<E>)(payload)
@@ -162,6 +205,13 @@ class PluginEventBusImpl implements PluginEventBus {
         }
       })()
       for (const [pid, stats] of perPlugin) {
+        // Skip telemetry for plugins that were uninstalled between the
+        // sync dispatch and this async callback landing. The handler
+        // set is already empty for them but the metrics collector
+        // would otherwise attribute the call to a torn-down plugin.
+        if (this.wasTornDownSince(pid, stats.tornDownSnap)) {
+          continue
+        }
         recordEventMetric(
           pid,
           event,
@@ -558,11 +608,16 @@ export async function getPluginStorageEntries(
  * are JS-side only and run on the same side as the plugin module.
  * Backend IPC is for the panel itself and is exposed via
  * `PluginPanelProps.invokeBackend`.
+ *
+ * Implemented in terms of the SDK's `buildPluginContext` so the
+ * context shape stays in lockstep with what plugin code sees
+ * during `onLoad` / `onEnable` etc. The host override is just
+ * the lifecycle-hooks-aren't-allowed-to-call-backends policy.
  */
 export function buildPluginContext(plugin: PluginDefinition): PluginContext {
+  const ctx = sdkBuildPluginContext(plugin)
   return {
-    pluginId: plugin.id,
-    pluginPath: plugin.pluginPath,
+    ...ctx,
     invokeBackend: async () => {
       throw new Error(
         `Backend IPC not available to lifecycle hooks (plugin_id=${plugin.id})`
@@ -621,6 +676,12 @@ export function emitPluginEvent<E extends PluginEvent>(
 // inference without a generic at every emit. The payload is computed
 // inside the helper to make it impossible to construct a malformed
 // event by mistake (e.g. swapping noteId and path).
+//
+// The host owns the global `pluginEventBus`; these helpers emit
+// straight into it (no SDK detour). They are kept as the canonical
+// public API for host-side callers (e.g. the editor store fires
+// `emitNoteChanged` on every keystroke) and stay in this file
+// because they need a write side-effect, not just a re-export.
 
 export function emitNoteOpened(noteId: string, path: string): void {
   pluginEventBus.emit('note:open', { noteId, path })

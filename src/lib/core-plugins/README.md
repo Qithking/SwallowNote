@@ -5,6 +5,18 @@ auto-loaded** — they exist as a small, well-commented reference library
 for plugin authors and as a smoke test for the host's lifecycle, event,
 storage, and context-menu APIs.
 
+## Zero host coupling
+
+Every `.tsx` in this directory imports **only** from
+`@swallow-note/plugin-sdk`. No host internals (`@/lib/plugin-*`,
+`@/types/plugin`, ...) appear. A plugin author can copy any of these
+files into a fresh `docs/plugin-template` project and have it run
+unchanged in the browser preview, the standalone build, and the host.
+
+This is the contract that makes "future plugin development never
+touches host code" possible. If you need a new capability, add an
+export to the SDK first.
+
 ## Layout
 
 ```

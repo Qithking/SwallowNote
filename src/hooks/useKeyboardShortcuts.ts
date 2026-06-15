@@ -424,17 +424,23 @@ export function useKeyboardShortcuts() {
       for (const [bindingKey, value] of Object.entries(bindings)) {
         if (!value) continue
         if (!matchShortcut(e, value)) continue
-        const lastColon = bindingKey.lastIndexOf(':')
-        if (lastColon <= 0) continue
-        const commandId = bindingKey.slice(lastColon + 1)
+        // `bindingKey` is encoded by `useUIStore` as
+        // `${pluginId}:${commandId}`. `validate_plugin_id` rejects
+        // `:` inside the plugin id, so the *first* colon is a
+        // reliable separator — we deliberately use `indexOf` here
+        // (not `lastIndexOf`) so a commandId that itself contains
+        // `:` (legal) doesn't get sliced into the pluginId.
+        const firstColon = bindingKey.indexOf(':')
+        if (firstColon <= 0) continue
+        const pluginId = bindingKey.slice(0, firstColon)
+        const commandId = bindingKey.slice(firstColon + 1)
         const registered = listPluginCommands().find(
           (cmd) =>
             cmd.id === commandId &&
             // Stamp carried on the registry entry; see
             // `RegisteredPluginCommand` in
             // `src/lib/plugin-commands.ts`.
-            (cmd as { __pluginId?: string }).__pluginId ===
-              bindingKey.slice(0, lastColon)
+            (cmd as { __pluginId?: string }).__pluginId === pluginId
         )
         if (!registered) continue
         e.preventDefault()

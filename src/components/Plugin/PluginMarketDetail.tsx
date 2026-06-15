@@ -273,6 +273,13 @@ export function PluginMarketDetail({
   }
 
   const onInstall = async () => {
+    // Early guard against double-clicks landing in the same render
+    // cycle. The button's `disabled` prop already covers the slow
+    // case (state has flipped to `isInstalling` by the time React
+    // re-renders) but a synchronous double-click before any state
+    // update commits would otherwise queue two installs and
+    // produce two success toasts for the same plugin.
+    if (isInstalling || installingVersion !== null) return
     setError(null)
     // Re-check at click time: the user might have updated the
     // store via the install manager tab between the resolution
@@ -407,6 +414,13 @@ export function PluginMarketDetail({
    * not per version).
    */
   const onInstallVersion = async (version: PluginIndexEntryVersion) => {
+    // Same early guard as `onInstall`: don't queue a second per-version
+    // install while the first one is still in flight, and don't
+    // race against a top-level install. `version.version` is the
+    // natural idempotency key for the per-version entry point.
+    if (isInstalling || installingVersion !== null || isRolling !== null) {
+      return
+    }
     setError(null)
     setInstallingVersion(version.version)
     let installedMeta: PluginMetadataRust | null = null
@@ -443,6 +457,14 @@ export function PluginMarketDetail({
   }
 
   const onRollback = async (version: string) => {
+    // Rollback must not race with another install or another
+    // rollback. The row's `disabled` prop already covers the slow
+    // case; this catches the synchronous double-click window
+    // (React hasn't re-rendered yet) and prevents the UI from
+    // showing two "Rollback in progress" badges.
+    if (isInstalling || installingVersion !== null || isRolling !== null) {
+      return
+    }
     setError(null)
     setIsRolling(version)
     try {

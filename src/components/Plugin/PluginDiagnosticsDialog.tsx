@@ -16,7 +16,7 @@
  * The footer offers `Rescan` (clear + repoll) and `Export bundle`
  * (download the diagnostic bundle JSON via the host).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { X, RefreshCw, Download, Activity } from 'lucide-react'
 import {
@@ -28,6 +28,8 @@ import {
   getAllPluginMetrics,
   getEventMetrics,
   clearAllMetrics,
+  getMetricsVersion,
+  subscribeToMetricsVersion,
   type PluginMetrics,
 } from '@/lib/plugin-telemetry'
 import { downloadDiagnosticBundle } from '@/lib/plugin-diagnostics'
@@ -41,6 +43,17 @@ export function PluginDiagnosticsDialog({ open, onOpenChange }: PluginDiagnostic
   const { t } = useTranslation()
   const [snapshot, setSnapshot] = useState<PluginMetrics[]>([])
   const [scanTime, setScanTime] = useState<Date>(new Date())
+  // Subscribe to the global metrics version so the dialog auto-refreshes
+  // the moment a new record lands, instead of waking on a 2s timer.
+  // `subscribeToMetricsVersion` is `useSyncExternalStore`-compatible:
+  // every `recordX(...)` call bumps `metricsVersion`, which causes
+  // `useSyncExternalStore` to schedule a re-render. The two-arg
+  // form (`subscribe`, `getSnapshot`) is sufficient — the value
+  // itself is just a counter, so there's no per-render allocation.
+  const metricsVersion = useSyncExternalStore(
+    subscribeToMetricsVersion,
+    getMetricsVersion,
+  )
 
   useEffect(() => {
     if (!open) return
@@ -49,9 +62,12 @@ export function PluginDiagnosticsDialog({ open, onOpenChange }: PluginDiagnostic
       setScanTime(new Date())
     }
     refresh()
-    const interval = setInterval(refresh, 2000)
-    return () => clearInterval(interval)
-  }, [open])
+    // No setInterval: `metricsVersion` changes trigger the next
+    // render, and the effect below re-runs `refresh` whenever it
+    // ticks. `open` is in the dep list so we still seed on open
+    // even when the user just opened a dialog and no record has
+    // landed since the last close.
+  }, [open, metricsVersion])
 
   const totals = useMemo(() => {
     const events = getEventMetrics()
