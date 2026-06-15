@@ -518,6 +518,25 @@ export interface PluginIndexEntryVersion {
   version: string
   downloadUrl: string
   sha256: string
+  /**
+   * Bug 1: per-version ed25519 signature over the *version's* zip
+   * bytes. Optional — the install pipeline falls back to
+   * `PluginIndexEntry.signatureB64` when this is missing, which
+   * preserves backward compatibility with indexes that pre-date
+   * the per-version protocol. Going forward, multi-version
+   * plugins should set this on every row of `versions[]`; the
+   * entry-level signature should be reserved for the *latest*
+   * version's bytes so the marketplace's "Install latest" path
+   * still verifies even when the user is loading an index that
+   * hasn't been re-signed per release yet.
+   */
+  signatureB64?: string
+  /**
+   * Optional per-version pubkey override. Falls back to
+   * `PluginIndexEntry.pubkeyB64`, then `PluginIndex.pubkeyB64`,
+   * via `effectivePubkey` at the install call site.
+   */
+  pubkeyB64?: string
   changelog: string
   publishedAt: string
 }

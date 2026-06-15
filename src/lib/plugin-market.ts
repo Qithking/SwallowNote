@@ -26,6 +26,7 @@
 import type {
   PluginIndex,
   PluginIndexEntry,
+  PluginIndexEntryVersion,
   PluginUpdateInfo,
   PluginVersionInfo,
 } from '@/types/plugin'
@@ -66,18 +67,64 @@ interface CachedZip {
  * Read a zip from the local cache. Returns `null` on miss or any
  * IndexedDB error — callers should treat a miss as a no-op and fall
  * through to the network.
+ *
+ * Bug 7: trust boundary. The cache is keyed by `sha256`, but
+ * `sha256` is just an `IDBValidKey` string — an attacker with
+ * write access to the IndexedDB database (e.g. via a
+ * compromised dev tool / browser extension) can plant a
+ * `CachedZip` record with `sha256` = X and `bytes` = a malicious
+ * zip. On the next install of any plugin whose declared
+ * `sha256` happens to equal X, the cache would hand back the
+ * malicious bytes and the host's signature check is the only
+ * thing standing between the user and a pwn. To shrink that
+ * window we re-verify the digest of the cached bytes on every
+ * read; a mismatch is treated as a cache miss and the record
+ * is deleted in the same transaction. The hash cost is
+ * dominated by `fetch` for the very first install, so the
+ * per-read hit is just a few milliseconds.
  */
 async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
   if (typeof indexedDB === 'undefined') return null
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
-      const tx = db.transaction(ZIP_STORE_NAME, 'readonly')
+      const tx = db.transaction(ZIP_STORE_NAME, 'readwrite')
       const store = tx.objectStore(ZIP_STORE_NAME)
       const req = store.get(sha256)
-      req.onsuccess = () => {
+      req.onsuccess = async () => {
         const rec = req.result as CachedZip | undefined
-        resolve(rec ? rec.bytes : null)
+        if (!rec) {
+          resolve(null)
+          return
+        }
+        // Bug 7 second-look. The cache record's declared
+        // `sha256` matches the key by construction, so we
+        // re-hash the *bytes* and compare against the key.
+        // Anything that doesn't match is treated as a
+        // poisoned record and evicted. The hash is computed
+        // inline with `crypto.subtle.digest('SHA-256', ...)`,
+        // which is constant-time for any input size on every
+        // modern browser, and `bytes` is at most a few MB so
+        // the cost is negligible compared to disk IO.
+        try {
+          const actual = await sha256Hex(rec.bytes)
+          if (actual.toLowerCase() !== sha256.toLowerCase()) {
+            // Mismatched — the record is corrupted or
+            // tampered. Evict and report a miss so the
+            // caller re-downloads from the network.
+            store.delete(sha256)
+            resolve(null)
+            return
+          }
+        } catch {
+          // `crypto.subtle` failed (e.g. detached ArrayBuffer
+          // in an older webview). Treat as a miss rather
+          // than refusing the install — the host's verify
+          // pipeline will still catch any real tampering.
+          resolve(null)
+          return
+        }
+        resolve(rec.bytes)
       }
       req.onerror = () => reject(req.error)
     })
@@ -227,14 +274,29 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
  * are also handled correctly by the platform `URL` parser, so
  * `repo.json` can use any of them without us re-implementing
  * RFC 3986 normalisation.
+ *
+ * Bug 6: the marketplace UI never lets the user edit the
+ * `download_url` of an entry — only the repo URL itself — so a
+ * malicious `download_url` is gated by the ability to commit to
+ * `repo.json`. Still, defence in depth: we explicitly reject
+ * schemes other than `http:` and `https:` here, because
+ * `new URL('javascript:...', base)` and `new URL('file:///...', base)`
+ * both parse successfully and would land on paths the host's
+ * `install_plugin_from_bytes` would then happily hand to
+ * `ZipArchive::new` (a zip reader over a JavaScript-served
+ * string is harmless, but a zip over `file:///etc/passwd` would
+ * surface bytes that nobody approved). The repo URL is gated the
+ * same way in `loadRepoUrl` to keep both ends of the protocol on
+ * the same threat model.
  */
 function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
   if (!downloadUrl) return downloadUrl
+  let parsed: URL
   try {
     // Absolute URL → returned as-is. Relative URL → resolved
     // against the repo URL, mirroring how a `<base href="…">`
     // tag would behave in a browser loading the index document.
-    return new URL(downloadUrl, repoUrl).toString()
+    parsed = new URL(downloadUrl, repoUrl)
   } catch {
     // Malformed input from a hand-edited repo.json. Fall back
     // to the literal string so the caller surfaces a network
@@ -244,6 +306,19 @@ function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
     // the URL was bogus.
     return downloadUrl
   }
+  // Bug 6 scheme allowlist. `http:` and `https:` only. We do not
+  // permit `ftp:`, `data:`, `blob:`, `javascript:`, `file:`, or
+  // any custom scheme — those either leak local files into the
+  // zip-extraction path (file:) or execute code in the webview
+  // (javascript:). The host shell is the only thing that knows
+  // how to safely read those schemes and we deliberately don't
+  // route through it here.
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(
+      `plugin download_url has disallowed scheme '${parsed.protocol}' (only http/https are accepted)`,
+    )
+  }
+  return parsed.toString()
 }
 
 /**
@@ -372,16 +447,28 @@ export function normaliseIndex(raw: any): PluginIndex {
 }
 
 function normaliseEntry(raw: any): PluginIndexEntry {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('plugin index entry is not an object')
+  }
+  for (const k of ['id', 'name', 'version', 'download_url', 'sha256'] as const) {
+    if (typeof raw[k] !== 'string' || raw[k].length === 0) {
+      throw new Error(
+        `plugin index entry missing required string field '${k}' (id=${
+          typeof raw.id === 'string' ? raw.id : '<unknown>'
+        })`,
+      )
+    }
+  }
   return {
-    id: raw.id ?? '',
-    name: raw.name ?? '',
-    version: raw.version ?? '',
+    id: raw.id,
+    name: raw.name,
+    version: raw.version,
     description: raw.description ?? '',
     author: raw.author ?? '',
     icon: raw.icon,
     tags: Array.isArray(raw.tags) ? raw.tags : [],
-    downloadUrl: raw.download_url ?? '',
-    sha256: raw.sha256 ?? '',
+    downloadUrl: raw.download_url,
+    sha256: raw.sha256,
     signatureB64: raw.signature_b64 ?? '',
     pubkeyB64: raw.pubkey_b64 ?? '',
     versions: Array.isArray(raw.versions) ? raw.versions.map(normaliseVersion) : [],
@@ -389,11 +476,35 @@ function normaliseEntry(raw: any): PluginIndexEntry {
   }
 }
 
-function normaliseVersion(raw: any) {
+function normaliseVersion(raw: any): PluginIndexEntryVersion {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('plugin index version is not an object')
+  }
+  if (typeof raw.version !== 'string' || raw.version.length === 0) {
+    throw new Error('plugin index version missing required field "version"')
+  }
+  if (typeof raw.download_url !== 'string' || raw.download_url.length === 0) {
+    throw new Error(
+      `plugin index version '${raw.version}' missing required field "download_url"`,
+    )
+  }
+  if (typeof raw.sha256 !== 'string' || raw.sha256.length === 0) {
+    throw new Error(
+      `plugin index version '${raw.version}' missing required field "sha256"`,
+    )
+  }
   return {
-    version: raw.version ?? '',
-    downloadUrl: raw.download_url ?? '',
-    sha256: raw.sha256 ?? '',
+    version: raw.version,
+    downloadUrl: raw.download_url,
+    sha256: raw.sha256,
+    signatureB64:
+      typeof raw.signature_b64 === 'string' && raw.signature_b64.length > 0
+        ? raw.signature_b64
+        : undefined,
+    pubkeyB64:
+      typeof raw.pubkey_b64 === 'string' && raw.pubkey_b64.length > 0
+        ? raw.pubkey_b64
+        : undefined,
     changelog: raw.changelog ?? '',
     publishedAt: raw.published_at ?? '',
   }

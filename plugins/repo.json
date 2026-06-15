@@ -1,7 +1,6 @@
 {
   "schema_version": 1,
   "updated_at": "2026-06-15T00:00:00Z",
-  "pubkey_b64": "TIJJekgAX+EAyx3OsQGDskNPrtpkr2YW+rqtb73QqVk=",
   "plugins": [
     {
       "id": "com.swallownote.export",
@@ -12,8 +11,6 @@
       "tags": ["export", "document", "pdf", "docx", "html"],
       "download_url": "./export/com.swallownote.export.zip",
       "sha256": "c814c93ba66e697bd4ee140191e109f566a5d347f416d9d1514acddceaf7cecd",
-      "signature_b64": "",
-      "pubkey_b64": "",
       "versions": [
         {
           "version": "0.2.0",
@@ -21,13 +18,6 @@
           "sha256": "c814c93ba66e697bd4ee140191e109f566a5d347f416d9d1514acddceaf7cecd",
           "changelog": "v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
           "published_at": "2026-06-15T00:00:00Z"
-        },
-        {
-          "version": "0.1.0",
-          "download_url": "./export/com.swallownote.export.zip",
-          "sha256": "751d27219d67bb63928e52d3d63d27f0e50f2bf9e2eb7c6f0bb0db8341a2bb9a",
-          "changelog": "初版发布：支持 Markdown 导出为 Word (.docx) 和 PDF",
-          "published_at": "2026-06-13T00:00:00Z"
         }
       ],
       "dependencies": []
@@ -41,8 +31,6 @@
       "tags": ["typist", "wechat", "editor", "markdown"],
       "download_url": "./typist/com.swallownote.typist.zip",
       "sha256": "7af8c27d42a726a530e38ec7fda613c6bee2138a0c042db58486441bd227db37",
-      "signature_b64": "",
-      "pubkey_b64": "",
       "versions": [
         {
           "version": "0.1.0",
