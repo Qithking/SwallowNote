@@ -563,16 +563,16 @@ export async function installPluginFromBytes(args: {
   version: string
   bytes: ArrayBuffer
   sha256: string
-  pubkeyB64: string
-  signatureB64: string
+  pubkeyB64?: string
+  signatureB64?: string
 }): Promise<PluginMetadataRust> {
   return invoke<PluginMetadataRust>('install_plugin_from_bytes', {
     pluginId: args.pluginId,
     version: args.version,
     bytes: Array.from(new Uint8Array(args.bytes)),
     sha256: args.sha256,
-    pubkeyB64: args.pubkeyB64,
-    signatureB64: args.signatureB64,
+    pubkeyB64: args.pubkeyB64 ?? '',
+    signatureB64: args.signatureB64 ?? '',
   })
 }
 

@@ -32,7 +32,7 @@ const manifest: PluginManifest = {
   author: 'SwallowNote',
   publishedAt: '2026-06-14',
   iconPosition: 'editorToolbar',
-  contentPosition: 'editorArea',
+  contentPosition: 'rightPanel',
   order: 40,
   enabled: true,
   // Note: `hasBackend` is read from `manifest.json` on disk by the host;

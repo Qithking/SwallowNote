@@ -1,24 +1,24 @@
 /**
  * Plugin Conflict Detection (Task 13 / G13)
  *
- * Scans the active plugin registry for collisions on three kinds of
- * identifiers:
+ * Scans the active plugin registry for collisions on one kind of
+ * identifier:
  *
- *   - `iconSlot`         — two enabled plugins declaring the same
- *                          `iconPosition` (sidebar / editorToolbar /
- *                          titleBar) would render two competing
- *                          icons in the same host chrome slot.
- *   - `contentPosition`  — two enabled plugins declaring the same
- *                          `contentPosition` (leftPanel /
- *                          rightPanel / fullPanel / editorArea)
- *                          would surface two competing panels in
- *                          the same host container.
  *   - `commandPalette`   — two plugins registering the same
  *                          commandPalette id would shadow each
  *                          other in the Ctrl+P palette. The
  *                          commandPalette manifest field is
  *                          optional; conflicts are only reported
  *                          for plugins that declared entries.
+ *
+ * Note: `iconPosition` (sidebar / editorToolbar / titleBar) and
+ * `contentPosition` (leftPanel / rightPanel / fullPanel / editorArea)
+ * are NOT considered conflicts:
+ *   - Multiple plugins can register icons in the same position and
+ *     they will be rendered in sorted order.
+ *   - Panels are displayed on-demand (user clicks a button), so
+ *     multiple plugins with the same contentPosition won't appear
+ *     simultaneously.
  *
  * Detection runs once per registry refresh (see
  * `stores/plugin.ts::setPlugins`) and the result is cached in the
@@ -37,7 +37,7 @@ import type { PluginDefinition } from '@/types/plugin'
 /** What kind of identifier collided. Mirrors the language used in
  *  the design doc (`.trae/specs/plugin-management-gap-analysis/spec.md`)
  *  so the telemetry log line reads naturally to plugin authors. */
-export type PluginConflictKind = 'iconSlot' | 'contentPosition' | 'commandPalette'
+export type PluginConflictKind = 'commandPalette'
 
 /**
  * A single collision record. One `PluginConflict` describes the
@@ -97,26 +97,6 @@ export function detectPluginConflicts(
   const enabled = plugins.filter((p) => p.enabled)
 
   const conflicts: PluginConflict[] = []
-
-  // ── iconSlot ───────────────────────────────────────────────
-  // Group by `iconPosition`. The registry already uses the same
-  // key, so two plugins in the same group would render two
-  // competing icons in e.g. the sidebar rail.
-  const byIcon = new Map<string, string[]>()
-  for (const p of enabled) {
-    pushGroup(byIcon, p.iconPosition, p.id)
-  }
-  emitConflicts(conflicts, 'iconSlot', byIcon)
-
-  // ── contentPosition ────────────────────────────────────────
-  // Same idea, different axis. Two plugins with the same
-  // contentPosition (e.g. `leftPanel`) would both want to be
-  // the "currently active" panel in that container.
-  const byContent = new Map<string, string[]>()
-  for (const p of enabled) {
-    pushGroup(byContent, p.contentPosition, p.id)
-  }
-  emitConflicts(conflicts, 'contentPosition', byContent)
 
   // ── commandPalette ──────────────────────────────────────────
   // Each plugin can register multiple palette entries; flatten

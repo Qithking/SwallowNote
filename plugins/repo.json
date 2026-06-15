@@ -30,12 +30,12 @@
       "author": "SwallowNote",
       "tags": ["typist", "wechat", "editor", "markdown"],
       "download_url": "./typist/com.swallownote.typist.zip",
-      "sha256": "7af8c27d42a726a530e38ec7fda613c6bee2138a0c042db58486441bd227db37",
+      "sha256": "9137e4a074607d2ddf47310b1c27e7fa4ecbab49cf8bf0752c530468545ed05f",
       "versions": [
         {
           "version": "0.1.0",
           "download_url": "./typist/com.swallownote.typist.zip",
-          "sha256": "7af8c27d42a726a530e38ec7fda613c6bee2138a0c042db58486441bd227db37",
+          "sha256": "9137e4a074607d2ddf47310b1c27e7fa4ecbab49cf8bf0752c530468545ed05f",
           "changelog": "初版发布：5 套公众号主题、剪贴板三级降级、表格/代码/引用等 Markdown 元素支持",
           "published_at": "2026-06-14T00:00:00Z"
         }

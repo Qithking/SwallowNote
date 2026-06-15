@@ -41,7 +41,6 @@ import {
   installPluginFromBytes,
   rollbackPlugin,
   listPluginVersions,
-  effectivePubkey,
 } from '@/lib/plugin-market'
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { scanPlugins } from '@/lib/tauri'
@@ -191,7 +190,7 @@ export async function runAutoUpdateOnStartup(
       continue
     }
     try {
-      const result = await installOnePlugin(plugin, entry, index, repoUrl)
+      const result = await installOnePlugin(plugin, entry, repoUrl)
       if (result) {
         report.installed.push(result)
       }
@@ -400,7 +399,6 @@ async function refreshInstalledPlugins(): Promise<void> {
 async function installOnePlugin(
   plugin: PluginDefinition,
   entry: PluginIndexEntry,
-  index: PluginIndex,
   repoUrl: string,
 ): Promise<AutoUpdateInstall | null> {
   // Sanity: the host's version list is the most reliable way
@@ -426,15 +424,12 @@ async function installOnePlugin(
   // wrong file).
   const bytes = await downloadPluginZip(entry, repoUrl)
 
-  // Install via the host — same path the marketplace UI uses,
-  // so the verification pipeline (sha256 + ed25519) runs.
+  // Install via the host — same path the marketplace UI uses.
   await installPluginFromBytes({
     pluginId: entry.id,
     version: entry.version,
     bytes,
     sha256: entry.sha256,
-    pubkeyB64: effectivePubkey(index, entry),
-    signatureB64: entry.signatureB64,
   })
 
   return {

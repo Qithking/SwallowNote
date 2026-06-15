@@ -6,7 +6,7 @@
   "author": "SwallowNote",
   "publishedAt": "2026-06-14",
   "iconPosition": "editorToolbar",
-  "contentPosition": "editorArea",
+  "contentPosition": "rightPanel",
   "order": 40,
   "enabled": true,
   "hasBackend": true,

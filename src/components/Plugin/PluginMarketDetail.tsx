@@ -70,7 +70,6 @@ import {
   downloadPluginZip,
   downloadPluginVersion,
   installPluginFromBytes,
-  effectivePubkey,
   listPluginVersions,
   rollbackPlugin,
 } from '@/lib/plugin-market'
@@ -299,17 +298,11 @@ export function PluginMarketDetail({
     e: PluginIndexEntry
   ): Promise<PluginMetadataRust | null> => {
     const bytes = await downloadPluginZip(e, repoUrl)
-    const pubkeyB64 = effectivePubkey(index, e)
     return installPluginFromBytes({
       pluginId: e.id,
       version: e.version,
       bytes,
       sha256: e.sha256,
-      pubkeyB64,
-      // The "Install latest" path always verifies against the
-      // entry-level signature, which is documented as the
-      // signature over the latest version's zip bytes.
-      signatureB64: e.signatureB64,
     })
   }
 
@@ -467,27 +460,11 @@ export function PluginMarketDetail({
     let installedMeta: PluginMetadataRust | null = null
     try {
       const bytes = await downloadPluginVersion(entry.id, version, repoUrl)
-      // Bug 1: per-version protocol. The signature for an older
-      // release's zip bytes is a *different* 64-byte string from
-      // the signature over the latest version's zip bytes — the
-      // entry-level `entry.signatureB64` is bound to the *latest*
-      // version's zip, not the one we're about to install. We
-      // prefer the per-version signature (added in this protocol
-      // revision) and fall back to the entry-level one for
-      // backward-compat with indexes that pre-date the per-version
-      // field. The pubkey also has a per-version override slot
-      // (e.g. for key rotation across releases), so we mirror
-      // the same fallback chain.
-      const signatureB64 = version.signatureB64 ?? entry.signatureB64
-      const pubkeyB64 =
-        version.pubkeyB64 ?? effectivePubkey(index, entry)
       installedMeta = await installPluginFromBytes({
         pluginId: entry.id,
         version: version.version,
         bytes,
         sha256: version.sha256,
-        pubkeyB64,
-        signatureB64,
       })
       await reloadAfterInstall()
       await refreshUpdates()
