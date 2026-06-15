@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-15T00:00:00Z",
+  "updated_at": "2026-06-15T12:46:54Z",
   "plugins": [
     {
       "id": "com.swallownote.export",
@@ -8,38 +8,35 @@
       "version": "0.2.0",
       "description": "将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式",
       "author": "SwallowNote",
-      "tags": ["export", "document", "pdf", "docx", "html"],
-      "download_url": "./export/com.swallownote.export.zip",
-      "sha256": "c814c93ba66e697bd4ee140191e109f566a5d347f416d9d1514acddceaf7cecd",
-      "versions": [
-        {
-          "version": "0.2.0",
-          "download_url": "./export/com.swallownote.export.zip",
-          "sha256": "c814c93ba66e697bd4ee140191e109f566a5d347f416d9d1514acddceaf7cecd",
-          "changelog": "v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
-          "published_at": "2026-06-15T00:00:00Z"
-        }
+      "tags": [
+        "export",
+        "document",
+        "pdf",
+        "docx",
+        "html"
       ],
+      "download_url": "./export/com.swallownote.export.zip",
+      "sha256": "20f147bb3b1d24fabdd82287c0950a677e006355eb3be0e8b9a6d54ad5f4126b",
+      "changelog": "v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
+      "published_at": "2026-06-15T12:46:49Z",
       "dependencies": []
     },
     {
       "id": "com.swallownote.typist",
       "name": "公众号排版",
-      "version": "0.1.0",
+      "version": "0.1.1,
       "description": "将 Markdown 文档按微信公众号等平台主题排版，一键复制带样式的富文本到公众号编辑器",
       "author": "SwallowNote",
-      "tags": ["typist", "wechat", "editor", "markdown"],
-      "download_url": "./typist/com.swallownote.typist.zip",
-      "sha256": "9137e4a074607d2ddf47310b1c27e7fa4ecbab49cf8bf0752c530468545ed05f",
-      "versions": [
-        {
-          "version": "0.1.0",
-          "download_url": "./typist/com.swallownote.typist.zip",
-          "sha256": "9137e4a074607d2ddf47310b1c27e7fa4ecbab49cf8bf0752c530468545ed05f",
-          "changelog": "初版发布：5 套公众号主题、剪贴板三级降级、表格/代码/引用等 Markdown 元素支持",
-          "published_at": "2026-06-14T00:00:00Z"
-        }
+      "tags": [
+        "typist",
+        "wechat",
+        "editor",
+        "markdown"
       ],
+      "download_url": "./typist/com.swallownote.typist.zip",
+      "sha256": "d944e4ccb12a46387708654640bf972a926f6bc225210e2aff939aa4a578ac46",
+      "changelog": "初版发布：5 套公众号主题、剪贴板三级降级、表格/代码/引用等 Markdown 元素支持",
+      "published_at": "2026-06-15T12:46:43Z",
       "dependencies": []
     }
   ]

@@ -471,7 +471,15 @@ function normaliseEntry(raw: any): PluginIndexEntry {
     sha256: raw.sha256,
     signatureB64: raw.signature_b64 ?? '',
     pubkeyB64: raw.pubkey_b64 ?? '',
-    versions: Array.isArray(raw.versions) ? raw.versions.map(normaliseVersion) : [],
+    // Top-level changelog / publishedAt are the canonical
+    // release notes for the *latest* version (the only one the
+    // marketplace ships). Older indexes that pre-date this
+    // flattening may still carry a `versions[]` array; we keep
+    // that optional for back-compat and let the detail UI
+    // prefer it when present.
+    changelog: raw.changelog,
+    publishedAt: raw.published_at ?? raw.publishedAt,
+    versions: Array.isArray(raw.versions) ? raw.versions.map(normaliseVersion) : undefined,
     dependencies: Array.isArray(raw.dependencies) ? raw.dependencies : [],
   }
 }

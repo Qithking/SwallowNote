@@ -527,11 +527,13 @@ export function PluginMarketDetail({
 
   const isInstalled = localVersion != null
   const isUpdateAvailable = isInstalled && localVersion !== entry.version
-  // `entry.versions` is the wire-format list (newest first). Some
-  // older indexes may not ship it; the existing "is at least one
-  // version listed" check guards both the tab visibility and the
-  // per-row rendering below.
-  const hasVersionHistory = entry.versions.length > 0
+  // `entry.versions` is the optional wire-format list (newest first).
+  // Fresh publishes omit it (the marketplace only ships the latest
+  // artifact), so the array is `undefined` rather than `[]` in that
+  // case; we coerce to `[]` here to keep the rest of the render code
+  // agnostic to the optionality.
+  const versionHistory = entry.versions ?? []
+  const hasVersionHistory = versionHistory.length > 0
 
   // Stable count of declared dependencies, used to badge the
   // Dependencies tab in the strip so the user can tell at a
@@ -1112,8 +1114,11 @@ function ChangelogPanel({
   // Some entries ship `versions` but every row has an empty
   // changelog. Treat that as "no changelog content" so the
   // empty state appears, instead of rendering a list of bare
-  // version numbers.
-  const hasChangelogContent = entry.versions.some(
+  // version numbers. `entry.versions` is optional (the
+  // marketplace only ships the latest artifact) so we coerce
+  // to `[]` first.
+  const versionRows = entry.versions ?? []
+  const hasChangelogContent = versionRows.some(
     (v) => (v.changelog ?? '').trim().length > 0,
   )
 
@@ -1166,7 +1171,7 @@ function ChangelogPanel({
             </p>
           )}
           <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-            {entry.versions.map((v) => {
+            {versionRows.map((v) => {
               const isLatest = v.version === entry.version
               const isCurrentLocal = isInstalled && localVersion === v.version
               const isBusy = installingVersion === v.version

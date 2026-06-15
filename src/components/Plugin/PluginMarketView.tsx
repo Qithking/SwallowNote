@@ -561,9 +561,11 @@ const PluginMarketCard = memo(function PluginMarketCard({
 
   // Most-recent version is the first entry in the `versions` list
   // (the protocol documents it as "newest first"). Fall back to the
-  // entry's own `version` field for older indexes that don't ship
-  // a `versions` array.
-  const publishedAt = entry.versions?.[0]?.publishedAt ?? ''
+  // entry's own `version` / top-level `publishedAt` for fresh
+  // publishes that don't ship a `versions` array (the marketplace
+  // only carries the latest artifact, so `versions` is optional).
+  const publishedAt =
+    entry.versions?.[0]?.publishedAt ?? entry.publishedAt ?? ''
   // Memoize the formatted byline date. The plugin entry's
   // `versions` list doesn't change after the index is fetched, so
   // the date string is a pure function of `publishedAt` — caching

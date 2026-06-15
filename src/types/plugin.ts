@@ -510,7 +510,27 @@ export interface PluginIndexEntry {
   signatureB64: string
   /** Override the repo-level key (optional). */
   pubkeyB64: string
-  versions: PluginIndexEntryVersion[]
+  /**
+   * Optional human-readable changelog for the *latest* version.
+   * The marketplace only ships the latest artifact, so a single
+   * top-level field is enough; older indexes may still ship a
+   * `versions[]` array (kept optional for back-compat) with
+   * per-row notes, and the UI prefers that array when present.
+   */
+  changelog?: string
+  /** Optional ISO-8601 release timestamp for the latest version. */
+  publishedAt?: string
+  /**
+   * Optional historical release records. The marketplace only
+   * ships the *latest* version on disk, so `versions` is left
+   * empty for fresh publishes and a no-op for the install
+   * pipeline. Older indexes that carried full history still
+   * parse — the UI uses the per-row changelog / publishedAt
+   * when present, and falls back to the top-level
+   * `changelog` / `publishedAt` (see `PluginMarketView`)
+   * otherwise.
+   */
+  versions?: PluginIndexEntryVersion[]
   dependencies: string[]
 }
 

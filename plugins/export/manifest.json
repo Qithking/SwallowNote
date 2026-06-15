@@ -4,7 +4,7 @@
   "description": "将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式",
   "version": "0.2.0",
   "author": "SwallowNote",
-  "publishedAt": "2026-06-13",
+  "publishedAt": "2026-06-15T12:46:49Z",
   "iconPosition": "editorToolbar",
   "contentPosition": "editorArea",
   "order": 50,
