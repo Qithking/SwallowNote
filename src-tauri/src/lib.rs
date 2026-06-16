@@ -191,6 +191,9 @@ pub fn run() {
             commands::plugin::export_plugin_configs,
             commands::plugin::import_plugin_configs,
             commands::plugin_invoke::invoke_plugin,
+            commands::plugin_settings::read_plugin_settings,
+            commands::plugin_settings::write_plugin_settings,
+            commands::plugin_settings::delete_plugin_settings,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");

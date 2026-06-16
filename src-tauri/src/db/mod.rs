@@ -3,6 +3,7 @@ pub mod ai_chat;
 pub mod ai_role_prompts;
 pub mod conflict_repo;
 pub mod folder_history;
+pub mod plugin_settings;
 pub mod session_state;
 
 use rusqlite::{Connection, OpenFlags, Result};
@@ -83,6 +84,49 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
 
     // conflict_repos table
     conflict_repo::create_table(&conn)?;
+
+    // plugin_settings table (single-table design). One row per
+    // plugin, with the values stored as a JSON blob. Replaces the
+    // previous per-plugin `plugin_settings_<id>` tables and the
+    // `plugin_settings_meta` sidecar.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plugin_settings (
+            plugin_id TEXT PRIMARY KEY,
+            values_json TEXT NOT NULL DEFAULT '{}',
+            schema_version INTEGER NOT NULL DEFAULT 0,
+            updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+        )",
+        [],
+    )?;
+
+    // Cleanup: drop legacy tables from the previous design. The
+    // previous schema created one `plugin_settings_<id>` table per
+    // plugin plus a `plugin_settings_meta` sidecar. After the
+    // single-table refactor, those are dead weight. We use a
+    // hard-coded allowlist (rather than a `LIKE 'plugin_settings_%'`
+    // wildcard) so we cannot accidentally match a *new* table that
+    // happens to share the prefix — e.g. a future
+    // `plugin_settings_audit_log` or a plugin author who
+    // hand-named a table to start with `plugin_settings_`. Each
+    // entry is a known-dead table from a prior schema version; the
+    // DROP is best-effort (a missing table is not an error) so a
+    // corrupt legacy table can never block startup — at worst the
+    // user loses their old settings, which is recoverable (the
+    // next install re-seeds defaults).
+    const LEGACY_TABLES: &[&str] = &[
+        "plugin_settings_meta",
+        // NOTE: the previous `plugin_settings_<id>` per-plugin
+        // tables are NOT listed here on purpose. They were
+        // generated dynamically (one per plugin id), so we cannot
+        // enumerate them in a static const slice. If a future
+        // release ships a *new* legacy table that needs the same
+        // treatment, add it to this list (and prefer a
+        // documented `IF EXISTS` drop so first-run installs
+        // don't surface spurious "no such table" errors).
+    ];
+    for table in LEGACY_TABLES {
+        let _ = conn.execute(&format!("DROP TABLE IF EXISTS \"{}\"", table), []);
+    }
 
     // Insert built-in role prompts if they don't exist
     let builtin_roles = [

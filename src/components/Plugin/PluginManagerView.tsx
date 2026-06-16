@@ -36,7 +36,7 @@ import { usePluginStore, useUIStore, usePluginMarketStore } from '@/stores'
 import { useShallow } from 'zustand/react/shallow'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
-import { buildPluginContext, getPluginStorage, createPluginEventBus } from '@/lib/plugin-host'
+import { createPluginPanelProps } from '@/lib/plugin-utils'
 import { open } from '@tauri-apps/plugin-dialog'
 import { toast } from 'sonner'
 import {
@@ -49,6 +49,7 @@ import {
 import { PluginPanelHost } from './PluginPanelHost'
 import { PluginStatsRibbon } from './PluginStatsRibbon'
 import { PluginInstalledCard } from './PluginInstalledCard'
+import { PluginSettingsDialog } from './PluginSettingsDialog'
 import { VirtualizedCardGrid } from './VirtualizedCardGrid'
 import { memo } from 'react'
 import { PluginErrorBoundary } from './PluginErrorBoundary'
@@ -123,6 +124,10 @@ function PluginManagerView() {
   // uninstalled races with the close handler, so the open() guard
   // checks the plugin still exists in the store.
   const [settingsPlugin, setSettingsPlugin] = useState<PluginDefinition | null>(null)
+  // Schema-driven settings dialog target (settings.json). Same
+  // pattern: we keep the full reference so a concurrent uninstall
+  // can't take the plugin out from under the dialog.
+  const [schemaSettingsPlugin, setSchemaSettingsPlugin] = useState<PluginDefinition | null>(null)
   // Permission dialog target. Same pattern as settingsPlugin: we keep
   // the full reference so a concurrent uninstall can't take the
   // plugin out from under the dialog.
@@ -350,22 +355,23 @@ function PluginManagerView() {
    * always false. The plugin's own `close` closes the dialog.
    */
   const buildSettingsPanelProps = useCallback((plugin: PluginDefinition): PluginPanelProps => {
-    const ctx = buildPluginContext(plugin)
-    return {
-      pluginId: plugin.id,
-      isActive: false,
-      close: () => setSettingsPlugin(null),
-      invokeBackend: ctx.invokeBackend,
-      store: getPluginStorage(plugin.id),
-      events: createPluginEventBus(plugin.id),
-      activeNoteContent: '',
-      activeNotePath: '',
-    }
+    return createPluginPanelProps(
+      plugin.id,
+      false,
+      () => setSettingsPlugin(null),
+      '',
+      ''
+    )
   }, [])
 
   const openSettings = useCallback((plugin: PluginDefinition) => {
     if (!plugin.settings) return
     setSettingsPlugin(plugin)
+  }, [])
+
+  const openSchemaSettings = useCallback((plugin: PluginDefinition) => {
+    if (!plugin.hasSettingsSchema) return
+    setSchemaSettingsPlugin(plugin)
   }, [])
 
   const handleReload = useCallback(async () => {
@@ -671,6 +677,7 @@ function PluginManagerView() {
               onUninstall={handleUninstall}
               onUpdate={handleUpdatePlugin}
               onSettings={openSettings}
+              onOpenSchemaSettings={openSchemaSettings}
               onPermissions={openPermissions}
               onStorage={openStorage}
             />
@@ -752,6 +759,15 @@ function PluginManagerView() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── Schema-driven settings dialog (settings.json) ─── */}
+      <PluginSettingsDialog
+        pluginId={schemaSettingsPlugin?.id ?? ''}
+        open={schemaSettingsPlugin !== null}
+        onOpenChange={(open) => {
+          if (!open) setSchemaSettingsPlugin(null)
+        }}
+      />
 
       {/* ── Permission dialog – install-time flow ───────── */}
       <Suspense fallback={null}>
@@ -841,6 +857,12 @@ interface ManageTabProps {
   onUninstall: (plugin: PluginDefinition) => void
   onUpdate?: (plugin: PluginDefinition) => void
   onSettings: (plugin: PluginDefinition) => void
+  /**
+   * Open the schema-driven settings dialog (settings.json) for a
+   * plugin. The manager view owns the dialog state and passes the
+   * resolved `pluginId` down to the dialog.
+   */
+  onOpenSchemaSettings: (plugin: PluginDefinition) => void
   onPermissions: (plugin: PluginDefinition) => void
   /**
    * Open the per-plugin storage inspector (Task 6 / G6).
@@ -867,6 +889,7 @@ function ManageTab({
   onUninstall,
   onUpdate,
   onSettings,
+  onOpenSchemaSettings,
   onPermissions,
   onStorage,
 }: ManageTabProps) {
@@ -961,6 +984,7 @@ function ManageTab({
                 onUninstall={() => onUninstall(plugin)}
                 onUpdate={onUpdate ? () => onUpdate(plugin) : undefined}
                 onSettings={() => onSettings(plugin)}
+                onOpenSchemaSettings={() => onOpenSchemaSettings(plugin)}
                 onPermissions={() => onPermissions(plugin)}
                 onStorage={() => onStorage(plugin)}
               />

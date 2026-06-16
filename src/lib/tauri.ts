@@ -203,6 +203,72 @@ export async function getPluginStoragePath(pluginId: string): Promise<string> {
   return await invoke('get_plugin_storage_path', { pluginId })
 }
 
+// ============================================================================
+// Plugin settings (SQLite-backed). The host builds / migrates the per-plugin
+// table at install / update time, and exposes a thin read / write / delete
+// API here for the settings dialog and the plugin SDK.
+// ============================================================================
+
+/** Mirrors the Rust `PluginSettingsView`. */
+export interface PluginSettingsView {
+  exists: boolean
+  values: Record<string, unknown>
+  schema: PluginSettingsSchema | null
+}
+
+/** Mirrors the Rust `SettingsSchema`. */
+export interface PluginSettingsSchema {
+  version: number
+  title?: string
+  description?: string
+  fields: PluginSettingsField[]
+}
+
+export type PluginSettingsFieldType =
+  | 'string'
+  | 'string-multiline'
+  | 'number'
+  | 'boolean'
+  | 'select'
+  | 'color'
+  | 'directory'
+  | 'password'
+
+export interface PluginSettingsFieldOption {
+  value: unknown
+  label: string
+}
+
+export interface PluginSettingsField {
+  key: string
+  type: PluginSettingsFieldType
+  label: string
+  default?: unknown
+  required?: boolean
+  secret?: boolean
+  placeholder?: string
+  options?: PluginSettingsFieldOption[]
+}
+
+export async function readPluginSettings(
+  pluginId: string
+): Promise<PluginSettingsView> {
+  return await invoke<PluginSettingsView>('read_plugin_settings', {
+    pluginId,
+  })
+}
+
+export async function writePluginSettings(
+  pluginId: string,
+  values: Record<string, unknown>
+): Promise<void> {
+  await invoke('write_plugin_settings', { args: { pluginId, values } })
+}
+
+export async function deletePluginSettings(pluginId: string): Promise<void> {
+  await invoke('delete_plugin_settings', { pluginId })
+}
+
 /**
  * Query the host for the on-disk size of every installed
  * plugin's `storage.json`. Used at app startup to **seed** the

@@ -52,6 +52,9 @@ import {
   clearPluginCommands,
 } from './plugin-commands'
 import { assertPermission } from './plugin-permission-guard'
+import { writePluginSettings } from './tauri'
+import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
+import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
 
 /**
  * Default timeout (ms) applied to a plugin lifecycle hook. If a hook
@@ -157,6 +160,66 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
           recordBackendMetric(pluginId, cmd, durationMs, success, errorMsg)
         })
       }
+    },
+    // Plugin settings (SQLite-backed). The host bridges the SDK's
+    // `getSetting` / `setSetting` / `getAllSettings` / `onSettingsChange`
+    // to its real implementations; the standalone stub falls back to
+    // a per-plugin storage cache. `readSetting(view, key)` (from
+    // `@/lib/plugin-settings`) returns the stored value, then the
+    // schema default, then `null` — exactly the contract the SDK
+    // publishes. `saveSettings` (already imported through the
+    // cache) is called for the per-key write; it updates the host
+    // cache and writes through to SQLite.
+    __pluginSettings_get: async (id, key) => {
+      // The settings layer reuses the existing `storage`
+      // permission. Settings *are* a kind of storage and the
+      // schema-driven dialog is gated by the same grant; the
+      // host doesn't introduce a new `plugin-settings`
+      // permission kind to keep the install-time UX
+      // frictionless.
+      assertPermission(id, 'storage', `read plugin setting "${key}"`)
+      const view = await loadSettingsCache(id, true)
+      return readSetting(view, key)
+    },
+    __pluginSettings_set: async (id, key, value) => {
+      assertPermission(id, 'storage', `write plugin setting "${key}"`)
+      const view = await loadSettingsCache(id, true)
+      const next = { ...view.values, [key]: value }
+      await writePluginSettings(id, next)
+      // Fan the change out to every panel/toolbar instance of
+      // this plugin id. We dispatch the typed
+      // `plugin-settings:change` event on the global bus so a
+      // subscriber registered via `panel.onSettingsChange`
+      // picks up the new full map regardless of which instance
+      // wrote.
+      emitPluginSettingsChanged(id, next)
+    },
+    __pluginSettings_all: async (id) => {
+      assertPermission(id, 'storage', `read all plugin settings`)
+      const view = await loadSettingsCache(id, true)
+      return { ...view.values }
+    },
+    __pluginSettings_subscribe: (handler) => {
+      // The host's per-plugin event bus filters by `__pluginId`,
+      // so we tag the handler with the host's pluginId. The
+      // SDK stub does not perform this tag check – the host
+      // bus is the only one that needs it for the permission
+      // gate. We also need to read the settings on every
+      // emit because the payload only carries the values map;
+      // we re-read schema defaults on demand via the same
+      // cache the host uses for dialog renders. We hand the
+      // SDK a callback that always emits the latest map so
+      // subscribers get a stable, post-write snapshot.
+      const tagged = handler as unknown as { __pluginId?: string }
+      tagged.__pluginId = pluginId
+      // Subscribe via the per-plugin bus so the host's `events.on`
+      // permission gate runs (the SDK's `onSettingsChange` calls
+      // this override; the host owns the gate). We also wrap the
+      // call so the SDK only sees the values map, not the
+      // per-plugin envelope.
+      return pluginEvents.on('plugin-settings:change', (payload) => {
+        handler(payload)
+      })
     },
   }
 }

@@ -8,6 +8,7 @@ pub mod git;
 pub mod folder_history;
 pub mod plugin;
 pub mod plugin_invoke;
+pub mod plugin_settings;
 pub mod session_state;
 pub mod upgrade;
 

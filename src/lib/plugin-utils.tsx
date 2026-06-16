@@ -6,6 +6,12 @@ import type { SidebarView, RightPanelType } from '@/stores'
 import type { ContentPosition, PluginPanelProps, ToolbarButtonProps } from '@/types/plugin'
 import { getPluginStorage, createPluginEventBus } from './plugin-host'
 import { assertPermission } from './plugin-permission-guard'
+import { loadSettings, readSetting } from './plugin-settings'
+import { writePluginSettings } from './tauri'
+import {
+  emitPluginSettingsChanged,
+  onSettingsChange as sdkOnSettingsChange,
+} from '@swallow-note/plugin-sdk'
 
 /**
  * Detect whether `value` is a React component-like (function/class component,
@@ -190,6 +196,28 @@ export function createPluginPanelProps(
     events: createPluginEventBus(pluginId),
     activeNoteContent,
     activeNotePath,
+    // Schema-driven settings bridge. The host reads/writes through
+    // the per-plugin SQLite table and emits `plugin-settings:change`
+    // for every successful write; subscribers on the same plugin
+    // id pick up the new map regardless of which instance wrote.
+    getSetting: async <T = unknown>(key: string): Promise<T | null> => {
+      assertPermission(pluginId, 'storage', `read plugin setting "${key}"`)
+      const view = await loadSettings(pluginId, true)
+      return readSetting(view, key) as T | null
+    },
+    setSetting: async <T = unknown>(key: string, value: T): Promise<void> => {
+      assertPermission(pluginId, 'storage', `write plugin setting "${key}"`)
+      const view = await loadSettings(pluginId, true)
+      const next = { ...view.values, [key]: value }
+      await writePluginSettings(pluginId, next)
+      emitPluginSettingsChanged(pluginId, next)
+    },
+    getAllSettings: async (): Promise<Record<string, unknown>> => {
+      assertPermission(pluginId, 'storage', `read all plugin settings`)
+      const view = await loadSettings(pluginId, true)
+      return { ...view.values }
+    },
+    onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
   }
 }
 
@@ -237,6 +265,29 @@ export function createToolbarButtonProps(
     deactivate,
     activeNoteContent,
     activeNotePath,
+    // Schema-driven settings bridge – same shape as the panel
+    // version. Toolbar buttons sometimes toggle a single
+    // setting (e.g. "open the editor in dark mode") and need
+    // to read the current value, write a new one, and observe
+    // changes from other instances.
+    getSetting: async <T = unknown>(key: string): Promise<T | null> => {
+      assertPermission(pluginId, 'storage', `read plugin setting "${key}"`)
+      const view = await loadSettings(pluginId, true)
+      return readSetting(view, key) as T | null
+    },
+    setSetting: async <T = unknown>(key: string, value: T): Promise<void> => {
+      assertPermission(pluginId, 'storage', `write plugin setting "${key}"`)
+      const view = await loadSettings(pluginId, true)
+      const next = { ...view.values, [key]: value }
+      await writePluginSettings(pluginId, next)
+      emitPluginSettingsChanged(pluginId, next)
+    },
+    getAllSettings: async (): Promise<Record<string, unknown>> => {
+      assertPermission(pluginId, 'storage', `read all plugin settings`)
+      const view = await loadSettings(pluginId, true)
+      return { ...view.values }
+    },
+    onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
   }
 }
 

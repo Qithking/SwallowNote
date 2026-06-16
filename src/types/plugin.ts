@@ -138,6 +138,7 @@ export type PluginEvent =
   | 'settings:change'
   | 'app:ready'
   | 'app:exit'
+  | 'plugin-settings:change'
 
 /** Payload shape for each event. Add a new branch when introducing a new event. */
 export interface PluginEventPayloadMap {
@@ -150,6 +151,7 @@ export interface PluginEventPayloadMap {
   'settings:change': { key: string; value: unknown }
   'app:ready': Record<string, never>
   'app:exit': Record<string, never>
+  'plugin-settings:change': { pluginId: string; values: Record<string, unknown> }
 }
 
 /** Handler signature for an event subscription. */
@@ -385,6 +387,12 @@ export interface PluginDefinition {
   pluginPath: string
   /** Whether the plugin has a Rust backend */
   hasBackend: boolean
+  /**
+   * Whether the plugin ships a `settings.json` schema. When true,
+   * the card shows the schema-driven settings button next to the
+   * plugin-built-in `settings` component button.
+   */
+  hasSettingsSchema?: boolean
   /** Permissions declared by the plugin. These are requested during installation. */
   permissions: PluginPermission[]
   /** Plugin-to-plugin dependencies, normalised from the manifest
@@ -615,6 +623,36 @@ export interface PluginPanelProps {
   activeNoteContent: string
   /** Current active note file path. Empty string if no note is active. */
   activeNotePath: string
+  /**
+   * Read a single value from the plugin's `settings.json`-defined
+   * schema. The host reads from the per-plugin SQLite table; in
+   * standalone preview mode the SDK reads from a localStorage cache.
+   * Returns the stored value, the schema default, or `null` if
+   * neither is set.
+   */
+  getSetting<T = unknown>(key: string): Promise<T | null>
+  /**
+   * Persist a single setting key. Writes through to the host
+   * (SQLite) and fires `plugin-settings:change` on the bus so other
+   * panel/toolbar instances pick up the new value. In standalone
+   * mode the stub updates the in-process cache and notifies local
+   * subscribers.
+   */
+  setSetting<T = unknown>(key: string, value: T): Promise<void>
+  /**
+   * Read every stored setting for this plugin. Useful for seeding
+   * local state on mount. Returns the stored values map, falling
+   * back to schema defaults for missing keys.
+   */
+  getAllSettings(): Promise<Record<string, unknown>>
+  /**
+   * Subscribe to settings changes. The handler receives the new
+   * full values map on every write. The returned function
+   * detaches the listener. Fires for writes from this plugin's
+   * own code, other panel instances of the same plugin, and the
+   * host's settings dialog.
+   */
+  onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
 }
 
 /**
@@ -651,6 +689,14 @@ export interface ToolbarButtonProps {
   activeNoteContent: string
   /** Current active note file path. Empty string if no note is active. */
   activeNotePath: string
+  /** Read a single setting key. See {@link PluginPanelProps.getSetting}. */
+  getSetting<T = unknown>(key: string): Promise<T | null>
+  /** Persist a single setting key. See {@link PluginPanelProps.setSetting}. */
+  setSetting<T = unknown>(key: string, value: T): Promise<void>
+  /** Read every stored setting. See {@link PluginPanelProps.getAllSettings}. */
+  getAllSettings(): Promise<Record<string, unknown>>
+  /** Subscribe to settings changes. See {@link PluginPanelProps.onSettingsChange}. */
+  onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
 }
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────

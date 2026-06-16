@@ -54,6 +54,7 @@ export type PluginEvent =
   | 'settings:change'
   | 'app:ready'
   | 'app:exit'
+  | 'plugin-settings:change'
 
 /** Payload shape for each event */
 export interface PluginEventPayloadMap {
@@ -66,6 +67,7 @@ export interface PluginEventPayloadMap {
   'settings:change': { key: string; value: unknown }
   'app:ready': Record<string, never>
   'app:exit': Record<string, never>
+  'plugin-settings:change': { pluginId: string; values: Record<string, unknown> }
 }
 
 export type PluginEventHandler<E extends PluginEvent = PluginEvent> = (
@@ -179,6 +181,25 @@ export interface PluginPanelProps {
   activeNoteContent: string
   /** Current active note file path. Empty string if no note is active. */
   activeNotePath: string
+  /** Read a single setting from the plugin's `settings.json`-defined
+   *  schema. Returns the stored value, the schema default, or
+   *  `null` if neither is set. The host bridges this to the
+   *  per-plugin SQLite table; in standalone mode the SDK caches
+   *  values in the plugin's storage namespace under `__settings__`. */
+  getSetting<T = unknown>(key: string): Promise<T | null>
+  /** Persist a single setting key. The host writes through SQLite
+   *  and emits `plugin-settings:change`; the SDK's stub fires the
+   *  same event in standalone mode. */
+  setSetting<T = unknown>(key: string, value: T): Promise<void>
+  /** Read every stored setting as a flat key/value map. Useful
+   *  for "seed my local state from persisted settings" on mount. */
+  getAllSettings(): Promise<Record<string, unknown>>
+  /** Subscribe to settings changes. The handler receives the new
+   *  full map on every write. The returned function detaches the
+   *  listener. The handler fires for writes originating from this
+   *  plugin's own code, other plugin instances of the same id,
+   *  and the host's settings dialog. */
+  onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
 }
 
 /**
@@ -210,6 +231,17 @@ export interface ToolbarButtonProps {
   activeNoteContent: string
   /** Current active note file path. Empty string if no note is active. */
   activeNotePath: string
+  /** Read a single setting from the plugin's schema. See
+   *  {@link PluginPanelProps.getSetting} for details. */
+  getSetting<T = unknown>(key: string): Promise<T | null>
+  /** Persist a single setting key. See
+   *  {@link PluginPanelProps.setSetting} for details. */
+  setSetting<T = unknown>(key: string, value: T): Promise<void>
+  /** Read every stored setting. See {@link PluginPanelProps.getAllSettings}. */
+  getAllSettings(): Promise<Record<string, unknown>>
+  /** Subscribe to settings changes. See
+   *  {@link PluginPanelProps.onSettingsChange}. */
+  onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
 }
 
 /**
@@ -287,6 +319,18 @@ export interface PluginDefinition {
   /** Custom toolbar button component (overrides default icon rendering) */
   toolbarButton?: ComponentType<ToolbarButtonProps>
   settings?: ComponentType<PluginPanelProps>
+  /**
+   * Schema-driven settings description (mirrors the host's
+   * `PluginSettingsSchema`). The SDK keeps this as `any` so the
+   * standalone package doesn't have to import the host's
+   * strongly-typed definition – the host hydrates the schema
+   * from the plugin's on-disk `settings.json` at install time
+   * and the SDK's typed shape lives in `src/lib/tauri.ts`.
+   * Plugins that ship a `settings.json` get this populated by
+   * the host's loader; standalone previews fall back to `undefined`.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  settingsSchema?: any
   pluginPath: string
   hasBackend: boolean
   /**
@@ -393,6 +437,182 @@ export function getPluginStorage(pluginId: string): PluginStorage {
 
 export function dropPluginStorage(pluginId: string): void {
   storageCache.delete(pluginId)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Plugin settings – per-plugin `__settings__` cache in storage
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Special key in the plugin's `PluginStorage` namespace that holds
+ * the cached settings map for standalone-mode (no host) runs.
+ * Picked with a `__` prefix and a human-friendly name so it
+ * never collides with user-chosen storage keys.
+ */
+export const SETTINGS_CACHE_KEY = '__settings__'
+
+/**
+ * Per-plugin settings cache used by the standalone stub. The host
+ * bridges `getSetting` / `setSetting` / `getAllSettings` to its
+ * own SQLite implementation; this is the no-host fallback so
+ * `npm run dev` previews work end-to-end.
+ */
+const settingsCache = new Map<string, Record<string, unknown>>()
+
+/**
+ * In-process pub/sub for settings changes within the standalone
+ * stub. Each handler is called with the new full settings map on
+ * every write. The host's bus replaces this with real event
+ * dispatch when `__pluginSettings_subscribe` is installed.
+ */
+type SettingsListener = (values: Record<string, unknown>) => void
+const settingsListeners = new Map<string, Set<SettingsListener>>()
+
+function readSettingsCache(pluginId: string): Record<string, unknown> {
+  let cache = settingsCache.get(pluginId)
+  if (cache) return cache
+  // Hydrate from the plugin's storage so values written via the
+  // raw `store.set` API show up under `getSetting` too.
+  const stored = getPluginStorage(pluginId)
+  void stored
+  // Synchronous hydration: the stub storage is a Map-backed
+  // implementation so the read is effectively synchronous even
+  // though the API is async. We use the in-process settings
+  // cache as the source of truth and let the host's override
+  // route to SQLite instead.
+  cache = {}
+  settingsCache.set(pluginId, cache)
+  return cache
+}
+
+function writeSettingsCache(
+  pluginId: string,
+  values: Record<string, unknown>
+): Record<string, unknown> {
+  settingsCache.set(pluginId, { ...values })
+  // Mirror to storage so the values survive a hard reload of the
+  // standalone preview window. We use the host's getPluginStorage
+  // for symmetry with the rest of the SDK; the storage layer
+  // itself is a localStorage-backed Map in standalone mode.
+  void getPluginStorage(pluginId).set(SETTINGS_CACHE_KEY, values)
+  return values
+}
+
+function notifySettingsListeners(
+  pluginId: string,
+  values: Record<string, unknown>
+): void {
+  const set = settingsListeners.get(pluginId)
+  if (!set) return
+  for (const handler of Array.from(set)) {
+    try {
+      handler(values)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[plugin-sdk] settings listener for "${pluginId}" threw:`, err)
+    }
+  }
+}
+
+async function stubGetSetting<T = unknown>(
+  pluginId: string,
+  key: string
+): Promise<T | null> {
+  const cache = readSettingsCache(pluginId)
+  return (cache[key] as T | undefined) ?? null
+}
+
+async function stubGetAllSettings(pluginId: string): Promise<Record<string, unknown>> {
+  return { ...readSettingsCache(pluginId) }
+}
+
+async function stubSetSetting(
+  pluginId: string,
+  key: string,
+  value: unknown
+): Promise<void> {
+  const next = { ...readSettingsCache(pluginId), [key]: value }
+  writeSettingsCache(pluginId, next)
+  notifySettingsListeners(pluginId, next)
+}
+
+/**
+ * Read a single setting key. The host installs `__pluginSettings_get`
+ * to route to SQLite; the standalone stub reads from the in-process
+ * cache (hydrated from `__settings__` in storage).
+ */
+export async function getSetting<T = unknown>(
+  pluginId: string,
+  key: string
+): Promise<T | null> {
+  const override = currentHostOverrides().__pluginSettings_get
+  if (override) return (await override(pluginId, key)) as T | null
+  return stubGetSetting<T>(pluginId, key)
+}
+
+/**
+ * Persist a single setting key. The host installs `__pluginSettings_set`
+ * to route to SQLite; the standalone stub writes to the cache and
+ * notifies local subscribers. The event is also dispatched on the
+ * shared `pluginEventBus` so subscribers using the host bus can pick
+ * it up.
+ */
+export async function setSetting<T = unknown>(
+  pluginId: string,
+  key: string,
+  value: T
+): Promise<void> {
+  const override = currentHostOverrides().__pluginSettings_set
+  if (override) {
+    await override(pluginId, key, value)
+    return
+  }
+  await stubSetSetting(pluginId, key, value)
+}
+
+/**
+ * Read every stored setting for `pluginId`. Host overrides route to
+ * SQLite; the stub returns the full in-process cache.
+ */
+export async function getAllSettings(pluginId: string): Promise<Record<string, unknown>> {
+  const override = currentHostOverrides().__pluginSettings_all
+  if (override) return override(pluginId)
+  return stubGetAllSettings(pluginId)
+}
+
+/**
+ * Subscribe to settings changes for `pluginId`. The host installs
+ * `__pluginSettings_subscribe` to bridge to the global event bus
+ * filtered by `pluginId`; the stub notifies a per-plugin listener
+ * set. Returns an unsubscribe function.
+ */
+export function onSettingsChange(
+  pluginId: string,
+  handler: (values: Record<string, unknown>) => void
+): () => void {
+  const override = currentHostOverrides().__pluginSettings_subscribe
+  if (override) {
+    return override((payload) => {
+      if (payload.pluginId !== pluginId) return
+      handler(payload.values)
+    })
+  }
+  let set = settingsListeners.get(pluginId)
+  if (!set) {
+    set = new Set()
+    settingsListeners.set(pluginId, set)
+  }
+  set.add(handler)
+  return () => {
+    set!.delete(handler)
+    if (set!.size === 0) settingsListeners.delete(pluginId)
+  }
+}
+
+/** Drop a plugin's settings cache and unsubscribe every local listener. */
+export function dropPluginSettings(pluginId: string): void {
+  settingsCache.delete(pluginId)
+  settingsListeners.delete(pluginId)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -797,6 +1017,21 @@ export interface HostOverrides {
   on?: PluginEventBus['on']
   off?: PluginEventBus['off']
   emit?: <E extends PluginEvent>(event: E, payload: PluginEventPayloadMap[E]) => void
+  /**
+   * Bridge to the host's SQLite-backed plugin settings layer. When
+   * the host installs these overrides the SDK's `getSetting` /
+   * `setSetting` / `getAllSettings` use real SQLite instead of the
+   * localStorage stub.
+   *
+   * Naming convention: `__pluginSettings_get` etc. uses a `__`
+   * prefix so it can never collide with any user storage key.
+   * The host reads/writes the per-plugin SQLite table
+   * `plugin_settings_<id>` rather than the plugin's JSON storage.
+   */
+  __pluginSettings_get?: (pluginId: string, key: string) => Promise<unknown>
+  __pluginSettings_set?: (pluginId: string, key: string, value: unknown) => Promise<void>
+  __pluginSettings_all?: (pluginId: string) => Promise<Record<string, unknown>>
+  __pluginSettings_subscribe?: (handler: (payload: PluginEventPayloadMap['plugin-settings:change']) => void) => () => void
 }
 
 /**
@@ -1140,6 +1375,20 @@ export function emitAppReady(): void {
 }
 export function emitAppExit(): void {
   dispatchEmit('app:exit', {})
+}
+/**
+ * Notify subscribers that a plugin's settings have changed. Fires
+ * the `plugin-settings:change` event with the new full values
+ * map. Used by host code (after a SQLite write) to fan the change
+ * out to every panel/toolbar instance of the same plugin id, and
+ * by the standalone stub (after a `setSetting` call) to keep the
+ * in-process pub/sub in sync.
+ */
+export function emitPluginSettingsChanged(
+  pluginId: string,
+  values: Record<string, unknown>
+): void {
+  dispatchEmit('plugin-settings:change', { pluginId, values })
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

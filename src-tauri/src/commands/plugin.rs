@@ -107,6 +107,11 @@ pub struct PluginMetadataRust {
     pub plugin_path: String,
     #[serde(default)]
     pub has_backend: bool,
+    /// True when the installed plugin ships a `settings.json` next
+    /// to its `index.js`. The frontend uses this to decide whether
+    /// to show the schema-driven settings button on the plugin card.
+    #[serde(default)]
+    pub has_settings_schema: bool,
 }
 
 /// Get the plugins directory path.
@@ -163,7 +168,13 @@ const UPLOAD_VERSION: &str = "upload";
 /// `<app_data>/plugins/../foo/...` and write outside the plugins
 /// root. We allow only `[a-zA-Z0-9._-]`, length 1..=128, and reject
 /// the boundary cases `.` / `..`.
-fn validate_plugin_id(id: &str) -> Result<(), PluginError> {
+///
+/// `pub` so the settings IPC commands in
+/// [`super::plugin_settings`] can call it as a path-traversal
+/// guard on `read_plugin_settings` / `write_plugin_settings` /
+/// `delete_plugin_settings` — the same boundary check, applied
+/// at every entry point that touches a row by `plugin_id`.
+pub fn validate_plugin_id(id: &str) -> Result<(), PluginError> {
     if id.is_empty() || id.len() > 128 {
         return Err(PluginError::InvalidInput(format!(
             "plugin id must be 1..=128 chars, got {}",
@@ -469,6 +480,10 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
         let has_backend = active_dir.join("backend").exists();
         // .disabled is a top-level marker, not version-scoped.
         let enabled = !path.join(".disabled").exists();
+        // Detect a `settings.json` schema in the active version dir.
+        // The host uses this flag to decide whether to show the
+        // schema-driven settings button on the plugin card.
+        let has_settings_schema = active_dir.join("settings.json").exists();
 
         let parsed_manifest = parse_manifest_from_index_js(&index_js);
 
@@ -491,6 +506,7 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
             meta.enabled = enabled;
             meta.plugin_path = active_dir.to_string_lossy().to_string();
             meta.has_backend = has_backend;
+            meta.has_settings_schema = has_settings_schema;
             meta
         } else {
             // Fallback: create minimal metadata from directory name
@@ -507,6 +523,7 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
                 enabled,
                 plugin_path: active_dir.to_string_lossy().to_string(),
                 has_backend,
+                has_settings_schema,
             }
         };
         plugins.push(meta);
@@ -651,7 +668,25 @@ pub fn install_plugin(
     let final_version_dir = final_plugin_dir.join(".versions").join(UPLOAD_VERSION);
     set_current_version(&final_plugin_dir, UPLOAD_VERSION)?;
 
+    // Materialise / migrate the settings table for this plugin id.
+    // Best-effort: a missing or malformed settings.json is not a
+    // reason to fail the install. We log to stderr so the user can
+    // see the cause in the dev console.
+    if let Some(db) = app_handle.try_state::<crate::db::Database>() {
+        if let Ok(conn) = db.conn.lock() {
+            if let Err(e) = crate::commands::plugin_settings::apply_settings_schema_on_disk(
+                &app_handle, &conn, &real_plugin_id,
+            ) {
+                eprintln!(
+                    "[plugin] apply_settings_schema for '{}' on install: {}",
+                    real_plugin_id, e
+                );
+            }
+        }
+    }
+
     let has_backend = final_version_dir.join("backend").exists();
+    let has_settings_schema = final_version_dir.join("settings.json").exists();
     let enabled = !final_plugin_dir.join(".disabled").exists();
 
     let final_index_js = final_version_dir.join("index.js");
@@ -668,6 +703,7 @@ pub fn install_plugin(
         enabled,
         plugin_path: final_version_dir.to_string_lossy().to_string(),
         has_backend,
+        has_settings_schema,
     });
 
     Ok(meta)
@@ -727,6 +763,18 @@ pub async fn uninstall_plugin(
     }
 
     fs::remove_dir_all(&plugin_dir).map_err(|e| PluginError::Io(format!("Failed to remove plugin: {}", e)))?;
+
+    // Drop the settings table for this plugin. Best-effort: if the
+    // DB is locked, a stray row is harmless (the next install with
+    // the same id will overwrite or migrate).
+    if let Err(e) =
+        crate::commands::plugin_settings::drop_settings_table_for(&app_handle, &plugin_id)
+    {
+        eprintln!(
+            "[plugin] drop_settings_table_for '{}' on uninstall: {}",
+            plugin_id, e
+        );
+    }
 
     Ok(())
 }
@@ -1426,7 +1474,29 @@ pub async fn install_plugin_from_bytes(
 
     set_current_version(&plugin_dir, &version)?;
 
+    // Materialise / migrate the settings table for this plugin id.
+    // `install_plugin_from_bytes` is reached from BOTH the marketplace
+    // install path (first install of a remote plugin) and the update
+    // path (`update_plugin` is a thin wrapper that calls this function).
+    // Mirrors the same hook in `install_plugin` (user-uploaded zip) so
+    // a plugin never has its settings table stranded: install creates
+    // + seeds, update migrates the schema. Best-effort: a missing or
+    // malformed settings.json is not a reason to fail the install.
+    if let Some(db) = app_handle.try_state::<crate::db::Database>() {
+        if let Ok(conn) = db.conn.lock() {
+            if let Err(e) = crate::commands::plugin_settings::apply_settings_schema_on_disk(
+                &app_handle, &conn, &plugin_id,
+            ) {
+                eprintln!(
+                    "[plugin] apply_settings_schema for '{}' on install/update: {}",
+                    plugin_id, e
+                );
+            }
+        }
+    }
+
     let has_backend = version_dir.join("backend").exists();
+    let has_settings_schema = version_dir.join("settings.json").exists();
     let enabled = !plugin_dir.join(".disabled").exists();
 
     let meta = parse_manifest_from_index_js(&index_js).unwrap_or(PluginMetadataRust {
@@ -1442,6 +1512,7 @@ pub async fn install_plugin_from_bytes(
         enabled,
         plugin_path: version_dir.to_string_lossy().to_string(),
         has_backend,
+        has_settings_schema,
     });
 
     Ok(meta)
@@ -1688,6 +1759,7 @@ pub fn rollback_plugin(
 
     let index_js = version_dir.join("index.js");
     let has_backend = version_dir.join("backend").exists();
+    let has_settings_schema = version_dir.join("settings.json").exists();
     let enabled = !plugin_dir.join(".disabled").exists();
     let meta = parse_manifest_from_index_js(&index_js).unwrap_or(PluginMetadataRust {
         id: plugin_id.clone(),
@@ -1702,6 +1774,7 @@ pub fn rollback_plugin(
         enabled,
         plugin_path: version_dir.to_string_lossy().to_string(),
         has_backend,
+        has_settings_schema,
     });
     Ok(meta)
 }

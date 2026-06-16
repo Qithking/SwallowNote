@@ -72,6 +72,13 @@ export interface PluginInstalledCardProps {
   onUninstall?: () => void
   onUpdate?: () => void
   onSettings?: () => void
+  /**
+   * Opens the schema-driven settings dialog (driven by the
+   * plugin's `settings.json`). Rendered when
+   * `plugin.hasSettingsSchema` is true; the card itself guards
+   * the visibility so callers only need to pass the prop.
+   */
+  onOpenSchemaSettings?: () => void
   onPermissions?: () => void
   /**
    * Opens the per-plugin storage inspector (Task 6). Rendered
@@ -90,6 +97,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
   onUninstall,
   onUpdate,
   onSettings,
+  onOpenSchemaSettings,
   onPermissions,
   onStorage,
 }: PluginInstalledCardProps) {
@@ -420,6 +428,16 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
                 className="pa-icon-btn"
                 title={t('plugin.settings')}
                 onClick={onSettings}
+              >
+                <SettingsIcon />
+              </button>
+            )}
+            {plugin.hasSettingsSchema && onOpenSchemaSettings && (
+              <button
+                type="button"
+                className="pa-icon-btn"
+                title={t('plugin.schemaSettings', { defaultValue: 'Plugin settings' })}
+                onClick={onOpenSchemaSettings}
               >
                 <SettingsIcon />
               </button>
