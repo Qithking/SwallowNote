@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-16T05:35:59Z",
+  "updated_at": "2026-06-16T06:05:44Z",
   "plugins": [
     {
       "id": "com.swallownote.export",
@@ -37,6 +37,25 @@
       "sha256": "71ac7e30066de53a5dcb04eecf735c731c29b97f4904ce2d7f3e86a650020db0",
       "changelog": "初版发布：5 套公众号主题、剪贴板三级降级、表格/代码/引用等 Markdown 元素支持",
       "published_at": "2026-06-16T05:35:58Z",
+      "dependencies": []
+    },
+    {
+      "id": "com.swallownote.wenyan",
+      "name": "文颜排版",
+      "version": "0.1.0",
+      "description": "使用文颜引擎将 Markdown 排版为微信公众号样式的富文本",
+      "author": "SwallowNote",
+      "tags": [
+        "wenyan",
+        "wechat",
+        "typesetting",
+        "markdown",
+        "theme"
+      ],
+      "download_url": "./wenyan/com.swallownote.wenyan.zip",
+      "sha256": "395438129a59becbfd2ac585d9c8747be79156111ddb7bf34d3a58c807befdda",
+      "changelog": "初版发布：集成 @wenyan-md/core 排版引擎，支持多主题、代码高亮、实时预览、一键复制",
+      "published_at": "2026-06-16T06:05:39Z",
       "dependencies": []
     }
   ]
