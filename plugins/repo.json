@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-16T06:05:44Z",
+  "updated_at": "2026-06-16T07:04:13Z",
   "plugins": [
     {
       "id": "com.swallownote.export",
@@ -53,9 +53,9 @@
         "theme"
       ],
       "download_url": "./wenyan/com.swallownote.wenyan.zip",
-      "sha256": "395438129a59becbfd2ac585d9c8747be79156111ddb7bf34d3a58c807befdda",
+      "sha256": "68ef2e517b8318529f69adc3f2490145ebf35fb137cb71ab46e5cd697046e13b",
       "changelog": "初版发布：集成 @wenyan-md/core 排版引擎，支持多主题、代码高亮、实时预览、一键复制",
-      "published_at": "2026-06-16T06:05:39Z",
+      "published_at": "2026-06-16T07:04:08Z",
       "dependencies": []
     }
   ]

@@ -57,15 +57,18 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
       const gzh = mod.getAllGzhThemes()
       const hl = mod.getAllHlThemes()
       if (cancelled) return
+      // @wenyan-md/core 主题结构：
+      //   - gzh 主题：{ meta: { id, name, ... }, getCss }
+      //   - hl  主题：{ id, getCss } （name 派生自 id）
       setThemes(gzh.map((t: unknown) => {
-        const theme = t as Record<string, unknown>
-        const id = String(theme.id ?? '')
-        return { id, name: String(theme.name ?? id) }
+        const meta = (t as { meta?: { id?: string; name?: string } }).meta ?? {}
+        const id = String(meta.id ?? '')
+        return { id, name: String(meta.name ?? id) }
       }))
       setHlThemes(hl.map((t: unknown) => {
-        const theme = t as Record<string, unknown>
+        const theme = t as { id?: string }
         const id = String(theme.id ?? '')
-        return { id, name: String(theme.name ?? id) }
+        return { id, name: id }
       }))
     }
     load()
@@ -78,11 +81,13 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
     render(debouncedContent, options)
   }, [open, debouncedContent, options, render])
 
-  // Sync preview DOM with rendered html.
+  // Sync preview DOM with rendered html. Using dangerouslySetInnerHTML
+  // ensures the preview is initialized correctly on remount — otherwise,
+  // if `html` is unchanged from a previous open, the [html]-only effect
+  // would skip and leave the new preview div empty.
   useEffect(() => {
-    if (previewRef.current && html) {
-      previewRef.current.innerHTML = html
-    }
+    // No-op: actual sync is handled by dangerouslySetInnerHTML on the
+    // preview div itself. Kept as a hook for future side-effects.
   }, [html])
 
   // Close on Escape.
@@ -330,6 +335,7 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
             >
               <div
                 ref={previewRef}
+                dangerouslySetInnerHTML={{ __html: html }}
                 style={{
                   maxWidth: 720,
                   margin: '0 auto',

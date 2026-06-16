@@ -59,32 +59,43 @@ export function useWenyanRenderer() {
     // Register built-in themes so getAllGzhThemes() etc. work.
     mod.registerAllBuiltInThemes()
     mod.registerBuiltInHlThemes()
+    // Enable mermaid rendering using the library's built-in browser
+    // renderer. Without a renderer, createWenyanCore throws when it
+    // encounters a ```mermaid``` code block.
+    const mermaidRenderer = mod.createBrowserMermaidRenderer()
     const instance = await mod.createWenyanCore({
       isConvertMathJax: true,
       isWechat: true,
+      mermaid: { renderer: mermaidRenderer },
     })
     wenyanRef.current = instance as WenyanCoreInstance
     return wenyanRef.current
   }, [])
 
-  // Create a persistent off-screen container for applyStylesWithTheme.
+  // Create a persistent off-screen wrapper that contains the article root.
+  // The wrapper is hidden; the article inside it is the element the wenyan
+  // library processes. This separation matters because the library returns
+  // `article.outerHTML` — if we set hidden styles on the article itself,
+  // those styles leak into the preview and push the content off-screen.
   const ensureContainer = useCallback(() => {
     if (containerRef.current) return containerRef.current
-    const div = document.createElement('div')
-    div.style.cssText = [
+    const wrapper = document.createElement('div')
+    wrapper.style.cssText = [
       'position: fixed',
       'left: 0',
       'top: 0',
-      'transform: translateX(-200vw)',
       'width: 720px',
       'z-index: -1',
       'background: #fff',
       'pointer-events: none',
       'visibility: hidden',
     ].join(';')
-    document.body.appendChild(div)
-    containerRef.current = div
-    return div
+    const article = document.createElement('div')
+    article.id = 'wenyan'
+    wrapper.appendChild(article)
+    document.body.appendChild(wrapper)
+    containerRef.current = article
+    return article
   }, [])
 
   const render = useCallback(
@@ -100,9 +111,11 @@ export function useWenyanRenderer() {
         const wenyan = await ensureWenyan()
         const fm = await wenyan.handleFrontMatter(markdown)
         const rawHtml = await wenyan.renderMarkdown(fm.content)
-        const container = ensureContainer()
-        container.innerHTML = rawHtml
-        const styledHtml = await wenyan.applyStylesWithTheme(container, {
+        // Pass the article root (with id="wenyan") to the library. The
+        // returned string is the article's outerHTML — no hidden styles.
+        const article = ensureContainer()
+        article.innerHTML = rawHtml
+        const styledHtml = await wenyan.applyStylesWithTheme(article, {
           themeId: options.themeId,
           hlThemeId: options.hlThemeId,
           isMacStyle: options.isMacStyle,
@@ -121,13 +134,16 @@ export function useWenyanRenderer() {
     [ensureWenyan, ensureContainer]
   )
 
-  // Cleanup container on unmount.
+  // Cleanup container on unmount. Remove the wrapper (which holds the
+  // article), not the article itself.
   useEffect(() => {
     return () => {
-      if (containerRef.current && containerRef.current.parentNode) {
-        containerRef.current.parentNode.removeChild(containerRef.current)
-        containerRef.current = null
+      const article = containerRef.current
+      const wrapper = article?.parentNode
+      if (wrapper && wrapper.parentNode) {
+        wrapper.parentNode.removeChild(wrapper)
       }
+      containerRef.current = null
     }
   }, [])
 
