@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-16T01:54:27Z",
+  "updated_at": "2026-06-16T02:51:03Z",
   "plugins": [
     {
       "id": "com.swallownote.export",
@@ -34,9 +34,9 @@
         "markdown"
       ],
       "download_url": "./typist/com.swallownote.typist.zip",
-      "sha256": "832568acc21475e8b6f17e8ebc9318e87427a9f6894cb19ff03ead4144247976",
+      "sha256": "f359e7324df8bea3a4edd97f605c2acff08177eeb6eb070ade75f866be37bd25",
       "changelog": "初版发布：5 套公众号主题、剪贴板三级降级、表格/代码/引用等 Markdown 元素支持",
-      "published_at": "2026-06-16T01:54:26Z",
+      "published_at": "2026-06-16T02:51:01Z",
       "dependencies": []
     }
   ]

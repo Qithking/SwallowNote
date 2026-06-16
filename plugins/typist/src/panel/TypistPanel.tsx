@@ -133,13 +133,8 @@ export function TypistPanel(panel: PluginPanelProps): ReactNode {
 
   return (
     <div
-      style={{
-        width: 'min(960px, 92vw)',
-        maxHeight: '80vh',
-        background: 'var(--bg-primary)',
-        border: '1px solid var(--border-color)',
-        borderRadius: 8,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+      style={{ 
+        borderRadius: 8,       
         display: 'flex',
         flexDirection: 'column',
         fontSize: 12,
@@ -207,7 +202,8 @@ export function TypistPanel(panel: PluginPanelProps): ReactNode {
         </button>
       </div>
 
-      {/* Body — 唯一主体,渲染后内容;高宽完全由 panel 内容区决定 */}
+      {/* Body — 唯一主体,渲染后内容;外层 preview 撑满 panel,内层 inner 自身滚动,
+         这样滚动条始终出现在内容区边缘,不会被外层 overflow:hidden 裁掉。 */}
       <div
         ref={previewRef}
         style={{
@@ -216,14 +212,28 @@ export function TypistPanel(panel: PluginPanelProps): ReactNode {
           width: '100%',
           flex: 1,
           minHeight: 0,
-          overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
           boxSizing: 'border-box',
         }}
       >
         {isRendering && !renderedHtml ? (
           <div style={{ color: '#999', padding: '20px 24px' }}>渲染中…</div>
         ) : renderedHtml ? (
-          <div dangerouslySetInnerHTML={{ __html: safePreviewHtml }} />
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflow: 'auto',
+              overflowY: 'scroll',
+              overflowX: 'hidden',
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '0 20px',
+            }}
+            dangerouslySetInnerHTML={{ __html: safePreviewHtml }}
+          />
         ) : (
           <div style={{ color: '#999', padding: '20px 24px' }}>预览将出现在这里</div>
         )}

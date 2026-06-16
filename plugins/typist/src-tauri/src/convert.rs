@@ -61,6 +61,10 @@ struct HtmlWriter {
     list_stack: Vec<bool>,
     /// Open list depth (1 = top-level). Used to compute indent.
     list_depth: usize,
+    /// Is the *current* list item a task list item? Set to `true` by
+    /// `push_task_marker` and consumed by `End(Item)` so we don't
+    /// double-prefix task list items (■/□ + •).
+    current_item_is_task: bool,
     /// Currently in a list item? If so, the next inline emission routes
     /// to the item buffer instead of the document buffer.
     in_item: bool,
@@ -90,6 +94,7 @@ impl HtmlWriter {
             heading_stack: Vec::new(),
             list_stack: Vec::new(),
             list_depth: 0,
+            current_item_is_task: false,
             in_item: false,
             item_buf: String::new(),
             in_code_block: false,
@@ -184,6 +189,15 @@ impl HtmlWriter {
             Tag::Item => {
                 self.in_item = true;
                 self.item_buf.clear();
+                // Reset the task-list flag; `push_task_marker` will
+                // re-set it if this item is a task list item. Bullet
+                // prefix is decided in `End(Item)` after we know.
+                self.current_item_is_task = false;
+                // Visual bullet/ordinal prefix is emitted in `End(Item)`
+                // because at this point we don't yet know whether the
+                // upcoming `TaskListMarker` event will mark this item
+                // as a task list item (which should not get a •/1.
+                // prefix on top of the ■/□).
                 self.out.push_str("<li style=\"");
                 self.out.push_str(&list_item_style(self.theme, self.list_depth));
                 self.out.push_str("\">");
@@ -291,6 +305,24 @@ impl HtmlWriter {
                 }
             }
             TagEnd::Item => {
+                // Prepend the visual bullet/ordinal prefix *here* (not
+                // in `Start(Item)`) so we know whether `push_task_marker`
+                // has fired and marked this item as a task list item.
+                // Task items already have a ■/□ in `item_buf`; we must
+                // not stack a •/1. on top of it.
+                if !self.current_item_is_task {
+                    if let Some(&ordered) = self.list_stack.last() {
+                        let prefix = if ordered { "1. " } else { "• " };
+                        if self.item_buf.is_empty() {
+                            // Empty item: just push the prefix into the
+                            // buffer so the span-emit below still fires
+                            // and we keep a consistent shape.
+                            self.item_buf.push_str(prefix);
+                        } else {
+                            self.item_buf = format!("{prefix}{}", self.item_buf);
+                        }
+                    }
+                }
                 // Flush any inline content accumulated during the item
                 if !self.item_buf.is_empty() {
                     self.out.push_str(&format!(
@@ -302,6 +334,7 @@ impl HtmlWriter {
                 }
                 self.out.push_str("</li>");
                 self.in_item = false;
+                self.current_item_is_task = false;
             }
             TagEnd::Strong => self.out.push_str("</span>"),
             TagEnd::Emphasis => self.out.push_str("</span>"),
@@ -437,7 +470,12 @@ impl HtmlWriter {
     }
 
     fn push_task_marker(&mut self, checked: bool) {
-        let marker = if checked { "☑ " } else { "☐ " };
+        // ■ (U+25A0 BLACK SQUARE) and □ (U+25A1 WHITE SQUARE) read
+        // consistently across macOS / Windows / Linux fonts. The
+        // previous ☑/☐ pair has noticeably different visual weight
+        // depending on the font, which made task lists look uneven.
+        let marker = if checked { "■ " } else { "□ " };
+        self.current_item_is_task = true;
         if self.in_item {
             self.item_buf.push_str(marker);
         } else {
@@ -473,8 +511,12 @@ impl HtmlWriter {
 // ─── Style helpers ──────────────────────────────────────────────────────────
 
 fn paragraph_style(t: Theme) -> String {
+    // Tighter line-height (1.6 vs 1.75) and slightly smaller font
+    // (15 vs 16) so the panel preview density matches a typical
+    // markdown editor. Margin 12 also keeps paragraph spacing
+    // visually aligned with the list margin (8–12px).
     format!(
-        "margin:16px 0;line-height:1.75;font-size:16px;color:{};font-family:{}",
+        "margin:12px 0;line-height:1.6;font-size:15px;color:{};font-family:{}",
         t.text, t.font_family
     )
 }
@@ -483,12 +525,12 @@ fn heading_open(level: usize, t: Theme) -> String {
     let idx = (level - 1).min(5);
     let color = t.heading[idx];
     let (size, weight, margin) = match level {
-        1 => ("24px", "bold", "24px 0 16px"),
-        2 => ("20px", "bold", "22px 0 14px"),
-        3 => ("18px", "bold", "20px 0 12px"),
-        4 => ("16px", "bold", "18px 0 10px"),
-        5 => ("15px", "600", "16px 0 8px"),
-        _ => ("14px", "600", "14px 0 8px"),
+        1 => ("22px", "bold", "20px 0 12px"),
+        2 => ("19px", "bold", "18px 0 10px"),
+        3 => ("17px", "bold", "16px 0 8px"),
+        4 => ("15px", "bold", "14px 0 8px"),
+        5 => ("14px", "600", "12px 0 6px"),
+        _ => ("13px", "600", "12px 0 6px"),
     };
     let extra = if level == 1 {
         "padding-bottom:8px;border-bottom:1px solid #eaecef;"
@@ -521,24 +563,35 @@ fn blockquote_style(t: Theme) -> String {
 }
 
 fn list_style(t: Theme, _ordered: bool) -> String {
+    // WeChat strips CSS `list-style: <bullet>`; we instead disable
+    // the default browser bullet and inject a literal "•" / "1. "
+    // character at item start (see `Start(Item)` / `End(Item)`).
+    // padding-left 24 keeps the bullet column narrow but visible.
     format!(
-        "margin:12px 0;padding-left:28px;color:{};font-family:{}",
+        "margin:8px 0;padding-left:24px;color:{};font-family:{};list-style:none",
         t.text, t.font_family
     )
 }
 
 fn list_item_style(t: Theme, depth: usize) -> String {
     let indent = ((depth.saturating_sub(1)) * 12) as i32;
+    // 1.6 line-height matches paragraph density; padding-left adds
+    // a small visual indent for nested items beyond what `list_style`'s
+    // `padding-left:24px` already provides.
     format!(
-        "margin:6px 0;line-height:1.75;padding-left:{}px",
+        "margin:6px 0;line-height:1.6;padding-left:{}px",
         indent
     )
 }
 
 fn inline_code_style(t: Theme) -> String {
+    // font-weight:500 prevents inline `code` from looking too thin
+    // next to surrounding regular text on macOS/Windows default
+    // monospace fonts.
     format!(
         "background:{};color:{};padding:2px 6px;border-radius:3px;\
-         font-size:14px;font-family:SF Mono,Menlo,Monaco,Consolas,monospace",
+         font-size:14px;font-family:SF Mono,Menlo,Monaco,Consolas,monospace;\
+         font-weight:500",
         t.code_bg, t.code_text
     )
 }
@@ -642,6 +695,62 @@ mod tests {
                 .unwrap();
         assert!(html.contains("href=\"https://x.com\""));
         assert!(html.contains("style=\""));
+    }
+
+    #[test]
+    fn tasklist_emits_filled_square_marker() {
+        let html = markdown_to_themed_html(
+            "- [x] done\n- [ ] todo",
+            WECHAT_DEFAULT,
+            "wechat",
+        )
+        .unwrap();
+        // We use ■ (U+25A0) for checked and □ (U+25A1) for unchecked
+        // because those two characters render with consistent visual
+        // weight across macOS / Windows / Linux default fonts, while
+        // the previous ☑ / ☐ pair looked uneven depending on font.
+        assert!(html.contains("■"), "expected ■ in: {html}");
+        assert!(html.contains("□"), "expected □ in: {html}");
+        // Task items must NOT also receive a •/1. prefix on top of
+        // the square marker (would look like "• ■ done").
+        assert!(
+            !html.contains("• ■") && !html.contains("• □"),
+            "task item should not have bullet prefix stacked on square marker, got: {html}"
+        );
+    }
+
+    #[test]
+    fn unordered_list_item_has_bullet_prefix() {
+        let html = markdown_to_themed_html("- a\n- b", WECHAT_DEFAULT, "wechat").unwrap();
+        // WeChat strips CSS `list-style: <bullet>`, so we inject a
+        // literal "• " character as the visual bullet. See `End(Item)`.
+        assert!(html.contains("• a"), "expected • a in: {html}");
+        assert!(html.contains("• b"), "expected • b in: {html}");
+    }
+
+    #[test]
+    fn ordered_list_item_has_ordinal_prefix() {
+        let html = markdown_to_themed_html(
+            "1. first\n2. second",
+            WECHAT_DEFAULT,
+            "wechat",
+        )
+        .unwrap();
+        // MVP: every ordered item gets "1. " — nested ordinals
+        // (1.1.1) deferred to a later patch.
+        assert!(html.contains("1. first"), "expected 1. first in: {html}");
+        assert!(html.contains("1. second"), "expected 1. second in: {html}");
+    }
+
+    #[test]
+    fn inline_code_has_styled_span() {
+        let html =
+            markdown_to_themed_html("`foo` bar", WECHAT_DEFAULT, "wechat").unwrap();
+        assert!(html.contains("<code"), "expected <code> in: {html}");
+        assert!(
+            html.contains("background:"),
+            "expected background: in <code> style in: {html}"
+        );
     }
 
     /// Regression: the header row used to be misrouted into the body
