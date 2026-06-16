@@ -191,8 +191,7 @@ PY
 
   # src/index.tsx — `version: 'X.Y.Z'` literal inside the
   # `definePlugin({ ... })` call. We use a regex so we don't have
-  # to parse TypeScript with a real parser. The same regex is used
-  # by `typist/package.sh` so a copy/paste bump stays in sync.
+  # to parse TypeScript with a real parser.
   python3 - "$SRC_INDEX" "$OLD_VERSION" "$NEW_VERSION" <<'PY'
 import re, sys
 path, old, new = sys.argv[1], sys.argv[2], sys.argv[3]

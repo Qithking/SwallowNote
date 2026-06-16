@@ -23,7 +23,9 @@ interface WenyanCoreInstance {
     element: HTMLElement,
     options: {
       themeId?: string
+      themeCss?: string
       hlThemeId?: string
+      hlThemeCss?: string
       isMacStyle?: boolean
       isAddFootnote?: boolean
     }
@@ -67,14 +69,19 @@ export interface ThemeOverrides {
 }
 
 export interface ParagraphOptions {
-  /** Base font-size of the article (applied to #wenyan). */
-  fontSize: number
-  /** Line height. */
-  lineHeight: number
+  /** Base font-size of the article (applied to #wenyan). 9 steps from 12→20. */
+  fontSize: 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20
+  /** Line height ratio (CSS line-height). */
+  lineHeight: 1.25 | 1.5 | 1.75 | 2
+  /** Additional line spacing in em. Added to lineHeight via CSS calc:
+   *  `line-height: calc(<lineHeight> + <lineSpacing>em)`. */
+  lineSpacing: 0 | 0.1 | 0.2 | 0.3
   /** Font family: 'sans-serif' | 'serif' | 'monospace'. */
   fontFamily: 'sans-serif' | 'serif' | 'monospace'
+  /** Letter spacing. */
+  letterSpacing: 'tight' | 'small' | 'normal' | 'loose'
   /** Spacing between paragraphs (margin-top + margin-bottom on #wenyan p). */
-  paragraphSpacing: 'compact' | 'standard' | 'loose'
+  paragraphSpacing: 'compact' | 'small' | 'standard' | 'loose'
   /** Text alignment for paragraphs. */
   textAlign: 'left' | 'center' | 'right' | 'justify'
   /** First line indent. 0 = off, 2 = 2em indent. */
@@ -84,8 +91,8 @@ export interface ParagraphOptions {
 export interface CodeBlockOptions {
   /** Border radius on #wenyan pre. */
   borderRadius: 0 | 5 | 10
-  /** Font size for code blocks. */
-  fontSize: 11 | 12 | 13 | 14
+  /** Font size for code blocks. 7 steps from 12→18. */
+  fontSize: 12 | 13 | 14 | 15 | 16 | 17 | 18
   /** Box shadow on #wenyan pre. */
   shadow: 'none' | 'light' | 'heavy'
   /** Mac-style traffic-light dots on code blocks. */
@@ -96,11 +103,15 @@ export interface RenderOptions {
   platform: Platform
   themeId: string
   hlThemeId: string
+  /** Optional raw CSS for a custom theme. When set, takes precedence over `themeId`. */
+  customThemeCss: string | null
   /** Footnote auto-generation (WeChat only). */
   isAddFootnote: boolean
   themeOverrides: ThemeOverrides
   paragraphOptions: ParagraphOptions
+  paragraphFollowTheme: boolean
   codeBlockOptions: CodeBlockOptions
+  codeBlockFollowTheme: boolean
 }
 
 const FONT_FAMILY_CSS: Record<ParagraphOptions['fontFamily'], string> = {
@@ -109,8 +120,16 @@ const FONT_FAMILY_CSS: Record<ParagraphOptions['fontFamily'], string> = {
   'monospace': `"SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`,
 }
 
+const LETTER_SPACING_CSS: Record<ParagraphOptions['letterSpacing'], string> = {
+  tight: '-0.02em',
+  small: '-0.01em',
+  normal: '0',
+  loose: '0.05em',
+}
+
 const PARAGRAPH_SPACING_CSS: Record<ParagraphOptions['paragraphSpacing'], string> = {
   compact: '0.3em 0',
+  small: '0.5em 0',
   standard: '1em 0',
   loose: '1.6em 0',
 }
@@ -124,7 +143,8 @@ const SHADOW_CSS: Record<CodeBlockOptions['shadow'], string> = {
 /** Build a <style> tag string that overrides the article's theme CSS. */
 function buildOverrideCss(opts: RenderOptions): string {
   const lines: string[] = []
-  // Theme overrides.
+  // Theme overrides (always applied — color/font are independent of the
+  // paragraph / code block "follow theme" toggles).
   lines.push(`#wenyan { color: ${opts.themeOverrides.textColor}; }`)
   lines.push(
     `#wenyan h1, #wenyan h2, #wenyan h3, #wenyan h4, #wenyan h5, #wenyan h6 { color: ${opts.themeOverrides.primaryColor}; }`
@@ -132,18 +152,31 @@ function buildOverrideCss(opts: RenderOptions): string {
   lines.push(`#wenyan a, #wenyan .footnote { color: ${opts.themeOverrides.primaryColor}; }`)
   lines.push(`#wenyan blockquote { background-color: ${opts.themeOverrides.blockquoteBg}; }`)
 
-  // Paragraph overrides.
-  const p = opts.paragraphOptions
-  lines.push(
-    `#wenyan { font-size: ${p.fontSize}px !important; line-height: ${p.lineHeight} !important; font-family: ${FONT_FAMILY_CSS[p.fontFamily]} !important; }`
-  )
-  lines.push(`#wenyan p { margin: ${PARAGRAPH_SPACING_CSS[p.paragraphSpacing]} !important; text-align: ${p.textAlign} !important; text-indent: ${p.textIndent}em !important; }`)
+  // Paragraph overrides — only when not following theme.
+  if (!opts.paragraphFollowTheme) {
+    const p = opts.paragraphOptions
+    // Combine 行高 (line-height ratio) and 行间距 (extra em) via calc.
+    // When lineSpacing is 0 the calc degenerates to the bare ratio,
+    // which the browser treats as a unitless line-height.
+    const lineHeightCss =
+      p.lineSpacing === 0
+        ? String(p.lineHeight)
+        : `calc(${p.lineHeight} + ${p.lineSpacing}em)`
+    lines.push(
+      `#wenyan { font-size: ${p.fontSize}px !important; line-height: ${lineHeightCss} !important; font-family: ${FONT_FAMILY_CSS[p.fontFamily]} !important; letter-spacing: ${LETTER_SPACING_CSS[p.letterSpacing]} !important; }`
+    )
+    lines.push(
+      `#wenyan p { margin: ${PARAGRAPH_SPACING_CSS[p.paragraphSpacing]} !important; text-align: ${p.textAlign} !important; text-indent: ${p.textIndent}em !important; }`
+    )
+  }
 
-  // Code block overrides.
-  const c = opts.codeBlockOptions
-  lines.push(
-    `#wenyan pre { border-radius: ${c.borderRadius}px !important; font-size: ${c.fontSize}px !important; box-shadow: ${SHADOW_CSS[c.shadow]} !important; }`
-  )
+  // Code block overrides — only when not following theme.
+  if (!opts.codeBlockFollowTheme) {
+    const c = opts.codeBlockOptions
+    lines.push(
+      `#wenyan pre { border-radius: ${c.borderRadius}px !important; font-size: ${c.fontSize}px !important; box-shadow: ${SHADOW_CSS[c.shadow]} !important; }`
+    )
+  }
 
   return lines.join('\n')
 }
@@ -238,12 +271,18 @@ export function useWenyanRenderer() {
         // applyStylesWithTheme modifies the article in place. The Mac-
         // style flag is sourced from codeBlockOptions so it lives in
         // the same setting group as the other code block controls.
-        const styledHtml = await wenyan.applyStylesWithTheme(article, {
-          themeId: options.themeId,
+        // If a custom theme CSS is set, it takes precedence over the
+        // built-in themeId lookup.
+        const applyOptions: Parameters<WenyanCoreInstance['applyStylesWithTheme']>[1] = {
+          themeId: options.customThemeCss ? undefined : options.themeId,
           hlThemeId: options.hlThemeId,
           isMacStyle: options.codeBlockOptions.isMacStyle,
           isAddFootnote: options.isAddFootnote,
-        })
+        }
+        if (options.customThemeCss) {
+          applyOptions.themeCss = options.customThemeCss
+        }
+        const styledHtml = await wenyan.applyStylesWithTheme(article, applyOptions)
         // For non-WeChat platforms, run the platform-specific post-
         // processing. It mutates the article in place and returns its
         // outerHTML.

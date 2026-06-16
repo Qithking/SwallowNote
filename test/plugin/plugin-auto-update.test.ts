@@ -11,8 +11,8 @@
  *     new:  semver.gt("1.0.0-beta.1", "1.0.0") → `false` (right)
  *
  * The marketplace wire format *does* ship pre-release versions
- * (the in-tree `typist` and `export` plugins both use plain
- * `0.1.0` for now, but the marketplace schema and the
+ * (the in-tree `export` plugin uses plain `0.1.0` for now, but
+ * the marketplace schema and the
  * dependency-resolver in `plugin-dependencies.ts` already accept
  * `-beta.N` / `-rc.N` suffixes), so a misfire could silently
  * downgrade an installed plugin to a pre-release.

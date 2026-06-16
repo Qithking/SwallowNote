@@ -4,7 +4,7 @@
   "description": "使用文颜引擎将 Markdown 排版为微信公众号样式的富文本",
   "version": "0.1.0",
   "author": "SwallowNote",
-  "publishedAt": "2026-06-16T07:26:01Z",
+  "publishedAt": "2026-06-16T09:10:34Z",
   "iconPosition": "editorToolbar",
   "contentPosition": "editorArea",
   "order": 45,

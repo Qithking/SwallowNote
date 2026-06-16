@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
+import type { PluginStorage } from '@swallow-note/plugin-sdk'
 import {
   useWenyanRenderer,
   PLATFORMS,
@@ -19,11 +20,17 @@ import {
   type Platform,
 } from './useWenyanRenderer'
 import { copyHtmlToClipboard } from './copyHtml'
+import { exportHtmlToPng } from './exportImage'
+import {
+  CustomThemeDialog,
+  type CustomTheme,
+} from './CustomThemeDialog'
 
 interface WenyanDialogProps {
   open: boolean
   onClose: () => void
   activeNoteContent: string
+  store: PluginStorage
 }
 
 const DEFAULT_THEME_OVERRIDES: ThemeOverrides = {
@@ -35,7 +42,9 @@ const DEFAULT_THEME_OVERRIDES: ThemeOverrides = {
 const DEFAULT_PARAGRAPH_OPTIONS: ParagraphOptions = {
   fontSize: 16,
   lineHeight: 1.75,
+  lineSpacing: 0,
   fontFamily: 'sans-serif',
+  letterSpacing: 'normal',
   paragraphSpacing: 'standard',
   textAlign: 'left',
   textIndent: 0,
@@ -53,10 +62,13 @@ const DEFAULT_OPTIONS: RenderOptions = {
   platform: 'wechat',
   themeId: 'default',
   hlThemeId: 'solarized-light',
+  customThemeCss: null,
   isAddFootnote: true,
   themeOverrides: DEFAULT_THEME_OVERRIDES,
   paragraphOptions: DEFAULT_PARAGRAPH_OPTIONS,
+  paragraphFollowTheme: true,
   codeBlockOptions: DEFAULT_CODE_BLOCK_OPTIONS,
+  codeBlockFollowTheme: true,
 }
 
 // Debounce helper.
@@ -70,19 +82,41 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export function WenyanDialog(props: WenyanDialogProps): ReactNode {
-  const { open, onClose, activeNoteContent } = props
+  const { open, onClose, activeNoteContent, store } = props
   const { html, loading, error, render } = useWenyanRenderer()
   const [options, setOptions] = useState<RenderOptions>(DEFAULT_OPTIONS)
   const [gzhThemes, setGzhThemes] = useState<Array<{ id: string; name: string }>>([])
   const [otherThemes, setOtherThemes] = useState<Array<{ id: string; name: string }>>([])
   const [hlThemes, setHlThemes] = useState<Array<{ id: string; name: string }>>([])
+  const [customThemes, setCustomThemes] = useState<CustomTheme[]>([])
+  const [customDialogOpen, setCustomDialogOpen] = useState(false)
   const [copyBusy, setCopyBusy] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
   const [openSections, setOpenSections] = useState({
     theme: true,
     paragraph: false,
     codeBlock: false,
   })
   const previewRef = useRef<HTMLDivElement>(null)
+
+  // The theme id currently in use. When a custom theme is picked, this
+  // is a `custom:<uuid>` id; the renderer reads the CSS from
+  // `options.customThemeCss`. When a built-in theme is picked, this is
+  // the plain id and `options.customThemeCss` is null.
+  const isCustomThemeActive = options.customThemeCss !== null
+
+  // Load custom themes on dialog open.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void store.get<CustomTheme[]>('wenyan-custom-themes').then((v) => {
+      if (cancelled) return
+      setCustomThemes(v ?? [])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, store])
 
   // Filter the visible theme list to the current platform. For
   // non-WeChat platforms we pin the theme to the platform's default and
@@ -91,6 +125,15 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
     if (options.platform === 'wechat') return gzhThemes
     return otherThemes
   }, [options.platform, gzhThemes, otherThemes])
+
+  // Reload custom themes when the inner dialog closes so edits show up
+  // in the parent dropdown without a full dialog reopen.
+  useEffect(() => {
+    if (customDialogOpen) return
+    void store.get<CustomTheme[]>('wenyan-custom-themes').then((v) => {
+      setCustomThemes(v ?? [])
+    })
+  }, [customDialogOpen, store])
 
   const debouncedContent = useDebounce(activeNoteContent, 300)
 
@@ -185,6 +228,33 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
       setCopyBusy(false)
     }
   }, [copyBusy, html])
+
+  const handleExport = useCallback(async () => {
+    if (exportBusy || !previewRef.current) return
+    setExportBusy(true)
+    const platformName =
+      PLATFORMS.find((p) => p.id === options.platform)?.name ?? options.platform
+    const ts = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace('T', '-')
+      .slice(0, 15)
+    const filename = `wenyan-${platformName}-${ts}`
+    try {
+      const result = await exportHtmlToPng(previewRef.current, { filename })
+      if (result.ok) {
+        toast.success(`已导出长图：${result.path}`)
+      } else if (result.cancelled) {
+        // User cancelled the directory picker – no toast, no error.
+      } else {
+        toast.error(`导出失败：${result.error ?? '未知错误'}`)
+      }
+    } catch (e) {
+      toast.error(`导出失败：${String(e)}`)
+    } finally {
+      setExportBusy(false)
+    }
+  }, [exportBusy, options.platform])
 
   if (!open) return null
 
@@ -302,7 +372,18 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
             <Section title="文章主题">
               <select
                 value={options.themeId}
-                onChange={(e) => setOptions((o) => ({ ...o, themeId: e.target.value }))}
+                onChange={(e) => {
+                  const id = e.target.value
+                  // When a custom theme is selected, also populate
+                  // customThemeCss so the renderer can pass it
+                  // directly to the library.
+                  const custom = customThemes.find((t) => t.id === id)
+                  setOptions((o) => ({
+                    ...o,
+                    themeId: id,
+                    customThemeCss: custom ? custom.css : null,
+                  }))
+                }}
                 disabled={options.platform !== 'wechat'}
                 style={{
                   width: '100%',
@@ -320,7 +401,34 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
                     {t.name}
                   </option>
                 ))}
+                {customThemes.length > 0 && (
+                  <optgroup label="— 自定义主题 —">
+                    {customThemes.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
+              <button
+                onClick={() => setCustomDialogOpen(true)}
+                disabled={options.platform !== 'wechat'}
+                style={{
+                  marginTop: 6,
+                  width: '100%',
+                  padding: '5px 8px',
+                  fontSize: 12,
+                  borderRadius: 4,
+                  border: '1px dashed #d1d5db',
+                  background: '#fff',
+                  color: options.platform !== 'wechat' ? '#9ca3af' : '#374151',
+                  cursor: options.platform !== 'wechat' ? 'not-allowed' : 'pointer',
+                }}
+                title="管理自定义主题"
+              >
+                自定义主题…
+              </button>
               {options.platform !== 'wechat' && (
                 <div
                   style={{
@@ -410,116 +518,171 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
                 setOpenSections((s) => ({ ...s, paragraph: !s.paragraph }))
               }
             >
-              <SelectRow
-                label="字号"
-                value={String(options.paragraphOptions.fontSize)}
+              <Toggle
+                label="跟随主题"
+                checked={options.paragraphFollowTheme}
                 onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    paragraphOptions: {
-                      ...o.paragraphOptions,
-                      fontSize: Number(v) as ParagraphOptions['fontSize'],
-                    },
-                  }))
+                  setOptions((o) => ({ ...o, paragraphFollowTheme: v }))
                 }
-                options={[
-                  { value: '12', label: '12px 紧凑' },
-                  { value: '14', label: '14px 小' },
-                  { value: '16', label: '16px 标准' },
-                  { value: '18', label: '18px 大' },
-                  { value: '20', label: '20px 加大' },
-                ]}
               />
-              <SelectRow
-                label="行高"
-                value={String(options.paragraphOptions.lineHeight)}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    paragraphOptions: {
-                      ...o.paragraphOptions,
-                      lineHeight: Number(v) as ParagraphOptions['lineHeight'],
-                    },
-                  }))
-                }
-                options={[
-                  { value: '1.5', label: '1.5 紧凑' },
-                  { value: '1.75', label: '1.75 标准' },
-                  { value: '2', label: '2 宽松' },
-                ]}
-              />
-              <SelectRow
-                label="字体"
-                value={options.paragraphOptions.fontFamily}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    paragraphOptions: {
-                      ...o.paragraphOptions,
-                      fontFamily: v as ParagraphOptions['fontFamily'],
-                    },
-                  }))
-                }
-                options={[
-                  { value: 'sans-serif', label: '无衬线' },
-                  { value: 'serif', label: '衬线' },
-                  { value: 'monospace', label: '等宽' },
-                ]}
-              />
-              <SelectRow
-                label="段间距"
-                value={options.paragraphOptions.paragraphSpacing}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    paragraphOptions: {
-                      ...o.paragraphOptions,
-                      paragraphSpacing: v as ParagraphOptions['paragraphSpacing'],
-                    },
-                  }))
-                }
-                options={[
-                  { value: 'compact', label: '紧凑' },
-                  { value: 'standard', label: '标准' },
-                  { value: 'loose', label: '宽松' },
-                ]}
-              />
-              <SelectRow
-                label="段落对齐"
-                value={options.paragraphOptions.textAlign}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    paragraphOptions: {
-                      ...o.paragraphOptions,
-                      textAlign: v as ParagraphOptions['textAlign'],
-                    },
-                  }))
-                }
-                options={[
-                  { value: 'left', label: '左对齐' },
-                  { value: 'center', label: '居中' },
-                  { value: 'right', label: '右对齐' },
-                  { value: 'justify', label: '两端' },
-                ]}
-              />
-              <SelectRow
-                label="首行缩进"
-                value={String(options.paragraphOptions.textIndent)}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    paragraphOptions: {
-                      ...o.paragraphOptions,
-                      textIndent: Number(v) as ParagraphOptions['textIndent'],
-                    },
-                  }))
-                }
-                options={[
-                  { value: '0', label: '无' },
-                  { value: '2', label: '2em' },
-                ]}
-              />
+              {!options.paragraphFollowTheme && (
+                <>
+                  <SelectRow
+                    label="字号"
+                    value={String(options.paragraphOptions.fontSize)}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        paragraphOptions: {
+                          ...o.paragraphOptions,
+                          fontSize: Number(v) as ParagraphOptions['fontSize'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: '12', label: '12px 紧凑' },
+                      { value: '13', label: '13px' },
+                      { value: '14', label: '14px 小' },
+                      { value: '15', label: '15px' },
+                      { value: '16', label: '16px 标准' },
+                      { value: '17', label: '17px' },
+                      { value: '18', label: '18px 大' },
+                      { value: '19', label: '19px' },
+                      { value: '20', label: '20px 加大' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="行高"
+                    value={String(options.paragraphOptions.lineHeight)}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        paragraphOptions: {
+                          ...o.paragraphOptions,
+                          lineHeight: Number(v) as ParagraphOptions['lineHeight'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: '1.25', label: '1.25 紧凑' },
+                      { value: '1.5', label: '1.5 标准' },
+                      { value: '1.75', label: '1.75 较大' },
+                      { value: '2', label: '2 大' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="行间距"
+                    value={String(options.paragraphOptions.lineSpacing)}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        paragraphOptions: {
+                          ...o.paragraphOptions,
+                          lineSpacing: Number(v) as ParagraphOptions['lineSpacing'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: '0', label: '小 (0em)' },
+                      { value: '0.1', label: '正常 (0.1em)' },
+                      { value: '0.2', label: '较大 (0.2em)' },
+                      { value: '0.3', label: '大 (0.3em)' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="字体"
+                    value={options.paragraphOptions.fontFamily}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        paragraphOptions: {
+                          ...o.paragraphOptions,
+                          fontFamily: v as ParagraphOptions['fontFamily'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: 'sans-serif', label: '无衬线' },
+                      { value: 'serif', label: '衬线' },
+                      { value: 'monospace', label: '等宽' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="字间距"
+                    value={options.paragraphOptions.letterSpacing}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        paragraphOptions: {
+                          ...o.paragraphOptions,
+                          letterSpacing: v as ParagraphOptions['letterSpacing'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: 'tight', label: '紧凑 (-0.02em)' },
+                      { value: 'small', label: '小 (-0.01em)' },
+                      { value: 'normal', label: '正常' },
+                      { value: 'loose', label: '宽松 (0.05em)' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="段间距"
+                    value={options.paragraphOptions.paragraphSpacing}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        paragraphOptions: {
+                          ...o.paragraphOptions,
+                          paragraphSpacing: v as ParagraphOptions['paragraphSpacing'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: 'compact', label: '紧凑 (0.3em)' },
+                      { value: 'small', label: '小 (0.5em)' },
+                      { value: 'standard', label: '标准 (1em)' },
+                      { value: 'loose', label: '宽松 (1.6em)' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="段落对齐"
+                    value={options.paragraphOptions.textAlign}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        paragraphOptions: {
+                          ...o.paragraphOptions,
+                          textAlign: v as ParagraphOptions['textAlign'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: 'left', label: '左对齐' },
+                      { value: 'center', label: '居中' },
+                      { value: 'right', label: '右对齐' },
+                      { value: 'justify', label: '两端' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="首行缩进"
+                    value={String(options.paragraphOptions.textIndent)}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        paragraphOptions: {
+                          ...o.paragraphOptions,
+                          textIndent: Number(v) as ParagraphOptions['textIndent'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: '0', label: '无' },
+                      { value: '2', label: '2em' },
+                    ]}
+                  />
+                </>
+              )}
             </CollapsibleSection>
 
             <CollapsibleSection
@@ -529,71 +692,85 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
                 setOpenSections((s) => ({ ...s, codeBlock: !s.codeBlock }))
               }
             >
-              <SelectRow
-                label="圆角"
-                value={String(options.codeBlockOptions.borderRadius)}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    codeBlockOptions: {
-                      ...o.codeBlockOptions,
-                      borderRadius: Number(v) as CodeBlockOptions['borderRadius'],
-                    },
-                  }))
-                }
-                options={[
-                  { value: '0', label: '无圆角' },
-                  { value: '5', label: '5px' },
-                  { value: '10', label: '10px' },
-                ]}
-              />
-              <SelectRow
-                label="字号"
-                value={String(options.codeBlockOptions.fontSize)}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    codeBlockOptions: {
-                      ...o.codeBlockOptions,
-                      fontSize: Number(v) as CodeBlockOptions['fontSize'],
-                    },
-                  }))
-                }
-                options={[
-                  { value: '11', label: '11px' },
-                  { value: '12', label: '12px' },
-                  { value: '13', label: '13px' },
-                  { value: '14', label: '14px' },
-                ]}
-              />
-              <SelectRow
-                label="阴影"
-                value={options.codeBlockOptions.shadow}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    codeBlockOptions: {
-                      ...o.codeBlockOptions,
-                      shadow: v as CodeBlockOptions['shadow'],
-                    },
-                  }))
-                }
-                options={[
-                  { value: 'none', label: '无' },
-                  { value: 'light', label: '轻' },
-                  { value: 'heavy', label: '重' },
-                ]}
-              />
               <Toggle
-                label="macOS 风格"
-                checked={options.codeBlockOptions.isMacStyle}
+                label="跟随主题"
+                checked={options.codeBlockFollowTheme}
                 onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    codeBlockOptions: { ...o.codeBlockOptions, isMacStyle: v },
-                  }))
+                  setOptions((o) => ({ ...o, codeBlockFollowTheme: v }))
                 }
               />
+              {!options.codeBlockFollowTheme && (
+                <>
+                  <SelectRow
+                    label="圆角"
+                    value={String(options.codeBlockOptions.borderRadius)}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        codeBlockOptions: {
+                          ...o.codeBlockOptions,
+                          borderRadius: Number(v) as CodeBlockOptions['borderRadius'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: '0', label: '无圆角' },
+                      { value: '5', label: '5px' },
+                      { value: '10', label: '10px' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="字号"
+                    value={String(options.codeBlockOptions.fontSize)}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        codeBlockOptions: {
+                          ...o.codeBlockOptions,
+                          fontSize: Number(v) as CodeBlockOptions['fontSize'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: '12', label: '12px' },
+                      { value: '13', label: '13px' },
+                      { value: '14', label: '14px' },
+                      { value: '15', label: '15px' },
+                      { value: '16', label: '16px' },
+                      { value: '17', label: '17px' },
+                      { value: '18', label: '18px' },
+                    ]}
+                  />
+                  <SelectRow
+                    label="阴影"
+                    value={options.codeBlockOptions.shadow}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        codeBlockOptions: {
+                          ...o.codeBlockOptions,
+                          shadow: v as CodeBlockOptions['shadow'],
+                        },
+                      }))
+                    }
+                    options={[
+                      { value: 'none', label: '无' },
+                      { value: 'light', label: '轻' },
+                      { value: 'heavy', label: '重' },
+                    ]}
+                  />
+                  <Toggle
+                    label="macOS 风格"
+                    checked={options.codeBlockOptions.isMacStyle}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        codeBlockOptions: { ...o.codeBlockOptions, isMacStyle: v },
+                      }))
+                    }
+                  />
+                </>
+              )}
             </CollapsibleSection>
 
             <div style={{ marginTop: 20 }}>
@@ -613,6 +790,42 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
                 }}
               >
                 {copyBusy ? '复制中…' : '复制到剪贴板'}
+              </button>
+              <button
+                onClick={handleExport}
+                disabled={exportBusy || !html || loading}
+                style={{
+                  marginTop: 6,
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  borderRadius: 6,
+                  border: '1px solid #111827',
+                  background: exportBusy || !html || loading ? '#f3f4f6' : '#fff',
+                  color: exportBusy || !html || loading ? '#9ca3af' : '#111827',
+                  cursor: exportBusy || !html || loading ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                {exportBusy ? '导出中…' : '导出长图'}
               </button>
             </div>
           </div>
@@ -687,6 +900,22 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
           </div>
         </div>
       </div>
+
+      <CustomThemeDialog
+        store={store}
+        open={customDialogOpen}
+        onClose={() => setCustomDialogOpen(false)}
+        selectedId={isCustomThemeActive ? options.themeId : null}
+        onSelect={(theme) => {
+          setOptions((o) => ({
+            ...o,
+            themeId: theme.id,
+            customThemeCss: theme.css,
+          }))
+          setCustomDialogOpen(false)
+          toast.success(`已切换到自定义主题「${theme.name}」`)
+        }}
+      />
     </div>
   )
 }

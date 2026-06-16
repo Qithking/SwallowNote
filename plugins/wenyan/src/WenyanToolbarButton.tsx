@@ -11,7 +11,7 @@ import { WenyanIcon } from './WenyanIcon'
 import { WenyanDialog } from './WenyanDialog'
 
 export function WenyanToolbarButton(props: ToolbarButtonProps): ReactNode {
-  const { size, activeNoteContent } = props
+  const { size, activeNoteContent, store } = props
   const [dialogOpen, setDialogOpen] = useState(false)
 
   const openDialog = useCallback(() => setDialogOpen(true), [])
@@ -35,6 +35,7 @@ export function WenyanToolbarButton(props: ToolbarButtonProps): ReactNode {
         open={dialogOpen}
         onClose={closeDialog}
         activeNoteContent={activeNoteContent}
+        store={store}
       />
     </>
   )
