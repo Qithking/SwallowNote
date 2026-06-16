@@ -28,7 +28,7 @@ const manifest: PluginManifest = {
   id: 'com.swallownote.typist',
   name: '公众号排版',
   description: '将 Markdown 文档按微信公众号等平台主题排版，一键复制带样式的富文本',
-  version: '0.1.0',
+  version: '0.1.1',
   author: 'SwallowNote',
   publishedAt: '2026-06-14',
   iconPosition: 'editorToolbar',

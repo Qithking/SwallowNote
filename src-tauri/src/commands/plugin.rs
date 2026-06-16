@@ -1542,15 +1542,50 @@ pub async fn check_plugin_updates(
                 let Some(active_dir) = active_version_dir(&path) else {
                     continue;
                 };
+                // The directory name under `.versions/<v>/` is the
+                // authoritative version string. The host wrote it via
+                // `set_current_version(&plugin_dir, &version)` during
+                // install / update, and it's the same value the
+                // `versions` listing API returns back to the frontend.
+                // Reading it from the manifest JSON inside `index.js`
+                // — which `parse_manifest_from_index_js` does — is
+                // convenient but creates a divergence when a plugin
+                // was packaged with a stale manifest comment (e.g. the
+                // zip was rebuilt but the `@swallow-manifest` header
+                // was never refreshed). Falling back to the directory
+                // name when the manifest disagrees keeps the
+                // marketplace's "Update" detection in lockstep with
+                // what the user actually has on disk.
+                let dir_version = active_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                if dir_version.is_empty() || dir_version == UPLOAD_VERSION {
+                    continue;
+                }
+
                 let index_js = active_dir.join("index.js");
                 let Some(meta) = parse_manifest_from_index_js(&index_js) else {
                     continue;
                 };
                 // Skip upload-sentinel installs — they have no real semver.
-                if meta.version.is_empty() || meta.version == UPLOAD_VERSION {
+                if meta.version == UPLOAD_VERSION {
                     continue;
                 }
-                local_versions.insert(meta.id, meta.version);
+                // Trust the directory name over the in-js manifest
+                // comment. The manifest comment is written by the
+                // packager at build time; the directory name is
+                // written by the host at install time. If the two
+                // disagree, the directory name reflects what the
+                // user actually installed (and what the
+                // `list_plugin_versions` IPC returns).
+                let version = if !meta.version.is_empty() {
+                    meta.version
+                } else {
+                    dir_version
+                };
+                local_versions.insert(meta.id, version);
             }
         }
     }
