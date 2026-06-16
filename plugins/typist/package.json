@@ -1,6 +1,6 @@
 {
   "name": "swallownote-plugin-typist",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Markdown 排版插件：把 Markdown 转成公众号/小红书等平台主题的富文本，一键复制到编辑器",
   "type": "module",
   "scripts": {

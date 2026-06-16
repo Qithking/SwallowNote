@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-16T01:05:24Z",
+  "updated_at": "2026-06-16T01:54:27Z",
   "plugins": [
     {
       "id": "com.swallownote.export",
@@ -24,7 +24,7 @@
     {
       "id": "com.swallownote.typist",
       "name": "公众号排版",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "description": "将 Markdown 文档按微信公众号等平台主题排版，一键复制带样式的富文本到公众号编辑器",
       "author": "SwallowNote",
       "tags": [
@@ -34,9 +34,9 @@
         "markdown"
       ],
       "download_url": "./typist/com.swallownote.typist.zip",
-      "sha256": "3ba8bd0ee0699506869b2f61e639493f044d9cb5df57642208ccddb0330c6589",
+      "sha256": "832568acc21475e8b6f17e8ebc9318e87427a9f6894cb19ff03ead4144247976",
       "changelog": "初版发布：5 套公众号主题、剪贴板三级降级、表格/代码/引用等 Markdown 元素支持",
-      "published_at": "2026-06-16T01:05:07Z",
+      "published_at": "2026-06-16T01:54:26Z",
       "dependencies": []
     }
   ]
