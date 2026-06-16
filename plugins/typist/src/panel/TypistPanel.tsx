@@ -2,9 +2,10 @@
  * Floating panel for the typist plugin.
  *
  * Renders inside `editorArea` (a floating card on top of the editor).
- * Layout: top bar with theme picker + action buttons; two-column body
- * with a read-only Markdown source on the left and the rendered
- * themed HTML on the right.
+ * Layout: top bar with theme picker + action buttons; the body is a
+ * single full-width / full-height column that hosts the rendered
+ * themed HTML. Width and height of the preview are driven by the
+ * panel's content area (no fixed `minHeight`, no reading-width cap).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -120,9 +121,6 @@ export function TypistPanel(panel: PluginPanelProps): ReactNode {
     }
   }, [renderedHtml, activeNotePath, themeId])
 
-  const wordCount = useMemo(() => countWords(activeNoteContent), [activeNoteContent])
-  const codeBlocks = useMemo(() => (activeNoteContent.match(/```/g)?.length ?? 0) / 2, [activeNoteContent])
-  const imageCount = useMemo(() => (activeNoteContent.match(/!\[[^\]]*\]\([^)]+\)/g)?.length ?? 0), [activeNoteContent])
   // Sanitize before injecting into the preview DOM. The backend already
   // inlines styles and drops raw HTML, but defense-in-depth: a future
   // backend regression or a malicious note must not be able to inject
@@ -209,70 +207,26 @@ export function TypistPanel(panel: PluginPanelProps): ReactNode {
         </button>
       </div>
 
-      {/* Body */}
+      {/* Body — 唯一主体,渲染后内容;高宽完全由 panel 内容区决定 */}
       <div
+        ref={previewRef}
         style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 1,
-          background: 'var(--border-color)',
-          minHeight: 320,
+          background: '#ffffff',
+          color: '#000',
+          width: '100%',
           flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          boxSizing: 'border-box',
         }}
       >
-        <div
-          style={{
-            background: 'var(--bg-primary)',
-            padding: 12,
-            overflow: 'auto',
-            fontFamily: 'SF Mono, Menlo, Monaco, Consolas, monospace',
-            fontSize: 12,
-            lineHeight: 1.6,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            color: 'var(--text-secondary)',
-          }}
-        >
-          {activeNoteContent || (
-            <span style={{ color: 'var(--text-muted)' }}>（当前笔记为空）</span>
-          )}
-        </div>
-        <div
-          ref={previewRef}
-          style={{
-            background: '#ffffff',
-            padding: '20px 24px',
-            overflow: 'auto',
-            color: '#000',
-            fontSize: 14,
-            lineHeight: 1.75,
-          }}
-        >
-          {isRendering && !renderedHtml ? (
-            <div style={{ color: '#999' }}>渲染中…</div>
-          ) : renderedHtml ? (
-            <div dangerouslySetInnerHTML={{ __html: safePreviewHtml }} />
-          ) : (
-            <div style={{ color: '#999' }}>预览将出现在这里</div>
-          )}
-        </div>
-      </div>
-
-      {/* Footer stats */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 16,
-          padding: '6px 12px',
-          borderTop: '1px solid var(--border-color)',
-          background: 'var(--bg-secondary)',
-          fontSize: 10,
-          color: 'var(--text-muted)',
-        }}
-      >
-        <span>字数: {wordCount.toLocaleString()}</span>
-        <span>代码块: {codeBlocks}</span>
-        <span>图片: {imageCount}</span>
+        {isRendering && !renderedHtml ? (
+          <div style={{ color: '#999', padding: '20px 24px' }}>渲染中…</div>
+        ) : renderedHtml ? (
+          <div dangerouslySetInnerHTML={{ __html: safePreviewHtml }} />
+        ) : (
+          <div style={{ color: '#999', padding: '20px 24px' }}>预览将出现在这里</div>
+        )}
       </div>
     </div>
   )
@@ -314,12 +268,6 @@ async function renderHtml(
   } finally {
     onRendering(false)
   }
-}
-
-function countWords(s: string): number {
-  // Same heuristic as the rest of the app: CJK = 1 per char, latin
-  // = 1 per whitespace-separated word.
-  return s.replace(/\s+/g, '').length
 }
 
 function deriveBaseName(path: string): string {
