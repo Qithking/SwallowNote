@@ -239,6 +239,25 @@ export interface PluginSettingsFieldOption {
   label: string
 }
 
+/**
+ * Conditional-visibility predicate for a {@link PluginSettingsField}.
+ * The field is rendered only when the current value of `key` in
+ * the values map strictly equals `equals`. The host currently only
+ * supports the equality form — every shipped plugin (picgo
+ * `visibleWhen` blocks for smms / imgur / github / custom / etc.)
+ * uses this shape, so adding AND / OR / `<` etc. is a future
+ * concern, not a present need.
+ *
+ * When `key` resolves to `undefined` (e.g. a stale rule that
+ * references a removed field) the predicate is treated as
+ * "hidden" on purpose, so a missing controller doesn't surface
+ * a block the user can no longer explain.
+ */
+export interface PluginSettingsVisibleWhen {
+  key: string
+  equals: unknown
+}
+
 export interface PluginSettingsField {
   key: string
   type: PluginSettingsFieldType
@@ -248,6 +267,7 @@ export interface PluginSettingsField {
   secret?: boolean
   placeholder?: string
   options?: PluginSettingsFieldOption[]
+  visibleWhen?: PluginSettingsVisibleWhen
 }
 
 export async function readPluginSettings(
@@ -955,6 +975,13 @@ export interface PluginMetadataRust {
   enabled: boolean
   plugin_path: string
   has_backend: boolean
+  /**
+   * True when the installed plugin ships a `settings.json` schema
+   * next to its `index.js`. The plugin manager uses this to decide
+   * whether to render the schema-driven settings button on the
+   * plugin card (paired with `PluginSettingsDialog`).
+   */
+  has_settings_schema: boolean
 }
 
 /** Scan the plugins directory and return metadata for each plugin */

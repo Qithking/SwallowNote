@@ -464,6 +464,12 @@ export async function loadAllPlugins(
           settings: manifest.settings,
           pluginPath: meta.plugin_path,
           hasBackend: meta.has_backend,
+          // True when the installed plugin ships a `settings.json`
+          // schema. The card renders a second Settings button (→
+          // PluginSettingsDialog) only when this is set, so the user
+          // can edit schema-driven settings even if the plugin
+          // author didn't ship a React `settings` component.
+          hasSettingsSchema: meta.has_settings_schema,
           permissions: manifest.permissions ?? [],
           // Carry lifecycle hooks from the manifest onto the runtime
           // definition. The store invokes these at register /

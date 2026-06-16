@@ -48,6 +48,7 @@ import { Label } from '@/components/ui/label'
 import { open as openDirDialog } from '@tauri-apps/plugin-dialog'
 import {
   hasSettings,
+  isFieldVisible,
   loadSettings,
   saveSettings,
   type PluginSettingsField,
@@ -120,10 +121,22 @@ export function PluginSettingsDialog({
     }
   }, [open, pluginId, initial, onOpenChange])
 
+  // Subset of the schema fields that pass the current
+  // `visibleWhen` predicates. Recomputed whenever `values`
+  // changes (e.g. the user switches `defaultProvider` from
+  // "github" to "tencent" — the GitHub-only block should
+  // disappear and the Tencent-only block appear in the same
+  // render). We also reuse this list in the validation pass
+  // so a `required: true` field that is currently hidden
+  // doesn't permanently disable the Save button.
+  const visibleFields = useMemo(
+    () => view?.schema?.fields.filter((f) => isFieldVisible(f, values)) ?? [],
+    [view, values]
+  )
+
   const validation = useMemo(() => {
     const errors: Record<string, string> = {}
-    if (!view?.schema) return errors
-    for (const f of view.schema.fields) {
+    for (const f of visibleFields) {
       if (!f.required) continue
       const v = values[f.key]
       if (v === undefined || v === null || v === '') {
@@ -131,7 +144,7 @@ export function PluginSettingsDialog({
       }
     }
     return errors
-  }, [view, values])
+  }, [visibleFields, values])
 
   const canSave = !saving && Object.keys(validation).length === 0
 
@@ -167,7 +180,7 @@ export function PluginSettingsDialog({
           </div>
         ) : (
           <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-            {view.schema.fields.map((field) => (
+            {visibleFields.map((field) => (
               <FieldRow
                 key={field.key}
                 field={field}

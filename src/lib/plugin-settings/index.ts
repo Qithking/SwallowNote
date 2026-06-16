@@ -23,6 +23,7 @@ import {
   type PluginSettingsFieldType,
   type PluginSettingsSchema,
   type PluginSettingsView,
+  type PluginSettingsVisibleWhen,
 } from '@/lib/tauri'
 
 export type {
@@ -31,6 +32,7 @@ export type {
   PluginSettingsFieldType,
   PluginSettingsSchema,
   PluginSettingsView,
+  PluginSettingsVisibleWhen,
 }
 
 /** Per-plugin cache. The host is the source of truth, this is just a hot path. */
@@ -81,6 +83,23 @@ export async function resetSettings(pluginId: string): Promise<void> {
 /** `true` when this plugin ships a `settings.json` schema. */
 export function hasSettings(view: PluginSettingsView | null | undefined): boolean {
   return !!view?.schema
+}
+
+/**
+ * Decide whether a field should be rendered given the current
+ * values map. A field with no `visibleWhen` is always shown.
+ * Otherwise the field shows only when the controller field's
+ * current value strictly equals the predicate's `equals`. A
+ * predicate whose `key` is missing from the values map evaluates
+ * to "hidden" on purpose — see
+ * {@link PluginSettingsVisibleWhen}.
+ */
+export function isFieldVisible(
+  field: PluginSettingsField,
+  values: Record<string, unknown>
+): boolean {
+  if (!field.visibleWhen) return true
+  return values[field.visibleWhen.key] === field.visibleWhen.equals
 }
 
 /** Return a single setting value, falling back to the schema default. */

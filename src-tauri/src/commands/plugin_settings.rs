@@ -103,8 +103,20 @@ pub fn delete_plugin_settings(
 /// return it as JSON. The settings dialog uses this as a sidecar so
 /// it can show labels, placeholders, and select options next to the
 /// values coming from SQLite.
+///
+/// The host's install pipeline ([`crate::commands::plugin`]) extracts
+/// plugin zips into `<app_data>/plugins/<id>/.versions/<active>/`,
+/// so `settings.json` lives inside the **active version dir**, not at
+/// the plugin root. Reading from the root silently returns `None`
+/// even for plugins that ship a perfectly valid schema, which the
+/// settings dialog then surfaces as "plugin does not provide
+/// settings.json". Use [`active_version_dir`] to resolve the
+/// currently active version (handles the `current` symlink, the
+/// `.current_version` text marker, and the lexicographic fallback in
+/// one go).
 pub fn read_schema_for_plugin(app: &AppHandle, plugin_id: &str) -> Option<serde_json::Value> {
-    let path = plugin_install_dir(app, plugin_id).join("settings.json");
+    let active_dir = crate::commands::plugin::active_version_dir(&plugin_install_dir(app, plugin_id))?;
+    let path = active_dir.join("settings.json");
     let text = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str::<serde_json::Value>(&text).ok()
 }
@@ -332,6 +344,7 @@ mod tests {
             secret: false,
             placeholder: None,
             options: None,
+            visible_when: None,
         }
     }
 

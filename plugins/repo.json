@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-16T09:10:39Z",
+  "updated_at": "2026-06-16T13:11:49Z",
   "plugins": [
     {
       "id": "com.swallownote.export",
@@ -38,6 +38,27 @@
       "sha256": "8ae7f1a0578814e02a3ee0c14e8ba50f6e0a7aed36cb1d31f8225bee7da83a4e",
       "changelog": "初版发布：集成 @wenyan-md/core 排版引擎，支持多主题、代码高亮、实时预览、一键复制",
       "published_at": "2026-06-16T09:10:34Z",
+      "dependencies": []
+    },
+    {
+      "id": "com.swallownote.picgo",
+      "name": "图床",
+      "version": "0.1.0",
+      "description": "基于 PicGo 的图床插件，支持 SM.MS / Imgur / GitHub / 自定义 HTTP 端点，本地图片一键上传并插入到笔记",
+      "author": "SwallowNote",
+      "tags": [
+        "image-host",
+        "picgo",
+        "upload",
+        "smms",
+        "imgur",
+        "github",
+        "markdown"
+      ],
+      "download_url": "./picgo/com.swallownote.picgo.zip",
+      "sha256": "b3e292705f15821b795ec44b4cfba187fcb00aa817c9ed555b48e94cdd2db38c",
+      "changelog": "初版发布：4 个 provider（SM.MS / Imgur / GitHub / Custom）、右侧面板 UI、上传历史、客户端转码、文件名策略、链接格式",
+      "published_at": "2026-06-16T13:11:49Z",
       "dependencies": []
     }
   ]

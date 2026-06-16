@@ -42,6 +42,27 @@ pub struct SettingsField {
     pub placeholder: Option<String>,
     #[serde(default)]
     pub options: Option<Vec<SettingsFieldOption>>,
+    /// Optional predicate evaluated against the current values
+    /// map; the field is shown only when the predicate holds.
+    /// Re-read from `settings.json` on every dialog open, so a
+    /// plugin author can change the rule across releases and the
+    /// host picks it up on the next install / update without
+    /// needing a schema version bump.
+    #[serde(default, rename = "visibleWhen")]
+    pub visible_when: Option<VisibleWhen>,
+}
+
+/// Conditional-visibility predicate for a [`SettingsField`]. The
+/// host currently supports an exact-equality check against another
+/// field's current value, which is what every shipped plugin uses
+/// (e.g. show GitHub-only fields when `defaultProvider == "github"`).
+/// Predicates with a `key` that does not exist in the values map
+/// evaluate to "hidden" on the JS side, so a stale rule doesn't
+/// accidentally surface a block whose controller is gone.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VisibleWhen {
+    pub key: String,
+    pub equals: serde_json::Value,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -482,6 +503,7 @@ mod tests {
                     secret: false,
                     placeholder: None,
                     options: None,
+                    visible_when: None,
                 })
                 .collect(),
         }
