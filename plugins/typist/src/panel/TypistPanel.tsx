@@ -148,9 +148,7 @@ export function TypistPanel(panel: PluginPanelProps): ReactNode {
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          padding: '8px 12px',
-          borderBottom: '1px solid var(--border-color)',
-          background: 'var(--bg-secondary)',
+          padding: '8px 12px',       
         }}
       >
         <span style={{ fontSize: 12, fontWeight: 600 }}>排版</span>

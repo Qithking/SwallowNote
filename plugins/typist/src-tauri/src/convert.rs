@@ -175,6 +175,23 @@ impl HtmlWriter {
                 };
             }
             Tag::List(start) => {
+                // If we're inside a list item and have buffered text,
+                // flush it *before* the nested list starts so the outer
+                // item's text appears before the nested <ul>/<ol> in
+                // document order. Without this, the inner `Start(Item)`
+                // would `clear()` the buffer and the outer text is lost.
+                if self.in_item && !self.item_buf.is_empty() {
+                    if let Some(&ordered) = self.list_stack.last() {
+                        let prefix = if ordered { "1. " } else { "• " };
+                        let buf = format!("{prefix}{}", self.item_buf);
+                        self.out.push_str(&format!(
+                            "<span style=\"{}\">{}</span>",
+                            paragraph_style(self.theme),
+                            buf
+                        ));
+                        self.item_buf.clear();
+                    }
+                }
                 let ordered = start.is_some();
                 self.list_stack.push(ordered);
                 self.list_depth += 1;
@@ -310,20 +327,16 @@ impl HtmlWriter {
                 // has fired and marked this item as a task list item.
                 // Task items already have a ■/□ in `item_buf`; we must
                 // not stack a •/1. on top of it.
-                if !self.current_item_is_task {
+                if !self.item_buf.is_empty() && !self.current_item_is_task {
                     if let Some(&ordered) = self.list_stack.last() {
                         let prefix = if ordered { "1. " } else { "• " };
-                        if self.item_buf.is_empty() {
-                            // Empty item: just push the prefix into the
-                            // buffer so the span-emit below still fires
-                            // and we keep a consistent shape.
-                            self.item_buf.push_str(prefix);
-                        } else {
-                            self.item_buf = format!("{prefix}{}", self.item_buf);
-                        }
+                        self.item_buf = format!("{prefix}{}", self.item_buf);
                     }
                 }
-                // Flush any inline content accumulated during the item
+                // Flush any inline content accumulated during the item.
+                // If the buffer is empty (e.g. the text was already
+                // flushed in `Start(List)` because this item contains a
+                // nested list), we skip emitting a bare prefix span.
                 if !self.item_buf.is_empty() {
                     self.out.push_str(&format!(
                         "<span style=\"{}\">{}</span>",
@@ -760,6 +773,38 @@ mod tests {
     /// full table pipeline (header + 1 body row) and asserts the
     /// canonical shape: exactly one <thead> + one <tbody>, header
     /// cells wrapped in <th>, body cells in <td>.
+    /// Regression test for nested list rendering: an outer list item
+    /// that contains text followed by a nested list must preserve the
+    /// outer item's text. Previously `Start(Item)` unconditionally
+    /// called `item_buf.clear()`, which wiped the outer item's buffered
+    /// text when the nested item started.
+    #[test]
+    fn nested_list_preserves_outer_item_text() {
+        let md = "1. Phase 1 — 显式 hook 字段（最小改动）\n   - 扩展 PluginManifest 添加可选字段\n   - 在 loadAllPlugins 流程中调用\n   - 与 React mount/unmount 解耦（系统级事件）\n";
+        let html = markdown_to_themed_html(md, WECHAT_DEFAULT, "wechat").unwrap();
+        println!("\n=== nested_list html ===\n{}\n========================\n", html);
+
+        // Outer ordered item text must survive.
+        assert!(
+            html.contains("Phase 1"),
+            "outer ordered item text 'Phase 1' missing in: {html}"
+        );
+
+        // Nested unordered item text must survive (in full).
+        assert!(
+            html.contains("扩展 PluginManifest"),
+            "nested item text '扩展 PluginManifest' missing in: {html}"
+        );
+        assert!(
+            html.contains("在 loadAllPlugins"),
+            "nested item text '在 loadAllPlugins' missing in: {html}"
+        );
+        assert!(
+            html.contains("与 React mount/unmount 解耦"),
+            "nested item text '与 React mount/unmount 解耦' missing in: {html}"
+        );
+    }
+
     #[test]
     fn table_header_row_routes_to_thead() {
         let md = "| col1 | col2 |\n|------|------|\n| a    | b    |\n";
