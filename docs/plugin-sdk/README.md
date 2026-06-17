@@ -34,6 +34,8 @@ import {
   type PluginPanelProps,
   pluginEventBus,
   registerContextMenu,
+  registerEditor,   // ← SDK 把组件推入 host 的 editor 注册表
+  unregisterEditor, // ← 配套的清理 API
   usePluginStorage,
 } from '@swallow-note/plugin-sdk'
 
@@ -51,6 +53,22 @@ function Panel(panel: PluginPanelProps) {
   )
 }
 
+/**
+ * 接管 .smm 文件的编辑器组件。
+ *
+ * ⚠️ 注意：声明 `editorFileExtensions` + `editorComponent` **本身不会**让
+ * host 把 .smm 文件的渲染权交给你 —— host 的 Editor.tsx 在渲染一个
+ * 文件时会去查 `pluginEditorRegistry`，但这个注册表是空的，直到你
+ * 从生命周期钩子调用 `registerEditor` 把它填进去。
+ *
+ * 因此带 editor 的插件必须实现 `onLoad` / `onUnload`（或 `onEnable` /
+ * `onDisable`）钩子来注册/反注册。
+ */
+function MindMapEditorView({ content, onChange }) {
+  // ... 完整的 .smm 编辑器实现
+  return <div>…</div>
+}
+
 const manifest: PluginDefinition = {
   id: 'com.example.demo',
   name: 'Demo',
@@ -66,6 +84,30 @@ const manifest: PluginDefinition = {
   panel: Panel,
   pluginPath: '',
   hasBackend: false,
+
+  // ① 静态声明：让 host 在安装时知道这个插件"想要"处理哪些扩展名
+  editorFileExtensions: ['.smm'],
+  editorComponent: MindMapEditorView,
+
+  // ② 权限：必须包含 'editor'，否则 registerEditor 调用会被拒绝
+  permissions: ['editor', 'events', 'storage'],
+
+  // ③ 运行时注入：必须从生命周期钩子调用 registerEditor，host 才
+  //    会在 Editor.tsx 的查表路径中真正找到你的组件
+  onLoad: ({ pluginId }) => {
+    registerEditor(pluginId, '.smm', MindMapEditorView)
+  },
+  onUnload: ({ pluginId }) => {
+    unregisterEditor(pluginId)
+  },
+  // 启用/禁用切换时同样需要维护注册表，否则用户在禁用→启用
+  // 之间打开 .smm 会看到兼容垫片
+  onEnable: ({ pluginId }) => {
+    registerEditor(pluginId, '.smm', MindMapEditorView)
+  },
+  onDisable: ({ pluginId }) => {
+    unregisterEditor(pluginId)
+  },
 }
 
 export default manifest
@@ -76,11 +118,67 @@ export default manifest
 | 类别 | 名称 |
 | --- | --- |
 | **类型** | `PluginDefinition`, `PluginManifest`（=Definition）, `PluginContext`, `PluginPanelProps`, `PluginStorage`, `PluginEventBus`, `PluginEvent`, `PluginEventPayloadMap`, `PluginEventHandler`, `PluginLifecycleHook`, `IconPosition`, `ContentPosition`, `ContextMenuItem`, `ContextMenuContext`, `ContextMenuLocation`, `ContextMenuRegistry`, `HostOverrides` |
-| **运行时** | `pluginEventBus`, `getPluginStorage`, `registerContextMenu`, `unregisterContextMenu`, `clearPluginMenuItems`, `getContextMenuItems`, `buildPluginContext`, `runLifecycleHook` |
+| **运行时** | `pluginEventBus`, `getPluginStorage`, `registerContextMenu`, `unregisterContextMenu`, `clearPluginMenuItems`, `getContextMenuItems`, `registerEditor`, `unregisterEditor`, `getEditorForExtension`, `getActivePluginExtensions`, `buildPluginContext`, `runLifecycleHook` |
 | **React hooks** | `usePluginStorage`, `usePluginEvent`, `usePluginEvents` |
 | **Emit 助手** | `emitNoteOpened`, `emitNoteClosed`, `emitNoteSaved`, `emitNoteChanged`, `emitThemeChanged`, `emitLocaleChanged`, `emitSettingChanged`, `emitAppReady`, `emitAppExit` |
 | **宿主接管** | `setHost(overrides): () => void` |
 | **版本** | `SDK_VERSION` |
+
+## 注册文件编辑器
+
+插件可以**接管一种或多种文件扩展名的渲染**——让 host 在打开 `.smm` / `.drawio` / `.excalidraw` 等"非 Markdown 文件"时，把渲染权交给你而不是内置的 markdown / 代码编辑器。
+
+整套机制分三层，**三层必须齐备** host 才会真正调用你的组件：
+
+### 1. 静态声明（在 `manifest` 上）
+
+```typescript
+const manifest: PluginDefinition = {
+  // … 其他字段 …
+  editorFileExtensions: ['.smm'],
+  editorComponent: MindMapEditorView,
+  permissions: ['editor'],   // ← 必须有 'editor' 权限
+}
+```
+
+- `editorFileExtensions`：扩展名清单，**带点、全部小写**（如 `.smm` / `.drawio`）。host 在解析 manifest 时会静态检查。
+- `editorComponent`：你的 React 组件，签名固定为 `{ content: string; onChange: (content: string) => void } => JSX.Element`。`onChange` 把新内容推回 host，host 负责落盘。
+- `permissions`：必须包含 `'editor'`。未声明的插件即使写了上面两个字段，host 也会在安装时打 warning，并拒绝 `registerEditor` 注入。
+
+### 2. 运行时注入（必须从生命周期钩子）
+
+```typescript
+onLoad:    ({ pluginId }) => registerEditor(pluginId, '.smm', MindMapEditorView),
+onUnload:  ({ pluginId }) => unregisterEditor(pluginId),
+onEnable:  ({ pluginId }) => registerEditor(pluginId, '.smm', MindMapEditorView),
+onDisable: ({ pluginId }) => unregisterEditor(pluginId),
+```
+
+⚠️ **关键约束**：必须从生命周期钩子调 `registerEditor`，**不能**在顶层 `manifest` 字面量中副作用调用。原因：`registerEditor` 走 `setHost(overrides).registerEditor` 桥接到 host 的注册表，host 只能在 `onLoad` / `onEnable` 调用前后通过 `setHost` 装上 hostOverrides。顶层调用会落到 SDK 的本地 stub，host 的 `Editor.tsx` 看不到。
+
+`unregisterEditor` 不带扩展名参数——插件卸载时一次性清空该插件注册的所有扩展名。
+
+### 3. host 侧分发
+
+`src/components/Editor.tsx` 在渲染一个文件时：
+
+1. 算 `fileType = detectFileType(filename)`（`fileTypeUtils.ts` 会读 `getActivePluginExtensions()` 决定 `.smm` 是 `'mindmap'` 还是默认 code）
+2. 查 `pluginEditorRegistry.getEditorForExtension(ext)`：命中 → 渲染 `PluginEditor`；未命中 → 渲染兼容垫片（一个轻量"请安装 X 插件"占位）
+3. 注册表每次变更会 emit `editor:registered` / `editor:unregistered` 事件，host 的 `Editor.tsx` 和文件树右键菜单都订阅了这两事件——插件装/卸时**实时**反映
+
+### 检测 helper
+
+```typescript
+// 当前已激活的插件扩展名集合，用于自定义 UI 判断
+const exts = getActivePluginExtensions()
+if (exts.has('.smm')) {
+  // 显示"新建思维导图"等菜单项
+}
+```
+
+### 完整示例
+
+完整可运行的 `.smm` 思维导图插件源码在 `plugins/mindmap/`，参考 [plugins/mindmap/src/index.tsx](../../plugins/mindmap/src/index.tsx)。
 
 ## 双模式
 

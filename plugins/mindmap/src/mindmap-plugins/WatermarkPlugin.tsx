@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useT } from '../i18n/useT'
 import { X, Droplets, Type, Palette, RotateCw, Space, Grid3X3, Layers, Download } from 'lucide-react'
-import { Switch } from '@/components/ui/switch'
-import { Input } from '@/components/ui/input'
-import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import { Switch } from '../components/ui/switch'
+import { Input } from '../components/ui/input'
+import { ScrollArea, ScrollBar } from '../components/ui/scroll-area'
 import { ColorButton } from './ColorPicker'
 
 interface WatermarkPluginProps {
@@ -105,7 +105,7 @@ function Divider() {
 }
 
 export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
-  const { t } = useTranslation()
+  const t = useT()
   const [config, setConfig] = useState<WatermarkConfig>(DEFAULT_CONFIG)
 
   // Load watermark config from mindMap
@@ -120,16 +120,16 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
 
   const applyConfig = useCallback((newConfig: WatermarkConfig) => {
     if (!mindMap) return
-    
+
     // Store config in mindMap options
     if (!mindMap.opt) mindMap.opt = {}
     mindMap.opt.watermark = newConfig
-    
+
     // Directly trigger watermark redraw
     if (mindMap.drawWatermark) {
       mindMap.drawWatermark()
     }
-    
+
     // Trigger data change event to save config
     mindMap.emit('data_change')
   }, [mindMap])
@@ -194,9 +194,9 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
             <SectionLabel icon={Palette} label={t('mindMap.watermark.color')} />
             <div className="flex items-center gap-2">
               <div className={`scale-[0.82] origin-left ${!config.enabled ? 'opacity-50' : ''}`}>
-                <ColorButton 
-                  value={config.color} 
-                  onChange={(c) => updateConfig('color', c)} 
+                <ColorButton
+                  value={config.color}
+                  onChange={(c) => updateConfig('color', c)}
                   disabled={!config.enabled}
                 />
               </div>
@@ -209,11 +209,11 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
           <div className={sectionCls}>
             <SectionLabel icon={Droplets} label={t('mindMap.watermark.opacity')} />
             <div className="flex items-center gap-2">
-              <Stepper 
-                value={Math.round(config.opacity * 100)} 
-                onChange={(v) => updateConfig('opacity', v / 100)} 
-                min={0} 
-                max={100} 
+              <Stepper
+                value={Math.round(config.opacity * 100)}
+                onChange={(v) => updateConfig('opacity', v / 100)}
+                min={0}
+                max={100}
                 step={5}
               />
               <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>%</span>
@@ -226,11 +226,11 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
           <div className={sectionCls}>
             <SectionLabel icon={Type} label={t('mindMap.watermark.fontSize')} />
             <div className="flex items-center gap-2">
-              <Stepper 
-                value={config.fontSize} 
-                onChange={(v) => updateConfig('fontSize', v)} 
-                min={8} 
-                max={72} 
+              <Stepper
+                value={config.fontSize}
+                onChange={(v) => updateConfig('fontSize', v)}
+                min={8}
+                max={72}
                 step={1}
               />
               <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>px</span>
@@ -243,11 +243,11 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
           <div className={sectionCls}>
             <SectionLabel icon={RotateCw} label={t('mindMap.watermark.rotation')} />
             <div className="flex items-center gap-2">
-              <Stepper 
-                value={config.rotate} 
-                onChange={(v) => updateConfig('rotate', v)} 
-                min={-180} 
-                max={180} 
+              <Stepper
+                value={config.rotate}
+                onChange={(v) => updateConfig('rotate', v)}
+                min={-180}
+                max={180}
                 step={5}
               />
               <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>°</span>
@@ -260,11 +260,11 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
           <div className={sectionCls}>
             <SectionLabel icon={Space} label={t('mindMap.watermark.lineSpacing')} />
             <div className="flex items-center gap-2">
-              <Stepper 
-                value={config.lineSpacing} 
-                onChange={(v) => updateConfig('lineSpacing', v)} 
-                min={50} 
-                max={300} 
+              <Stepper
+                value={config.lineSpacing}
+                onChange={(v) => updateConfig('lineSpacing', v)}
+                min={50}
+                max={300}
                 step={10}
               />
               <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>px</span>
@@ -277,11 +277,11 @@ export function WatermarkPlugin({ mindMap, onClose }: WatermarkPluginProps) {
           <div className={sectionCls}>
             <SectionLabel icon={Grid3X3} label={t('mindMap.watermark.letterSpacing')} />
             <div className="flex items-center gap-2">
-              <Stepper 
-                value={config.textSpacing} 
-                onChange={(v) => updateConfig('textSpacing', v)} 
-                min={50} 
-                max={300} 
+              <Stepper
+                value={config.textSpacing}
+                onChange={(v) => updateConfig('textSpacing', v)}
+                min={50}
+                max={300}
                 step={10}
               />
               <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>px</span>

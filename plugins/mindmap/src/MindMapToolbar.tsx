@@ -5,7 +5,7 @@
  * This is a simplified toolbar inspired by the official simple-mind-map Vue2 example.
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useT } from './i18n/useT'
 import {
   Undo2,
   Redo2,
@@ -33,16 +33,16 @@ import {
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
-} from '@/components/ui/dropdown-menu'
+} from './components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+} from './components/ui/dialog'
+import { Input } from './components/ui/input'
+import { Textarea } from './components/ui/textarea'
 import { BaseStylePlugin, NodeStylePlugin, WatermarkPlugin, ColorPicker } from './mindmap-plugins'
 
 interface MindMapToolbarProps {
@@ -59,7 +59,7 @@ interface TagItem {
 // simple-mind-map layout name to a dedicated i18n key so the host
 // can swap the language without each row drifting back to a
 // generic term like "布局" or "放大".
-const getLayoutGroups = (t: any) => [
+const getLayoutGroups = (t: (key: string) => string) => [
   {
     label: t('mindMap.toolbar.logicalStructure'),
     children: [
@@ -101,7 +101,7 @@ const getLayoutGroups = (t: any) => [
 
 // simple-mind-map 的 dist 文件只包含 default 主题
 // 其他主题需要通过 MindMap.defineTheme() 注册或使用 setThemeConfig() 自定义
-const getThemeOptions = (t: any) => [
+const getThemeOptions = (t: (key: string) => string) => [
   { value: 'default', label: t('mindMap.toolbar.themeDefault') },
   { value: 'dark', label: t('mindMap.toolbar.themeDark') },
 ]
@@ -142,7 +142,7 @@ const ICON_LIST = [
 ]
 
 export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
-  const { t } = useTranslation()
+  const t = useT()
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [activeNodes, setActiveNodes] = useState<any[]>([])
   const [currentLayout, setCurrentLayout] = useState('logicalStructure')
@@ -293,8 +293,8 @@ export function MindMapToolbar({ mindMap }: MindMapToolbarProps) {
     if (!mindMap || !hasActiveNode) return
     const node = activeNodes[0]
     const tagData = tags
-      .filter((t) => t.text.trim().length > 0)
-      .map((t) => ({ text: t.text.trim(), style: t.style }))
+      .filter((tag) => tag.text.trim().length > 0)
+      .map((tag) => ({ text: tag.text.trim(), style: tag.style }))
     mindMap.execCommand('SET_NODE_TAG', node, tagData)
     setTagDialogOpen(false)
   }, [mindMap, activeNodes, tags])

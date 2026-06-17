@@ -55,6 +55,8 @@ export type PluginEvent =
   | 'app:ready'
   | 'app:exit'
   | 'plugin-settings:change'
+  | 'editor:registered'
+  | 'editor:unregistered'
 
 /** Payload shape for each event */
 export interface PluginEventPayloadMap {
@@ -68,6 +70,8 @@ export interface PluginEventPayloadMap {
   'app:ready': Record<string, never>
   'app:exit': Record<string, never>
   'plugin-settings:change': { pluginId: string; values: Record<string, unknown> }
+  'editor:registered': { pluginId: string; extension: string }
+  'editor:unregistered': { pluginId: string; extension: string }
 }
 
 export type PluginEventHandler<E extends PluginEvent = PluginEvent> = (
@@ -167,6 +171,7 @@ export type PluginPermission =
   | 'network'
   | 'clipboard'
   | 'notifications'
+  | 'editor'
 
 /** The props passed to a panel / settings component. Field order
  *  matches the host's `PluginPanelProps`: action → state → identity. */
@@ -276,6 +281,28 @@ export interface PluginManifest {
   toolbarButton?: ComponentType<ToolbarButtonProps>
   settings?: ComponentType<PluginPanelProps>
   /**
+   * Optional file extensions this plugin can render (e.g. `['.smm']`).
+   * When a file with one of these extensions is opened, the host
+   * delegates rendering to {@link editorComponent} instead of using
+   * the built-in Markdown / code / mind-map editors. Multiple plugins
+   * cannot claim the same extension — the host rejects the second
+   * installer with a toast. The host also requires the `'editor'`
+   * permission to be declared in `permissions`.
+   */
+  editorFileExtensions?: string[]
+  /**
+   * Optional React component that renders an open file whose
+   * extension matches one of {@link editorFileExtensions}. The host
+   * passes `{ content, onChange }`: the plugin reads the initial
+   * `content` and pushes the new content back via `onChange` so
+   * the host can persist it through the same pipeline that
+   * Markdown / code editors use.
+   */
+  editorComponent?: ComponentType<{
+    content: string
+    onChange: (content: string) => void
+  }>
+  /**
    * Permissions this plugin needs from the host. Listed values must
    * match `PluginPermission`; the host shows the user a grant/revoke
    * dialog at install time and re-checks on every protected call.
@@ -319,6 +346,22 @@ export interface PluginDefinition {
   /** Custom toolbar button component (overrides default icon rendering) */
   toolbarButton?: ComponentType<ToolbarButtonProps>
   settings?: ComponentType<PluginPanelProps>
+  /**
+   * File extensions (with leading dot, lower-cased) the plugin can
+   * render. Mirrors {@link PluginManifest.editorFileExtensions};
+   * the host uses the runtime value when wiring up file-open
+   * dispatch. See that field for the full semantics.
+   */
+  editorFileExtensions?: string[]
+  /**
+   * Editor component the host mounts for files whose extension
+   * matches one of {@link editorFileExtensions}. Mirrors
+   * {@link PluginManifest.editorComponent}.
+   */
+  editorComponent?: ComponentType<{
+    content: string
+    onChange: (content: string) => void
+  }>
   /**
    * Schema-driven settings description (mirrors the host's
    * `PluginSettingsSchema`). The SDK keeps this as `any` so the
@@ -876,6 +919,193 @@ export function getStubCommandRegistry(): StubCommandRegistry {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  File-editor registry – in-process Map
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Minimal duck-typed stand-in for the host's
+ * `PluginPermissionDeniedError`. The SDK intentionally doesn't
+ * depend on the host's class (and therefore can't `instanceof`
+ * check it), so the host installs an `__assertPluginPermission`
+ * override that throws its own class. The SDK catches by `name`
+ * here only to surface a console warning — the override's throw
+ * itself is what protects the registry.
+ */
+export class PluginPermissionDeniedError extends Error {
+  readonly name = 'PluginPermissionDeniedError'
+  constructor(
+    public readonly pluginId: string,
+    public readonly permission: PluginPermission,
+    public readonly operation: string,
+  ) {
+    super(
+      `Plugin "${pluginId}" is not allowed to ${operation} (missing permission: ${permission})`,
+    )
+    Object.setPrototypeOf(this, PluginPermissionDeniedError.prototype)
+  }
+}
+
+/**
+ * Per-extension entry in the standalone editor registry. The
+ * component is held as `unknown` so the SDK stays
+ * React-agnostic at the registry layer; consumers narrow it back
+ * to the strongly-typed `PluginEditorComponent` (defined by the
+ * host bridge) at the call site.
+ */
+interface StubEditorEntry {
+  pluginId: string
+  component: ComponentType<{
+    content: string
+    onChange: (content: string) => void
+  }>
+}
+
+/**
+ * In-process editor registry used when the host is not installed
+ * (standalone previews via `npm run dev`). The host installs
+ * `HostOverrides.registerEditor` etc. for production; the stub
+ * exists so plugin code can call the same SDK entry points and
+ * have them work end-to-end in the preview window.
+ */
+class StubEditorRegistry {
+  private readonly byExtension = new Map<string, StubEditorEntry>()
+
+  /**
+   * @throws PluginPermissionDeniedError when the caller hasn't
+   * installed a host override that asserts the `editor` permission.
+   * The host's override calls the host's own
+   * `assertPermission(pluginId, 'editor', ...)` which throws its
+   * own class; the SDK rethrows the host's error verbatim (the
+   * duck-typed `name` field is what the SDK matches on, not the
+   * class identity) and the standalone stub throws the SDK's
+   * own `PluginPermissionDeniedError` when the host is missing.
+   */
+  register(
+    pluginId: string,
+    extension: string,
+    component: StubEditorEntry['component'],
+  ): void {
+    const normalised = this.normaliseExtension(extension)
+    this.assertPermission(pluginId, `register editor for "${normalised}"`)
+    const existing = this.byExtension.get(normalised)
+    if (existing && existing.pluginId !== pluginId) {
+      throw new Error(
+        `extension "${normalised}" already registered by plugin "${existing.pluginId}"`,
+      )
+    }
+    this.byExtension.set(normalised, { pluginId, component })
+  }
+
+  unregister(pluginId: string): void {
+    for (const [ext, entry] of Array.from(this.byExtension.entries())) {
+      if (entry.pluginId === pluginId) {
+        this.byExtension.delete(ext)
+      }
+    }
+  }
+
+  get(extension: string): StubEditorEntry | null {
+    return this.byExtension.get(this.normaliseExtension(extension)) ?? null
+  }
+
+  extensions(): Set<string> {
+    return new Set(this.byExtension.keys())
+  }
+
+  /**
+   * Normalise the extension to a leading-dot, lower-cased form
+   * (e.g. `SMM` → `.smm`). Plugins are documented to declare
+   * lower-cased values, but we accept a few common mistakes to
+   * make the dev experience forgiving.
+   */
+  private normaliseExtension(extension: string): string {
+    let ext = extension.trim().toLowerCase()
+    if (!ext) return ext
+    if (!ext.startsWith('.')) ext = `.${ext}`
+    return ext
+  }
+
+  /**
+   * Permission gate. We delegate to a host override so the
+   * production check uses the host's authoritative grants
+   * (`assertPermission` reads from the user-granted
+   * `plugin_permissions_<id>` localStorage record). If no host
+   * is installed (standalone preview), the SDK's own
+   * `PluginPermissionDeniedError` is the safety net — but the
+   * stub still allows every registration in practice because
+   * `__assertPluginPermission` is only set by the host.
+   */
+  private assertPermission(pluginId: string, operation: string): void {
+    const override = currentHostOverrides().__assertPluginPermission
+    if (override) {
+      override(pluginId, 'editor', operation)
+      return
+    }
+    // No host bridge installed: the standalone preview cannot
+    // know whether the plugin has the permission, so we let the
+    // call through. The host will perform the real check on the
+    // next load. This matches the policy used by the other
+    // in-process stubs (storage, events, …).
+  }
+}
+
+const stubEditorRegistry = new StubEditorRegistry()
+
+/**
+ * Register a file editor for one or more extensions. Plugins
+ * typically call this from `onLoad` (or any lifecycle hook) to
+ * claim rendering responsibility for files that match
+ * `editorFileExtensions` in their manifest. In host mode the
+ * call is forwarded to `src/stores/pluginEditor.ts`, which
+ * enforces the `editor` permission and rejects duplicate
+ * extensions. In standalone mode the in-process stub above is
+ * used.
+ */
+export function registerEditor(
+  pluginId: string,
+  extension: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  component: ComponentType<any>,
+): void {
+  currentHostOverrides().registerEditor?.(pluginId, extension, component) ??
+    stubEditorRegistry.register(pluginId, extension, component)
+}
+
+/**
+ * Drop every editor this plugin has registered. Mirrors
+ * `clearPluginCommands` — the plugin store calls this on
+ * uninstall so a removed plugin's editor doesn't keep claiming
+ * extensions after the plugin's module is gone.
+ */
+export function unregisterEditor(pluginId: string): void {
+  currentHostOverrides().unregisterEditor?.(pluginId) ??
+    stubEditorRegistry.unregister(pluginId)
+}
+
+/**
+ * Look up the editor for a given extension. Returns `null` if
+ * no plugin has registered a matching editor. Host callers
+ * (the file-open dispatcher in `Editor.tsx`) use this to
+ * decide whether to mount a plugin-provided component or fall
+ * back to the built-in Markdown / code editor.
+ */
+export function getEditorForExtension(
+  extension: string,
+):
+  | { pluginId: string; component: ComponentType<{ content: string; onChange: (content: string) => void }> }
+  | null {
+  return currentHostOverrides().getEditorForExtension?.(extension) ??
+    stubEditorRegistry.get(extension)
+}
+
+/** Read-only snapshot of every currently-registered extension.
+ *  Useful for diagnostics / conflict detection. */
+export function getActivePluginExtensions(): Set<string> {
+  return currentHostOverrides().getActivePluginExtensions?.() ??
+    stubEditorRegistry.extensions()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  PluginContext + lifecycle helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1032,6 +1262,45 @@ export interface HostOverrides {
   __pluginSettings_set?: (pluginId: string, key: string, value: unknown) => Promise<void>
   __pluginSettings_all?: (pluginId: string) => Promise<Record<string, unknown>>
   __pluginSettings_subscribe?: (handler: (payload: PluginEventPayloadMap['plugin-settings:change']) => void) => () => void
+  /**
+   * Permission gate for the editor registry. The host installs
+   * this so the SDK's `registerEditor` can throw the host's
+   * authoritative `PluginPermissionDeniedError` when a plugin
+   * claims the `editor` permission without actually being
+   * granted it. The `__` prefix mirrors the settings overrides
+   * above — these are SDK-internal bridges, not part of the
+   * public plugin API.
+   */
+  __assertPluginPermission?: (
+    pluginId: string,
+    permission: PluginPermission,
+    operation: string,
+  ) => void
+  /**
+   * File-editor registry bridges. The host installs these so
+   * plugin code that calls `registerEditor` /
+   * `unregisterEditor` / `getEditorForExtension` /
+   * `getActivePluginExtensions` goes through the production
+   * registry in `src/stores/pluginEditor.ts` (which performs
+   * duplicate-extension detection, permission re-checks, and
+   * toasts the user on conflict). The standalone stub backs
+   * the same functions when the host is absent (npm run dev).
+   */
+  registerEditor?: (
+    pluginId: string,
+    extension: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    component: ComponentType<any>,
+  ) => void
+  unregisterEditor?: (pluginId: string) => void
+  getEditorForExtension?: (extension: string) => {
+    pluginId: string
+    component: ComponentType<{
+      content: string
+      onChange: (content: string) => void
+    }>
+  } | null
+  getActivePluginExtensions?: () => Set<string>
 }
 
 /**

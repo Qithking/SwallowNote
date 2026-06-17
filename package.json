@@ -89,7 +89,6 @@
     "remark-math": "^6.0.0",
     "semver": "^7.6.0",
     "shiki": "^4.0.2",
-    "simple-mind-map": "^0.14.0-fix.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.5.4",
     "zustand": "^5.0.1"

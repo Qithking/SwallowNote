@@ -12,7 +12,7 @@ import type {
 import { emptyRegistry } from '@/types/plugin'
 import { useUIStore } from './ui'
 import { dropPluginStorage, pluginEventBus, buildPluginContext } from '@/lib/plugin-host'
-import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
+import { runPluginLifecycleHook, type PluginWithModule } from '@/lib/plugin-host-takeover'
 import { clearPluginMenuItems } from '@/lib/plugin-menu'
 import { clearPluginCommands } from '@/lib/plugin-commands'
 import { clearGranted } from '@/lib/plugin-permission-guard'
@@ -395,9 +395,22 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       return
     }
     set((state) => {
-      const plugins = state.plugins.map((p) =>
-        p.id === id ? { ...p, enabled } : p
-      )
+      const plugins = state.plugins.map((p) => {
+        if (p.id !== id) return p
+        const next = { ...p, enabled }
+        // Preserve the non-enumerable __pluginModule field so
+        // lifecycle hooks can still call setHost after a toggle.
+        const mod = (p as PluginWithModule).__pluginModule
+        if (mod) {
+          Object.defineProperty(next, '__pluginModule', {
+            value: mod,
+            enumerable: false,
+            writable: false,
+            configurable: false,
+          })
+        }
+        return next
+      })
       // Task 13 / G13: re-run the conflict scan. Disabling a
       // plugin removes it from every conflict group; enabling
       // it can re-attach it to a slot. The scan is O(3N) and
@@ -481,11 +494,22 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       }
     }
     // 重新镜像 auto-update 偏好到新 PluginDefinition。
-    const withAutoUpdate = deduped.map((p) =>
-      state.pluginAutoUpdate[p.id] === true
-        ? { ...p, autoUpdate: true }
-        : p,
-    )
+    const withAutoUpdate = deduped.map((p) => {
+      if (state.pluginAutoUpdate[p.id] !== true) return p
+      const next = { ...p, autoUpdate: true }
+      // Preserve the non-enumerable __pluginModule field so
+      // lifecycle hooks can still call setHost after a toggle.
+      const mod = (p as PluginWithModule).__pluginModule
+      if (mod) {
+        Object.defineProperty(next, '__pluginModule', {
+          value: mod,
+          enumerable: false,
+          writable: false,
+          configurable: false,
+        })
+      }
+      return next
+    })
     // 在镜像后的列表上运行冲突扫描。
     const conflicts = detectPluginConflicts(withAutoUpdate)
     set({

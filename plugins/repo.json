@@ -1,7 +1,25 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-16T13:11:49Z",
+  "updated_at": "2026-06-17T09:23:39Z",
   "plugins": [
+    {
+      "id": "com.swallownote.mindmap",
+      "name": "思维导图",
+      "version": "0.2.0",
+      "description": "基于 simple-mind-map 的独立 .smm 文件编辑器，提供逻辑结构图/思维导图/组织结构/时间轴/鱼骨图等多种布局",
+      "author": "SwallowNote",
+      "tags": [
+        "mindmap",
+        "editor",
+        "smm",
+        "brainstorm"
+      ],
+      "download_url": "./mindmap/com.swallownote.mindmap.zip",
+      "sha256": "05ee274c093d4f24465d893bdb3c673677587dadfda5b0ba9c2fb6b7ed14b305",
+      "changelog": "初版发布：从 host 抽出为独立插件，支持 .smm 文件编辑、5 大布局组（逻辑结构/思维导图/组织结构/时间轴/鱼骨图）、多种主题、外框/水印/节点样式",
+      "published_at": "2026-06-17T09:23:37Z",
+      "dependencies": []
+    },
     {
       "id": "com.swallownote.export",
       "name": "文档导出",

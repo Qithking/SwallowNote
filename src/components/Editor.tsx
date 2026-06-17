@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore } from '@/stores'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
+import { usePluginEditors, pluginEditorRegistry, getEditorForExtension } from '@/stores/pluginEditor'
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
 const MindMapEditor = lazy(() => import('./editors/MindMapEditor').then(m => ({ default: m.MindMapEditor })))
@@ -292,6 +293,22 @@ export function EditorView() {
   const scrollToLineRef = useRef(scrollToLine)
   const { t } = useTranslation()
 
+  // Re-render when the plugin editor registry changes. The plugin
+  // store fires its `onLoad` / `onUnload` / `onEnable` / `onDisable`
+  // hooks asynchronously after the plugin module is evaluated, so
+  // the registry can flip *after* the user has already clicked a
+  // `.smm` file. Without this re-render hook the dispatcher would
+  // see an empty registry and fall through to the compatibility
+  // shim. We delegate the bus subscription to a centralised
+  // `usePluginEditors` hook so the host-side permission grant and
+  // handler tagging are guaranteed consistent — the `revision`
+  // counter increments on every mutation, which we fold into the
+  // editor's `key` to force a clean remount of the dispatcher
+  // output (so a user who disables → re-enables the mind-map
+  // plugin sees the open tab swap from the shim to the live
+  // editor without a manual reload).
+  const { revision: editorRegistryRev } = usePluginEditors()
+
   // Listen for scroll-to-line events
   useEffect(() => {
     const handler = (e: Event) => {
@@ -352,7 +369,7 @@ export function EditorView() {
     )
   }
 
-  const fileType = detectFileType(activeTab.name, activeTab.content)
+  const fileType = detectFileType(activeTab.name, activeTab.content, pluginEditorRegistry.getActivePluginExtensions())
   const viewMode = activeTab.viewMode
 
   const handleContentChange = (content: string) => {
@@ -404,17 +421,50 @@ export function EditorView() {
         />
       )}
 
-      {fileType === 'mindmap' && (
-        <div className="flex-1 flex overflow-hidden">
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-            <MindMapEditor
-              key={activeTab.id}
-              content={activeTab.content}
-              onChange={handleContentChange}
-            />
-          </Suspense>
-        </div>
-      )}
+      {fileType === 'mindmap' && (() => {
+        // Plugin-based dispatch: any plugin that declared
+        // `editorFileExtensions` matching the active note's
+        // extension takes over rendering. Otherwise we fall
+        // back to the built-in `MindMapEditor` shim, which
+        // surfaces a clear "please install the plugin" hint
+        // for users on older hosts / who disabled the plugin.
+        const PluginEditor = getEditorForExtension(
+          `.${(activeTab.name.split('.').pop() || '').toLowerCase()}`,
+        )?.component
+        const Editor = PluginEditor || MindMapEditor
+        // Pass `filename` so the compatibility shim can show
+        // a useful "please open Plugin Manager to install
+        // the plugin" hint for the specific file the user is
+        // trying to open. Plugin components ignore it.
+        const isShim = !PluginEditor
+        // Bake both `isShim` and `editorRegistryRev` into the
+        // key. The plugin's editor and the host's compatibility
+        // shim are different component types, so React *should*
+        // unmount + remount when the toggle fires
+        // `editor:registered` / `editor:unregistered` — but in
+        // practice the `editorRegistryRev` bump can race with
+        // the JSX evaluation and React sometimes reuses the
+        // mounted instance when the type at the position is
+        // memoised by a parent. Including the rev in the key
+        // guarantees a clean remount on every plugin toggle,
+        // so a user who disables → re-enables the mind-map
+        // plugin sees the open tab swap from the shim to the
+        // live editor (and back) immediately, with no manual
+        // reload and no stale state leaking across the
+        // transition.
+        return (
+          <div className="flex-1 flex overflow-hidden">
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
+              <Editor
+                key={`${activeTab.id}:${isShim ? 'shim' : 'plugin'}:${editorRegistryRev}`}
+                content={activeTab.content}
+                onChange={handleContentChange}
+                {...(isShim ? { filename: activeTab.name } : {})}
+              />
+            </Suspense>
+          </div>
+        )
+      })()}
     </div>
   )
 }

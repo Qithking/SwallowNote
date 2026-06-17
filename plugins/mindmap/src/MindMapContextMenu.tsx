@@ -12,7 +12,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from '@/components/ui/context-menu'
+} from './components/ui/context-menu'
 import {
   Trash2,
   ChevronDown,
@@ -24,7 +24,7 @@ import {
   ClipboardPaste,
   Type,
 } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
+import { useT } from './i18n/useT'
 
 interface MindMapContextMenuProps {
   mindMap: any // simple-mind-map instance
@@ -32,7 +32,7 @@ interface MindMapContextMenuProps {
 }
 
 export function MindMapContextMenu({ mindMap, children }: MindMapContextMenuProps) {
-  const { t } = useTranslation()
+  const t = useT()
   const [activeNodes, setActiveNodes] = useState<any[]>([])
   const [contextNode, setContextNode] = useState<any>(null)
   const triggerRef = useRef<HTMLDivElement>(null)

@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Minus, Plus, Square, Paintbrush, Shapes, Spline, BoxSelect, Image, Tag } from 'lucide-react'
-import { Switch } from '@/components/ui/switch'
+import { Switch } from '../components/ui/switch'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
+} from '../components/ui/select'
 import { ColorButton } from './ColorPicker'
-import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import { ScrollArea, ScrollBar } from '../components/ui/scroll-area'
 
 interface NodeStylePluginProps {
   mindMap: any

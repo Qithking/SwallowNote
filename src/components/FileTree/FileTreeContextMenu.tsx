@@ -33,6 +33,7 @@ import { removeFolderHistory } from '@/lib/tauri'
 import { useTranslation } from 'react-i18next'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 import { updateNodesWithChildren, findParentNode } from '@/lib/utils/treeUtils'
+import { usePluginEditors } from '@/stores/pluginEditor'
 import { countWords } from '@/lib/utils/wordCount'
 
 function getRelativePath(rootPath: string, fullPath: string): string {
@@ -79,6 +80,19 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   const addAiAttachedFile = useUIStore((s) => s.addAiAttachedFile)
   const repositories = useGitStore((s) => s.repositories)
   const { t } = useTranslation()
+
+  // Re-render when the plugin editor registry changes so the
+  // "new mind map" entry disappears the moment the user disables
+  // / uninstalls the plugin that owns the `.smm` extension. The
+  // hook wraps the host-bus subscription, self-grants the
+  // `events` permission in memory only, and exposes a fresh
+  // `extensions` Set on every mutation so the conditional render
+  // below picks up the new value synchronously — no manual reload
+  // required. We pass the returned `revision` through to the
+  // `<ContextMenuItem key>` so a fresh DOM node is mounted for
+  // the menu entry the moment the underlying state flips.
+  const { extensions: pluginExtensions } = usePluginEditors()
+  const hasMindMapEditor = pluginExtensions.has('.smm')
 
   const isRootFolder = workspaceMode === 'workspace' && workspaceFolders.includes(node.path)
 
@@ -307,14 +321,23 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
               <FolderPlus size={12} />
               <span>{t('contextMenu.newFolder')}</span>
             </ContextMenuItem>
-            <ContextMenuItem
-              onClick={onNewMindMap}
-              style={{ color: 'var(--text-secondary)' }}
-              className="cursor-pointer"
-            >
-              <GitFork size={12} />
-              <span>{t('contextMenu.newMindMap')}</span>
-            </ContextMenuItem>
+            {/* 新建思维导图：仅当某个插件声明拥有 .smm 文件编辑器
+                时才显示此菜单项。原来的 host 在 mind map 仍是内置
+                编辑器时硬编码显示；现在 mind map 已迁出 host，
+                没有插件就根本没有能渲染 .smm 文件的入口，菜单项
+                也就失去意义。判断走 pluginEditorRegistry 而不是
+                写死插件 id：以后任何插件声明 editorFileExtensions
+                含 .smm 都会让该项出现，便于第三方扩展。 */}
+            {hasMindMapEditor && (
+              <ContextMenuItem
+                onClick={onNewMindMap}
+                style={{ color: 'var(--text-secondary)' }}
+                className="cursor-pointer"
+              >
+                <GitFork size={12} />
+                <span>{t('contextMenu.newMindMap')}</span>
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
           </>
         )}

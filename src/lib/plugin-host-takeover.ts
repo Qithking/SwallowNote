@@ -3,6 +3,7 @@ import type {
   PluginContext,
   PluginDefinition,
   PluginLifecycleHook,
+  PluginPermission,
 } from '@/types/plugin'
 import type { HostOverrides } from '@swallow-note/plugin-sdk'
 import { getPluginStorage, pluginEventBus, createPluginEventBus, runLifecycleHook } from './plugin-host'
@@ -17,6 +18,12 @@ import {
   unregisterCommand,
   clearPluginCommands,
 } from './plugin-commands'
+import {
+  registerEditor,
+  unregisterEditor,
+  getEditorForExtension,
+  getActivePluginExtensions,
+} from '@/stores/pluginEditor'
 import { assertPermission } from './plugin-permission-guard'
 import { writePluginSettings } from './tauri'
 import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
@@ -103,6 +110,72 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       return pluginEvents.on('plugin-settings:change', (payload) => {
         handler(payload)
       })
+    },
+    /**
+     * File-editor registry bridge. The host's `registerEditor`
+     * is the production path; the SDK's stub is bypassed because
+     * `currentHostOverrides().registerEditor` short-circuits the
+     * stub layer. The host-side registry performs the real
+     * permission check (defence in depth — the SDK's
+     * `__assertPluginPermission` override is the first gate)
+     * and rejects duplicate extensions with a toast + throw.
+     */
+    registerEditor: (id, extension, component) => {
+      // The SDK calls
+      //   currentHostOverrides().registerEditor?.(pluginId, extension, component)
+      // so the host override's signature must accept the same
+      // three arguments. We close over `pluginId` from the
+      // surrounding scope to avoid trusting the plugin to
+      // declare its own id (a malicious plugin could pass
+      // someone else's id and steal the extension). The `id`
+      // parameter is therefore ignored and `pluginId` wins;
+      // we still destructure it to keep the type-checker
+      // happy.
+      void id
+      return registerEditor(pluginId, extension, component)
+    },
+    unregisterEditor: () => unregisterEditor(pluginId),
+    getEditorForExtension: (extension) => {
+      const entry = getEditorForExtension(extension)
+      // The host-side registry stores a plain
+      // `PluginEditorEntry`; the SDK's `HostOverrides` type
+      // wants the same shape, so we return it as-is. Callers
+      // that consumed the SDK's stub expect a strongly-typed
+      // component; the host-bridged component is the same
+      // React component type, so the type compatibility holds
+      // at the call site (the SDK's getEditorForExtension
+      // narrows it back).
+      return entry
+        ? {
+            pluginId: entry.pluginId,
+            component: entry.component,
+          }
+        : null
+    },
+    getActivePluginExtensions: () => getActivePluginExtensions(),
+    /**
+     * Permission gate for the editor registry. The SDK's
+     * `registerEditor` calls this before any mutation; we
+     * delegate to the host's `assertPermission` so the
+     * authoritative grant (in
+     * `plugin_permissions_<id>` localStorage) is the source
+     * of truth. A denial throws `PluginPermissionDeniedError`,
+     * which the SDK re-throws verbatim.
+     */
+    __assertPluginPermission: (
+      targetPluginId: string,
+      permission: PluginPermission,
+      operation: string,
+    ) => {
+      // We re-assert against the host's authoritative
+      // permission gate. The `targetPluginId` is the id the
+      // SDK received from the plugin's own call — we still
+      // run the check against it because the SDK's
+      // `__assertPluginPermission` is per-call (the registry
+      // itself does a second pass). A plugin that somehow
+      // impersonated another id would still be caught by the
+      // registry's own `usePluginStore` check.
+      assertPermission(targetPluginId, permission, operation)
     },
   }
 }

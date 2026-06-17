@@ -61,6 +61,7 @@ export async function loadPluginModule(pluginPath: string): Promise<PluginManife
 async function loadPluginModuleWithRef(
   pluginPath: string
 ): Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null }> {
+  let code = ''
   try {
     const indexJsPath = `${pluginPath}/index.js`
 
@@ -69,7 +70,7 @@ async function loadPluginModuleWithRef(
     // the file content via a Rust command (which has unrestricted FS
     // access) and create a blob URL for `import()`.
     const { readFile } = await import('@/lib/tauri')
-    let code = await readFile(indexJsPath)
+    code = await readFile(indexJsPath)
 
     console.log(`[PluginLoader] Read ${indexJsPath}: ${code.length} chars, hasReactImport: ${code.includes('from "react"')}, hasBundledReact: ${code.includes('__SECRET_INTERNALS')}`)
 
@@ -153,6 +154,19 @@ async function loadPluginModuleWithRef(
         'const $1 = window.React;'
       )
       .replace(
+        // Match: import { ... } from "react";
+        // (Covers the { X as Y } form that the preceding X, { ... } /
+        // { ... } / X / * as rules above don't cover. Vite can emit
+        // `import { useState as useX }` in some tree-shaking paths.)
+        /import\s*\{([^}]*)\}\s*from\s+["']react["'];?/g,
+        (_match, named: string) => {
+          const names = named.split(',').map((s: string) => s.trim().split(/\s+as\s+/).map((x: string) => x.trim()))
+          return names.map(([orig, alias]) =>
+            alias ? `const ${alias} = window.React.${orig};` : `const ${orig} = window.React.${orig};`
+          ).join('\n')
+        }
+      )
+      .replace(
         /import\s+(\w+)\s+from\s+["']react-dom\/client["'];?/g,
         'const $1 = window.ReactDOM;'
       )
@@ -169,6 +183,30 @@ async function loadPluginModuleWithRef(
         // Match: import * as X from "react-dom";
         /import\s*\*\s*as\s+(\w+)\s+from\s+["']react-dom["'];?/g,
         'const $1 = window.ReactDOM;'
+      )
+      .replace(
+        // Match: import { X, X as Y, ... } from "react-dom";
+        // (Covers `import { createPortal as FS } from "react-dom"`,
+        // which the preceding X / * rules don't match. Triggered by
+        // any plugin that uses react-dom named exports such as
+        // `createPortal` — e.g. com.swallownote.mindmap.)
+        /import\s*\{([^}]*)\}\s*from\s+["']react-dom["'];?/g,
+        (_match, named: string) => {
+          const names = named.split(',').map((s: string) => s.trim().split(/\s+as\s+/).map((x: string) => x.trim()))
+          return names.map(([orig, alias]) =>
+            alias ? `const ${alias} = window.ReactDOM.${orig};` : `const ${orig} = window.ReactDOM.${orig};`
+          ).join('\n')
+        }
+      )
+      .replace(
+        // Match: import { X as Y } from "react-dom/client";
+        /import\s*\{([^}]*)\}\s*from\s+["']react-dom\/client["'];?/g,
+        (_match, named: string) => {
+          const names = named.split(',').map((s: string) => s.trim().split(/\s+as\s+/).map((x: string) => x.trim()))
+          return names.map(([orig, alias]) =>
+            alias ? `const ${alias} = window.ReactDOM.${orig};` : `const ${orig} = window.ReactDOM.${orig};`
+          ).join('\n')
+        }
       )
       .replace(
         // Match: import { jsx, jsxs, Fragment } from "react/jsx-runtime";
@@ -268,7 +306,23 @@ async function loadPluginModuleWithRef(
     }
     return { manifest, module }
   } catch (err) {
-    console.error(`[PluginLoader] Failed to load plugin from ${pluginPath}:`, err)
+    // Surface a more useful diagnostic when the failure was caused
+    // by an unrewritten `import` statement surviving the
+    // import-to-const transforms above. Otherwise the user just
+    // sees the generic "manifest missing" placeholder, which is
+    // hard to debug.
+    const remainingImports = code.match(/^import\s.*$/gm)
+    if (remainingImports && remainingImports.length > 0) {
+      console.error(
+        `[PluginLoader] Failed to load plugin from ${pluginPath}.`,
+        `Residual import statement(s) after rewrite (loader transform is incomplete):`,
+        remainingImports,
+        'Underlying error:',
+        err,
+      )
+    } else {
+      console.error(`[PluginLoader] Failed to load plugin from ${pluginPath}:`, err)
+    }
     return { manifest: null, module: null }
   }
 }

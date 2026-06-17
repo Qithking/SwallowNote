@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useT } from '../i18n/useT'
 import { X, Palette, Minus, Plus, Spline, GitBranch, Link, BoxSelect, Square, Crown, Binary, Layers, Braces } from 'lucide-react'
-import { Switch } from '@/components/ui/switch'
+import { Switch } from '../components/ui/switch'
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
+} from '../components/ui/select'
 import { ColorSwatch, ColorButton } from './ColorPicker'
-import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import { ScrollArea, ScrollBar } from '../components/ui/scroll-area'
 
 interface BaseStylePluginProps {
   mindMap: any
@@ -183,7 +183,7 @@ function Divider() {
 }
 
 export function BaseStylePlugin({ mindMap, onClose }: BaseStylePluginProps) {
-  const { t } = useTranslation()
+  const t = useT()
   const [config, setConfig] = useState<BaseStyleConfig>({
     backgroundColor: '#fafafa',
     backgroundImage: '',

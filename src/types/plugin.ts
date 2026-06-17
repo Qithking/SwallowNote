@@ -27,6 +27,7 @@ export type PluginPermission =
   | 'network'           // Make network requests
   | 'clipboard'         // Access clipboard
   | 'notifications'     // Show notifications
+  | 'editor'            // Register a custom file editor (editorFileExtensions)
 
 /**
  * Permission metadata for display in UI
@@ -56,6 +57,7 @@ export const PLUGIN_PERMISSIONS: PermissionInfo[] = [
   { permission: 'network' },
   { permission: 'clipboard' },
   { permission: 'notifications' },
+  { permission: 'editor' },
 ]
 
 // ─── Event bus types ───────────────────────────────────────────────────────────
@@ -75,6 +77,8 @@ export type PluginEvent =
   | 'app:ready'
   | 'app:exit'
   | 'plugin-settings:change'
+  | 'editor:registered'
+  | 'editor:unregistered'
 
 /** Payload shape for each event. Add a new branch when introducing a new event. */
 export interface PluginEventPayloadMap {
@@ -88,6 +92,8 @@ export interface PluginEventPayloadMap {
   'app:ready': Record<string, never>
   'app:exit': Record<string, never>
   'plugin-settings:change': { pluginId: string; values: Record<string, unknown> }
+  'editor:registered': { pluginId: string; extension: string }
+  'editor:unregistered': { pluginId: string; extension: string }
 }
 
 /** Handler signature for an event subscription. */
@@ -191,6 +197,27 @@ export interface PluginManifest {
    * the plugin manager. Same props as `panel`; use `close` to dismiss.
    */
   settings?: ComponentType<PluginPanelProps> | ReactNode
+  /**
+   * Optional file extensions (with leading dot, lower-cased, e.g.
+   * `['.smm']`) this plugin can render. When the host opens a file
+   * whose extension is listed here, it delegates rendering to
+   * {@link editorComponent} instead of using the built-in Markdown
+   * / code editor. Multiple plugins cannot claim the same extension;
+   * the host rejects the second installer with a toast. The plugin
+   * must also declare `'editor'` in {@link permissions}.
+   */
+  editorFileExtensions?: string[]
+  /**
+   * Optional React component used to render files whose extension
+   * matches one of {@link editorFileExtensions}. The host passes
+   * `{ content, onChange }`: the plugin reads the initial `content`
+   * and pushes the new content back via `onChange` so the host can
+   * persist it through the same pipeline as Markdown / code edits.
+   */
+  editorComponent?: ComponentType<{
+    content: string
+    onChange: (content: string) => void
+  }> | ReactNode
   /** 插件所需权限。 */
   permissions?: PluginPermission[]
   /** 依赖的其他插件。 */
@@ -248,6 +275,18 @@ export interface PluginDefinition {
   toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
   /** 可选设置 UI 组件。 */
   settings?: ComponentType<PluginPanelProps> | ReactNode
+  /** File extensions (with leading dot, lower-cased) the plugin can
+   *  render. Mirrors {@link PluginManifest.editorFileExtensions};
+   *  the host uses the runtime value when wiring up file-open
+   *  dispatch. */
+  editorFileExtensions?: string[]
+  /** Editor component the host mounts for files whose extension
+   *  matches one of {@link editorFileExtensions}. Mirrors
+   *  {@link PluginManifest.editorComponent}. */
+  editorComponent?: ComponentType<{
+    content: string
+    onChange: (content: string) => void
+  }> | ReactNode
   /** Absolute path to the plugin package directory on disk */
   pluginPath: string
   /** Whether the plugin has a Rust backend */

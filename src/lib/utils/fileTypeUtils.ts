@@ -7,8 +7,21 @@ export type FileType = 'markdown' | 'code' | 'binary' | 'mindmap'
 // Markdown files
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown', '.mdown', '.mkd', '.mkdn']
 
-// Mind map files
-const MINDMAP_EXTENSIONS = ['.smm']
+// Mind map extensions are owned by the `com.swallownote.mindmap`
+// plugin. The host keeps no hard-coded list of "file types that
+// need a special editor" anymore — instead, when a plugin
+// registers an `editorFileExtensions` claim, the host reads
+// `getActivePluginExtensions()` and feeds the result into
+// `detectFileType` via the optional `pluginExtensions`
+// parameter.
+//
+// The legacy `MINDMAP_EXTENSIONS = ['.smm']` constant was used
+// by the now-deleted built-in `MindMapEditor.tsx`; we keep a
+// fallback here so a `.smm` file opened without the plugin
+// installed still gets routed to the `mindmap` FileType and
+// the host's compatibility shim can show a meaningful "please
+// install the plugin" message.
+const FALLBACK_MINDMAP_EXTENSIONS = ['.smm']
 
 // CodeMirror supported languages — covers both native packages and legacy StreamLanguage modes
 const CODEMIRROR_EXTENSIONS: Record<string, string> = {
@@ -265,12 +278,30 @@ export function isBinaryContent(content: string): boolean {
  * Detect file type from filename and content.
  * Returns 'markdown' for markdown, 'binary' for binary files, and 'code' for
  * everything else (including unknown text files — they will open as plain text).
+ *
+ * `pluginExtensions` is the live set of file extensions that some enabled
+ * plugin has claimed via `editorFileExtensions`. When the active note's
+ * extension is in this set, the host routes the file to the matching
+ * plugin's `editorComponent` instead of the built-in editor. The
+ * parameter is optional: when omitted, a fallback list of legacy
+ * extensions (e.g. `.smm` for the standalone mind-map editor) is used
+ * so the compatibility shim can still surface "please install the
+ * plugin" messages for users who have files from older hosts.
  */
-export function detectFileType(filename: string, content?: string): FileType {
+export function detectFileType(
+  filename: string,
+  content?: string,
+  pluginExtensions?: Set<string>,
+): FileType {
   const ext = getFileExtension(filename)
 
-  // Check for mind map files
-  if (MINDMAP_EXTENSIONS.includes(ext)) {
+  // Check for mind map / plugin-handled files. The live
+  // `pluginExtensions` set, when provided, takes precedence; if
+  // the plugin is disabled, its extensions naturally drop out
+  // of the set and the file falls through to a plain text /
+  // code editor (no special "mindmap" routing).
+  const claimedExts = pluginExtensions ?? new Set(FALLBACK_MINDMAP_EXTENSIONS)
+  if (claimedExts.has(ext)) {
     return 'mindmap'
   }
 
