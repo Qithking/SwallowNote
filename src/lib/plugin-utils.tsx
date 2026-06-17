@@ -224,6 +224,32 @@ export function createPluginPanelProps(
 // ─── Toolbar button helpers ──────────────────────────────────────────────────
 
 /**
+ * Derive the active-note helpers passed to plugin toolbar buttons.
+ *
+ * `isActiveNoteMarkdown` uses the same regex the editor itself uses
+ * (`.md` / `.markdown`, case-insensitive). Centralised here so a
+ * plugin doesn't have to re-implement (or drift from) the host's
+ * notion of "is this a markdown note".
+ */
+function deriveActiveNoteMeta(activeNotePath: string): {
+  activeNoteName: string
+  activeNoteExt: string
+  isActiveNoteMarkdown: boolean
+} {
+  if (!activeNotePath) {
+    return { activeNoteName: '', activeNoteExt: '', isActiveNoteMarkdown: false }
+  }
+  const name = activeNotePath.split(/[\\/]/).pop() || activeNotePath
+  const dotIdx = name.lastIndexOf('.')
+  const ext = dotIdx >= 0 ? name.slice(dotIdx + 1).toLowerCase() : ''
+  return {
+    activeNoteName: name,
+    activeNoteExt: ext,
+    isActiveNoteMarkdown: ext === 'md' || ext === 'markdown',
+  }
+}
+
+/**
  * Create ToolbarButtonProps for a plugin's custom toolbar button component.
  * Similar to createPluginPanelProps but tailored for toolbar-level rendering.
  */
@@ -236,6 +262,8 @@ export function createToolbarButtonProps(
   activeNoteContent: string = '',
   activeNotePath: string = '',
 ): ToolbarButtonProps {
+  const { activeNoteName, activeNoteExt, isActiveNoteMarkdown } =
+    deriveActiveNoteMeta(activeNotePath)
   return {
     size,
     isActive,
@@ -265,6 +293,9 @@ export function createToolbarButtonProps(
     deactivate,
     activeNoteContent,
     activeNotePath,
+    activeNoteName,
+    activeNoteExt,
+    isActiveNoteMarkdown,
     // Schema-driven settings bridge – same shape as the panel
     // version. Toolbar buttons sometimes toggle a single
     // setting (e.g. "open the editor in dark mode") and need

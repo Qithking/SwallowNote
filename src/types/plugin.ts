@@ -480,6 +480,28 @@ export interface ToolbarButtonProps {
   activeNoteContent: string
   /** Current active note file path. Empty string if no note is active. */
   activeNotePath: string
+  /**
+   * Current active note file name (last path segment, e.g.
+   * `note.md`). Empty string when no note is active. Plugins use
+   * this for UI hints without re-parsing `activeNotePath`.
+   */
+  activeNoteName: string
+  /**
+   * Lower-cased file extension of the active note (without the
+   * leading dot, e.g. `"md"`, `"markdown"`, `"json"`). Empty string
+   * when no note is active or the file has no extension. Plugins
+   * gate behaviour on this value (or `isActiveNoteMarkdown`) instead
+   * of re-deriving a regex from the path.
+   */
+  activeNoteExt: string
+  /**
+   * `true` when the host has detected that the active note is a
+   * Markdown file (i.e. `activeNoteExt` is `md` or `markdown`).
+   * Plugins that only make sense for Markdown use this to disable
+   * their toolbar button (set `aria-disabled`, skip the click
+   * handler) instead of relying on the host to hide the icon.
+   */
+  isActiveNoteMarkdown: boolean
   /** Read a single setting key. See {@link PluginPanelProps.getSetting}. */
   getSetting<T = unknown>(key: string): Promise<T | null>
   /** Persist a single setting key. See {@link PluginPanelProps.setSetting}. */

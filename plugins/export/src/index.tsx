@@ -741,7 +741,14 @@ async function generatePdfFromHtml(
 // ─── Toolbar button component (dropdown menu) ────────────────────────────────
 
 function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
-  const { size, invokeBackend, activeNoteContent, activeNotePath } = props
+  const {
+    size,
+    invokeBackend,
+    activeNoteContent,
+    activeNotePath,
+    activeNoteName,
+    isActiveNoteMarkdown,
+  } = props
   const [menuOpen, setMenuOpen] = useState(false)
   // We track the in-flight state via both a ref (for synchronous
   // guard, so double-clicks inside the same microtask don't
@@ -757,8 +764,9 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
 
   // Derive note name from path. Falls back to the full path so
   // the user always sees a meaningful filename in the save
-  // dialog.
-  const noteName = activeNotePath
+  // dialog. Prefers the host-supplied `activeNoteName` so the
+  // path-parsing rules stay in one place.
+  const noteName = activeNoteName || activeNotePath
     ? activeNotePath.split('/').pop() || activeNotePath
     : 'untitled'
 
@@ -768,6 +776,17 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   // handlers, and a document with only whitespace is still
   // considered "empty".
   const hasContent = activeNoteContent.trim().length > 0
+  // Markdown-only: backend serialises Markdown to HTML/DOCX/PDF.
+  // We disable the entire toolbar button (and the menu items) for
+  // any other file type, and rely on the host's pre-computed
+  // `isActiveNoteMarkdown` flag so we don't drift from the
+  // host's notion of "markdown".
+  const notMarkdown = !isActiveNoteMarkdown
+  const disabledTitle = notMarkdown
+    ? activeNoteName
+      ? `文档导出仅支持 Markdown 文件（当前：${activeNoteName}）`
+      : '文档导出仅支持 Markdown 文件'
+    : strings.tooltip
 
   // Close menu on outside click.
   useEffect(() => {
@@ -912,15 +931,20 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   return (
     <div ref={menuRef} className="relative">
       <button
-        onClick={() => setMenuOpen(!menuOpen)}
-        className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+        onClick={() => {
+          if (notMarkdown) return
+          setMenuOpen(!menuOpen)
+        }}
+        disabled={notMarkdown}
+        aria-disabled={notMarkdown}
+        className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
         style={{ color: menuOpen ? 'var(--theme-color)' : 'var(--text-primary)' }}
-        title={strings.tooltip}
-        aria-label={strings.tooltip}
+        title={disabledTitle}
+        aria-label={disabledTitle}
       >
         <ExportIcon size={size} />
       </button>
-      {menuOpen && (
+      {menuOpen && !notMarkdown && (
         <div
           className="absolute right-0 top-full mt-1 z-50 rounded-lg py-1 min-w-[140px]"
           style={{
