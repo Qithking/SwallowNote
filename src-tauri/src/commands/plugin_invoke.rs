@@ -1,58 +1,4 @@
-/**
- * Plugin backend invocation layer.
- *
- * Architecture
- * ============
- *
- *   TS panel ─invoke('plugin_<id>_<cmd>')─▶ Rust host
- *                                                │
- *                                                ▼
- *                                       spawn subprocess
- *                                       (`<plugin>/backend/plugin_<id>`)
- *                                                │
- *                                          JSON-RPC over
- *                                          stdin/stdout
- *
- * The host keeps a long-lived child process per plugin so we don't pay
- * the spawn cost on every command. The child is started lazily on the
- * first call, reused for subsequent calls, and re-spawned automatically
- * if it dies.
- *
- * Wire protocol
- * =============
- *
- * Line-delimited JSON-RPC 2.0 over the child's stdin/stdout:
- *
- *   host  → plugin : {"jsonrpc":"2.0","id":1,"method":"cmd","params":{...}}\n
- *   plugin→ host   : {"jsonrpc":"2.0","id":1,"result":...}\n
- *   plugin→ host   : {"jsonrpc":"2.0","id":1,"error":{"code":-1,"message":"..."}}\n
- *
- * Stderr from the plugin is logged but never treated as a response.
- *
- * Lifetime
- * ========
- *
- * - `PluginProcessState` is a `HashMap<plugin_id, PluginProcess>` stored
- *   in Tauri's state. The map is shared via `Arc<tokio::sync::Mutex<…>>`
- *   because the command path is async.
- * - On `invoke_plugin` we look up (or lazily create) the process. If
- *   the previous run died, we evict the dead entry and spawn a fresh
- *   child before sending the request.
- * - Per-request timeout is `INVOKE_TIMEOUT`. On timeout the pending
- *   oneshot is dropped (the reader task will eventually find no
- *   receiver when a late response arrives and discard it).
- *
- * Error model
- * ===========
- *
- * The `invoke_plugin` command returns `Result<Value, PluginError>` so
- * the IPC surface uses the same categorical error type as the rest of
- * the `plugin_*` family (see [`crate::commands::error::PluginError`]).
- * The `Display` impl produces the same human-readable string the
- * previous `Result<Value, String>` returned, so the TypeScript-side
- * `err.message` seen by `panel.invokeBackend` callers does not
- * change.
- */
+//! Plugin backend invocation: 长驻子进程 + JSON-RPC over stdin/stdout。错误统一走 PluginError。
 use crate::commands::error::PluginError;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -148,11 +94,7 @@ pub fn new_shared_plugin_process_state() -> SharedPluginProcessState {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-/// Build a `tokio::process::Command` for the given platform. On Windows
-/// we set the `CREATE_NO_WINDOW` flag so the plugin backend does not
-/// flash a console window. Mirrors the policy in
-/// `commands::create_command` but for the async `Command` type, which
-/// has its own `kill_on_drop` knob we want to enable.
+// 构建 async Command；Windows 设 CREATE_NO_WINDOW，启用 kill_on_drop。
 fn build_command(program: &str) -> Command {
     let mut cmd = Command::new(program);
     #[cfg(target_os = "windows")]
@@ -195,13 +137,7 @@ fn resolve_backend_binary(plugin_id: &str, plugin_path: &str) -> Option<PathBuf>
     None
 }
 
-/// Spawn the child and start its reader/stderr tasks. Returns
-/// `PluginProcess` on success.
-///
-/// This function is called with the outer map mutex held (so two
-/// concurrent first-time calls can't both spawn). It does not await on
-/// the child itself – `tokio::process::Child::wait` is not used here
-/// because we detect process death through EOF on stdout instead.
+// 在持有外层 map mutex 时 spawn 子进程；进程死亡通过 stdout EOF 检测。
 async fn spawn_plugin_process(
     plugin_id: String,
     plugin_path: String,
@@ -254,10 +190,7 @@ async fn spawn_plugin_process(
                     };
                     let mut map = pending_for_reader.lock().await;
                     if let Some(tx) = map.remove(&resp.id) {
-                        // If the receiver was already dropped (e.g. the
-                        // host timed out the request) this silently
-                        // succeeds. We still need to clean up the
-                        // entry, which we just did.
+                        // receiver 可能已因超时 drop，send 静默失败。
                         let _ = tx.send(resp);
                     } else {
                         eprintln!(
@@ -351,19 +284,7 @@ async fn get_or_spawn(
     Ok(proc)
 }
 
-/// Tauri command: invoke `command` on `plugin_id`'s backend.
-///
-/// Wire shape (called by the TS side as `invoke('plugin_<id>_<cmd>', ...)`):
-///   { plugin_id, command, args? }
-/// We extract `plugin_id` and `command` from the JSON-RPC envelope
-/// style and pass the rest as `args`.
-///
-/// Returns `Result<Value, PluginError>` — the error categories are
-/// `InvalidInput` (empty plugin_id / command), `Io` (app data dir
-/// lookup), `NotFound` (backend binary), `Process` (spawn / pipes /
-/// EOF / stdin write / flush), `JsonRpc` (request encoding,
-/// channel closed, plugin-reported error) and `Timeout` (no response
-/// within `INVOKE_TIMEOUT`).
+// Tauri 命令：在 plugin_id 后端调用 command。返回 Result<Value, PluginError>。
 #[tauri::command]
 pub async fn invoke_plugin(
     app_handle: AppHandle,
@@ -463,20 +384,12 @@ pub async fn invoke_plugin(
     response.body
 }
 
-/// Kill the backend child process for `plugin_id` (if any) and
-/// forget the entry. After this call, the next `invoke_plugin` will
-/// lazily spawn a fresh process — useful for clean uninstalls and
-/// for plugins whose backend has wedged. Returns `true` if a live
-/// process was killed, `false` if no entry existed.
+// Kill 并移除 plugin_id 的后端进程。返回 true 表示杀掉了存活进程。
 pub async fn kill_plugin_backend(
     state: &SharedPluginProcessState,
     plugin_id: &str,
 ) -> Result<bool, PluginError> {
-    // We deliberately validate the id here too, even though the only
-    // call site (the `kill_plugin` Tauri command) does the same check.
-    // Defending at this layer means callers wiring this function up
-    // from Rust unit tests or future commands can't accidentally
-    // bypass the path-traversal guard.
+    // 此层也校验 id，防止未来 Rust 侧调用方绕过路径遍历防护。
     if plugin_id.is_empty() || plugin_id.len() > 128
         || plugin_id == "." || plugin_id == ".."
     {
@@ -500,13 +413,7 @@ pub async fn kill_plugin_backend(
         map.remove(plugin_id)
     };
     if let Some(proc) = proc {
-        // Take the child out from under the Arc<Mutex<Option<Child>>> so
-        // we can call `kill().await` without holding the per-process
-        // mutex. After `start_kill` returns, the OS-level `kill_on_drop`
-        // flag we set on the Command is a no-op (we *did* kill it), but
-        // we still `await` the kill so the child actually exits and
-        // its file descriptors are released before the caller proceeds
-        // (e.g. deletes the plugin directory).
+        // 取出 child 以便 start_kill + 等待退出，确保 fd 释放。
         let child_arc = proc.child.clone();
         let mut guard = child_arc.lock().await;
         if let Some(mut child) = guard.take() {

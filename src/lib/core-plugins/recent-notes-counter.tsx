@@ -204,18 +204,7 @@ function RecentNotesSettings(panel: PluginPanelProps): ReactNode {
 
 // ─── Lifecycle hooks ──────────────────────────────────────────────────────────
 
-/**
- * onLoad runs once when the plugin is registered. Use it for
- * one-time initialization that doesn't need a panel. The host gives
- * us a PluginContext – we use it to grab our plugin-scoped storage
- * and seed a default value.
- *
- * NOTE: Build the `PluginContext` argument that the host normally
- * passes in for production hooks. For this *in-tree* sample we use
- * the same `buildPluginContext` helper the host itself uses so the
- * semantics are 1:1. (`invokeBackend` will throw from a hook,
- * which is by design — see `plugin-host.ts` for the rationale.)
- */
+/** onLoad — one-time init: seed installedAt stamp and register context menu. */
 async function onLoad(context: { pluginId: string }): Promise<void> {
   const store = getPluginStorage(context.pluginId)
   const existing = await store.get<string>('installedAt')
@@ -295,12 +284,7 @@ function onUnmount(): void {
   // Storage is already serialized; nothing extra to do.
 }
 
-/**
- * onActivate fires when the panel becomes the visible/active one.
- * The host also passes `isActive` through panel props for
- * per-render state, but lifecycle hooks are the right place for
- * "side effects on focus" (start animations, refresh charts…).
- */
+/** onActivate — panel becomes visible; use for focus side effects. */
 function onActivate(context: { pluginId: string }): void {
   console.debug(`[recent-notes] activated (pluginId=${context.pluginId})`)
 }

@@ -1,25 +1,4 @@
-/**
- * PluginManagerView - Full-panel plugin management page (Plugin Atlas).
- *
- * New design (Plugin Atlas) — layout & typography borrowed from
- * `designs/plugin-atlas.html`, but **all colors are bound to the
- * application's own theme variables** via the `--pa-*` aliases in
- * `index.css`. The plugin manager therefore inherits the app's
- * light / dark / system theme automatically — no toggle, no
- * independent palette, no `data-pa-theme` attribute.
- *
- * Top of the panel: editorial hero (eyebrow + serif title + 4
- * action buttons), then a 5-cell stats ribbon, then a 1fr/268px
- * grid whose main column holds the book-spine list and whose
- * rail holds the storage meter and the three "open" buttons
- * (Activity / Diagnostics / Logs) that pop the corresponding
- * dialog.
- *
- * We keep the two-tab structure (Installed / Marketplace) — the
- * marketplace needs the same installed list to render Install /
- * Update / Installed badges, and the user expects a single click
- * to switch.
- */
+/** 插件管理全屏页面（Plugin Atlas）。颜色绑定到 --pa-* 主题变量。 */
 import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from 'react'
 import {
   Upload,
@@ -46,6 +25,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
 import { PluginPanelHost } from './PluginPanelHost'
 import { PluginStatsRibbon } from './PluginStatsRibbon'
 import { PluginInstalledCard } from './PluginInstalledCard'
@@ -112,11 +101,7 @@ function PluginManagerView() {
   const [isUploading, setIsUploading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
   const [activeTab, setActiveTab] = useState<PluginManagerTab>('manage')
-  // Failure list dialog state (Task 2 / G2). The dialog is
-  // mounted but hidden until the user clicks the top-of-page
-  // banner; reusing the same controlled pattern as the other
-  // plugin popups (Activity / Diagnostics / Logs / Storage
-  // Inspector) keeps state predictable.
+  // 失败列表弹窗状态。
   const [failuresDialogOpen, setFailuresDialogOpen] = useState(false)
   // Settings dialog state. We keep the plugin reference (not just the
   // id) so we don't depend on store re-selection while the dialog is
@@ -139,6 +124,11 @@ function PluginManagerView() {
   // `plugin` to render the header and to call into the
   // per-plugin storage on confirm.
   const [storagePlugin, setStoragePlugin] = useState<PluginDefinition | null>(null)
+  // Uninstall confirmation target. The card's uninstall button opens
+  // this dialog instead of uninstalling immediately, so a stray click
+  // doesn't remove a plugin the user meant to keep. Confirmed uninstalls
+  // fall through to `handleUninstall`.
+  const [uninstallConfirmPlugin, setUninstallConfirmPlugin] = useState<PluginDefinition | null>(null)
   // Permissions-to-grant queue. When the install flow finishes
   // extracting a plugin package, we open the dialog with the
   // declared permissions and let the user opt in/out before any
@@ -213,40 +203,12 @@ function PluginManagerView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugins.length])
 
-  // Compute the totals for the 5-cell stats ribbon. Errors come
-  // from the telemetry store; the other four are derived from
-  // `plugins` and `marketUpdates`. Trends are intentionally
-  // left undefined — we'd need a baseline snapshot to compute
-  // them, and the host doesn't expose one yet.
-  //
-  // We use a deferred state to avoid blocking the initial render.
-  // Metrics are computed after the UI is visible.
-  //
-  // **M15 (Wave D review):** the previous `useEffect([plugins.length])`
-  // only re-ran the metrics recomputation when the plugin *count*
-  // changed. A busy host emitting hundreds of metrics while the
-  // user was looking at the stats ribbon would see frozen error
-  // counts / event totals / storage size — the snapshot was a
-  // one-shot computed at mount. We now subscribe to
-  // `usePluginTelemetryVersion()`, a monotonic counter bumped on
-  // every recorder call, so the recompute fires whenever the host
-  // actually records something. The effect deps become
-  // `[plugins.length, metricsVersion]`, and the version itself
-  // changes only on real recorder activity, so we don't pay a
-  // constant-rate re-render cost.
+  // 通过 usePluginTelemetryVersion 订阅指标版本。
   const metricsVersion = usePluginTelemetryVersion()
   const [metricsSnapshot, setMetricsSnapshot] = useState<ReturnType<typeof getAllPluginMetrics>>([])
 
   useEffect(() => {
-    // Defer metrics calculation to one tick so the first paint lands
-    // before we recompute. The old code used a 300ms setTimeout
-    // fallback for environments without `requestIdleCallback`
-    // (Tauri WebView, jsdom, etc.), but with evidence showing the
-    // actual `getAllPluginMetrics` cost is 0ms on a 1-plugin install
-    // and bounded by `O(4M + N)` even on a 200-plugin install, the
-    // 300ms was a free 300ms of perceived latency on every page
-    // mount. Yielding with `setTimeout(0)` (≈ 4ms in practice) is
-    // enough to let React commit the first frame.
+    // 延迟指标计算到下一 tick。
     const calculateMetrics = () => {
       setMetricsSnapshot(getAllPluginMetrics())
     }
@@ -302,17 +264,7 @@ function PluginManagerView() {
     const maxBytes = cap // real free bytes, or null on host failure
     const pct = maxBytes && maxBytes > 0 ? Math.min(100, (usedBytes / maxBytes) * 100) : 0
     return { usedBytes, maxBytes, pct }
-    // The body doesn't reference `metricsVersion` /
-    // `plugins.length` directly — they're *triggers*, not
-    // inputs. `metricsVersion` is the version-bump handle
-    // from `usePluginTelemetryVersion()`; `plugins.length`
-    // changes when a plugin is installed or uninstalled
-    // (the only path that adds / removes entries in the
-    // `pluginStorageSize` tracker, via `clearPluginMetrics`).
-    // The function reads from the tracker directly, so we
-    // only need it to re-run on those triggers. Disable
-    // the lint rule — this is the established pattern in
-    // this file (see lines 207, 245, 259 for siblings).
+    // metricsVersion 是触发器而非输入。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [metricsVersion, plugins.length])
 
@@ -457,16 +409,7 @@ function PluginManagerView() {
     await initializePluginPermissions(plugin.id, plugin.permissions)
   }, [])
 
-  /**
-   * Open the per-plugin storage inspector (Task 6 / G6). We
-   * intentionally don't gate this on the `storage` permission
-   * — the inspector is a *browse* tool and a plugin author
-   * who hasn't been granted storage should still be able to see
-   * the empty state. The per-row `entries()` call inside the
-   * dialog runs through the same permission gate, so a revoked
-   * plugin surfaces a clear "permission required" error rather
-   * than a silent empty list.
-   */
+  /** 打开每插件存储检查器。 */
   const openStorage = useCallback((plugin: PluginDefinition) => {
     setStoragePlugin(plugin)
   }, [])
@@ -515,7 +458,7 @@ function PluginManagerView() {
     // Find update info from market updates
     const updateInfo = marketUpdates.find((u) => u.id === plugin.id && u.localVersion !== u.remoteVersion)
     if (!updateInfo) {
-      toast.error(t('plugin.noUpdateAvailable', { defaultValue: 'No update available' }))
+      toast.error(t('plugin.noUpdateAvailable', { defaultValue: '暂无可用更新' }))
       return
     }
     // Set the pending detail ID so PluginMarketView auto-opens
@@ -674,7 +617,7 @@ function PluginManagerView() {
               onUpload={handleUpload}
               hasUpdate={hasUpdate}
               onToggle={handleToggleEnabled}
-              onUninstall={handleUninstall}
+              onUninstall={setUninstallConfirmPlugin}
               onUpdate={handleUpdatePlugin}
               onSettings={openSettings}
               onOpenSchemaSettings={openSchemaSettings}
@@ -811,15 +754,7 @@ function PluginManagerView() {
         />
       </Suspense>
 
-      {/* ── Load-failures dialog (Task 2 / G2) ────────
-            Opened from the top-of-page warning banner. The
-            dialog owns its own confirm/uninstall state but
-            delegates the "View logs" action to the manager
-            so we reuse the same `openDialog === 'logs'`
-            slot that the rail button already populates —
-            no second logs instance. Lazy chunk so users
-            who never see a failure don't pay for the
-            dialog's tauri bridge bundle. */}
+      {/* 从顶部 banner 打开，懒加载。 */}
       <Suspense fallback={null}>
         <PluginLoadFailuresDialog
           open={failuresDialogOpen}
@@ -827,6 +762,47 @@ function PluginManagerView() {
           onViewLogs={() => setOpenDialog('console')}
         />
       </Suspense>
+
+      {/* ── Uninstall confirmation ─────────────────────
+            The installed card's uninstall button opens this
+            alert dialog instead of uninstalling immediately,
+            so a stray click doesn't remove a plugin the user
+            meant to keep. Confirmed uninstalls fall through
+            to `handleUninstall`. */}
+      <AlertDialog
+        open={uninstallConfirmPlugin !== null}
+        onOpenChange={(open) => {
+          if (!open) setUninstallConfirmPlugin(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('plugin.pa.uninstall.confirmTitle', { defaultValue: '确认卸载' })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('plugin.pa.uninstall.confirmDesc', {
+                defaultValue: '确定要卸载 {{name}} 吗？此操作不可撤销。',
+                name: uninstallConfirmPlugin?.name ?? '',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setUninstallConfirmPlugin(null)}>
+              {t('plugin.pa.uninstall.cancel', { defaultValue: '取消' })}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = uninstallConfirmPlugin
+                setUninstallConfirmPlugin(null)
+                if (target) void handleUninstall(target)
+              }}
+            >
+              {t('plugin.pa.uninstall.confirm', { defaultValue: '卸载' })}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -1129,14 +1105,7 @@ function PermissionDialogMount({
   plugin: PluginDefinition | { pluginId: string; pluginName: string; requested: PluginPermission[] } | null
   onClose: () => void
 }) {
-  // Normalize the input shape. The install flow gives us a small
-  // struct with `pluginId` / `pluginName` / `requested`; the
-  // per-card flow gives us a PluginDefinition with `id` / `name` /
-  // `permissions`. Mapping both to a single shape lets the dialog
-  // stay agnostic of which entry point opened it. Wrapped in
-  // useMemo so the resulting object identity is stable for the
-  // useEffect deps below (otherwise the effect would re-fire on
-  // every render of the parent).
+  // 归一为统一形状。
   const normalized = useMemo(() => {
     if (plugin == null) return null
     if ('pluginId' in plugin) {

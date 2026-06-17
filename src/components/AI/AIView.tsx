@@ -87,6 +87,8 @@ function AIView() {
   const defaultAiModelId = useUIStore((s) => s.defaultAiModelId)
   const aiPort = useUIStore((s) => s.aiPort)
   const setSettingsPanelVisible = useUIStore((s) => s.setSettingsPanelVisible)
+  const setSettingsSection = useUIStore((s) => s.setSettingsSection)
+  const setSidebarView = useUIStore((s) => s.setSidebarView)
   const setActiveAiModel = useUIStore((s) => s.setActiveAiModel)
   const aiAttachedFiles = useUIStore((s) => s.aiAttachedFiles)
   const removeAiAttachedFile = useUIStore((s) => s.removeAiAttachedFile)
@@ -299,6 +301,19 @@ function AIView() {
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 2000)
   }
+
+  /**
+   * Open the Settings panel and jump directly to the AI section.
+   * Mirrors the behaviour of clicking the activity-bar gear icon,
+   * which also sets `sidebarView = 'settings'` (the rendering
+   * condition in `App.tsx` requires BOTH `settingsPanelVisible`
+   * AND `sidebarView === 'settings'` for the panel to appear).
+   */
+  const openAiSettings = useCallback(() => {
+    setSettingsSection('ai')
+    setSettingsPanelVisible(true)
+    setSidebarView('settings')
+  }, [setSettingsSection, setSettingsPanelVisible, setSidebarView])
 
   const handleSaveAsNewFile = async (content: string) => {
     const activeTab = editorTabs.find((t) => t.id === editorActiveTabId)
@@ -560,7 +575,7 @@ function AIView() {
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
-                onClick={() => setSettingsPanelVisible(true)}
+                onClick={openAiSettings}
               >
                 <Settings size={14} />
               </Button>
@@ -581,7 +596,7 @@ function AIView() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setSettingsPanelVisible(true)}
+              onClick={openAiSettings}
             >
               <Settings size={14} className="mr-1.5" />
               {t('ai.goToSettings')}
@@ -589,9 +604,9 @@ function AIView() {
           </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <Sparkles size={24} className="mb-3 opacity-50" />
-            <p className="text-xs text-center">
-              {t('ai.askAnything')}
+            <Sparkles size={32} className="mb-3 opacity-50" />
+            <p className="text-sm text-center font-medium">
+              {t('ai.placeholderResponse')}
             </p>
           </div>
         ) : (

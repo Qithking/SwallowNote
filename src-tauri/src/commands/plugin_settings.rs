@@ -34,22 +34,10 @@ pub fn read_plugin_settings(
     db: State<'_, Database>,
     plugin_id: String,
 ) -> Result<PluginSettingsView, String> {
-    // Path-traversal guard. The frontend already validates, but
-    // the IPC boundary is the only place we can be sure the
-    // input hasn't been tampered with (e.g. by a misbehaving
-    // plugin that calls back into the host). Mirrors the
-    // validation other plugin commands apply.
+    // IPC 边界路径遍历防护。
     crate::commands::plugin::validate_plugin_id(&plugin_id).map_err(|e| e.to_string())?;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    // `exists` is the SQLite row presence flag — independent
-    // from `schema`, which is sourced from the on-disk
-    // `settings.json`. A plugin can have a row but no schema
-    // (e.g. an older plugin whose `settings.json` was removed),
-    // or a schema but no row (e.g. never-opened settings dialog
-    // for a brand-new install). Callers (the TS `hasSettings`
-    // helper) use `schema` to decide whether to render the
-    // settings dialog; `exists` is kept for diagnostics and
-    // future "you have customised values" indicators.
+    // exists = SQLite 行是否存在；schema 来自磁盘 settings.json。
     let exists = repo::read_settings_row(&conn, &plugin_id)
         .map_err(|e| e.to_string())?
         .is_some();
@@ -99,21 +87,7 @@ pub fn delete_plugin_settings(
     repo::drop_settings_row(&conn, &plugin_id).map_err(|e| e.to_string())
 }
 
-/// Locate the on-disk `settings.json` for an installed plugin and
-/// return it as JSON. The settings dialog uses this as a sidecar so
-/// it can show labels, placeholders, and select options next to the
-/// values coming from SQLite.
-///
-/// The host's install pipeline ([`crate::commands::plugin`]) extracts
-/// plugin zips into `<app_data>/plugins/<id>/.versions/<active>/`,
-/// so `settings.json` lives inside the **active version dir**, not at
-/// the plugin root. Reading from the root silently returns `None`
-/// even for plugins that ship a perfectly valid schema, which the
-/// settings dialog then surfaces as "plugin does not provide
-/// settings.json". Use [`active_version_dir`] to resolve the
-/// currently active version (handles the `current` symlink, the
-/// `.current_version` text marker, and the lexicographic fallback in
-/// one go).
+// 从 active version dir 读取 settings.json 作为 schema sidecar。
 pub fn read_schema_for_plugin(app: &AppHandle, plugin_id: &str) -> Option<serde_json::Value> {
     let active_dir = crate::commands::plugin::active_version_dir(&plugin_install_dir(app, plugin_id))?;
     let path = active_dir.join("settings.json");
@@ -157,36 +131,8 @@ pub fn apply_settings_schema_on_disk(
         Some(row) if row.schema_version == schema.version => {
             Ok(Some(ApplyOutcome::Unchanged { version: schema.version }))
         }
-        // Schema bumped. Diff the old values against the new
-        // schema, write the result, and report the diff.
-        //
-        // The same path covers both directions of "bumped":
-        //
-        //   * Upgrade (new.version > row.schema_version) — the
-        //     normal install / update flow. New fields are
-        //     seeded from the schema's defaults; old fields the
-        //     schema no longer declares are dropped.
-        //
-        //   * Downgrade (new.version < row.schema_version) — a
-        //     developer is shipping an older `settings.json`
-        //     than the one already on disk. The row is rebuilt
-        //     from the new schema, which means *any keys the
-        //     new schema does not recognise are discarded* —
-        //     this is the correct semantic for a schema
-        //     downgrade (the schema is by definition the source
-        //     of truth, and a key the schema no longer declares
-        //     has no place in the new values map).
-        //
-        // The trade-off is that downgrade is destructive with
-        // respect to forward-compat fields, and the host does
-        // NOT warn the user. Plugin authors and release-engine
-        // operators are expected to keep schema versions
-        // monotonically increasing across releases, so
-        // downgrades only ever happen as part of deliberate
-        // developer-driven rolls. If a future product
-        // requirement demands backing up the discarded keys
-        // or surfacing a confirmation dialog, this is the
-        // call site to revisit.
+        // Schema 版本变化：按新 schema diff 旧值并写回。
+        // 降级会丢弃新 schema 未声明的 key（破坏性，不警告）。
         Some(row) => {
             let prev_version = row.schema_version;
             let (new_values, changes) = migrate_values(&row.values, &schema);
@@ -236,19 +182,7 @@ fn defaults_from_schema(
     out
 }
 
-/// Diff an existing values map against a new schema and produce the
-/// next values map plus a list of human-readable changes
-/// (`+key` / `-key` / `~key`).
-///
-/// Rules:
-///   1. For every field the new schema declares: keep the user's
-///      value when present; fall back to the schema's default (or
-///      `Null`) when missing.
-///   2. For every key in the old map that no longer exists in the
-///      new schema: drop it (record as `-key`).
-///   3. For every key that survives but whose JSON shape changed:
-///      record as `~key` (we keep the value as-is — JSON already
-///      carries the type, so the caller can still render it).
+// 按新 schema diff 旧值：保留用户值或填默认，丢弃未声明 key，记录变更。
 fn migrate_values(
     old_values: &serde_json::Map<String, serde_json::Value>,
     schema: &repo::SettingsSchema,
@@ -268,35 +202,16 @@ fn migrate_values(
     // (preserving type) or seeding the default.
     for f in &schema.fields {
         if let Some(existing) = old_values.get(&f.key) {
-            // The user has a value. If the JSON shape drifted
-            // (e.g. an array became a string), record the change
-            // so the caller can log it, but keep the user's value
-            // intact — overwriting with the default would silently
-            // destroy user data.
+            // shape 漂移时记录 ~key 但保留用户值。
             if !same_shape(existing, f.default.as_ref().unwrap_or(&serde_json::Value::Null)) {
                 changes.push(format!("~{}", f.key));
             }
             out.insert(f.key.clone(), existing.clone());
         } else {
-            // Pick the seed value: the schema's declared `default`
-            // when present, otherwise `Null`. We still insert the
-            // key into the output map regardless — the schema is
-            // authoritative, so an unrecognised value from the
-            // old row (e.g. a new field the previous version
-            // didn't know about) gets the typed default in the
-            // new row.
+            // seed 取 schema default 或 Null。
             let seed = f.default.clone().unwrap_or(serde_json::Value::Null);
             out.insert(f.key.clone(), seed);
-            // Suppress the `+key` change log when the seed is
-            // `Null` AND the schema didn't declare a default for
-            // this field. A `+key` line for a field with no
-            // declared default is noise: the row will hold `Null`
-            // either way, and the user did not opt in to seeing
-            // a "field added" toast for a field they cannot
-            // configure. The condition below is "the schema
-            // declared a real (non-Null) default" — only then is
-            // the seed materially different from the missing
-            // old value and worth surfacing.
+            // 仅当 schema 声明了非 Null default 时才记录 +key。
             if !(f.default.is_none() || matches!(f.default.as_ref(), Some(serde_json::Value::Null))) {
                 changes.push(format!("+{}", f.key));
             }

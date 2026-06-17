@@ -5,15 +5,30 @@
 # and contains:
 #   - index.js          (ES module bundle built by Vite)
 #   - manifest.json     (plugin metadata)
+#   - settings.json     (plugin settings schema)
+#   - backend/          (Rust binary for 公众号 push)
+#     └── plugin_com.swallownote.wenyan
 #
-# This is a pure-frontend plugin (no Rust backend).
+# Usage: ./package.sh [release] [--skip-repo]
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODE="${1:-debug}"
+SKIP_REPO=0
+
+# Parse flags
+for arg in "$@"; do
+  case "$arg" in
+    debug|release) MODE="$arg" ;;
+    --skip-repo) SKIP_REPO=1 ;;
+  esac
+done
+
 PLUGIN_ID="com.swallownote.wenyan"
 DIST_DIR="$SCRIPT_DIR/dist"
 REPO_JSON="$SCRIPT_DIR/../repo.json"
 MANIFEST="$SCRIPT_DIR/manifest.json"
+SETTINGS="$SCRIPT_DIR/settings.json"
 
 PUBLISHED_AT=$(python3 -c "from datetime import datetime, timezone; print(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))")
 
@@ -34,19 +49,39 @@ echo "==> Building frontend (Vite ES module bundle)..."
 cd "$SCRIPT_DIR"
 npx vite build
 
-# Copy manifest into dist
+echo "==> Building backend (Rust binary)..."
+cd "$SCRIPT_DIR"
+if [ "$MODE" = "release" ]; then
+  cargo build --release --manifest-path "$SCRIPT_DIR/src-tauri/Cargo.toml"
+  BIN_PATH="$SCRIPT_DIR/src-tauri/target/release/plugin_com_swallownote_wenyan"
+else
+  cargo build --manifest-path "$SCRIPT_DIR/src-tauri/Cargo.toml"
+  BIN_PATH="$SCRIPT_DIR/src-tauri/target/debug/plugin_com_swallownote_wenyan"
+fi
+
+# Copy backend binary into dist/backend/ with the expected name
+mkdir -p "$DIST_DIR/backend"
+cp "$BIN_PATH" "$DIST_DIR/backend/plugin_$PLUGIN_ID"
+chmod +x "$DIST_DIR/backend/plugin_$PLUGIN_ID"
+
+# Copy manifest and settings into dist
 cp "$MANIFEST" "$DIST_DIR/manifest.json"
+cp "$SETTINGS" "$DIST_DIR/settings.json"
 
 echo "==> Creating zip package..."
 cd "$DIST_DIR"
 ZIP_NAME="${PLUGIN_ID}.zip"
 rm -f "$SCRIPT_DIR/$PLUGIN_ID"*.zip
 
+# Deterministic zip: pin mtime + strip extra attributes (see export package.sh)
 touch -d '2020-01-01T00:00:00Z' \
   "$DIST_DIR/index.js" \
   "$DIST_DIR/manifest.json" \
-  "$DIST_DIR"
-zip -X -r "$SCRIPT_DIR/$ZIP_NAME" index.js manifest.json > /dev/null
+  "$DIST_DIR/settings.json" \
+  "$DIST_DIR/backend/plugin_$PLUGIN_ID" \
+  "$DIST_DIR" \
+  "$DIST_DIR/backend"
+zip -X -r "$SCRIPT_DIR/$ZIP_NAME" index.js manifest.json settings.json backend/ > /dev/null
 
 echo ""
 echo "✓ Plugin package created: $SCRIPT_DIR/$ZIP_NAME"
@@ -59,7 +94,10 @@ echo "  version:       $VERSION"
 echo "  published_at:  $PUBLISHED_AT"
 
 # Sync repo.json
-if [ ! -f "$REPO_JSON" ]; then
+if [ "$SKIP_REPO" = "1" ]; then
+  echo ""
+  echo "→ Skipping repo.json sync (--skip-repo)"
+elif [ ! -f "$REPO_JSON" ]; then
   echo ""
   echo "⚠ plugins/repo.json not found — skipping index sync"
 else

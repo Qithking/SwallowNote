@@ -13,6 +13,12 @@ export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings' | `plugin:${string}`
 export type EditorViewMode = 'edit' | 'preview' | 'split'
 export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | `plugin:${string}` | null
+/**
+ * Section IDs inside the Settings panel. Mirrors the
+ * `SettingsSection` type in `Settings/SettingsView.tsx`.
+ * `null` means "no specific section requested" (default first paint).
+ */
+export type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | null
 
 /** Request from editor context menu to trigger an AI action */
 export interface AiContextMenuRequest {
@@ -393,6 +399,13 @@ export interface UIState {
   commandPaletteVisible: boolean
   searchPanelVisible: boolean
   settingsPanelVisible: boolean
+  /**
+   * Section to focus when the Settings panel opens.
+   * Set by callers (e.g. AIView's settings button) so the panel
+   * jumps directly to the requested section. Cleared after the
+   * SettingsView consumes it.
+   */
+  settingsSection: SettingsSection
   aiPanelVisible: boolean
   rightPanelType: RightPanelType
   clipboardFiles: string[]
@@ -442,6 +455,7 @@ export interface UIState {
   toggleCommandPalette: () => void
   toggleSearchPanel: () => void
   setSettingsPanelVisible: (visible: boolean) => void
+  setSettingsSection: (section: SettingsSection) => void
   toggleSettingsPanel: () => void
   toggleAIPanel: () => void
   setRightPanelType: (type: RightPanelType) => void
@@ -508,6 +522,7 @@ export const useUIStore = create<UIState>((set) => ({
   commandPaletteVisible: false,
   searchPanelVisible: false,
   settingsPanelVisible: false,
+  settingsSection: null,
   aiPanelVisible: false,
   rightPanelType: null,
   clipboardFiles: [],
@@ -572,6 +587,7 @@ export const useUIStore = create<UIState>((set) => ({
   toggleSearchPanel: () =>
     set((state) => ({ searchPanelVisible: !state.searchPanelVisible })),
   setSettingsPanelVisible: (visible) => set({ settingsPanelVisible: visible }),
+  setSettingsSection: (section: SettingsSection) => set({ settingsSection: section }),
   toggleSettingsPanel: () =>
     set((state) => ({ settingsPanelVisible: !state.settingsPanelVisible })),
   toggleAIPanel: () =>
@@ -961,6 +977,11 @@ export const useUIStore = create<UIState>((set) => ({
       }
       try {
         const builtinModels = await getBuiltinAiModels()
+        const builtinIds = new Set(builtinModels.map((bm) => bm.id))
+        // Prune stale `builtin-*` entries that no longer exist in the
+        // current built-in list (e.g. GLM-Z1-9B removed in 2026-06-17).
+        // User-added custom models are untouched.
+        aiModels = aiModels.filter((m) => !(m.isBuiltIn && !builtinIds.has(m.id)))
         const existingIds = new Set(aiModels.map((m) => m.id))
         const missing = builtinModels
           .filter((bm) => !existingIds.has(bm.id))
@@ -975,6 +996,8 @@ export const useUIStore = create<UIState>((set) => ({
             isBuiltIn: bm.is_built_in,
           }))
         aiModels = [...missing, ...aiModels]
+        // Persist the pruned list so the change survives restarts.
+        saveAppSettings({ aiModels: JSON.stringify(aiModels) })
       } catch { /* ignore */ }
       // Batch decrypt all API keys concurrently BEFORE setting state,
       // so that models are available with decrypted keys in a single set() call.

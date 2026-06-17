@@ -65,12 +65,13 @@ describe('TC-005: 文件拖拽测试', () => {
   it('TC-005-02: 开始拖拽单个文件', () => {
     const { result } = renderHook(() => useFileTreeDragDrop(mockNodes))
     const mockEvent = createMockDragEvent()
-    const testNode = mockNodes[0].children?.[0]!
-    
+    const testNode = mockNodes[0].children?.[0]
+
+    expect(testNode).toBeDefined()
     act(() => {
-      result.current.handleDragStart(mockEvent, testNode)
+      result.current.handleDragStart(mockEvent, testNode!)
     })
-    
+
     expect(mockEvent.stopPropagation).toHaveBeenCalled()
     expect(result.current.dragSourcePaths).toEqual(['/test-workspace/file1.md'])
   })
@@ -78,54 +79,59 @@ describe('TC-005: 文件拖拽测试', () => {
   it('TC-005-03: 拖拽经过目录', () => {
     const { result } = renderHook(() => useFileTreeDragDrop(mockNodes))
     const mockEvent = createMockDragEvent()
-    const fileNode = mockNodes[0].children?.[0]!
-    const folderNode = mockNodes[0].children?.[1]!
-    
+    const fileNode = mockNodes[0].children?.[0]
+    const folderNode = mockNodes[0].children?.[1]
+
+    expect(fileNode).toBeDefined()
+    expect(folderNode).toBeDefined()
     act(() => {
-      result.current.handleDragStart(mockEvent, fileNode)
-      result.current.handleDragOver(mockEvent, folderNode)
+      result.current.handleDragStart(mockEvent, fileNode!)
+      result.current.handleDragOver(mockEvent, folderNode!)
     })
-    
+
     expect(result.current.dragOverPath).toBe('/test-workspace/folder')
   })
 
   it('TC-005-04: 拖拽离开目录', () => {
     const { result } = renderHook(() => useFileTreeDragDrop(mockNodes))
     const mockEvent = createMockDragEvent()
-    const fileNode = mockNodes[0].children?.[0]!
-    const folderNode = mockNodes[0].children?.[1]!
-    
+    const fileNode = mockNodes[0].children?.[0]
+    const folderNode = mockNodes[0].children?.[1]
+
+    expect(fileNode).toBeDefined()
+    expect(folderNode).toBeDefined()
     act(() => {
-      result.current.handleDragStart(mockEvent, fileNode)
-      result.current.handleDragOver(mockEvent, folderNode)
+      result.current.handleDragStart(mockEvent, fileNode!)
+      result.current.handleDragOver(mockEvent, folderNode!)
     })
-    
+
     expect(result.current.dragOverPath).toBe('/test-workspace/folder')
-    
+
     const leaveEvent = {
       ...createMockDragEvent(),
       clientX: 0,
       clientY: 0,
       currentTarget: { getBoundingClientRect: () => ({ left: 50, right: 150, top: 50, bottom: 150 }) },
     } as unknown as React.DragEvent
-    
+
     act(() => {
       result.current.handleDragLeave(leaveEvent)
     })
-    
+
     expect(result.current.dragOverPath).toBeNull()
   })
 
   it('TC-005-05: 结束拖拽', () => {
     const { result } = renderHook(() => useFileTreeDragDrop(mockNodes))
     const mockEvent = createMockDragEvent()
-    const fileNode = mockNodes[0].children?.[0]!
-    
+    const fileNode = mockNodes[0].children?.[0]
+
+    expect(fileNode).toBeDefined()
     act(() => {
-      result.current.handleDragStart(mockEvent, fileNode)
+      result.current.handleDragStart(mockEvent, fileNode!)
       result.current.handleDragEnd()
     })
-    
+
     expect(result.current.dragSourcePaths).toEqual([])
     expect(result.current.dragOverPath).toBeNull()
   })

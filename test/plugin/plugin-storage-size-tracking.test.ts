@@ -60,7 +60,7 @@ import {
   getPluginStorageBytes,
   getAllPluginStorageBytesSnapshot,
 } from '@/lib/plugin-telemetry'
-import { getAllPluginStorageSizes, getPluginStorageSize, getStorageCap } from '@/lib/tauri'
+import { getAllPluginStorageSizes, getPluginStorageSize } from '@/lib/tauri'
 
 beforeEach(() => {
   // Tear down the module-level subscription cache so the

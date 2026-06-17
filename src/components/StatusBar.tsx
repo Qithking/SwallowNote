@@ -119,6 +119,7 @@ function StatusBar() {
         versionStatusRef.current = 'download-ready'
       }
     } catch {
+      // update check is best-effort; ignore network/parse errors
     }
   }
 
@@ -355,7 +356,7 @@ function StatusBar() {
       </AlertDialog>
 
       <div
-        className="mt-1 flex items-center justify-between px-3 text-[12px] shrink-0 select-none"
+        className="flex items-center justify-between px-3 py-1 text-[12px] shrink-0 select-none"
       >
         {/* Left Section */}
         <div className="flex items-center gap-2">

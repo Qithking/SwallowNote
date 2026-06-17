@@ -1,10 +1,4 @@
-//! conflict_repo — Persistent storage for git conflict records
-//!
-//! The `conflict_repos` table stores repositories that currently have
-//! merge/rebase conflicts. This data is maintained by the auto-sync
-//! background task and used by the frontend to:
-//!   - Mark conflict status in the sync management panel
-//!   - Auto-open conflict resolution tabs on session restore
+//! conflict_repos 表：存储存在合并/变基冲突的仓库记录，供前端标记状态与会话恢复。
 
 use crate::db::Database;
 use rusqlite::Result;

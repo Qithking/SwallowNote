@@ -1,31 +1,9 @@
-//! Plugin settings storage — single-table JSON blob design.
-//!
-//! All settings for all plugins live in one `plugin_settings` table
-//! keyed by `plugin_id`. The values for a single plugin are stored as
-//! a JSON blob (`values_json`) alongside the schema version that was
-//! last applied. This replaces the previous "one table per plugin +
-//! `plugin_settings_meta` sidecar" layout, which was awkward to
-//! migrate (SQLite has no real DROP COLUMN on older versions) and
-//! type-lossy (all values were round-tripped through `TEXT`).
-//!
-//! Migration is now a pure-data operation: diff the existing values
-//! map against the new `SettingsSchema` and emit an in-memory
-//! result. The driver is the `apply_settings_schema_on_disk` helper
-//! in `commands::plugin_settings`; the diff itself lives in the
-//! commands layer (`migrate_values`) so the db layer stays schema
-//! agnostic.
-//!
-//! All callers in the host should be going through
-//! `commands::plugin_settings`, not this module directly.
+//! 插件设置存储：单表 plugin_settings，values 以 JSON blob 存储 + schema_version。
 
 use rusqlite::{params, Connection, Result};
 
 /// One field in a `settings.json` schema.
-///
-/// Mirrors the JSON schema on the JS side (`SettingsField` in
-/// `src/lib/plugin-settings/types.ts`). Unknown `type` values are
-/// rejected at install time so a misconfigured plugin fails fast
-/// rather than silently rendering as an input box.
+// 镜像 JS 侧 SettingsField；未知 type 在 install 时拒绝。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SettingsField {
     pub key: String,
@@ -42,23 +20,12 @@ pub struct SettingsField {
     pub placeholder: Option<String>,
     #[serde(default)]
     pub options: Option<Vec<SettingsFieldOption>>,
-    /// Optional predicate evaluated against the current values
-    /// map; the field is shown only when the predicate holds.
-    /// Re-read from `settings.json` on every dialog open, so a
-    /// plugin author can change the rule across releases and the
-    /// host picks it up on the next install / update without
-    /// needing a schema version bump.
+    // 可见性谓词，每次开弹窗重读。
     #[serde(default, rename = "visibleWhen")]
     pub visible_when: Option<VisibleWhen>,
 }
 
-/// Conditional-visibility predicate for a [`SettingsField`]. The
-/// host currently supports an exact-equality check against another
-/// field's current value, which is what every shipped plugin uses
-/// (e.g. show GitHub-only fields when `defaultProvider == "github"`).
-/// Predicates with a `key` that does not exist in the values map
-/// evaluate to "hidden" on the JS side, so a stale rule doesn't
-/// accidentally surface a block whose controller is gone.
+// 字段可见性谓词：当前仅支持对另一字段值的精确相等判断。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VisibleWhen {
     pub key: String,
@@ -72,11 +39,7 @@ pub struct SettingsFieldOption {
 }
 
 /// The `settings.json` body.
-///
-/// The `version` field is required; we use it to decide whether the
-/// existing row is compatible. The host stores the schema version it
-/// last migrated to in `schema_version` so it can short-circuit if
-/// nothing changed.
+// settings.json body；version 必填。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SettingsSchema {
     pub version: u32,
@@ -107,13 +70,7 @@ impl SettingsSchema {
             if f.key.is_empty() {
                 return Err("settings field missing `key`".into());
             }
-            // Reject duplicate keys up-front: a settings.json with
-            // the same key twice would silently lose all but the
-            // last `default` and trip the renderer in
-            // non-obvious ways (e.g. two `onChange` handlers
-            // racing on the same key). The host treats the
-            // schema as authoritative, so we fail fast at install
-            // time rather than render an inconsistent form.
+            // 拒绝重复 key：避免 default 被覆盖及 renderer 竞争。
             if !seen.insert(f.key.as_str()) {
                 return Err(format!(
                     "settings field `{}` declared more than once",
@@ -220,17 +177,7 @@ pub fn drop_settings_row(conn: &Connection, plugin_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Decode the `values_json` column. Empty / whitespace is treated
-/// as `{}` for forward compatibility with the old `value_to_text`
-/// layout (which wrote `""` for `Null`).
-///
-/// A non-empty body that fails to parse, or that is not a JSON
-/// object, is treated as an empty map rather than an error. The
-/// rationale: a corrupt row would otherwise crash the host on
-/// every read, and the worst-case outcome of "silently lose a
-/// plugin's settings" is recoverable (the next install re-seeds
-/// defaults) whereas "host refuses to start" is not. We log to
-/// stderr so the cause is visible in the dev console.
+// 解码 values_json：空/空白→{}；解析失败→空 map（不报错，避免 host 崩溃）。
 fn parse_values_map(
     plugin_id: &str,
     raw: &str,
@@ -313,11 +260,7 @@ mod tests {
         upsert_settings(&c, "com.example.x", &values, 2).unwrap();
         let row = read_settings_row(&c, "com.example.x").unwrap().unwrap();
         assert_eq!(row.schema_version, 2);
-        // JSON round-trip preserves types — a whole-number
-        // integer is read back as an integer (Number(1)), not as
-        // 1.0. The previous "TEXT everywhere" design collapsed
-        // every numeric to f64 on read; this test is the
-        // regression guard.
+        // JSON round-trip 保留整数类型。
         assert_eq!(row.values.get("a").unwrap(), &serde_json::json!(1));
         assert_eq!(row.values.get("b").unwrap(), &serde_json::json!("x"));
         assert_eq!(row.values.get("c").unwrap(), &serde_json::json!(true));
@@ -325,11 +268,7 @@ mod tests {
 
     #[test]
     fn write_number_one_reads_back_as_int() {
-        // The previous (TEXT-backed) design parsed "1" as f64 on
-        // the way out, so writing `Number(1)` round-tripped to
-        // `Number(1.0)`. The single-table JSON-blob design keeps
-        // the value as `Number(1)` on the round trip. We pin that
-        // behaviour down here.
+        // 旧 TEXT 设计会把 1 round-trip 成 1.0；新设计保持整数。
         let c = conn();
         ensure_settings_row(&c, "com.example.x").unwrap();
         let mut values = serde_json::Map::new();
@@ -420,12 +359,7 @@ mod tests {
 
     #[test]
     fn migrate_no_op_when_version_unchanged() {
-        // Applying the same schema twice must NOT clobber a value
-        // the user edited between the two apply calls. The caller
-        // is expected to short-circuit on equal version numbers,
-        // so this test pins the "no-op short-circuit" contract on
-        // the upsert path: a same-version re-apply that does
-        // happen (e.g. manual tooling) leaves the value alone.
+        // 同版本 re-apply 会覆盖整 map（预期）；保护由调用方 short-circuit。
         let c = conn();
         upsert_settings(
             &c,
@@ -434,12 +368,7 @@ mod tests {
             1,
         )
         .unwrap();
-        // User edits n to 42 via write_settings, then a same-
-        // version re-apply from the migration codepath
-        // overwrites the whole map. This is *expected* — the
-        // short-circuit at the caller level is the actual
-        // protection. We assert here that the new value lands
-        // and the version stays at 1.
+        // 用户编辑后同版本 re-apply 会覆盖（预期）。
         upsert_settings(
             &c,
             "com.example.x",
@@ -511,10 +440,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_field_keys() {
-        // The same key declared twice must be rejected at
-        // validation time. Without the guard, the second `default`
-        // would silently shadow the first and the renderer would
-        // produce two inputs with the same id.
+        // 重复 key 会导致 default shadow 及 renderer 同 id 输入。
         let s = schema_with_keys(&["apiKey", "region", "apiKey"]);
         let err = s.validate().expect_err("duplicate key must be rejected");
         assert!(
@@ -526,13 +452,7 @@ mod tests {
 
     #[test]
     fn parse_values_map_handles_corrupt_json() {
-        // Non-empty, non-JSON body must NOT propagate the parse
-        // error. The previous contract bubbled
-        // `FromSqlConversionFailure` up the stack, which crashed
-        // the host on every subsequent read of the row. The new
-        // contract soft-fails to an empty map and logs the cause.
-        // This pins down the soft-fail path: an unparseable body
-        // round-trips as `{}`.
+        // 不可解析 body 必须 soft-fail 为空 map。
         let out = parse_values_map("com.example.bad", "not-json-at-all").unwrap();
         assert!(out.is_empty(), "corrupt body must decode to empty map");
 

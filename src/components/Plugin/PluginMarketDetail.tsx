@@ -90,7 +90,6 @@ import type {
   PluginVersionInfo,
   PluginPermission,
 } from '@/types/plugin'
-import { PLUGIN_PERMISSIONS } from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
 
 /**
@@ -180,14 +179,7 @@ export function PluginMarketDetail({
 }) {
   const { t } = useTranslation()
   const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
-  // The repo URL the `PluginIndex` was loaded from. We have to
-  // thread it through to `downloadPluginZip` / `downloadPluginVersion`
-  // because both `downloadUrl` fields in the index are documented
-  // as *relative* to that URL — `fetch()` on its own resolves
-  // them against the Tauri webview's document base, which is the
-  // host shell (`tauri://localhost/…`) and yields a 404 + sha256
-  // mismatch on every install. Capturing it here once keeps the
-  // call sites below from re-reading the store on every click.
+  // 市场索引 downloadUrl 为相对路径，需 repoUrl 解析。
   const repoUrl = usePluginMarketStore((s) => s.repoUrl)
 
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
@@ -257,12 +249,7 @@ export function PluginMarketDetail({
       ),
     [entry.id, entry.version, entry.dependencies, installedMap, indexMap],
   )
-  // True when the install / update button must be disabled:
-  // there are unsatisfied versions (can't be auto-fixed) or
-  // detected cycles. Missing deps *do* still let the install
-  // proceed if the user resolves them via the auto-resolve
-  // button — so the button is only disabled for *hard*
-  // failures.
+  // 存在未满足版本或循环依赖时禁用安装按钮。
   const hasBlockingDependencyIssue =
     dependencyResolution.unsatisfied.length > 0 ||
     dependencyResolution.cycles.length > 0
@@ -307,20 +294,10 @@ export function PluginMarketDetail({
   }
 
   const onInstall = async () => {
-    // Early guard against double-clicks landing in the same render
-    // cycle. The button's `disabled` prop already covers the slow
-    // case (state has flipped to `isInstalling` by the time React
-    // re-renders) but a synchronous double-click before any state
-    // update commits would otherwise queue two installs and
-    // produce two success toasts for the same plugin.
+    // 防止双击重复安装。
     if (isInstalling || installingVersion !== null) return
     setError(null)
-    // Re-check at click time: the user might have updated the
-    // store via the install manager tab between the resolution
-    // memo and this click. If something is still off (hard
-    // failures only — missing deps the user hasn't yet
-    // resolved), refuse and surface the same banner the dialog
-    // already shows.
+    // 点击时重新检查依赖。
     if (hasBlockingDependencyIssue) {
       const reason =
         dependencyResolution.cycles.length > 0
@@ -488,11 +465,7 @@ export function PluginMarketDetail({
   }
 
   const onRollback = async (version: string) => {
-    // Rollback must not race with another install or another
-    // rollback. The row's `disabled` prop already covers the slow
-    // case; this catches the synchronous double-click window
-    // (React hasn't re-rendered yet) and prevents the UI from
-    // showing two "Rollback in progress" badges.
+    // 防止回滚并发。
     if (isInstalling || installingVersion !== null || isRolling !== null) {
       return
     }
@@ -511,12 +484,7 @@ export function PluginMarketDetail({
           version,
         })
       )
-      // A rollback is a re-activation of an already-installed
-      // plugin whose permissions were set on the original install.
-      // We don't re-open the permission dialog here — the user
-      // has already made their decision on the prior install, and
-      // re-prompting on every rollback would be a regression.
-      // (The post-install path is purely a "first install" affordance.)
+      // 回滚不重新弹权限对话框。
       onClose()
     } catch (e: any) {
       setError(friendlyInstallError(e, t))
@@ -674,11 +642,7 @@ export function PluginMarketDetail({
             )}
 
             {/*
-              "权限" tab — shows the permissions the installed copy
-              of the plugin declared. The marketplace index doesn't
-              ship a permission list (only the on-disk manifest
-              does), so for not-yet-installed plugins we render a
-              centred empty state explaining why.
+              权限 Tab。
             */}
             {activeTab === 'permissions' && (
               <div className="pmd-permissions">
@@ -920,14 +884,7 @@ function formatDate(dateStr: string): string {
   }
 }
 
-/**
- * Generic centred empty-state for tabs that have nothing to show.
- * Used by Reviews (placeholder) and Permissions (when the plugin
- * isn't installed). Lifted to a small component so the three
- * call sites stay visually consistent and a future tweak to the
- * empty-state chrome (icon size, padding, etc.) only needs to be
- * made once.
- */
+/** 通用居中空状态组件。 */
 function EmptyStatePanel({
   icon,
   title,
@@ -1111,12 +1068,7 @@ function ChangelogPanel({
 }) {
   const { t } = useTranslation()
 
-  // Some entries ship `versions` but every row has an empty
-  // changelog. Treat that as "no changelog content" so the
-  // empty state appears, instead of rendering a list of bare
-  // version numbers. `entry.versions` is optional (the
-  // marketplace only ships the latest artifact) so we coerce
-  // to `[]` first.
+  // 空时显示空状态。
   const versionRows = entry.versions ?? []
   const hasChangelogContent = versionRows.some(
     (v) => (v.changelog ?? '').trim().length > 0,
@@ -1410,7 +1362,6 @@ function PermissionsPanel({
       }}
     >
       {declaredPermissions.map((perm) => {
-        const info = PLUGIN_PERMISSIONS.find((p) => p.permission === perm)
         return (
           <li
             key={perm}
@@ -1449,7 +1400,7 @@ function PermissionsPanel({
                   fontWeight: 600,
                 }}
               >
-                <span>{info?.name ?? perm}</span>
+                <span>{t(`plugin.permission.items.${perm}.name`)}</span>
                 <Badge variant="secondary" style={{ fontSize: 10 }}>
                   {t('plugin.market.permissionsRequested', { defaultValue: '已请求' })}
                 </Badge>
@@ -1462,7 +1413,7 @@ function PermissionsPanel({
                   lineHeight: 1.4,
                 }}
               >
-                {info?.description ?? perm}
+                {t(`plugin.permission.items.${perm}.description`)}
               </div>
             </div>
           </li>
@@ -1472,12 +1423,7 @@ function PermissionsPanel({
   )
 }
 
-/**
- * "依赖" tab — peer-plugin dependency resolution (G4) lifted out
- * of the previous overview sub-section. Shows the resolver's
- * verdict for every declared dep, plus a summary banner when the
- * install would be blocked.
- */
+/** 依赖 Tab（G4）。 */
 function DependenciesPanel({
   entry,
   dependencyResolution,
@@ -1535,29 +1481,7 @@ function DependenciesPanel({
 }
 
 /**
- * Per-dependency status list rendered inside the "依赖"
- * section of `PluginMarketDetail`.
- *
- * Each row in the manifest's `dependencies` array gets one of
- * four states:
- *   - `satisfied`     — installed locally at a version the
- *                       manifest accepts. Green check.
- *   - `missing`       — not installed at all. The right-hand
- *                       label hints at the marketplace version
- *                       when we know one ("仓库提供 v1.5.0"),
- *                       or "未找到" when the marketplace has
- *                       no record of the id.
- *   - `unsatisfied`   — installed, but the local version
- *                       doesn't satisfy the declared range.
- *                       Red bang.
- *   - `cycle`         — appears in a detected cycle path. Red
- *                       lock-ish icon.
- *
- * Lifted into a small standalone component (instead of
- * inlined in the JSX) so the JSX inside `PluginMarketDetail`
- * stays focused on flow control — the resolver's bucket
- * structure drives the rendering, and putting that mapping
- * here keeps the dialog render path compact.
+ * 依赖状态列表，每行四种状态之一：satisfied/missing/unsatisfied/cycle。
  */
 function DependencyResolutionList({
   resolution,

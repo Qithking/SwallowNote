@@ -46,7 +46,6 @@ vi.mock('sonner', () => ({
 }))
 
 import {
-  findConflictingPluginCommandKey,
   dispatchBuiltin,
 } from '@/hooks/useKeyboardShortcuts'
 import { useUIStore } from '@/stores/ui'

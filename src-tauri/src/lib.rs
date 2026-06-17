@@ -21,9 +21,7 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-/// Set Dock icon visibility on macOS
-/// When visible=true: NSApplicationActivationPolicyRegular (shows in Dock)
-/// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
+/// macOS Dock 图标可见性切换（Regular/Accessory 策略）。
 #[tauri::command]
 fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
     set_dock_icon_visibility_inner(visible)
@@ -214,18 +212,11 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle.clone());
-            // Plan B: start a dedicated watch on the plugins
-            // tree so external `storage.json` mutations
-            // (import, manual edit, restore from backup)
-            // surface a `plugin-storage-changed` event the
-            // frontend can subscribe to. Idempotent.
+            // 监听 plugins 树，外部 storage.json 变更时通知前端。幂等。
             services::file_watcher::watch_plugin_storage(app_handle.clone());
 
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
-            // Per-plugin backend subprocess state. See
-            // `commands/plugin_invoke.rs` for the design. The map is
-            // empty at startup; child processes are spawned lazily
-            // on the first `invoke_plugin` call for a given plugin.
+            // 每插件后端子进程状态；启动为空，首次 invoke_plugin 时懒加载。
             app.handle().manage(commands::plugin_invoke::new_shared_plugin_process_state());
 
             // AI proxy is no longer auto-started on launch to save memory.

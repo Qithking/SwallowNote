@@ -275,7 +275,10 @@
       "correct": "纠错",
       "outline": "提纲",
       "summary": "摘要",
-      "format": "格式整理"
+      "format": "格式整理",
+      "complete": "补全",
+      "rewrite": "改写",
+      "explain": "解释"
     }
   },
   "common": {
@@ -330,7 +333,8 @@
     "closeRightTabs": "关闭右侧标签页",
     "copyPath": "复制路径",
     "copyRelativePath": "复制相对路径",
-    "showInExplorer": "在文件资源管理器中显示"
+    "showInExplorer": "在文件资源管理器中显示",
+    "revealInTree": "在文件树中定位"
   },
   "fileTree": {
     "newFile": "新建文件",
@@ -823,7 +827,21 @@
       "save": "保存更改",
       "saving": "保存中…",
       "noDescription": "暂无描述",
-      "saveFailed": "保存权限失败"
+      "saveFailed": "保存权限失败",
+      "selectAll": "全选",
+      "selectNone": "全不选",
+      "noPermissionWarning": "未授权任何权限，插件可能无法正常工作",
+      "items": {
+        "storage": { "name": "存储", "description": "访问持久化存储以保存插件数据" },
+        "events": { "name": "事件", "description": "订阅宿主事件（笔记打开/保存、主题切换等）" },
+        "context-menu": { "name": "右键菜单", "description": "在右键菜单中添加项目" },
+        "backend": { "name": "后端", "description": "与原生 Rust 后端通信" },
+        "filesystem-read": { "name": "文件系统读取", "description": "读取系统中的文件" },
+        "filesystem-write": { "name": "文件系统写入", "description": "写入系统中的文件" },
+        "network": { "name": "网络", "description": "发起网络请求" },
+        "clipboard": { "name": "剪贴板", "description": "读取和写入剪贴板" },
+        "notifications": { "name": "通知", "description": "显示桌面通知" }
+      }
     },
     "market": {
       "tabManage": "已安装",
@@ -903,7 +921,17 @@
         "healthHealthy": "健康",
         "healthUnhealthy": "异常",
         "healthUnknown": "未知",
-        "conflict": "冲突"
+        "conflict": "冲突",
+        "tagBackend": "后端",
+        "tagPerms": "{{count}} 项权限",
+        "switchOn": "开",
+        "switchOff": "关"
+      },
+      "uninstall": {
+        "confirmTitle": "确认卸载",
+        "confirmDesc": "确定要卸载 {{name}} 吗？此操作不可撤销。",
+        "cancel": "取消",
+        "confirm": "卸载"
       },
       "autoUpdate": {
         "label": "自动更新",

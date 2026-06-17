@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 declare module 'simple-mind-map' {
   interface MindMapOptions {
     el: HTMLElement

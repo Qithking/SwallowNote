@@ -154,7 +154,10 @@ function WelcomeScreen() {
         id,
         path,
         name,
-        content: '',
+        // Use undefined to indicate "not loaded yet" so loadTabContent
+        // and EditorView's auto-load useEffect can trigger correctly.
+        // Using '' would be treated as "loaded empty file" and skip loading.
+        content: undefined as unknown as string,
         isDirty: false,
         isEdited: false,
         viewMode: 'preview',

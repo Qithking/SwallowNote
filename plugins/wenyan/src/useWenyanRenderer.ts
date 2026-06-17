@@ -201,6 +201,7 @@ export function useWenyanRenderer() {
   const otherCoreRef = useRef<WenyanCoreInstance | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [html, setHtml] = useState('')
+  const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -331,5 +332,5 @@ export function useWenyanRenderer() {
     }
   }, [])
 
-  return { html, loading, error, render }
+  return { html, title, loading, error, render }
 }

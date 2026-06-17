@@ -8,7 +8,7 @@ export { useEditorStore } from './editor'
 export type { EditorTab, EditorState } from './editor'
 
 export { useUIStore } from './ui'
-export type { Theme, NoteWidth, SidebarView, EditorViewMode, RightPanelType, UIState, CustomThemeColors, CustomTheme, AiContextMenuRequest } from './ui'
+export type { Theme, NoteWidth, SidebarView, EditorViewMode, RightPanelType, SettingsSection, UIState, CustomThemeColors, CustomTheme, AiContextMenuRequest } from './ui'
 
 export { useGitStore } from './git'
 export type { GitBranch, GitState, PullResult, SyncStatus } from './git'

@@ -71,9 +71,9 @@ describe('TC-014: 数学公式测试', () => {
     
     const markdown = `Here is a block formula:
 
-\$\$
+$$
 \\int_0^\\infty e^{-x^2} dx = \\frac{\\sqrt{\\pi}}{2}
-\$\$
+$$
 
 End of formula.`
     

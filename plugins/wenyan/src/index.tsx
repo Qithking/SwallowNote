@@ -12,7 +12,8 @@
  *   - Real-time preview with debounced re-render
  *   - One-click copy styled HTML to clipboard
  *
- * Pure frontend plugin — no Rust backend needed.
+ * Frontend plugin with a Rust backend for pushing article drafts to
+ * WeChat Official Accounts (公众号草稿箱).
  */
 /* eslint-disable react-refresh/only-export-components */
 import type { PluginManifest } from '@swallow-note/plugin-sdk'
@@ -23,7 +24,7 @@ import { WenyanToolbarButton } from './WenyanToolbarButton'
 const manifest: PluginManifest = {
   id: 'com.swallownote.wenyan',
   name: '文颜排版',
-  description: '使用文颜引擎将 Markdown 排版为微信公众号样式的富文本',
+  description: '使用文颜引擎将 Markdown 排版为微信公众号样式的富文本，支持推送到公众号草稿箱',
   version: '0.1.0',
   author: 'SwallowNote',
   publishedAt: '2026-06-16',
@@ -34,7 +35,7 @@ const manifest: PluginManifest = {
   icon: WenyanIcon,
   panel: () => null,
   toolbarButton: WenyanToolbarButton,
-  permissions: ['clipboard', 'storage', 'events'],
+  permissions: ['clipboard', 'storage', 'events', 'backend'],
 }
 
 export default manifest

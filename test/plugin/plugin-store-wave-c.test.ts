@@ -301,12 +301,13 @@ describe('TC-WaveC-M8: unregisterPlugin prunes the user-bound plugin-command sho
 
 describe('TC-WaveC-M9: setPlugins invokes detectPluginConflicts only once per refresh', () => {
   it('emits exactly one telemetry line per detected conflict (no duplication)', async () => {
-    // Two enabled sidebar plugins — the canonical iconSlot
-    // collision. A third plugin uses a unique slot so we
-    // also know the detector isn't over-reporting.
-    const a = makePlugin({ id: 'com.test.collide-a', iconPosition: 'sidebar' })
-    const b = makePlugin({ id: 'com.test.collide-b', iconPosition: 'sidebar' })
-    const c = makePlugin({ id: 'com.test.collide-c', iconPosition: 'editorToolbar' })
+    // Two enabled plugins share the same commandPalette entry —
+    // the canonical commandPalette collision. A third plugin
+    // uses a unique command so we also know the detector isn't
+    // over-reporting.
+    const a = makePlugin({ id: 'com.test.collide-a', commandPalette: ['shared.cmd'] })
+    const b = makePlugin({ id: 'com.test.collide-b', commandPalette: ['shared.cmd'] })
+    const c = makePlugin({ id: 'com.test.collide-c', commandPalette: ['unique.cmd'] })
 
     usePluginStore.getState().setPlugins([a, b, c])
     // Yield once so the synchronous `set()` plus the
@@ -314,7 +315,7 @@ describe('TC-WaveC-M9: setPlugins invokes detectPluginConflicts only once per re
     await Promise.resolve()
 
     const conflicts = getHookMetrics().filter(
-      (m) => m.hook === 'plugin.conflict' && m.error?.includes('sidebar'),
+      (m) => m.hook === 'plugin.conflict' && m.error?.includes('shared.cmd'),
     )
     // The previous double-call bug would have produced two
     // entries per conflict; the fix produces exactly one.
@@ -324,21 +325,18 @@ describe('TC-WaveC-M9: setPlugins invokes detectPluginConflicts only once per re
   })
 
   it('keeps the per-plugin conflict map consistent with the detector output', () => {
-    // Two enabled plugins share the same `iconPosition` AND
-    // the same `contentPosition` — the detector should emit
-    // *two* conflicts (one per kind), and each plugin's bucket
-    // should hold both. We assert against the absolute count
-    // to lock the contract: the map is 1:1 with the detector
-    // output, not silently de-duplicated.
+    // Two enabled plugins share the same `commandPalette` entry.
+    // The detector should emit one conflict, and each plugin's
+    // bucket should hold it. We assert against the absolute
+    // count to lock the contract: the map is 1:1 with the
+    // detector output, not silently de-duplicated.
     const a = makePlugin({
       id: 'com.test.cm-a',
-      iconPosition: 'sidebar',
-      contentPosition: 'leftPanel',
+      commandPalette: ['collide.cmd'],
     })
     const b = makePlugin({
       id: 'com.test.cm-b',
-      iconPosition: 'sidebar',
-      contentPosition: 'leftPanel',
+      commandPalette: ['collide.cmd'],
     })
     usePluginStore.getState().setPlugins([a, b])
 
@@ -348,11 +346,10 @@ describe('TC-WaveC-M9: setPlugins invokes detectPluginConflicts only once per re
     expect(aConflicts).toBeDefined()
     expect(bConflicts).toBeDefined()
     expect(aConflicts).toHaveLength(bConflicts.length)
-    // The kinds are stable: at least one of each is the
-    // iconSlot collision, and at least one is the
-    // contentPosition collision. We assert the *peer id
-    // set* is the same across both plugins' buckets — i.e.
-    // the per-plugin projection is symmetric.
+    // The kinds are stable: the single commandPalette
+    // collision. We assert the *peer id set* is the same
+    // across both plugins' buckets — i.e. the per-plugin
+    // projection is symmetric.
     const aPeerIds = aConflicts.map((c) => c.kind).sort()
     const bPeerIds = bConflicts.map((c) => c.kind).sort()
     expect(aPeerIds).toEqual(bPeerIds)

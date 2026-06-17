@@ -223,7 +223,7 @@ const SearchView = memo(function SearchView() {
       const mergedResults = Array.from(mergedMap.values())
       setResults(mergedResults)
       setExpandedFiles(new Set(mergedResults.map(r => r.file_path)))
-    } catch (_e) {
+    } catch {
       setResults([])
     } finally {
       setIsSearching(false)

@@ -1,31 +1,4 @@
-/**
- * PluginMarketView - in-app plugin marketplace browser (Plugin Atlas).
- *
- * The marketplace tab is mounted inside the same `pa-root` shell as
- * the Installed view, so the `--pa-*` tokens it consumes are
- * already bound to the application's theme variables — there is no
- * `data-pa-theme` toggle here, and the panel picks up light / dark
- * / system automatically. The `.pa-market-*` classes in
- * `index.css` mirror the editorial style of the Installed list and
- * stay scoped to `.pa-root`.
- *
- * Layout:
- *   ┌─ pa-market-hero ─────────────────────────────┐
- *   │  pa-repo-input (store icon + URL + Apply)     │
- *   │  pa-pill (key verified)                      │
- *   └──────────────────────────────────────────────┘
- *   ┌─ pa-toolbar ──────────────────────────────────┐
- *   │  pa-search  (full-width)                      │
- *   │  pa-segmented (all / editor / ai / …)         │
- *   └──────────────────────────────────────────────┘
- *   pa-market-grid
- *     pa-market-card × N (body + badge)
- *
- * State lives in `usePluginMarketStore` so the install state
- * survives navigation away from the marketplace tab. The detail
- * and post-install permission dialogs are unchanged from the
- * pre-Atlas version.
- */
+/** PluginMarketView - 应用内插件市场浏览（Plugin Atlas）。类名 .pa-market-* 限定在 .pa-root 内。 */
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import {
@@ -53,19 +26,12 @@ import type {
 } from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
 
-// Stable style objects — pulled out of the render path so the
-// `byline` icons (User, Calendar) don't allocate a fresh
-// inline style literal on every render of every card. With
-// 100+ marketplace entries that adds up to hundreds of
-// allocations per keystroke in the search box.
+// 提取为常量避免每次渲染分配新对象
 const ICON_STYLE = { marginRight: 3, verticalAlign: -1 } as const
 
 function PluginMarketView() {
   const { t } = useTranslation()
-  // Merge selectors into fewer calls to reduce the number of
-  // selector evaluations on each store update. Zustand's shallow
-  // comparison means we only re-render when the selected slice
-  // actually changes.
+  // 合并 selector 减少求值次数
   const repoUrl = usePluginMarketStore((s) => s.repoUrl)
   const index = usePluginMarketStore((s) => s.index)
   const isFetchingIndex = usePluginMarketStore((s) => s.isFetchingIndex)
@@ -83,21 +49,7 @@ function PluginMarketView() {
   const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
   const pendingDetailId = usePluginMarketStore((s) => s.pendingDetailId)
   const setPendingDetailId = usePluginMarketStore((s) => s.setPendingDetailId)
-  // Derive `allTags` and `filteredEntries` in the component via
-  // `useMemo`. Calling store methods directly through the selector
-  // — `usePluginMarketStore((s) => s.allTags())` — is a classic
-  // Zustand footgun: `allTags()` returns a freshly-sorted `Array`
-  // on every call, so `Object.is(prev, next)` is always `false`,
-  // React re-renders, the selector runs again, the array is a
-  // different reference, React re-renders … in a tight loop. The
-  // browser keeps redrawing, the click event for the market card
-  // never gets a chance to dispatch, and the UI appears to hang
-  // on click. Subscribe to the underlying `index` (stable
-  // reference between refetches) and `searchQuery` / `tagFilter`
-  // (string / string[] — stable references between user edits)
-  // and recompute the derived list with `useMemo`, so a click on
-  // a card only re-renders the component when the underlying
-  // inputs actually change.
+  // 用 useMemo 派生 allTags/filteredEntries，避免 selector 返回新数组导致死循环
   const allTags = useMemo(() => {
     const idx = index
     if (!idx) return []
@@ -138,14 +90,7 @@ function PluginMarketView() {
 
   const [draftUrl, setDraftUrl] = useState(repoUrl)
   const [detailEntry, setDetailEntry] = useState<PluginIndexEntry | null>(null)
-  // Stable `openDetail` callback — the marketplace grid was
-  // previously creating a fresh `() => setDetailEntry(entry)`
-  // closure for every card on every parent re-render. Combined
-  // with the `localVersionFor(entry.id)` and `updates.find(...)`
-  // calls already in the map, that meant each keystroke in the
-  // search box allocated N+2 closures. Switching to a single
-  // `openDetail` keyed on `entry.id` keeps the card list's
-  // re-render path allocation-light.
+  // 稳定 callback 避免新闭包
   const openDetail = useCallback(
     (id: string) => {
       const entry = index?.plugins.find((p) => p.id === id) ?? null
@@ -153,20 +98,7 @@ function PluginMarketView() {
     },
     [index],
   )
-  // Post-install permission grant queue. The marketplace install path
-  // runs the same flow as the user-upload path in `PluginManagerView`:
-  // the host writes the plugin, we re-scan / re-load so the entry
-  // appears in the registry, and *then* we open the permission dialog
-  // pre-seeded with the plugin's declared permission list. Without
-  // this step a marketplace-installed plugin with declared
-  // permissions would auto-activate with no grants and a user
-  // revoke would be impossible until the user discovered the
-  // per-card "Permissions" button by trial and error.
-  //
-  // The dialog mounting follows the same async-host wrapper pattern
-  // as `PluginManagerView.PermissionDialogMount`: the dialog needs
-  // the current `PluginPermissionStatus[]` from localStorage, so we
-  // fetch it before opening the modal.
+  // Post-install 权限授予队列：安装后弹出权限对话框
   const [pendingPermissionGrant, setPendingPermissionGrant] = useState<{
     pluginId: string
     pluginName: string
@@ -192,14 +124,7 @@ function PluginMarketView() {
     }
   }, [pendingPermissionGrant])
 
-  /**
-   * Invoked by `PluginMarketDetail` after a successful install or
-   * update. The detail dialog closes before the permission dialog
-   * opens so the two don't stack and the user always lands on the
-   * permission question. If the installed plugin declares no
-   * permissions, the toast is the only post-install affordance —
-   * mirroring the upload flow's no-permissions short-circuit.
-   */
+  /** 安装/更新成功回调：关闭详情对话框，按需弹权限对话框 */
   const handleInstalled = (meta: PluginMetadataRust) => {
     setDetailEntry(null)
     // Defer the dialog open one tick so React can finish unmounting
@@ -224,24 +149,12 @@ function PluginMarketView() {
     })
   }
 
-  // Keep `draftUrl` in sync if the store URL changes elsewhere
-  // (e.g. via `setRepoUrl` from a future "reset to default" action,
-  // or hot-reload of the persisted value). Without this the input
-  // could show a stale value while the actual fetch targets the
-  // updated URL — leading to UI state and fetch state disagreeing.
+  // 同步 draftUrl 与 store URL
   useEffect(() => {
     setDraftUrl(repoUrl)
   }, [repoUrl])
 
-  // Consume the pending detail ID set by `PluginManagerView.handleUpdatePlugin`.
-  // When a user clicks "Update" on an installed card, the manager sets
-  // `pendingDetailId` and switches to the market tab. This effect opens
-  // the detail dialog for that plugin and clears the pending ID.
-  //
-  // We track whether the effect has already consumed the value so a
-  // re-render (e.g. the index reloading after a fetch) doesn't reopen
-  // the same dialog. We also short-circuit if the component unmounted
-  // mid-flight to avoid a setState-on-unmounted warning.
+  // 消费 pendingDetailId 打开详情对话框
   const consumedDetailRef = useRef<string | null>(null)
   useEffect(() => {
     if (!pendingDetailId || pendingDetailId === consumedDetailRef.current) return
@@ -266,10 +179,7 @@ function PluginMarketView() {
     // Use background refresh to avoid clearing existing index while loading
     void refreshIndex({ background: true })
     void refreshUpdates({ background: true })
-    // We intentionally don't depend on the function identities —
-    // Zustand returns stable function refs, but listing them would
-    // re-run this on every store update. The deps we care about are
-    // the URL itself and the *trigger* of mount.
+    // Zustand 函数引用稳定，不放入 deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoUrl])
 
@@ -281,14 +191,7 @@ function PluginMarketView() {
 
   return (
     <div className="pa-flex-col pa-market" style={{ height: '100%', gap: 0 }}>
-      {/*
-        The marketplace gets its own visual chrome so it doesn't
-        blur into the Installed list. The `pa-market-hero` is a
-        paper-2 card with a bold heading, the repo URL input, and
-        the key-verified pill — a clearly different surface from
-        the Installed list's book-spine cards. Below it: a search
-        bar + tag chips, then the card grid.
-      */}
+      {/* marketplace 独立视觉外壳 */}
       <section className="pa-market-hero">
         <div className="pa-market-hero-head">
           <h3 className="pa-market-hero-title">
@@ -400,13 +303,7 @@ function PluginMarketView() {
           )}
         </div>
         <div className="pa-market-meta">
-          {/*
-            Use Trans so the count is rendered as a <b> child
-            component, not as the raw `<b>` HTML string. The
-            translation key is just `{{count}} 项 · 已验证密钥`
-            with no embedded markup; the wrapping <b> lives in
-            this component, not in the i18n string.
-          */}
+          {/* 用 Trans 让 count 渲染为 <b> 子组件 */}
           <Trans
             i18nKey="plugin.pa.viewMeta.marketplace"
             values={{ count: index ? index.plugins.length : 0 }}
@@ -507,43 +404,7 @@ function EmptyState({
   )
 }
 
-/**
- * PluginMarketCard — a single plugin tile in the marketplace grid.
- *
- * This card is a *sibling* of `PluginInstalledCard` rather than a
- * different style: both use the same `.pa-market-card` chrome
- * (4px coloured spine + body), the same head layout (italic
- * display name + mono id + status badge), the same byline row
- * (author · date · version, mono, with leading icons), and the
- * same tag chip row. They differ only in the actions row at the
- * bottom — Installed exposes a switch + per-plugin icon buttons
- * (settings/permissions/update/uninstall), while Marketplace
- * exposes a primary CTA (Install / Update / Installed) + a
- * details icon, because the marketplace view cannot toggle a
- * plugin that's only listed remotely.
- *
- * Anatomy (top → bottom):
- *   ┌──────────────────────────────────────────┐
- *   │▌ spine 4px (one of 12 hues)             │
- *   ├──────────────────────────────────────────┤
- *   │ ● Plugin Name (italic display)       ⤓  │ ← status dot + name + badge
- *   │ by · author · 2024-01-01 · v0.1.0        │ ← byline (mono)
- *   │                                          │
- *   │ Description, two lines max.             │
- *   │                                          │
- *   │ [tag] [tag] [2 deps] [Update]            │ ← tag chips
- *   │ ─────────────────────────────────────    │
- *   │ [Install]            [⤓]  [ℹ]            │ ← CTA + icon row
- *   └──────────────────────────────────────────┘
- *
- * The card itself is clickable (opens the detail dialog); the
- * actions row's `e.stopPropagation()` lets the buttons fire
- * without bubbling up to the card click. The CTA and the info
- * icon are *both* shortcuts to the same detail dialog — the CTA
- * is the primary action because it shows the install / update
- * state at a glance, and the info icon is a fallback for users
- * who want to read the changelog before installing.
- */
+/** PluginMarketCard - 市场网格中的插件卡片。复用 .pa-market-card chrome。 */
 const PluginMarketCard = memo(function PluginMarketCard({
   entry,
   localVersion,
@@ -559,34 +420,17 @@ const PluginMarketCard = memo(function PluginMarketCard({
   const isInstalled = !!localVersion
   const isUpdateAvailable = !!updateInfo && updateInfo.localVersion !== updateInfo.remoteVersion
 
-  // Most-recent version is the first entry in the `versions` list
-  // (the protocol documents it as "newest first"). Fall back to the
-  // entry's own `version` / top-level `publishedAt` for fresh
-  // publishes that don't ship a `versions` array (the marketplace
-  // only carries the latest artifact, so `versions` is optional).
+  // 最新版本为 versions[0]
   const publishedAt =
     entry.versions?.[0]?.publishedAt ?? entry.publishedAt ?? ''
-  // Memoize the formatted byline date. The plugin entry's
-  // `versions` list doesn't change after the index is fetched, so
-  // the date string is a pure function of `publishedAt` — caching
-  // it here means a parent re-render (search box typing, tag
-  // filter toggle) doesn't repeat the `new Date()` round-trip
-  // for every card.
+  // memoize 日期字符串
   const dateText = useMemo(
     () => (publishedAt ? formatDate(publishedAt) : ''),
     [publishedAt],
   )
   const version = entry.version || '—'
 
-  // ── Tag chips ────────────────────────────────────────────
-  // The Installed card surfaces runtime status (position, backend,
-  // permissions, update, error). The Marketplace card doesn't have
-  // any of that data — it has tags, dependencies, and update
-  // availability. Same `.pa-market-badge` chrome, different
-  // content. We show up to 3 tags (matching the segmented filter
-  // row above) plus a deps counter when the plugin ships with
-  // peer dependencies. Memoized so a parent re-render doesn't
-  // re-allocate the chips array for every card.
+  // 显示最多 3 个 tag + deps 计数器 + 更新徽章
   const tags = useMemo(() => {
     const result: { key: string; cls: string; label: string }[] = []
     if (entry.tags) {
@@ -621,12 +465,7 @@ const PluginMarketCard = memo(function PluginMarketCard({
     ? { cls: 'pa-market-badge is-installed', label: t('plugin.market.badgeInstalled', { defaultValue: 'Installed' }) }
     : { cls: 'pa-market-badge is-install', label: t('plugin.market.badgeInstall', { defaultValue: 'Install' }) }
 
-  // CTA button (left half of the actions row). The label is the
-  // human-friendly action verb; the class swaps the colour theme
-  // for install / update / installed states. The button is
-  // *always* enabled and *always* opens the detail dialog — the
-  // detail dialog owns the actual install / update flow so we
-  // can show the changelog + permissions before committing.
+  // CTA 总是 enabled，点击打开详情对话框
   const cta = isUpdateAvailable
     ? { cls: 'pa-market-cta is-update', label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }) }
     : isInstalled
@@ -686,20 +525,7 @@ const PluginMarketCard = memo(function PluginMarketCard({
           ))}
         </div>
 
-        {/*
-          Actions row. Stops propagation so the buttons fire
-          without bubbling up to the card's own click handler
-          (which would also open the detail dialog). Visually
-          identical to the Installed card's actions row — same
-          dashed divider, same icon row, same horizontal
-          layout. The left half is a primary CTA instead of a
-          switch (marketplace plugins can't be toggled), and
-          the right half is `Download` (shortcut to the detail
-          dialog — same destination as the card body click)
-          and `Info` (alias for the same shortcut, labelled
-          for users who don't recognise the download icon as
-          a "view details" action).
-        */}
+        {/* actions 行：stopPropagation 防止冒泡 */}
         <div className="pa-installed-actions" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
@@ -743,11 +569,7 @@ const PluginMarketCard = memo(function PluginMarketCard({
   )
 })
 
-/**
- * `YYYY-MM-DD` for a date string (ISO 8601 expected). Falls back
- * to the input string if parsing fails so a malformed `publishedAt`
- * never crashes the card.
- */
+/** ISO 转 YYYY-MM-DD */
 function formatDate(dateStr: string): string {
   if (!dateStr) return ''
   try {

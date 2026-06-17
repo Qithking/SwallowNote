@@ -4,11 +4,22 @@
  */
 import type { FileNode } from '@/stores/filetree'
 
-/** Recursively update children of a matching node in the tree */
+/** Recursively update children of a matching node in the tree.
+ *  Clears isLoading and skips creating new objects when nothing changed
+ *  (reference equality optimization for React re-render avoidance). */
 export function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
   return list.map((n) => {
-    if (n.path === path) return { ...n, children }
-    if (n.children) return { ...n, children: updateNodesWithChildren(n.children, path, children) }
+    if (n.path === path) {
+      // Skip creating a new object if children reference is already the same
+      if (n.children === children && !n.isLoading) return n
+      return { ...n, children, isLoading: false }
+    }
+    if (n.children) {
+      const updatedChildren = updateNodesWithChildren(n.children, path, children)
+      // Skip creating a new object if no child was actually updated
+      if (updatedChildren === n.children) return n
+      return { ...n, children: updatedChildren }
+    }
     return n
   })
 }

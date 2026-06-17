@@ -1,53 +1,13 @@
-/**
- * Unified error type for the plugin IPC surface.
- *
- * All 6 Tauri commands exposed under the `plugin_*` family
- * ([`super::plugin::scan_plugins`], [`super::plugin::install_plugin`],
- * [`super::plugin::uninstall_plugin`], [`super::plugin::toggle_plugin_enabled`],
- * [`super::plugin::get_plugin_storage_path`],
- * [`super::plugin_invoke::invoke_plugin`]) return `Result<_, PluginError>`.
- *
- * Design goals
- * ============
- *
- * 1. **Categorical**: the variant conveys *what kind* of failure
- *    happened (NotFound / InvalidInput / Io / Process / Security /
- *    JsonRpc / Timeout / Other) so the host can log/branch on it
- *    without parsing the human-readable message.
- *
- * 2. **Stable TS contract**: the `Display` impl produces the **same**
- *    human-readable string the previous `Result<_, String>` returned,
- *    so the TypeScript `err.message` seen by `panel.invokeBackend`
- *    callers does not change. This was a hard requirement of the
- *    "A 方案" decision recorded in `.work/执行文档.md`.
- *
- * 3. **No protocol change**: Tauri serialises the error via
- *    `serde::Serialize`, and since `Result<_, PluginError>` is
- *    displayed as a `String` on the wire, the IPC payload remains
- *    `{ "message": "..." }` — no breaking change to the frontend.
- *
- * 4. **No extra dependencies on the hot path**: every variant is a
- *    thin wrapper around `String` (or a small struct for `Timeout`).
- *    Constructing one is a single move, no allocation beyond the
- *    string already produced by the underlying error.
- */
+//! Plugin IPC 统一错误类型；Display 输出与原 Result<_, String> 保持一致以维持前端 TS 契约。
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PluginError {
-    /// A plugin, file, or other resource was not found.
-    ///
-    /// Examples:
-    /// - `PluginError::NotFound(format!("Plugin '{}' not found", id))`
-    /// - `PluginError::NotFound(format!("plugin backend not found (plugin_id={})", id))`
+    /// 资源未找到（插件/文件/后端等）。
     #[error("{0}")]
     NotFound(String),
 
-    /// Caller-supplied argument failed validation.
-    ///
-    /// Examples:
-    /// - empty `plugin_id` or `command` strings
-    /// - a plugin zip that does not contain an `index.js`
+    /// 调用方参数校验失败。
     #[error("{0}")]
     InvalidInput(String),
 
@@ -57,39 +17,19 @@ pub enum PluginError {
     #[error("{0}")]
     Io(String),
 
-    /// Child-process or path resolution error.
-    ///
-    /// Examples: spawn failure, stdin/stdout/stderr pipe unavailable,
-    /// subprocess exited unexpectedly, write/flush to plugin stdin
-    /// failed, backend binary path resolution issues.
+    /// 子进程或路径解析错误。
     #[error("{0}")]
     Process(String),
 
-    /// Security policy violation.
-    ///
-    /// Examples: zip-slip detected, symlink entry in plugin zip,
-    /// attempted path traversal outside the plugins directory.
-    /// These are reported as `Err(PluginError::Security(...))` so the
-    /// host can flag the plugin as malicious even though the message
-    /// reads the same as a regular `Io` error.
+    /// 安全策略违规（zip-slip / 符号链接 / 路径穿越）。
     #[error("{0}")]
     Security(String),
 
-    /// Plugin subprocess violated the JSON-RPC protocol.
-    ///
-    /// Examples: malformed response line, request encoding failure,
-    /// a JSON-RPC `error.message` returned by the plugin, response
-    /// channel closed before delivery.
+    /// 子进程违反 JSON-RPC 协议。
     #[error("{0}")]
     JsonRpc(String),
 
-    /// Plugin subprocess did not respond within the per-call timeout.
-    ///
-    /// Carries structured fields so the host (and the diagnostic
-    /// panel) can render a useful message without re-parsing the
-    /// `Display` output. The `Display` impl matches the original
-    /// `Result<_, String>` shape:
-    /// `plugin backend timed out after {secs}s (plugin_id=..., command=...)`.
+    /// 调用超时；携带结构化字段供诊断面板渲染。
     #[error("plugin backend timed out after {secs}s (plugin_id={plugin_id}, command={command})")]
     Timeout {
         secs: u64,
@@ -130,10 +70,7 @@ impl From<serde_json::Error> for PluginError {
     }
 }
 
-/// `#[tauri::command]` requires the error type to be convertible into
-/// `tauri::ipc::InvokeError`. We piggy-back on `InvokeError::from_error`
-/// (which uses our `Display` impl) so the wire format the frontend sees
-/// is exactly the same string the previous `Result<_, String>` returned.
+/// 借助 InvokeError::from_error 保持前端 wire format 不变。
 impl From<PluginError> for tauri::ipc::InvokeError {
     fn from(err: PluginError) -> Self {
         tauri::ipc::InvokeError::from_error(err)

@@ -14,8 +14,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Shield, Check, AlertTriangle } from 'lucide-react'
-import type { PluginPermission, PluginPermissionStatus, PermissionInfo } from '@/types/plugin'
-import { PLUGIN_PERMISSIONS } from '@/types/plugin'
+import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
 import { grantPluginPermissions, revokePluginPermissions } from '@/lib/plugin-permissions'
 import {
   Dialog,
@@ -60,10 +59,6 @@ export function PluginPermissionDialog({
         ? prev.filter((p) => p !== permission)
         : [...prev, permission]
     )
-  }
-
-  const getPermissionInfo = (permission: PluginPermission): PermissionInfo | undefined => {
-    return PLUGIN_PERMISSIONS.find((p) => p.permission === permission)
   }
 
   const handleSubmit = async () => {
@@ -151,9 +146,49 @@ export function PluginPermissionDialog({
           </p>
         </div>
 
+        {permissions.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 12,
+              marginTop: 12,
+              fontSize: 12,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedPermissions([...permissions])}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--accent-color, #6366f1)',
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: 12,
+              }}
+            >
+              {t('plugin.permission.selectAll')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedPermissions([])}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: 12,
+              }}
+            >
+              {t('plugin.permission.selectNone')}
+            </button>
+          </div>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
           {permissions.map((permission) => {
-            const info = getPermissionInfo(permission)
             const isSelected = selectedPermissions.includes(permission)
             const currentStatusItem = currentStatus.find((s) => s.permission === permission)
 
@@ -191,7 +226,7 @@ export function PluginPermissionDialog({
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 500 }}>
-                    {info?.name ?? permission}
+                    {t(`plugin.permission.items.${permission}.name`)}
                   </div>
                   <div
                     style={{
@@ -199,7 +234,7 @@ export function PluginPermissionDialog({
                       color: isSelected ? 'rgba(255,255,255,0.85)' : 'var(--text-secondary)',
                     }}
                   >
-                    {info?.description ?? t('plugin.permission.noDescription')}
+                    {t(`plugin.permission.items.${permission}.description`)}
                   </div>
                 </div>
                 {currentStatusItem?.granted && !isSelected && (

@@ -32,41 +32,8 @@ import type { FileNode } from '@/stores/filetree'
 import { removeFolderHistory } from '@/lib/tauri'
 import { useTranslation } from 'react-i18next'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
-
-/**
- * Count words in content, properly handling CJK characters.
- */
-function countWords(content: string): number {
-  let count = 0
-  const cjkRegex = /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g
-  const cjkMatches = content.match(cjkRegex)
-  if (cjkMatches) {
-    count += cjkMatches.length
-  }
-  const withoutCjk = content.replace(cjkRegex, ' ')
-  const latinWords = withoutCjk.split(/\s+/).filter(Boolean)
-  count += latinWords.length
-  return count
-}
-
-function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return list.map((n) => {
-    if (n.path === path) return { ...n, children }
-    if (n.children) return { ...n, children: updateNodesWithChildren(n.children, path, children) }
-    return n
-  })
-}
-
-function findNodeParent(node: FileNode, list: FileNode[]): FileNode | null {
-  for (const n of list) {
-    if (n.children) {
-      if (n.children.some(c => c.path === node.path)) return n
-      const found = findNodeParent(node, n.children)
-      if (found) return found
-    }
-  }
-  return null
-}
+import { updateNodesWithChildren, findParentNode } from '@/lib/utils/treeUtils'
+import { countWords } from '@/lib/utils/wordCount'
 
 function getRelativePath(rootPath: string, fullPath: string): string {
   if (!rootPath) return fullPath
@@ -100,6 +67,8 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   const addTab = useEditorStore((s) => s.addTab)
   const nodes = useFileTreeStore((s) => s.nodes)
   const setSelectedPath = useFileTreeStore((s) => s.setSelectedPath)
+  const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
+  const setLastClickedPath = useFileTreeStore((s) => s.setLastClickedPath)
   const toggleNode = useFileTreeStore((s) => s.toggleNode)
   const setNodes = useFileTreeStore((s) => s.setNodes)
   const removeRoot = useFileTreeStore((s) => s.removeRoot)
@@ -129,7 +98,10 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
     if (node.isDirectory) {
       toggleNode(node.path)
     } else {
+      // 清理多选状态，与 FileTreeView.handleSelect 行为一致
+      clearMultiSelection()
       setSelectedPath(node.path)
+      setLastClickedPath(node.path)
       try {
         const content = await loadFileContent(node.path)
         addTab({
@@ -266,9 +238,14 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       for (const tab of tabsToClose) {
         editorStore.removeTab(tab.id)
       }
+
+      // 清理文件树选中状态，与 useFileTreeActions.handleDeleteSelected 行为一致
+      clearMultiSelection()
+      setSelectedPath(null)
+      setLastClickedPath(null)
       
       // Refresh parent
-      const parent = findNodeParent(node, nodes)
+      const parent = findParentNode(node, nodes)
       if (parent) {
         const children = await loadDirectory(parent.path, showAllFiles, markdownOnly)
         const updatedNodes = updateNodesWithChildren(nodes, parent.path, children)

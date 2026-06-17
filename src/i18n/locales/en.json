@@ -275,7 +275,10 @@
       "correct": "Correct",
       "outline": "Outline",
       "summary": "Summary",
-      "format": "Format"
+      "format": "Format",
+      "complete": "Complete",
+      "rewrite": "Rewrite",
+      "explain": "Explain"
     }
   },
   "common": {
@@ -330,7 +333,8 @@
     "closeRightTabs": "Close Tabs to Right",
     "copyPath": "Copy Path",
     "copyRelativePath": "Copy Relative Path",
-    "showInExplorer": "Show in File Explorer"
+    "showInExplorer": "Show in File Explorer",
+    "revealInTree": "Reveal in File Tree"
   },
   "fileTree": {
     "newFile": "New File",
@@ -823,7 +827,21 @@
       "save": "Save Changes",
       "saving": "Saving…",
       "noDescription": "No description",
-      "saveFailed": "Failed to save permissions"
+      "saveFailed": "Failed to save permissions",
+      "selectAll": "Select all",
+      "selectNone": "Select none",
+      "noPermissionWarning": "No permissions granted. The plugin may not work correctly.",
+      "items": {
+        "storage": { "name": "Storage", "description": "Access persistent storage for saving plugin data" },
+        "events": { "name": "Events", "description": "Subscribe to host events (note open/save, theme change, etc.)" },
+        "context-menu": { "name": "Context Menu", "description": "Add items to right-click menus" },
+        "backend": { "name": "Backend", "description": "Communicate with native Rust backend" },
+        "filesystem-read": { "name": "Filesystem Read", "description": "Read files from your system" },
+        "filesystem-write": { "name": "Filesystem Write", "description": "Write files to your system" },
+        "network": { "name": "Network", "description": "Make network requests" },
+        "clipboard": { "name": "Clipboard", "description": "Read from and write to clipboard" },
+        "notifications": { "name": "Notifications", "description": "Show desktop notifications" }
+      }
     },
     "market": {
       "tabManage": "Installed",
@@ -903,7 +921,17 @@
         "healthHealthy": "Healthy",
         "healthUnhealthy": "Unhealthy",
         "healthUnknown": "Unknown",
-        "conflict": "Conflict"
+        "conflict": "Conflict",
+        "tagBackend": "Backend",
+        "tagPerms": "{{count}} perms",
+        "switchOn": "On",
+        "switchOff": "Off"
+      },
+      "uninstall": {
+        "confirmTitle": "Confirm uninstall",
+        "confirmDesc": "Uninstall {{name}}? This action cannot be undone.",
+        "cancel": "Cancel",
+        "confirm": "Uninstall"
       },
       "autoUpdate": {
         "label": "Auto-update",

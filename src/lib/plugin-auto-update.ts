@@ -1,36 +1,4 @@
-/**
- * Plugin Auto-Update (Task 11 / G11)
- *
- * Background machinery that powers the "opt-in auto-update" flow:
- *
- * 1. The user toggles `autoUpdate` on a single installed plugin
- *    (see `PluginInstalledCard` / `setPluginAutoUpdate`).
- * 2. On the next app start, `runAutoUpdateOnStartup` walks the
- *    plugin list, filters the opted-in ones, asks the host if a
- *    newer version exists, and silently re-installs it via the
- *    marketplace download pipeline.
- * 3. After a successful install the caller shows a toast that
- *    includes an "撤销" / "Undo" action — clicking it rolls back
- *    to the previously-installed version via
- *    `rollbackPlugin(pluginId, previousVersion)`.
- *
- * The whole chain is **strictly best-effort**:
- *   - A failed network / index fetch is swallowed; the user is
- *     never blocked from launching the app.
- *   - A failed install on one plugin does not abort the loop —
- *     the remaining opted-in plugins still get a chance to update.
- *   - A failed rollback surfaces a follow-up error toast but does
- *     not throw — the user can still see the broken plugin in the
- *     manager and act manually.
- *
- * The signature `runAutoUpdateOnStartup` is *deliberately* a free
- * function (not a React hook) so it can be called from a non-
- * component context (the `App.tsx` init chain) and so it stays
- * trivially unit-testable: the function reads the plugin store
- * via `usePluginStore.getState()` and the marketplace store the
- * same way, returning a plain `AutoUpdateReport` object the test
- * can assert against.
- */
+/** 插件自动更新（Task 11/G11）。启动时扫描 opted-in 插件，下载安装新版本，toast 提供撤销。best-effort：失败不阻塞启动。 */
 import { toast } from 'sonner'
 import semver from 'semver'
 import type { PluginDefinition, PluginIndex, PluginIndexEntry } from '@/types/plugin'
@@ -46,27 +14,13 @@ import { loadAllPlugins } from '@/lib/plugin-loader'
 import { scanPlugins } from '@/lib/tauri'
 import i18next from 'i18next'
 
-/**
- * Type for a translation function compatible with both
- * `i18next.TFunction` and a plain `(key, opts) => string`.
- * The auto-update helpers accept either form so non-React
- * callers (the `App.tsx` startup chain) can pass either
- * a `useTranslation()` result or a fallback that calls
- * `i18next.t(...)` directly.
- */
+/** 兼容 i18next.TFunction 和普通函数的翻译类型。 */
 export type AutoUpdateTranslator = (
   key: string,
   opts?: Record<string, unknown>,
 ) => string
 
-/**
- * One row of the auto-update run report. `null` results in fields
- * are explicitly NOT used (the row is omitted from the array
- * when the plugin wasn't opted in, or when no update was
- * available). Keeping the per-plugin record lets the caller build
- * a more detailed "X plugins were updated in the background"
- * summary than a bare count, and is cheap to construct.
- */
+/** 自动更新运行报告：considered/installed/failed。 */
 export interface AutoUpdateReport {
   /** Plugins that were considered (opted in). */
   considered: number
@@ -91,21 +45,7 @@ export interface AutoUpdateFailure {
   reason: string
 }
 
-/**
- * Walk the installed plugin list, download newer versions for
- * opted-in plugins, install them, and surface the result.
- *
- * The function is fire-and-forget: callers (typically `App.tsx`)
- * invoke it without awaiting and let it complete in the
- * background. Any rejection is logged but never propagated —
- * a slow / flaky marketplace must not delay the user from
- * working with the rest of the app.
- *
- * @param i18n Optional `t` function used for the toast copy.
- *             Falls back to the `i18next.t` global when omitted
- *             so non-React callers don't have to thread a
- *             `useTranslation` hook through.
- */
+/** 启动时自动更新 opted-in 插件。fire-and-forget。 */
 export async function runAutoUpdateOnStartup(
   i18n?: AutoUpdateTranslator,
 ): Promise<AutoUpdateReport> {
@@ -140,11 +80,7 @@ export async function runAutoUpdateOnStartup(
     return report
   }
 
-  // 3. Fetch the index. Best-effort: a network error here means
-  //    "no updates this run", and we silently return. We do NOT
-  //    trigger a refresh on the marketplace UI store, because
-  //    that would clobber whatever the user has open; the
-  //    auto-update chain reads its own copy of the index.
+  // best-effort 拉取索引。
   let index: PluginIndex | null
   try {
     await marketStore.refreshIndex({ background: true })
@@ -167,12 +103,7 @@ export async function runAutoUpdateOnStartup(
     entryById.set(entry.id, entry)
   }
 
-  // 4. Walk the opted-in plugins. Sequential on purpose: a
-  //    marketplace rate-limit / bandwidth cap shouldn't be
-  //    multiplied by the opt-in count, and the user only ever
-  //    opts in to a handful of plugins (the feature is opt-in,
-  //    not opt-out). A slow install for plugin A does not
-  //    block plugin B thanks to the try/catch inside the loop.
+  // 顺序遍历避免限流。
   for (const plugin of optedIn) {
     const entry = entryById.get(plugin.id)
     if (!entry) {
@@ -181,11 +112,7 @@ export async function runAutoUpdateOnStartup(
       // meaningful for marketplace-published ones.)
       continue
     }
-    // Semver-gate: only consider a real version bump. The
-    // marketplace index is the source of truth for "is there
-    // a newer version"; the host's `check_plugin_updates` does
-    // the same comparison server-side, but we keep the check
-    // local to avoid a round-trip per plugin.
+    // 本地 semver 比较避免 IPC 往返。
     if (!isNewerVersion(entry.version, plugin.version)) {
       continue
     }
@@ -208,20 +135,12 @@ export async function runAutoUpdateOnStartup(
     }
   }
 
-  // 5. If anything actually changed on disk, re-scan and re-load
-  //    the plugin set so the manager's "Update" badge clears
-  //    and the new version is reflected in the registry. We
-  //    schedule this *after* the toast so the user sees the
-  //    "已更新" message even if the rescan is slow.
+  // 有安装成功时重新扫描注册表。
   if (report.installed.length > 0) {
     void refreshInstalledPlugins()
   }
 
-  // 6. Surface toasts. Each successful install gets its own
-  //    toast with an "撤销" action so the user can roll back
-  //    to the previous version with one click. Failures are
-  //    summarised in a single warning toast to avoid spamming
-  //    the notification area.
+  // 每个成功单独 toast，失败合并。
   for (const installed of report.installed) {
     showAutoUpdateToast(t, installed)
   }
@@ -242,16 +161,7 @@ export async function runAutoUpdateOnStartup(
   return report
 }
 
-/**
- * Hydrate the persisted `pluginAutoUpdate` map from
- * `localStorage` and re-mirror it onto the runtime
- * definitions. Called once on app start so a previously-
- * opted-in plugin survives a cold reload.
- *
- * Idempotent: calling it twice with the same `localStorage`
- * state is a no-op (the store's own `hydratePluginAutoUpdate`
- * does a wholesale replace, not a merge).
- */
+/** 启动时从 localStorage 恢复 autoUpdate 配置并镜像到运行时。 */
 export function hydrateAutoUpdateFromLocalStorage(): void {
   const record: Record<string, boolean> = {}
   if (typeof window === 'undefined' || !window.localStorage) {
@@ -274,17 +184,7 @@ export function hydrateAutoUpdateFromLocalStorage(): void {
   usePluginStore.getState().hydratePluginAutoUpdate(record)
 }
 
-/**
- * Trigger an undo for a previous auto-update. Wraps the
- * `rollbackPlugin` IPC call, shows a confirmation toast, and
- * re-scans the plugin set on success so the registry picks up
- * the rolled-back version.
- *
- * The function returns the metadata of the now-active version
- * (typically the pre-update one) so the caller can render
- * additional UI if needed; the toast itself is the primary
- * user-visible signal.
- */
+/** 撤销自动更新：rollback、toast、重新扫描。 */
 export async function undoAutoUpdate(args: {
   pluginId: string
   previousVersion: string
@@ -325,25 +225,7 @@ export async function undoAutoUpdate(args: {
 }
 
 /**
- * Compare two semver strings and report whether `remote` is
- * strictly newer than `local`. Delegates to node-semver so the
- * pre-release rules are honored (`1.0.0-beta.1 < 1.0.0`) and the
- * marketplace can safely treat `-beta` builds as "older than
- * the matching release" rather than the lexically-greater string
- * the previous per-component splitter produced.
- *
- * Edge cases:
- *   - Either side empty → `false`. A missing version on disk
- *     must never trigger an auto-update (a fresh install is
- *     the only safe way to introduce a plugin to the registry).
- *   - Either side fails `semver.valid()` → fall back to a
- *     strict-string inequality, then to `false`. This keeps
- *     historical marketplace entries that predate strict semver
- *     compatible (e.g. a `v1` legacy tag) while still refusing
- *     to mis-fire on garbage.
- *
- * Exported for unit testing — the `runAutoUpdateOnStartup`
- * integration test relies on the same helper.
+ * 比较 semver，remote 严格大于 local 时返回 true。解析失败回退字符串比较。
  */
 export function isNewerVersion(remote: string, local: string): boolean {
   if (!remote || !local) return false
@@ -360,23 +242,11 @@ export function isNewerVersion(remote: string, local: string): boolean {
       // auto-update chain.
     }
   }
-  // Fallback for unparseable inputs. The previous behaviour
-  // (loose per-component compare) is preserved here so a
-  // marketplace index that still ships e.g. `v1` / `latest`
-  // doesn't regress. A simple lex-greater is good enough: the
-  // only consumer is a best-effort auto-update that swallows
-  // its own errors anyway.
+  // semver 解析失败时回退字符串比较。
   return r > l
 }
 
-/**
- * Re-scan the on-disk plugin set and re-hydrate the store.
- * Mirrors the chain `App.tsx` runs at startup, but scoped to
- * the post-auto-update rebuild. Errors are logged and
- * swallowed: a failed rescan just means the manager will
- * show stale data until the next manual refresh, which is
- * strictly better than blocking the user.
- */
+/** 重新扫描磁盘并刷新 store。 */
 async function refreshInstalledPlugins(): Promise<void> {
   try {
     const scanned = await scanPlugins()
@@ -389,39 +259,20 @@ async function refreshInstalledPlugins(): Promise<void> {
   }
 }
 
-/**
- * Download + install a single plugin. Returns the install
- * record (for the toast) on success, or `null` when there is
- * no available update for this plugin. Throws on a hard
- * failure (network, sha256 mismatch, install rejection) so
- * the caller's catch can record the per-plugin failure.
- */
+/** 下载并安装单个插件。 */
 async function installOnePlugin(
   plugin: PluginDefinition,
   entry: PluginIndexEntry,
   repoUrl: string,
 ): Promise<AutoUpdateInstall | null> {
-  // Sanity: the host's version list is the most reliable way
-  // to detect "this is the *currently active* version on
-  // disk" because the marketplace can list a version that
-  // isn't active (e.g. after a manual rollback). We compare
-  // the marketplace's latest `entry.version` against the
-  // host's `isActive: true` row and bail when they match —
-  // there's nothing to install.
+  // 用 host 的 isActive 版本判断是否最新。
   const versions = await listPluginVersions(plugin.id)
   const active = versions.find((v) => v.isActive)
   if (active && active.version === entry.version) {
     return null
   }
 
-  // Download (honours the IndexedDB cache + sha256 check).
-  // `repoUrl` is forwarded to `downloadPluginZip` so the
-  // `download_url` recorded in the index is resolved against
-  // the *repo* base, not the Tauri webview's document base —
-  // see `resolveDownloadUrl` in plugin-market.ts for the full
-  // rationale (relative `./export/foo.zip` would otherwise
-  // become `tauri://localhost/export/foo.zip` and hit the
-  // wrong file).
+  // 下载（走缓存 + sha256 校验）。
   const bytes = await downloadPluginZip(entry, repoUrl)
 
   // Install via the host — same path the marketplace UI uses.
@@ -440,16 +291,7 @@ async function installOnePlugin(
   }
 }
 
-/**
- * Show the "auto-update completed" toast for a single plugin.
- * The toast carries an "撤销" action that, when clicked,
- * triggers `undoAutoUpdate` for the recorded previous version.
- *
- * The `id` is intentionally unique per toast (the plugin id)
- * so a second auto-update for the same plugin in the same
- * session produces two distinct toasts — the second update's
- * "撤销" should roll *that* update back, not the first one's.
- */
+/** 展示自动更新完成 toast，带撤销。 */
 function showAutoUpdateToast(t: AutoUpdateTranslator, installed: AutoUpdateInstall): void {
   toast.success(
     t('plugin.pa.autoUpdate.installedTitle', {

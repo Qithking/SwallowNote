@@ -1,21 +1,4 @@
-/**
- * SplitDiffViewer — Two-pane diff viewer for conflict files
- *
- * Uses @codemirror/merge's MergeView for side-by-side diff with:
- * - Automatic line alignment between unchanged content
- * - Word-level change highlighting (inserted/deleted)
- * - Synchronized scrolling (toggleable)
- * - Revert controls between changed chunks
- * - Copy left/right buttons to overwrite entire content
- *
- * Layout:
- * ┌──────────────────┬──────────────────┐
- * │     Remote       │      Local       │
- * │   (read-only)    │   (editable)     │
- * └──────────────────┴──────────────────┘
- *
- * IMPORTANT: Parent must use a `key` prop to force remount when switching files.
- */
+/** SplitDiffViewer — two-pane diff via @codemirror/merge. Remote (read-only) | Local (editable). */
 
 import { useEffect, useRef, useMemo, useState, useImperativeHandle, forwardRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -347,13 +330,7 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
           
           const wrapper = document.createElement('div')
           wrapper.className = 'cm-diff-arrows-wrapper'
-          // CM6 will set style.top on this element with the document coordinate.
-          // CM6's default theme sets .cm-merge-revert button { position: absolute },
-          // and .cm-merge-revert is { position: relative }, so top is relative to .cm-merge-revert.
-          // We only override display/gap for layout; let CM6 handle positioning.
-          // CRITICAL: position:absolute is required because CM6 sets style.top on this element.
-          // CM6's .cm-merge-revert is position:relative, so top is relative to it.
-          // The .cm-merge-revert MUST stretch to document height for positioning to work.
+          // position:absolute required — CM6 sets style.top.
           wrapper.style.cssText = 'position:absolute;display:flex;flex-direction:row;gap:2px;'
 
           // Use refs to access latest callbacks without recreating MergeView
@@ -483,15 +460,7 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
 
       {/* Global styles for the merge view */}
       <style>{`
-        /* Root merge view container — use CM6's default scrolling model
-         * CM6's baseTheme sets .cm-mergeView to overflowY:auto (scrollable)
-         * and .cm-scroller to height:auto;overflowY:visible.
-         * This means the WHOLE mergeView scrolls as one unit,
-         * and .cm-merge-revert stretches to document height so
-         * position:absolute revert buttons with style.top work correctly.
-         *
-         * We only constrain the outer container height; let CM6 handle the rest.
-         */
+        /* Root container — constrain outer height only. */
         .cm-split-diff-viewer > .cm-mergeView {
           height: 100% !important;
           /* Keep CM6's default overflowY:auto for unified scrolling */

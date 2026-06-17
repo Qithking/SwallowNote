@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:backend": "bash build.sh release",
     "package": "bash package.sh",
     "typecheck": "tsc --noEmit"
   },

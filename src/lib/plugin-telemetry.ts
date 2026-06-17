@@ -56,15 +56,7 @@ export interface BackendMetric {
   error?: string
 }
 
-/**
- * Health-related error record. Distinct from a regular hook
- * `error` (which is a string attached to a `HookMetric`) – this
- * is the per-plugin "last error" snapshot the diagnostics popup
- * shows at the top of the unhealthy plugin's row, and that the
- * plugin health monitor consults when it auto-disables a wedged
- * plugin. The shape is intentionally narrow: hook name, message,
- * timestamp, and whether the plugin was auto-disabled.
- */
+/** 健康监控用的"最近错误"快照，区别于 HookMetric.error，用于诊断弹窗显示。 */
 export interface PluginLastError {
   pluginId: string
   hook: string
@@ -103,87 +95,35 @@ const backendMetrics: BackendMetric[] = []
 const pluginStorageSize = new Map<string, number>()
 
 /**
- * M15 (Wave D review) — `metricsVersion` is a monotonically
- * increasing counter that bumps on every metric-recording call.
- * Consumers that want to re-render whenever the host records new
- * telemetry (e.g. `PluginManagerView` computing the stats ribbon /
- * storage meter / errors counter) read the counter via
- * `getMetricsVersion()` and include it in their `useEffect` deps
- * (or call `usePluginTelemetryVersion()` from `@/hooks`).
- *
- * Why not just call `getAllPluginMetrics()` on an interval? The
- * metric buffers are bounded (1000 entries × 4 arrays = 4000
- * records), but `getAllPluginMetrics` still does O(4M + N) work on
- * every call, and an interval is a free constant-rate re-render
- * even when nothing is happening. A version counter is O(1) and
- * only fires when there's actually a new metric to fold in.
- *
- * The counter starts at 0 and is bumped in every recorder
- * (`recordEventMetric` / `recordStorageMetric` / etc.) via
- * `bumpMetricsVersion()`. `clearAllMetrics()` resets it to 0
- * (the right thing — the "after a clear" UI is the same as the
- * "before any metric" UI). The companion hook
- * `usePluginTelemetryVersion` reads it via a `useSyncExternalStore`
- * subscription so React batches the re-render correctly.
+ * 指标版本计数器：记录新指标时自增，供 usePluginTelemetryVersion 订阅触发重渲染。
+ * clearAllMetrics 重置为 0；每次 recordX 调用通过 bumpMetricsVersion 自增。
  */
 let metricsVersion = 0
 
 /** Bump the version counter. Called by every recorder. */
 function bumpMetricsVersion(): void {
   metricsVersion += 1
-  // Notify all subscribers. The set is iterated over a copy
-  // so a subscriber that unsubscribes itself (or another
-  // subscriber) mid-notification doesn't disturb the
-  // iteration order. Subscribers are React's
-  // `useSyncExternalStore` `onChange` callbacks, which schedule
-  // a re-render — they are guaranteed to be cheap (no
-  // user-supplied code runs in the body) so we call them
-  // synchronously and let React batch the subsequent renders.
+  // 迭代副本以避免订阅者取消订阅导致迭代错乱。
   if (metricsVersionSubscribers.size > 0) {
     for (const sub of Array.from(metricsVersionSubscribers)) {
       try {
         sub()
       } catch {
-        // A throwing subscriber shouldn't break the recorder
-        // path. Swallow the error and continue notifying
-        // siblings — the next render pass will surface the
-        // problem to the developer console via React's own
-        // error boundary.
+        // 吞掉订阅者异常，避免破坏记录路径。
       }
     }
   }
 }
 
-/**
- * Return the current metrics version. The counter increments
- * exactly once per recorded metric (event / storage / hook /
- * backend) and once on `clearAllMetrics`. Callers can include
- * the return value in a `useEffect` dep array to recompute
- * derived state (e.g. the `PluginManagerView` stats ribbon)
- * whenever new telemetry lands.
- */
+/** 返回当前指标版本号。 */
 export function getMetricsVersion(): number {
   return metricsVersion
 }
 
-/**
- * Subscribers to the metrics version counter. Kept module-local
- * so recorders can notify it without a circular import. The
- * `usePluginTelemetryVersion` React hook is the primary
- * consumer; tests can subscribe directly to assert notification
- * behaviour without spinning up a renderer.
- */
+/** 指标版本订阅者集合。 */
 const metricsVersionSubscribers = new Set<() => void>()
 
-/**
- * Subscribe to metrics-version changes. The returned function
- * is a `useSyncExternalStore`-compatible unsubscribe — calling
- * it removes the callback from the notification set. The
- * callback is invoked once per `recordX` / `clearAllMetrics`
- * call (NOT per microtask), so a busy host that emits a
- * thousand metrics notifies a thousand times — React batches
- * the resulting re-renders.
- */
+/** 订阅指标版本变化，返回取消订阅函数，兼容 useSyncExternalStore。 */
 export function subscribeToMetricsVersion(onChange: () => void): () => void {
   metricsVersionSubscribers.add(onChange)
   return () => {
@@ -197,15 +137,7 @@ export function subscribeToMetricsVersion(onChange: () => void): () => void {
  *  filter chips can treat the host entries uniformly. */
 const HOST_PLUGIN_ID = 'host'
 
-/**
- * Per-plugin "last error" cache. The plugin health monitor writes
- * here when it auto-disables a wedged plugin; the diagnostics popup
- * reads from here to surface a one-liner at the top of the
- * unhealthy plugin's row. Cleared on uninstall so a reinstall
- * starts with a clean slate. We also clear it on a successful
- * hook fire (`markPluginHealthy`) so the badge transitions to
- * "healthy" and the error line disappears.
- */
+/** 每插件"最近错误"缓存：健康监控写入，诊断弹窗读取，卸载或恢复健康时清除。 */
 const lastErrorByPlugin = new Map<string, PluginLastError>()
 
 // ─── Recording functions ─────────────────────────────────────────────────────
@@ -268,12 +200,7 @@ export function recordStorageMetric(
   _groupsCache = null
   bumpMetricsVersion()
 
-  // Update storage size tracking. The host now passes a signed
-  // `dataSize` for `set` (new − old) so an overwrite of a 100-byte
-  // value with a 30-byte value reports −70 instead of double-
-  // counting +30. The tracker treats any value as the size delta
-  // to apply — positive for growth, negative for shrinkage — and
-  // clamps to 0 to defend against metric drift.
+  // dataSize 为 set/delete 的尺寸增量（正增长/负收缩）。
   if (success && operation === 'set') {
     const current = pluginStorageSize.get(pluginId) ?? 0
     pluginStorageSize.set(pluginId, Math.max(0, current + dataSize))
@@ -357,20 +284,7 @@ export function getBackendMetrics(): readonly BackendMetric[] {
   return backendMetrics
 }
 
-/**
- * Get aggregated metrics for a plugin.
- *
- * Performance: the previous implementation called `.filter()` on
- * all four metric arrays per plugin, which made the typical
- * `getAllPluginMetrics()` call O(4 × N × M) (N plugins × M total
- * metrics). For a 200-plugin install with 1000 events buffered
- * per type, that's 800 000 array allocations + scans per click.
- *
- * We pre-group the metrics by plugin id into per-id lists (one
- * pass per array, O(M)) and reuse the groups across all
- * `getPluginMetrics` calls. The total cost of a full snapshot
- * is now O(4M + N) instead of O(4NM).
- */
+/** 按 pluginId 预分组缓存，避免每次调用全量过滤。 */
 type PluginMetricGroup = {
   events: EventMetric[]
   storage: StorageMetric[]
@@ -474,12 +388,7 @@ export function getAllPluginMetrics(): PluginMetrics[] {
     return _metricsCache
   }
 
-  // Reuse the pre-grouped metrics from `getMetricGroups` (O(4M))
-  // and summarise each plugin in a single pass. The previous
-  // implementation called `getPluginMetrics(id)` per id, which
-  // looked up the group, only to immediately throw it away — but
-  // because `getPluginMetrics` did its own `.filter()` scan over
-  // all four arrays, the total cost was O(4M) per call × N ids.
+  // 复用预分组结果汇总所有插件。
   const groups = getMetricGroups()
   const result: PluginMetrics[] = []
   for (const [id, g] of groups) {
@@ -500,12 +409,7 @@ export function clearAllMetrics(): void {
   _metricsCache = null
   _groupsCache = null
   lastErrorByPlugin.clear()
-  // Bump the version counter (do *not* reset to 0) so the
-  // `usePluginTelemetryVersion` subscriber sees a fresh value
-  // and re-renders. We use a strictly-increasing counter so
-  // every recorder call — including a `clearAllMetrics` that
-  // happens to land on the same numeric value as the previous
-  // state — still produces a new `Object.is` transition.
+  // bump（不重置）以确保订阅者检测到变化。
   bumpMetricsVersion()
 }
 
@@ -529,39 +433,13 @@ export function clearPluginMetrics(pluginId: string): void {
   lastErrorByPlugin.delete(pluginId)
   _metricsCache = null
   _groupsCache = null
-  // Wave C / Minor 7: bump the version counter so React
-  // subscribers (`usePluginTelemetryVersion` consumers like
-  // `PluginManagerView`'s stats ribbon / storage meter / errors
-  // counter) re-render and recompute their snapshots. Without
-  // this, a freshly-uninstalled plugin's residual metrics would
-  // keep showing in the ribbon until the next recorder call –
-  // which on a quiet host could mean "until the next user
-  // action". Mirrors the same `bumpMetricsVersion()` call in
-  // `clearAllMetrics` and every `recordX` function.
+  // bump 以触发订阅者重渲染。
   bumpMetricsVersion()
 }
 
 /**
- * Seed (or overwrite) the per-plugin storage size tracker with
- * authoritative byte counts from the host.
- *
- * The JS-side `recordStorageMetric` only knows about *deltas*
- * (size of a value just set, size of a value just deleted).
- * Across an app restart, those deltas start at 0 — so a plugin
- * with a pre-existing 2 MB `storage.json` from a previous
- * session would otherwise show `0 B` in the manager view's
- * storage meter until the next `set` triggers an update.
- *
- * This function is called from two places:
- * - **App startup** (after the plugin list loads): full seed
- *   with `getAllPluginStorageSizes()`.
- * - **Storage file change event** (the host's file watcher
- *   noticed a `storage.json` modify/remove): single-plugin
- *   re-stat with `getPluginStorageSize(id)`.
- *
- * `bumpMetricsVersion()` is called at most once per invocation
- * so a single call with many plugins collapses to one re-
- * render (the typical startup case).
+ * 用 host 的权威字节数初始化/覆盖插件存储尺寸跟踪器。
+ * 启动和文件变更时调用；单次调用最多 bump 一次以合并重渲染。
  */
 export function seedPluginStorageSizes(sizes: Record<string, number>): void {
   let changed = false
@@ -582,15 +460,7 @@ export function seedPluginStorageSizes(sizes: Record<string, number>): void {
   }
 }
 
-/**
- * Re-stat a single plugin's `storage.json` and update the
- * tracker. Used by the file-watcher handler in `App.tsx` when
- * a `storage.json` mutation is observed that the JS-side
- * delta path wouldn't notice (external import, manual edit).
- * Returns the new size, or `null` if the host couldn't stat
- * (e.g. plugin was uninstalled between the event emission and
- * our handler running).
- */
+/** 重新 stat 单个插件 storage.json 并更新跟踪器。 */
 export async function refreshPluginStorageSize(pluginId: string): Promise<number | null> {
   const size = await getPluginStorageSize(pluginId)
   const prev = pluginStorageSize.get(pluginId) ?? 0
@@ -602,25 +472,8 @@ export async function refreshPluginStorageSize(pluginId: string): Promise<number
 }
 
 /**
- * Subscribe to host-emitted `plugin-storage-changed` events
- * and reconcile the in-memory `pluginStorageSize` tracker
- * with the new file size.
- *
- * The host's file watcher (in `services/file_watcher.rs`)
- * watches `<app_data>/plugins/` and emits one event per
- * `storage.json` mutation, with the resolved plugin id and
- * current file size. The JS-side delta tracker
- * (`recordStorageMetric`) is unaware of writes that bypass
- * the JS layer — e.g. an `import_plugin_configs` from a
- * bundle zip, or a manual edit while the app is running.
- * This subscription is what closes that gap.
- *
- * Returns the unsubscribe function. Safe to call multiple
- * times — each call subscribes exactly once. The dynamic
- * `import('@tauri-apps/api/event')` keeps the telemetry
- * module free of a hard dep on `@tauri-apps/api/event` at
- * module-evaluation time (it isn't always available in
- * test environments).
+ * 订阅 host 的 plugin-storage-changed 事件以同步外部写入造成的尺寸变化。
+ * 返回取消订阅函数；动态 import 以避免测试环境的硬依赖。
  */
 export async function subscribeToPluginStorageChanges(): Promise<() => void> {
   if (pluginStorageChangesUnsub) return pluginStorageChangesUnsub
@@ -643,27 +496,7 @@ export async function subscribeToPluginStorageChanges(): Promise<() => void> {
 
 let pluginStorageChangesUnsub: (() => void) | null = null
 
-/**
- * Read the total storage size (bytes) used by every plugin
- * currently tracked. The number is the sum of the entries
- * in `pluginStorageSize` — i.e. **only** plugins the
- * `seedPluginStorageSizes` seeder has touched (or that
- * have run at least one `set/delete/clear` recorded
- * through `recordStorageMetric`).
- *
- * The result is **NOT** the same as
- * `getAllPluginMetrics().reduce((s, m) => s + m.storageSizeBytes, 0)`
- * — that reduce only sees plugins that have a metrics
- * entry, and `getAllPluginMetrics` constructs entries from
- * `eventMetrics` / `storageMetrics` / `hookMetrics` /
- * `backendMetrics` via lazy `ensure(id)`, so a plugin that
- * has never run a single recorded metric is invisible to
- * the reduce. The manager view's storage meter was
- * previously hitting that branch and silently reporting
- * 0 B for newly-installed plugins — see the inline
- * discussion in `PluginManagerView`'s `storageMeter`
- * useMemo before this fix.
- */
+/** 返回所有被跟踪插件的存储总字节数。 */
 export function getTotalPluginStorageBytes(): number {
   let total = 0
   for (const bytes of pluginStorageSize.values()) {
@@ -678,14 +511,7 @@ export function getPluginStorageBytes(pluginId: string): number {
   return pluginStorageSize.get(pluginId) ?? 0
 }
 
-/**
- * Return a snapshot of every plugin the tracker knows
- * about, as `id -> bytes`. The returned object is a
- * defensive shallow copy — callers may mutate it freely
- * without affecting internal state. Used by tests and by
- * debug overlays; the manager view's hot path uses
- * `getTotalPluginStorageBytes` directly.
- */
+/** 返回所有插件存储尺寸的快照（浅拷贝）。 */
 export function getAllPluginStorageBytesSnapshot(): Record<string, number> {
   const out: Record<string, number> = {}
   for (const [id, bytes] of pluginStorageSize) {
@@ -694,14 +520,7 @@ export function getAllPluginStorageBytesSnapshot(): Record<string, number> {
   return out
 }
 
-/**
- * Test-only: tear down any module-level subscriptions so a
- * fresh `subscribeToPluginStorageChanges` call registers a
- * new listener. Not exported via the public surface — only
- * used by the `plugin-storage-size-tracking` test suite,
- * which needs to verify the subscribe path without the
- * singleton short-circuit kicking in.
- */
+/** 测试专用：重置订阅状态。 */
 export function __resetPluginStorageChangesForTests(): void {
   if (pluginStorageChangesUnsub) {
     pluginStorageChangesUnsub()
@@ -711,17 +530,7 @@ export function __resetPluginStorageChangesForTests(): void {
 
 // ─── Health-monitor integration ─────────────────────────────────────────────
 
-/**
- * Record an error for a plugin. Called by the plugin health
- * monitor when a lifecycle hook exceeds the timeout, and by other
- * callers (host shutdown handlers, permission errors) that want
- * to surface a "last error" line in the diagnostics popup. The
- * `autoDisabled` flag is set when the monitor flipped the plugin
- * to disabled as a consequence of the error; it lets the UI
- * decide whether to render the error chip as a "you were
- * auto-disabled" warning vs. a soft "we logged this but did
- * nothing" note.
- */
+/** 记录插件"最近错误"。autoDisabled 区分自动禁用与仅记录两种情况。 */
 export function recordPluginError(
   pluginId: string,
   hook: string,
@@ -737,14 +546,7 @@ export function recordPluginError(
   })
 }
 
-/**
- * Mark a plugin healthy. Called when a lifecycle hook completes
- * within its timeout window; clears the cached `lastError` so
- * the diagnostics popup stops showing a stale error from a prior
- * wedged run. Does NOT touch the metrics ring buffers – a
- * successful run is allowed to leave its `recordHookMetric` entry
- * in the hook log; we only erase the "last error" highlight.
- */
+/** 标记插件健康：清除 lastError，保留指标缓冲。 */
 export function markPluginHealthy(pluginId: string): void {
   lastErrorByPlugin.delete(pluginId)
 }
@@ -770,37 +572,7 @@ export function clearPluginLastError(pluginId: string): void {
 
 // ─── Plugin conflict logging (Task 13 / G13) ───────────────────────────────
 
-/**
- * Record a single plugin conflict to the telemetry ring buffer.
- * The conflict detector in `plugin-conflicts.ts` returns a flat
- * list of `PluginConflict` records; the store hands them here so
- * the Logs popup can render them under a dedicated "⚠️ Conflict"
- * group (and the jsonl export picks them up alongside the rest
- * of the host's hook activity).
- *
- * The metric is recorded as a synthetic host-attributed
- * `HookMetric` with `hook === PLUGIN_CONFLICT_HOOK`. We re-use
- * the hook ring buffer because conflict detection is conceptually
- * a "host lifecycle event" — a one-shot scan that produced a
- * structured finding — and the Logs popup already knows how to
- * render hook entries. The `error` field carries the human
- * message (e.g. "iconSlot \"sidebar\" · [a, b]") so the same
- * text shows up in the popup, the jsonl export, and the
- * clipboard copy without any further translation.
- *
- * Each call appends one metric — the caller should batch the
- * detector's output into N calls (or fold the list into one
- * multi-line message; the popup renders the message as-is so
- * folding keeps the log denser). We pick per-conflict entries
- * for now: the popup can re-group identical conflicts, and
- * jsonl consumers can correlate by timestamp.
- *
- * `success: true` is the default — the detector ran successfully,
- * it just found a collision — and is what `formatLogLine` uses to
- * downgrade a hook line from `'err'` to `'info'`. We then
- * special-case the conflict hook name (see `formatLogLine`) so
- * the line gets a `'warn'` severity regardless.
- */
+/** 将插件冲突记录为合成的 HookMetric（hook=plugin.conflict），供 Logs 弹窗渲染。 */
 export function recordPluginConflict(message: string): void {
   hookMetrics.push({
     timestamp: Date.now(),
@@ -815,10 +587,7 @@ export function recordPluginConflict(message: string): void {
   }
   _metricsCache = null
   _groupsCache = null
-  // Bump the version so any `usePluginTelemetryVersion` consumer
-  // (e.g. the Logs popup) picks up the new conflict entry on the
-  // next render. Conflicts flow through the hook buffer, so the
-  // metric is otherwise invisible to the version counter.
+  // bump 以让 Logs 弹窗感知新冲突。
   bumpMetricsVersion()
 }
 
@@ -889,18 +658,7 @@ export interface FormattedLogLine {
 /** Union of all metric record types — accepted by `formatLogLine`. */
 export type AnyMetric = EventMetric | StorageMetric | HookMetric | BackendMetric
 
-/**
- * Convert a single metric record to a display-ready log line. The shape
- * stays the same regardless of source (`event` / `storage` / `hook` /
- * `backend`) so the popup can stream them in arrival order. Severity
- * defaults to `info` and is upgraded to `err` for storage/hook/backend
- * records whose `success === false`, and to `warn` for `success` storage
- * ops on a permission-style hook.
- *
- * We intentionally do not consult any I/O: this is a pure transformation
- * over the metric snapshot the popup is iterating over, so it stays
- * cheap enough to run for every line on every render.
- */
+/** 将单条指标转换为日志行。严重级别默认 info，失败时升级。 */
 export function formatLogLine(metric: AnyMetric, now: number = Date.now()): FormattedLogLine {
   const date = new Date(metric.timestamp)
   const time = formatTime(date)
@@ -930,15 +688,7 @@ export function formatLogLine(metric: AnyMetric, now: number = Date.now()): Form
   }
   if ('hook' in metric) {
     const m = metric as HookMetric
-    // Task 13 / G13: conflict entries are recorded as synthetic
-    // host-attributed hook metrics with `hook === PLUGIN_CONFLICT_HOOK`.
-    // Surface them as a `warn` line in the dedicated "⚠️ Conflict"
-    // group; the message body carries the human-readable summary
-    // produced by the conflict detector (e.g. "iconSlot \"sidebar\"
-    // · [a, b]"). Recognising the line by hook name keeps the
-    // shape identical to any other hook metric, so the rest of
-    // the popup's rendering path doesn't have to special-case
-    // anything beyond a single branch here.
+    // 冲突条目归为 warn 级别和 'conflict' 分组。
     if (m.hook === PLUGIN_CONFLICT_HOOK) {
       return {
         timestamp: m.timestamp,
@@ -1018,109 +768,39 @@ export interface LogExportResult {
  *  the original "full ring buffer, oldest-first" contract that
  *  pre-existing callers (and the TC-08 tests) rely on. */
 export interface ExportLogsOptions {
-  /**
-   * Cap on the number of records included in the output. Omit
-   * (or pass a non-positive value) for "no cap" — every record
-   * in the four ring buffers is included. When set, the limit
-   * is applied *after* the plugin-id filter so a caller asking
-   * for "the most recent 100 events for plugin X" gets 100 of
-   * X's events, not 100 mixed events with X filtered out.
-   */
+  /** 记录数上限，过滤后应用；省略或非正值表示无上限。 */
   limit?: number
-  /**
-   * Sort order. `'asc'` (the default) reads top-to-bottom in
-   * chronological order — appropriate for a long-term log file
-   * that a human will `cat` or `tail -f` later. `'desc'` emits
-   * newest-first, which mirrors the visual order of the Logs
-   * popup and lets Copy and Export advertise a count the user
-   * can verify against what they see on screen.
-   */
+  /** 排序：'asc'（默认）或 'desc'。 */
   order?: 'asc' | 'desc'
 }
 
-/**
- * Build a `jsonl` payload from the in-memory metric buffers.
- *
- * jsonl (JSON Lines) is a stable, line-oriented format: each
- * line is a self-contained JSON object, so the file is grep-
- * friendly and tail-able with line-by-line tools (`jq -c .`,
- * `grep '"pluginId":"com.x"' logs.jsonl`, etc.). We pick jsonl
- * over a single big JSON array because the latter requires the
- * whole document in memory before any consumer can stream it,
- * and because each line gets its own timestamp from the metric
- * record – the consumer can sort / filter without re-parsing.
- *
- * The function is pure: it does not touch the filesystem. The
- * caller (the Logs popup) is responsible for handing `text` to
- * the Tauri save dialog + write path. Keeping I/O outside the
- * telemetry module means the function is trivially unit-testable
- * without mocking tauri, and means the same payload can be
- * reused for clipboard-copy, future "send to support" actions,
- * etc.
- *
- * @param pluginId  Optional id. When supplied, the export is
- *                  restricted to records whose `pluginId` matches
- *                  the argument; the popup uses this for its
- *                  per-plugin filter chip. When `undefined`, every
- *                  record in the four ring buffers is included.
- * @param format    Currently only `'jsonl'` is supported; the
- *                  parameter is kept for forward-compat so a
- *                  future PR can add `'csv'` / `'ndjson'` (an
- *                  alias of jsonl) without touching the call
- *                  site.
- * @param options   Optional knobs. `options.limit` caps the
- *                  number of records returned (applied after the
- *                  `pluginId` filter); `options.order` switches
- *                  between chronological (`'asc'`, default) and
- *                  newest-first (`'desc'`) emission. Both are
- *                  omitted by default to preserve the historical
- *                  "full buffer, oldest first" behaviour.
- */
+/** 将指标缓冲构建为 jsonl 载荷。纯函数，可选 pluginId 过滤、limit、order。 */
 export function exportLogs(
   pluginId?: string,
   format: LogExportFormat = 'jsonl',
   options: ExportLogsOptions = {},
 ): LogExportResult {
   const { limit, order = 'asc' } = options
-  // Walk the same four ring buffers `getRecentLogLines` does, so
-  // a Copy and an Export from the same view yield the same record
-  // set (modulo ordering). Each array is in insertion order; we
-  // sort the merged list by `timestamp` according to the caller's
-  // `order` request.
+  // 合并四个环形缓冲并按 timestamp 排序。
   const all: AnyMetric[] = []
   for (const m of eventMetrics) all.push(m)
   for (const m of storageMetrics) all.push(m)
   for (const m of hookMetrics) all.push(m)
   for (const m of backendMetrics) all.push(m)
-  // Stable sort by `timestamp` (ms since epoch). `'asc'` reads
-  // top-to-bottom in time order — the canonical "log file" feel.
-  // `'desc'` reverses so the head of the file is the most recent
-  // event, matching the visual order of the Logs popup.
+  // 按 order 排序。
   all.sort((a, b) =>
     order === 'desc' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp,
   )
   const filtered = pluginId
     ? all.filter((m) => m.pluginId === pluginId)
     : all
-  // Apply the limit *after* the filter so a scoped call
-  // ("most recent 100 for plugin X") gets 100 of X's records
-  // even when the global buffer is dominated by other plugins.
-  // A non-positive / NaN `limit` is treated as "no cap" to match
-  // the contract documented on `ExportLogsOptions.limit`.
+  // limit 在过滤后应用。
   const limited =
     typeof limit === 'number' && Number.isFinite(limit) && limit > 0
       ? filtered.slice(0, limit)
       : filtered
 
-  // Render the records. We compute the `FormattedLogLine` (which
-  // already owns a `time` field) and emit one object per line
-  // with a `kind` discriminator so the consumer can route by
-  // type without re-parsing the message string. We include the
-  // source metric fields under the same key names so the file
-  // remains a faithful dump of the host's telemetry buffers,
-  // not just a presentation-layer log. We iterate `limited`
-  // (the post-filter, post-cap slice) so the rendered `text`
-  // is exactly as wide as `recordCount` advertises.
+  // 渲染每条记录为带 kind 的 JSON 对象。
   const lines: string[] = []
   for (const m of limited) {
     const formatted = formatLogLine(m)
@@ -1186,11 +866,7 @@ export function exportLogs(
       )
     }
   }
-  // Trailing newline is the canonical "ends with EOL" line
-  // discipline (POSIX text file convention). Tools that read
-  // line-by-line ignore the empty last record, but the file
-  // is friendlier to `cat | less` and `wc -l` if it ends
-  // with a newline.
+  // 尾随换行遵循 POSIX 约定。
   const text = lines.length > 0 ? lines.join('\n') + '\n' : ''
   // `format` is reserved for future variants; the call site
   // already passes the literal and a future PR can branch on
@@ -1201,20 +877,7 @@ export function exportLogs(
 
 // ─── Time-window aggregation (Task 12 / G12) ────────────────────────────────
 
-/**
- * One bucket of aggregated metrics covering a fixed time window.
- *
- * The aggregator splits a time range `[now - bucketCount * windowMs, now]`
- * into `bucketCount` equally-sized buckets and rolls every record whose
- * `timestamp` falls in `[startTs, endTs)` into that bucket. Counts and
- * averages are kept as separate fields so the caller (e.g. the sparkline
- * component) can pick the slice it needs without re-walking the buffer.
- *
- * `errorRate` is pre-computed as `errorCount / totalCount` for the
- * sparkline's color-picking logic – we don't want the rendering layer
- * to know about the count/rate contract, only about "what's the colour
- * of this point".
- */
+/** 单时间窗口的聚合指标桶。 */
 export interface TelemetryBucket {
   /** Bucket start timestamp (inclusive, ms since epoch). */
   startTs: number
@@ -1268,34 +931,7 @@ export interface TimeWindowAggregateOptions {
   now?: number
 }
 
-/**
- * Aggregate the in-memory metric buffers into a fixed number of
- * equally-sized time windows ending at `now`.
- *
- * Bucket layout (default 30 × 60_000ms = 30 minutes of history):
- *
- *   now-30m ────────── now-29m ───── ... ──────── now-1m ───── now
- *   | bucket 0 | bucket 1 | ... | bucket 29 |
- *
- * Each record is placed into exactly one bucket. Records older
- * than the first bucket's `startTs` or newer than `now` are dropped –
- * the visualisation is a "recent history" view, not an audit log.
- *
- * Why a dedicated function (and not a hook on the card): the
- * sparkline renders inside a list of 50+ cards, so re-deriving
- * aggregates on every render would walk four 1000-element ring
- * buffers per card per render (200k array reads per frame). By
- * computing the aggregate once per card-mount we keep the cost
- * flat. Callers that need a reactive view can re-invoke on a
- * timer or on a metric-write event; the function is pure over
- * its inputs.
- *
- * Performance: O(M) where M is the total number of buffered
- * metrics across all four ring buffers. Bucket placement is a
- * `Math.floor` index, no allocation per record. Averages are
- * summed in parallel arrays and divided once per bucket at the
- * end, so the inner loop has no branches beyond the filter.
- */
+/** 将指标缓冲聚合为固定数量的等宽时间窗口桶。 */
 export function aggregateTelemetryByTimeWindow(
   options: TimeWindowAggregateOptions = {}
 ): TelemetryBucket[] {
@@ -1306,11 +942,7 @@ export function aggregateTelemetryByTimeWindow(
     now = Date.now(),
   } = options
 
-  // Defensive validation – the sparkline component calls us with
-  // a `bucketCount` derived from the card width, and we'd rather
-  // render an empty chart than crash because the parent passed a
-  // NaN. Returning an empty array matches the "no data → don't
-  // render" contract documented on the card.
+  // 防御性校验：非有限值返回空数组。
   if (!Number.isFinite(windowMs) || windowMs <= 0) return []
   if (!Number.isFinite(bucketCount) || bucketCount <= 0) return []
 
@@ -1339,21 +971,7 @@ export function aggregateTelemetryByTimeWindow(
   const hookDurationSum = new Array<number>(bucketCount).fill(0)
   const backendDurationSum = new Array<number>(bucketCount).fill(0)
 
-  // Closure over the bucket range so the inner loop doesn't have
-  // to recompute `firstStart` per record. The index calculation
-  // is `floor((ts - firstStart) / windowMs)`, which clamps to a
-  // value in `[0, bucketCount)` after the early-return guards.
-  //
-  // Edge case: a record at `ts === now` is mathematically
-  // *outside* the end-exclusive window `[firstStart, now)`, but
-  // in practice a metric recorded at the very moment the
-  // aggregator runs (e.g. inside a test where everything happens
-  // in the same millisecond) would otherwise be silently dropped.
-  // We special-case `ts === now` to land in the last bucket so
-  // the "every record up to now is counted" contract holds. The
-  // alternative — `floor((now - firstStart) / windowMs)` — would
-  // return `bucketCount` (out of range) for a 30×60s layout, so
-  // the special-case is the cleanest fix.
+  // 计算时间戳所属桶索引。ts === now 归入最后一个桶。
   const place = (ts: number): number => {
     if (ts < firstStart) return -1
     if (ts > now) return -1
@@ -1375,12 +993,7 @@ export function aggregateTelemetryByTimeWindow(
     hookDurationSum[idx] += m.durationMs
     if (!m.success) b.errorCount++
   }
-  // Backend IPC metrics – secondary "duration" signal. The
-  // sparkline blends hook + backend averages weighted by their
-  // counts, but we expose them as separate fields so the caller
-  // can choose to render only one (e.g. the marketplace card has
-  // no `hasBackend` distinction, so it'd just use the hook
-  // average).
+  // backend IPC 指标：次级时长信号。
   for (const m of backendMetrics) {
     if (pluginId !== undefined && m.pluginId !== pluginId) continue
     const idx = place(m.timestamp)

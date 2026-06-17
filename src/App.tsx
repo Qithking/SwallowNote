@@ -112,108 +112,43 @@ function App() {
       // This depends on file tree being loaded first
       await restoreSessionState()
       
-      // Step 5: Load plugins from <app_data>/plugins and register them in the
-      // plugin store. Decoupled from the window-show path below so a
-      // slow plugin scan (large plugin sets, cold disk cache) doesn't
-      // delay first paint. Plugin icons and panels will appear in
-      // ActivityBar / TitleBar / EditorToolbar / Sidebar as soon as
-      // `loaded` flips and the registry is rebuilt.
-      //
-      // Performance: we kick off the chain without awaiting it. The
-      // store's `loaded` flag is set after the work completes, and the
-      // window is shown BEFORE the plugin chain finishes (see the
-      // `getCurrentWindow().show()` call further down). This means the
-      // user sees the app shell and can navigate the workspace while
-      // plugins stream in.
+      // Step 5: 异步加载插件（不阻塞首屏）
       const { scanPlugins } = await import('@/lib/tauri')
       const { loadAllPlugins } = await import('@/lib/plugin-loader')
-      // Wave A / C3: `usePluginStore` is already statically
-      // imported at the top of this file (see the `@/stores`
-      // import on the first batch of imports). Re-importing the
-      // same module dynamically here is dead weight on the
-      // critical path: Vite would have to walk the dynamic
-      // import graph (and serialize the resulting promise) for
-      // a module that's already part of the eagerly-loaded
-      // initial bundle. Use the static binding instead.
+      // usePluginStore 已静态导入
       scanPlugins()
         .then(loadAllPlugins)
         .then(async (result) => {
           const { plugins: defs, failures } = result
           usePluginStore.getState().setPlugins(defs)
-          // Record per-plugin load failures (G2). The plugin
-          // manager reads this to render a top-of-page warning
-          // banner. `setLoadFailures` replaces the whole map, so
-          // a successful rescan automatically drops entries for
-          // plugins that are now loading cleanly.
+          // 记录加载失败信息
           usePluginStore.getState().setLoadFailures(failures)
           usePluginStore.getState().setLoaded(true)
-          // Plan A: seed the per-plugin storage size tracker
-          // with authoritative byte counts from the host. The
-          // JS-side delta tracker starts at 0 on every fresh
-          // launch, so without this seed a plugin with a pre-
-          // existing `storage.json` would show `0 B` in the
-          // manager view's storage meter until its next write.
-          // See `seedPluginStorageSizes` for the rationale.
+          // 用宿主端权威字节数 seed 存储大小追踪器
           const { seedPluginStorageSizes } = await import('@/lib/plugin-telemetry')
           const { getAllPluginStorageSizes } = await import('@/lib/tauri')
           void getAllPluginStorageSizes()
             .then((sizes) => seedPluginStorageSizes(sizes))
             .catch((err) => {
-              // Non-fatal: the meter will still come up at 0 B
-              // and populate on the next `set/delete/clear`.
-              // Don't surface to the user — this is a host
-              // probe, not a plugin operation.
+              // 非致命：下次写入时会重新填充
               console.warn('[App] failed to seed plugin storage sizes:', err)
             })
-          // Plan B: subscribe to host-emitted
-          // `plugin-storage-changed` events so the meter
-          // reconciles after any write that bypasses the
-          // JS-side delta path (import from a bundle zip,
-          // manual edit, restore from backup). The
-          // subscription is module-singleton inside
-          // `plugin-telemetry`, so multiple calls collapse
-          // to one listen handle.
+          // 订阅宿主存储变更事件，reconcile 绕过 JS 路径的写入
           const { subscribeToPluginStorageChanges } = await import('@/lib/plugin-telemetry')
           void subscribeToPluginStorageChanges().catch((err) => {
             console.warn('[App] failed to subscribe to plugin storage changes:', err)
           })
-          // Hydrate the in-memory permission guard from localStorage
-          // now that we know the full installed-plugin set. The guard
-          // is what the event bus, storage, and backend IPC consult
-          // synchronously on every operation, so it must be ready
-          // before the user can trigger a protected action.
-          //
-          // We fire-and-forget here so a slow localStorage read on
-          // a 200-plugin install doesn't gate the rest of the UI.
-          // The first protected operation from the user will await
-          // the in-flight hydration via the guard's own check path.
+          // Hydrate 权限守卫缓存，确保跨 tab 授权变更即时生效
           const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
           void hydratePermissionGuard(defs.map((d) => d.id))
-          // Task 11 / G11: hydrate the per-plugin "auto-update"
-          // opt-in map from localStorage and fire the background
-          // auto-update chain. Both calls are fire-and-forget:
-          //   - `hydrateAutoUpdateFromLocalStorage` is a single
-          //     `Object.keys(localStorage)` walk and finishes
-          //     in well under 1ms.
-          //   - `runAutoUpdateOnStartup` makes at most one
-          //     network round-trip (the marketplace index
-          //     refresh) plus one download per opted-in
-          //     plugin. None of that is on the startup critical
-          //     path: a failed / slow marketplace call must
-          //     never block the user from working with the
-          //     rest of the app.
+          // Hydrate 自动更新配置并触发后台更新链（fire-and-forget）
           const { hydrateAutoUpdateFromLocalStorage, runAutoUpdateOnStartup } =
             await import('@/lib/plugin-auto-update')
           hydrateAutoUpdateFromLocalStorage()
           void runAutoUpdateOnStartup()
         })
         .catch((err) => {
-          // `loadAllPlugins` no longer rejects on per-plugin
-          // failures (G2) – the only paths that reach this
-          // catch are transport-level errors (e.g. the Rust
-          // scanner itself returned nothing). Log and mark
-          // the store loaded so the manager doesn't spin
-          // forever.
+          // 仅传输层错误到达此 catch
           console.error('[App] Failed to load plugins on startup:', err)
           usePluginStore.getState().setLoaded(true)
         })
@@ -222,45 +157,18 @@ function App() {
       const { default: i18n } = await import('i18next')
       setAppLocale(i18n.language).catch(() => {})
 
-      // Window was created hidden (visible:false) to prevent white→black flash.
-      // Now that theme and settings are loaded, show the window. We
-      // intentionally do NOT await the plugin loading chain above —
-      // the user can start working with the empty plugin set while
-      // plugins stream in, and the store's `loaded` flag toggles
-      // (from `false` → `true`) once everything is registered.
+      // 主题/设置加载完成后显示窗口，避免闪烁
       try {
         await getCurrentWindow().show()
       } catch { /* ignore */ }
 
-      // Plugins that want to do post-startup work (e.g. register a
-      // command palette entry) can listen for this event. We emit
-      // *after* the window is visible so a plugin that does DOM work
-      // in its handler sees a mounted document.
-      //
-      // The store exposes `loaded` so a plugin that needs the full
-      // registry can wait for it; we don't gate `app:ready` on
-      // plugin-load completion because that would re-introduce the
-      // blocking behaviour we just removed.
+      // 窗口可见后发射 app:ready
       try {
         const { emitAppReady } = await import('@/lib/plugin-host')
         emitAppReady()
       } catch { /* ignore */ }
 
-      // Performance: preload the lazy `PluginManagerView` chunk
-      // during startup. The component is wrapped in `<Suspense>` and
-      // shows a "Loading..." fallback while its chunk is being
-      // downloaded — that fallback was the user-perceived "200ms
-      // initial loading state" on first click (when no hover had
-      // pre-warmed the cache). The chunk is ~80KB gzipped and the
-      // download happens off the main render path because we kicked
-      // it off only *after* the window is shown. By the time the
-      // user clicks the activity-bar icon (typically seconds later),
-      // the chunk is in the browser's HTTP cache and the first
-      // render goes through without the Suspense fallback.
-      //
-      // We schedule the import on an idle callback so it doesn't
-      // race with the React mount of the app shell; the chunk is
-      // small enough that the start-of-idle slot will be free.
+      // 空闲时段预加载 PluginManagerView chunk
       try {
         if ('requestIdleCallback' in window) {
           ;(window as unknown as { requestIdleCallback: (cb: () => void) => void })
@@ -276,11 +184,7 @@ function App() {
   useEffect(() => {
     const win = getCurrentWindow()
     const unlisten = win.listen('tauri://close-requested', async () => {
-      // Notify plugins that the app is about to exit. Plugins can
-      // flush their storage synchronously here, but the user has
-      // already chosen to quit, so we don't await async work – the
-      // store `writePromise` will complete in the background as
-      // long as the process stays alive long enough.
+      // 通知插件 app 退出（不 await）
       try {
         const { emitAppExit } = await import('@/lib/plugin-host')
         emitAppExit()
@@ -346,7 +250,9 @@ function App() {
           if (tab.isDirty) {
             editorStore.markExternalChange(tab.id)
           } else {
-            editorStore.loadTabContent(tab.id)
+            // Force reload: loadTabContent skips when content !== undefined,
+            // but external modifications need to overwrite the cached content.
+            editorStore.loadTabContent(tab.id, 0, true)
           }
         }
       } else if (type === 'created' || type === 'removed' || type === 'renamed') {
@@ -362,6 +268,15 @@ function App() {
           )
           for (const tab of tabsToClose) {
             editorStore.removeTab(tab.id)
+          }
+
+          // 清理文件树选中状态：若删除的是当前选中文件/其父目录，则清空 selectedPath
+          const fileTreeStore = useFileTreeStore.getState()
+          const currentSelectedPath = fileTreeStore.selectedPath
+          if (currentSelectedPath && (currentSelectedPath === path || currentSelectedPath.startsWith(path + '/'))) {
+            fileTreeStore.setSelectedPath(null)
+            fileTreeStore.clearMultiSelection()
+            fileTreeStore.setLastClickedPath(null)
           }
         }
 
@@ -731,16 +646,16 @@ function App() {
   return (
     <TooltipProvider>
       <div
-        className="h-screen w-screen flex flex-col p-[6px]"
+        className="h-screen w-screen flex flex-col"
         style={{ background: 'transparent', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
         onContextMenu={handleContextMenu}
       >
-        <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))', boxShadow: 'var(--shadow-app)' }}>
+        <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))'}}>
         {/* Title Bar */}
         <TitleBar />
 
         {/* Main Content */}
-        <div className="flex-1 flex overflow-hidden gap-x-0.5 px-1">
+        <div className="flex-1 flex overflow-hidden gap-x-0.5 px-1 pr-1.5">
           {/* Activity Bar */}
           <ActivityBar />
 

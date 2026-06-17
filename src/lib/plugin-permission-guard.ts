@@ -1,38 +1,10 @@
 /**
- * Plugin permission enforcement.
- *
- * This module is the runtime sandbox for the permission model. The
- * three "permission-bearing" host services (event bus, storage,
- * backend IPC) all consult `assertPermission(...)` before doing work
- * so a plugin can never reach a feature the user hasn't approved.
- *
- * The store of truth is `window.localStorage` (see
- * `plugin-permissions.ts`) but every check is hot-path code, so we
- * mirror grants into an in-memory `Set` and refresh it eagerly when
- * a grant/revoke lands. The localStorage write is the source of
- * truth – the in-memory cache is rebuilt from it at app start and
- * on every `setGranted(...)` / `clearAll()` call.
- *
- * Synchronous-only contract
- * -------------------------
- * The event bus `on()` and storage constructor are sync, so the
- * permission gate has to be sync too. We therefore forbid the
- * granted cache from doing any I/O on the read path; any pending
- * localStorage write is dropped on app restart, and the next
- * `getPluginPermissions` (called by the UI for display) will
- * re-materialize the cache.
+ * Plugin permission enforcement — runtime sandbox for event/storage/IPC.
+ * Grants eagerly hydrated from localStorage at module load (sync) to avoid race.
  */
-import type { PluginPermission } from '@/types/plugin'
+import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
 
-/**
- * Thrown by `assertPermission` when a plugin attempts a protected
- * operation without the corresponding grant.
- *
- * Subclassing `Error` keeps the V8 stack readable. The class name
- * is also exported so plugins can `instanceof` it and degrade
- * gracefully (e.g. show "missing permission" UI) instead of showing
- * a raw stack trace.
- */
+/** Thrown by assertPermission; subclass Error for instanceof-check. */
 export class PluginPermissionDeniedError extends Error {
   public readonly pluginId: string
   public readonly permission: PluginPermission
@@ -61,6 +33,56 @@ export class PluginPermissionDeniedError extends Error {
  */
 const grants = new Map<string, Set<PluginPermission>>()
 
+// Hardcoded prefix to avoid module-load cycle.
+const PERMISSIONS_KEY_PREFIX = 'plugin_permissions_'
+
+/** Eagerly hydrate grants cache from localStorage at module load. */
+function eagerHydrateFromLocalStorage(): void {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  const prefix = PERMISSIONS_KEY_PREFIX
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (!key || !key.startsWith(prefix)) continue
+    const pluginId = key.substring(prefix.length)
+    if (!pluginId) continue
+    let raw: string | null
+    try {
+      raw = localStorage.getItem(key)
+    } catch {
+      // localStorage can throw in private-browsing / quota
+      // edge cases. A missing entry for one plugin must not
+      // prevent the rest of the cache from materialising.
+      continue
+    }
+    if (!raw) continue
+    let status: PluginPermissionStatus[]
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      // Defensive: skip non-array entries.
+      if (!Array.isArray(parsed)) {
+        console.warn(
+          `[plugin-permission-guard] ignoring non-array permission entry for ${pluginId}`,
+        )
+        continue
+      }
+      status = parsed
+    } catch {
+      // Corrupt entry – log once and skip. The next save
+      // through the UI will overwrite it with a clean record.
+      console.warn(
+        `[plugin-permission-guard] ignoring corrupt permission entry for ${pluginId}`,
+      )
+      continue
+    }
+    const granted = status.filter((s) => s.granted).map((s) => s.permission)
+    if (granted.length > 0) {
+      grants.set(pluginId, new Set(granted))
+    }
+  }
+}
+
+eagerHydrateFromLocalStorage()
+
 /** Replace the grant set for one plugin. Used after a UI save. */
 export function setGranted(pluginId: string, perms: PluginPermission[]): void {
   grants.set(pluginId, new Set(perms))
@@ -76,13 +98,7 @@ export function clearAll(): void {
   grants.clear()
 }
 
-/**
- * Synchronous, hot-path permission check. Throws
- * `PluginPermissionDeniedError` if the grant is missing. We throw
- * rather than return a boolean so a plugin author can't accidentally
- * drop the error on the floor (`if (check()) ...` is a footgun for
- * security checks).
- */
+/** Sync hot-path check; throws to prevent silent security bypass. */
 export function assertPermission(
   pluginId: string,
   permission: PluginPermission,

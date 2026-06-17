@@ -70,6 +70,8 @@ function SettingsView() {
   const { t, i18n } = useTranslation()
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const contentRef = useRef<HTMLDivElement>(null)
+  const settingsSection = useUIStore((s) => s.settingsSection)
+  const setSettingsSection = useUIStore((s) => s.setSettingsSection)
   const {
     theme, setTheme,
     autoStart, setAutoStart,
@@ -161,6 +163,21 @@ function SettingsView() {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   }, [])
+
+  // Deep-link support: when a caller (e.g. AIView's settings button)
+  // sets `settingsSection` in the store, jump to that section on mount
+  // and clear the request so subsequent opens default to the first
+  // section.
+  useEffect(() => {
+    if (!settingsSection) return
+    // Defer to next frame so the section DOM is mounted before
+    // `scrollIntoView` runs (the panel itself just opened too).
+    const raf = requestAnimationFrame(() => {
+      scrollToSection(settingsSection)
+      setSettingsSection(null)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [settingsSection, scrollToSection, setSettingsSection])
 
   const themes: { value: Theme; labelKey: string; emoji: string }[] = [
     { value: 'light', labelKey: 'settings.appearance.theme.light', emoji: '\u2600\uFE0F' },

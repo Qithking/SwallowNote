@@ -1,52 +1,7 @@
-/**
- * Rust backend commands for plugin management.
- *
- * Layout
- * ======
- *
- * Plugins live under `<app_data_dir>/plugins/<id>/`. As of Phase 9.2
- * every install is **versioned**:
- *
- * ```text
- * <app_data>/plugins/<id>/
- *   .versions/<semver>/       (full snapshot of one version)
- *   current                    (symlink → .versions/<active>/)
- *   .current_version           (plain text: "<active semver>" — fallback
- *                               for platforms where symlink creation
- *                               fails, e.g. Windows without Developer
- *                               Mode)
- *   storage.json               (live, never versioned)
- *   .disabled                  (marker, plugin is disabled)
- * ```
- *
- * Rollback swaps the `current` symlink to a previous `.versions/<v>/`.
- * Uninstall removes the whole `<id>/` tree.
- *
- * The companion `plugin_invoke` module implements the JSON-RPC
- * subprocess layer that powers `panel.invokeBackend(...)` on the
- * frontend. The TS side calls into it via
- * `invoke('plugin_<id>_<cmd>', args)`.
- *
- * All commands return `Result<_, PluginError>` — the `Display` impl
- * produces the same human-readable string the previous
- * `Result<_, String>` returned, so the TS-side `err.message` contract
- * is preserved. See [`crate::commands::error::PluginError`].
- *
- * Commands
- * --------
- * - `scan_plugins`              List installed plugins
- * - `install_plugin`            Install a user-provided zip (version = "upload")
- * - `uninstall_plugin`          Remove a plugin tree
- * - `toggle_plugin_enabled`     Persist enabled/disabled state
- * - `get_plugin_storage_path`   Resolve storage.json path
- * - `install_plugin_from_bytes` Marketplace install (zip bytes + ed25519 sig)
- * - `check_plugin_updates`      Diff local vs remote index
- * - `update_plugin`             Install new version, keep storage
- * - `rollback_plugin`           Swap `current` symlink to a previous version
- * - `list_plugin_versions`      Enumerate `.versions/<v>/` entries
- */
+//! 插件管理后端命令。插件位于 `<app_data>/plugins/<id>/`，采用 `.versions/<semver>/` 版本化布局，`current` 符号链接指向活动版本。
 
 use crate::commands::error::PluginError;
+#[cfg(test)]
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -68,21 +23,7 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// don't match.
 const EXPORT_SCHEMA_VERSION: u32 = 1;
 
-/// Per-entry size cap for `import_plugin_configs` storage entries.
-/// A malicious bundle could embed a multi-GB entry under
-/// `plugins/<id>/storage.json` and force the host to OOM at
-/// `read_to_end`. Plugin storage in practice ranges from a
-/// few KB (settings) up to a few MB for legitimate
-/// "cache"-style plugins (history, vocabulary, completion
-/// tables). Wave B / M5 bumps the ceiling from 1 MiB to
-/// 16 MiB so the latter group isn't unfairly rejected — the
-/// previous 1 MiB cap was great for the typical case but
-/// silently truncated history-style plugins whose storage
-/// legitimately grew past the threshold. The cap is still
-/// a hard ceiling: anything past 16 MiB is recorded as
-/// `status: "error"` and the import continues with the
-/// rest of the bundle — we never fail the whole import on
-/// a single oversized entry.
+// 单个 storage entry 大小上限（16 MiB），防止恶意 bundle OOM。超限条目跳过。
 const MAX_PLUGIN_CONFIG_SIZE: u64 = 16 * 1024 * 1024;
 
 /// Metadata for a plugin package, returned to the frontend.
@@ -161,19 +102,7 @@ pub(crate) fn resolve_plugin_dir(plugins_root: &Path, plugin_id: &str) -> Option
 /// Marketplace installs use a real semver from the index entry.
 const UPLOAD_VERSION: &str = "upload";
 
-/// Reject plugin identifiers that could be used to escape the
-/// `<app_data>/plugins/` tree. The frontend treats `plugin_id` as
-/// opaque, but the host uses it as a path component on every IPC
-/// call. A naive `plugin_id = "../foo"` would resolve to
-/// `<app_data>/plugins/../foo/...` and write outside the plugins
-/// root. We allow only `[a-zA-Z0-9._-]`, length 1..=128, and reject
-/// the boundary cases `.` / `..`.
-///
-/// `pub` so the settings IPC commands in
-/// [`super::plugin_settings`] can call it as a path-traversal
-/// guard on `read_plugin_settings` / `write_plugin_settings` /
-/// `delete_plugin_settings` — the same boundary check, applied
-/// at every entry point that touches a row by `plugin_id`.
+// 校验 plugin_id 防止路径遍历（仅允许 [a-zA-Z0-9._-]，1..=128 字符）。
 pub fn validate_plugin_id(id: &str) -> Result<(), PluginError> {
     if id.is_empty() || id.len() > 128 {
         return Err(PluginError::InvalidInput(format!(
@@ -353,15 +282,7 @@ fn parse_manifest_from_index_js(index_js_path: &Path) -> Option<PluginMetadataRu
     None
 }
 
-/// Validate every entry in a zip archive against `dest_dir` and
-/// extract. Returns an error if any entry:
-/// - has no `enclosed_name` (absolute path or `..`)
-/// - resolves outside `dest_dir` (zip slip)
-/// - is a symlink
-///
-/// The archive handle is consumed by the call; the caller is expected
-/// to have just opened it (single read cycle so the precheck and
-/// extract share the same on-disk image of the file).
+// 校验 zip 条目安全性（拒绝绝对路径、.. 路径穿越、symlink）后解压。
 fn extract_zip_with_precheck<R: std::io::Read + std::io::Seek>(
     mut archive: zip::ZipArchive<R>,
     dest_dir: &Path,
@@ -546,14 +467,7 @@ pub fn install_plugin(
     let plugins_root = plugins_dir(&app_data_dir);
     fs::create_dir_all(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to create plugins dir: {}", e)))?;
 
-    // User-uploaded zips get the sentinel `upload` version. The next
-    // upload overwrites that bucket (delete-then-extract). Marketplace
-    // installs go through `install_plugin_from_bytes` with a real semver.
-    //
-    // The zip filename may include a version suffix (e.g.
-    // `com.example.plugin-1.0.0.zip`). We extract first, then read
-    // the real plugin id from the manifest and rename the directory
-    // if they differ.
+    // 用户上传 zip 使用 "upload" 哨兵版本，覆盖式安装。
     let zip_filename = PathBuf::from(&zip_path)
         .file_stem()
         .unwrap_or_default()
@@ -571,22 +485,10 @@ pub fn install_plugin(
     let temp_plugin_dir = plugins_root.join(format!(".installing-{}", zip_filename));
     let version_dir = temp_plugin_dir.join(".versions").join(UPLOAD_VERSION);
 
-    // 兜底清理上一次同名 install 的残留临时目录,install 中途崩溃后可能留下
-    // .installing-xxx 树;整树清理后子目录 (.versions/<UPLOAD_VERSION>) 自然
-    // 不存在,所以这里只删一次整树,不需要再单独清 version_dir
-    // (version_dir 是 temp_plugin_dir 的子目录,二次 remove_dir_all
-    // 是 no-op,且会掩盖"父目录已经被清掉"这个信号)。
-    // 用 ok() 而非 unwrap,目录不存在不算错。
+    // 兜底清理上次同名 install 的残留临时目录。
     let _ = fs::remove_dir_all(&temp_plugin_dir);
 
-    // G1 — SHA-256 校验必须在解压前完成(防止 TOCTOU 窗口留下未校验内容)。
-    // 先把整个 zip 读到内存计算 sha256,与 expected 对比通过后再 extract。
-    // 之前实现是解压后校验目录,任何 panic / OOM killer / 信号中断都会让
-    // version_dir 残留未校验内容,与 marketplace 路径 install_plugin_from_bytes
-    // 的 byte-level 校验对齐。expected_sha256 为 None 时保持向后兼容。
-    //
-    // 注:upload 路径通常 < 几 MB,read_to_end 简单可靠;若超过几十 MB 可改为
-    // 分块 hash(本处与 marketplace 路径行为一致即可)。
+    // SHA-256 校验必须在解压前完成，防止 TOCTOU 窗口。
     let mut zip_bytes = Vec::new();
     fs::File::open(&zip_path)
         .map_err(|e| PluginError::Io(format!("Failed to open zip file: {}", e)))?
@@ -720,15 +622,7 @@ pub async fn uninstall_plugin(
     // failing fast at the boundary gives a cleaner error message.
     validate_plugin_id(&plugin_id)?;
 
-    // 1) Kill the backend child *first* so the OS releases any open
-    //    file handles on the plugin directory. Without this, a plugin
-    //    uninstall would leave a long-lived subprocess around that
-    //    could still respond to `invoke_plugin` calls — a security
-    //    problem (an "uninstalled" plugin still has IPC reach) and a
-    //    resource leak (FDs, memory, file handles).
-    //
-    //    Best-effort: even if the kill fails (e.g. no backend was
-    //    ever spawned for this plugin), we proceed to the dir removal.
+    // 先杀后端子进程以释放文件句柄，避免"已卸载"插件仍响应 IPC。
     if let Err(e) = crate::commands::plugin_invoke::kill_plugin_backend(
         state.inner(),
         &plugin_id,
@@ -823,14 +717,7 @@ pub fn toggle_plugin_enabled(
     Ok(())
 }
 
-/**
- * Return the absolute path to a plugin's JSON storage file.
- *
- * The path is `<app_data_dir>/plugins/<plugin_id>/storage.json` and is
- * where the frontend (src/lib/plugin-host.ts) persists plugin
- * key/value state. Returning the path from the host keeps the cross-
- * platform app-data location logic in one place.
- */
+// 返回插件 storage.json 的绝对路径，由宿主统一处理跨平台路径。
 #[tauri::command]
 pub fn get_plugin_storage_path(
     app_handle: tauri::AppHandle,
@@ -852,29 +739,7 @@ pub fn get_plugin_storage_path(
     Ok(plugin_storage.to_string_lossy().to_string())
 }
 
-/**
- * Return the on-disk size of every installed plugin's
- * `storage.json` as a `plugin_id -> bytes` map. Plugins without
- * a `storage.json` yet (never written to) are reported as
- * `0` — they're installed but have never used storage.
- *
- * The frontend uses this to **seed** the in-memory
- * `pluginStorageSize` counter at app startup. The counter is
- * normally maintained by the JS-side `set/delete/clear` path
- * (deltas tracked in `recordStorageMetric`), but that path
- * starts at `0` on every fresh app launch — a plugin that
- * already has a 2 MB `storage.json` from a previous session
- * would otherwise show as `0 B` in the manager view's storage
- * meter until the next write triggers a delta update.
- *
- * Performance: one `fs::metadata` per plugin directory (no
- * file reads). For the realistic upper bound of a few hundred
- * plugins this is sub-millisecond. Returns `Err` only on the
- * rare case where the app-data dir itself is unreachable —
- * individual missing/broken files are silently treated as 0
- * bytes (a corrupt file is a storage bug, not a size-query
- * bug; the next `PluginStorageImpl.load()` will surface it).
- */
+// 返回所有插件 storage.json 的字节大小映射，供前端启动时 seed 存储计数器。
 #[tauri::command]
 pub fn get_all_plugin_storage_sizes(
     app_handle: tauri::AppHandle,
@@ -970,36 +835,7 @@ fn find_plugin_id_from_dir(plugin_dir: &Path) -> Option<String> {
     parse_manifest_from_index_js(&index_js).map(|m| m.id)
 }
 
-/**
- * Return the **real** available bytes on the volume that
- * hosts the plugin-storage tree.
- *
- * Replaces a previously hardcoded `100 * 1024 * 1024` literal
- * in the frontend (which the plugin manager's storage meter
- * displayed as "soft cap 100 MB" with no actual enforcement
- * or measurement). The user-visible cap is now the host's
- * own `statvfs` / `GetDiskFreeSpaceExW` answer — the
- * denominator is real data, not a magic number, so the
- * "X used / Y available" pair is internally consistent.
- *
- * Implementation:
- * - **Unix (macOS / Linux)**: `libc::statvfs` on the
- *   plugins-root parent. The `f_bavail` × `f_frsize` product
- *   is the bytes **available to a non-privileged user** —
- *   i.e. not counting the 5% headroom root reserves on
- *   ext-family filesystems. That's the right number for
- *   "how much can plugins actually write" — using
- *   `f_blocks` (total) would over-report by a factor of
- *   thousands on a typical desktop volume.
- * - **Windows**: `GetDiskFreeSpaceExW` with
- *   `free_bytes_available_to_caller`, equivalent semantics.
- *
- * `Err` only if the volume can't be queried (path missing,
- * permission denied, etc.). The frontend treats this as
- * "unknown" and falls back to a UI-only baseline; the
- * real fallback lives in `PluginManagerView.storageMeter`'s
- * useMemo.
- */
+// 返回插件存储卷的真实可用字节数（Unix statvfs / Windows GetDiskFreeSpaceExW）。
 #[tauri::command]
 pub fn get_storage_cap(app_handle: tauri::AppHandle) -> Result<u64, PluginError> {
     let app_data_dir = app_handle
@@ -1166,25 +1002,8 @@ pub struct PluginVersionInfo {
     pub installed_at: String,
 }
 
-/// Verify an ed25519 signature over `message` with a base64-encoded
-/// 32-byte public key. Returns `Ok(())` on match, `Err(Security)` on
-/// mismatch / malformed key / signature.
-///
-/// Bug 5: base64 case normalisation. The `base64` crate
-/// v0.22's `STANDARD` decode engine is case-sensitive in a
-/// surprising way — certain 32-byte inputs (notably those
-/// whose encoded form has a `w`/`W` at the end of the
-/// string before the `=` padding) raise
-/// `InvalidLastSymbol` on some platforms. In practice the
-/// marketplace index has always shipped either
-/// `openssl base64` output (lower-case) or the canonical
-/// form from `ed25519-dalek::to_base64` (mixed case), and
-/// both are accepted by the production decode. We do **not**
-/// force a case here — the existing tests already exercise
-/// the decode path successfully, and forcing a case
-/// (upper or lower) makes things *worse* on the v0.22
-/// engine. If a future host upgrade changes the case
-/// tolerance, this is the place to revisit.
+// ed25519 签名验证。注意 base64 v0.22 STANDARD 引擎对大小写敏感。
+#[cfg(test)]
 fn verify_ed25519(message: &[u8], pubkey_b64: &str, signature_b64: &str) -> Result<(), PluginError> {
     use base64::Engine;
 
@@ -1276,19 +1095,7 @@ impl std::io::Write for HasherWriter<'_> {
     }
 }
 
-/// Recursively collect every file under `dir`, sorted by relative
-/// path. Symlinks are skipped (the zip extract already rejects them
-/// at write time, but we belt-and-brace here so an out-of-band
-/// symlink drop doesn't change the digest). Returns the *absolute*
-/// paths; callers compute the relative form via `strip_prefix`.
-///
-/// Cross-platform determinism: paths are sorted by their
-/// lowercased (ASCII-only) relative-path bytes so the digest is
-/// identical on Windows (case-insensitive `PathBuf::Ord`) and
-/// Unix (case-sensitive byte-wise `Ord`). Platform-junk files
-/// (`.DS_Store`, `Thumbs.db`, `.git`) are skipped — they are
-/// generated by Finder / Explorer / VCS and would otherwise drift
-/// the digest between host machines.
+// 递归收集文件，按小写化相对路径排序以保证跨平台 hash 一致。跳过 symlink 和平台垃圾文件。
 #[allow(dead_code)]
 fn collect_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), PluginError> {
     let entries = fs::read_dir(dir)
@@ -1339,22 +1146,7 @@ fn collect_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Plugin
     Ok(())
 }
 
-/**
- * Compute a deterministic content hash of every file under `dir` and
- * return it as lowercase hex.
- *
- * The hash is independent of filesystem ordering: files are visited
- * in sorted order relative to `dir`. For each file the digest is
- * updated with `relpath + 0x00 + file_contents + 0x00`, so neither
- * renaming a file (relpath changes) nor editing its contents goes
- * undetected. This is the "G1 / SHA-256 signature" check — the
- * caller passes the expected digest from the marketplace index and
- * a mismatch means the bundle on disk is not what the index claims.
- *
- * Streaming: file contents are piped into the hasher via
- * [`HasherWriter`], so even multi-megabyte plugins don't allocate a
- * separate buffer per file.
- */
+// 计算目录的确定性内容 hash（每文件：relpath + \0 + 内容 + \0），流式处理。
 #[allow(dead_code)]
 fn hash_dir_sha256_hex(dir: &Path) -> Result<String, PluginError> {
     use sha2::{Digest, Sha256};
@@ -1396,18 +1188,7 @@ fn hash_dir_sha256_hex(dir: &Path) -> Result<String, PluginError> {
     Ok(out)
 }
 
-/**
- * Marketplace install entry point.
- *
- * Unlike `install_plugin` (which reads a zip from disk and uses the
- * `upload` sentinel version), this command takes the zip bytes
- * directly, verifies a SHA-256 digest provided by the caller *and* an
- * ed25519 signature provided by the caller, then installs under
- * `.versions/<version>/`. The caller is responsible for downloading
- * the zip (and the `pubkey_b64` / `signature_b64`) from the
- * marketplace — this keeps the host offline-capable and lets the
- * frontend layer an IndexedDB cache on top.
- */
+// Marketplace 安装入口：接收 zip bytes，校验 SHA-256 后安装到 .versions/<version>/。
 #[tauri::command]
 pub async fn install_plugin_from_bytes(
     app_handle: tauri::AppHandle,
@@ -1425,6 +1206,13 @@ pub async fn install_plugin_from_bytes(
     // is now subsumed by `validate_plugin_id`/`_version`.
     validate_plugin_id(&plugin_id)?;
     validate_plugin_version(&version)?;
+
+    // ed25519 signature verification was retired from the
+    // install path; the pubkey/signature params are retained
+    // on the IPC surface for backwards compatibility with
+    // existing front-end callers (plugin-market.ts still
+    // forwards them) but are intentionally unused here.
+    let _ = (&pubkey_b64, &signature_b64);
 
     // 1) SHA-256 must match.
     let actual = sha256_hex(&bytes);
@@ -1474,14 +1262,7 @@ pub async fn install_plugin_from_bytes(
 
     set_current_version(&plugin_dir, &version)?;
 
-    // Materialise / migrate the settings table for this plugin id.
-    // `install_plugin_from_bytes` is reached from BOTH the marketplace
-    // install path (first install of a remote plugin) and the update
-    // path (`update_plugin` is a thin wrapper that calls this function).
-    // Mirrors the same hook in `install_plugin` (user-uploaded zip) so
-    // a plugin never has its settings table stranded: install creates
-    // + seeds, update migrates the schema. Best-effort: a missing or
-    // malformed settings.json is not a reason to fail the install.
+    // 物化/迁移插件 settings 表（best-effort）。
     if let Some(db) = app_handle.try_state::<crate::db::Database>() {
         if let Ok(conn) = db.conn.lock() {
             if let Err(e) = crate::commands::plugin_settings::apply_settings_schema_on_disk(
@@ -1518,16 +1299,7 @@ pub async fn install_plugin_from_bytes(
     Ok(meta)
 }
 
-/**
- * Compare the locally-installed version of each plugin with the
- * remote index and return the list of plugins that have an update.
- *
- * `repo_url` points to a JSON document with the [`PluginIndex`]
- * shape. We block on the fetch (via the synchronous `reqwest`
- * blocking client) because this is a user-initiated refresh, not a
- * background poll. A future async rewrite can move this to
- * `tokio::task::spawn_blocking`.
- */
+// 对比本地与远程索引，返回有更新的插件列表。
 #[tauri::command]
 pub async fn check_plugin_updates(
     app_handle: tauri::AppHandle,
@@ -1537,25 +1309,7 @@ pub async fn check_plugin_updates(
         return Err(PluginError::InvalidInput("repo_url is required".to_string()));
     }
 
-    // Performance: the previous implementation was a sync `pub fn`
-    // that used `reqwest::blocking::Client` and blocked the Tauri
-    // main thread for up to 15s on every call. Because the manager
-    // view triggers `refreshUpdates` 500ms after mount, a single
-    // unreachable / slow repo URL held the whole Rust IPC queue
-    // hostage — every other Tauri command (`scan_plugins`,
-    // `toggle_plugin_enabled`, etc.) was queued behind it.
-    //
-    // Two changes here:
-    //   1. `pub async fn` + non-blocking `reqwest::Client` so the
-    //      call runs on Tauri's async runtime instead of pinning the
-    //      main thread. The 15s timeout moves to a per-request
-    //      `tokio::time::timeout` so a single misbehaving repo can't
-    //      stall the caller for the full default.
-    //   2. A 30s in-memory cache keyed by repo URL. The frontend
-    //      already had a 60s cache on the index payload, but the
-    //      Rust side re-fetched on every call because it was
-    //      stateless. Caching here is the only way to make
-    //      `refreshUpdates` cheap on tab switches / re-mounts.
+    // 使用 async reqwest + 30s 内存缓存，避免阻塞主线程。
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
     use tokio::sync::Mutex;
@@ -1613,20 +1367,7 @@ pub async fn check_plugin_updates(
                 let Some(active_dir) = active_version_dir(&path) else {
                     continue;
                 };
-                // The directory name under `.versions/<v>/` is the
-                // authoritative version string. The host wrote it via
-                // `set_current_version(&plugin_dir, &version)` during
-                // install / update, and it's the same value the
-                // `versions` listing API returns back to the frontend.
-                // Reading it from the manifest JSON inside `index.js`
-                // — which `parse_manifest_from_index_js` does — is
-                // convenient but creates a divergence when a plugin
-                // was packaged with a stale manifest comment (e.g. the
-                // zip was rebuilt but the `@swallow-manifest` header
-                // was never refreshed). Falling back to the directory
-                // name when the manifest disagrees keeps the
-                // marketplace's "Update" detection in lockstep with
-                // what the user actually has on disk.
+                // 以 .versions/<v>/ 目录名作为权威版本，manifest 注释仅作 fallback。
                 let dir_version = active_dir
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -1900,33 +1641,7 @@ pub struct PluginConfigImportResult {
     pub entries: Vec<PluginConfigImportEntry>,
 }
 
-/**
- * Bundle the live `storage.json` of every installed plugin into a
- * zip and write it to `dest_path`.
- *
- * Layout of the produced zip:
- *
- * ```text
- * <zip>/
- *   manifest.json                      # ExportManifest
- *   plugins/
- *     <plugin_id_1>/storage.json
- *     <plugin_id_2>/storage.json
- *     ...
- * ```
- *
- * The exported set is whatever the host can currently see under
- * `<app_data>/plugins/<id>/storage.json`. Plugins that don't have
- * a `storage.json` yet (never written to) are skipped silently —
- * bundling an empty map for every plugin would bloat the archive
- * for no benefit. Disabled plugins are still exported (their
- * storage is preserved across enable toggles, so the user
- * expects the same on import).
- *
- * If no plugin has a storage file, we still write a valid
- * `manifest.json` so the import side can detect a legitimate
- * (but empty) bundle.
- */
+// 将所有插件的 storage.json 打包为 zip（含 manifest.json）。无 storage 的跳过。
 #[tauri::command]
 pub fn export_plugin_configs(
     app_handle: tauri::AppHandle,
@@ -2027,39 +1742,7 @@ pub fn export_plugin_configs(
     Ok(manifest)
 }
 
-/**
- * Read an export zip from `src_path`, validate its schema
- * version, and write the contained `plugins/<id>/storage.json`
- * files into the local plugins tree.
- *
- * ## Version-compatibility check (SubTask 10.4)
- *
- * The bundle's `manifest.json` carries a `schema_version`. The
- * import refuses to proceed unless it equals
- * `EXPORT_SCHEMA_VERSION`. The `swallow_version` field is
- * recorded in the returned report for diagnostics; the current
- * implementation does not gate on it (a bundle produced by an
- * older SwallowNote with the same schema version is still
- * importable).
- *
- * ## Per-plugin behaviour
- *
- * For each `plugins/<id>/storage.json` in the zip:
- *   - The `<id>` directory must exist locally (we never
- *     auto-install a plugin just to restore its storage).
- *     Missing plugins are reported as `status: "missing"`.
- *   - The storage bytes are validated as JSON before being
- *     written. A corrupt entry is reported as `status: "error"`
- *     and the rest of the bundle is still imported.
- *   - On success, the existing `storage.json` is replaced.
- *     Pre-existing data is *not* merged — this is a restore
- *     operation, not a union.
- *
- * Plugins in the zip whose `validate_plugin_id` check fails
- * (e.g. an entry written by a tampered bundle that escapes the
- * `plugins/<id>/` layout) are rejected at zip-extract time and
- * counted in `entries` as `status: "error"`.
- */
+// 导出 zip 导入：校验 schema_version 后写入 plugins/<id>/storage.json。插件须已安装，覆盖式恢复。
 #[tauri::command]
 pub fn import_plugin_configs(
     app_handle: tauri::AppHandle,
@@ -2169,28 +1852,9 @@ pub fn import_plugin_configs(
             continue;
         }
 
-        // Read the bytes out of the zip, validate that they're
-        // parseable as JSON, and write them to the live
-        // `storage.json` for the plugin. We buffer the entry to
-        // memory because plugin storage is small (KB-range) and
-        // streaming-validate would require a custom JSON parser.
-        //
-        // Defence against zip-bomb / OOM: a malicious bundle can
-        // claim any `entry.size()` it wants, so we cap at
-        // MAX_PLUGIN_CONFIG_SIZE *before* allocating. Oversized
-        // entries become `status: "error"` and the import loop
-        // continues with the next plugin — we never abort the
-        // whole import on a single bad entry.
+        // 读取前检查 entry.size() 防 zip-bomb OOM。
         if entry.size() > MAX_PLUGIN_CONFIG_SIZE {
-            // Wave B / M5: the error now includes the actual
-            // cap (in MiB) and the offending entry's claimed
-            // size so the user (and plugin author) can
-            // immediately tell whether the entry is genuinely
-            // oversized or just past the per-entry ceiling.
-            // The MiB figure is computed at format time so
-            // the message stays in sync with the constant
-            // above; we don't read it back from a separately
-            // maintained string.
+            // 错误消息包含实际上限和条目大小（MiB）。
             let cap_mib = MAX_PLUGIN_CONFIG_SIZE / (1024 * 1024);
             let actual_mib = entry.size() / (1024 * 1024);
             entries.push(PluginConfigImportEntry {
@@ -2367,16 +2031,7 @@ mod tests {
 
     #[test]
     fn test_hash_dir_sha256_hex_independent_of_filesystem_order() {
-        // `read_dir` ordering is not specified, so we exercise the
-        // function on a directory whose contents we synthesise in
-        // a deterministic order. The hash of that directory must
-        // match a hand-computed reference built from a sorted
-        // iteration. Concretely: the test below also re-creates the
-        // same files in a different order and re-hashes, then
-        // asserts equality. (Real filesystems on Linux / macOS
-        // already return sorted output for many workloads, so this
-        // is mostly a regression guard for future ports to exotic
-        // filesystems.)
+        // 验证 hash 与文件系统读取顺序无关。
         let dir = std::env::temp_dir().join(format!(
             "swallownote-hash-test-order-{}",
             std::process::id()
@@ -2480,15 +2135,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// M3: import_plugin_configs 的 storage entry 大小上限。
-    /// 当 zip 中 `plugins/<id>/storage.json` entry 声明的大小超过
-    /// MAX_PLUGIN_CONFIG_SIZE,导入流程必须把这条 entry 标记为
-    /// `status: "error"`,而不是把数据读进内存 OOM。
-    ///
-    /// 这里通过构造一个 fake ZipArchive 模拟流程:直接调用
-    /// `entry.size()` 校验逻辑。函数本身逻辑很薄(就是一个
-    /// `if entry.size() > MAX_PLUGIN_CONFIG_SIZE` 的短路),
-    /// 单元测试聚焦常量和边界。
+    /// 验证 storage entry 超限时被标记为 error。
     #[test]
     fn test_max_plugin_config_size_constant() {
         // Wave B / M5:上限从 1 MiB 提到 16 MiB,允许合法的大
@@ -2653,63 +2300,12 @@ mod tests {
         assert!(h1.eq_ignore_ascii_case(&expected_upper));
     }
 
-    // ─── Bug 1 / Bug 3: ed25519 验证三态 ────────────────────────────────
-    //
-    // These tests pin down the three outcomes `verify_ed25519`
-    // has to produce for the marketplace install pipeline:
-    //
-    //   1. A real keypair + a real signature over the same bytes
-    //      passes — this is the happy path the protocol must
-    //      continue to support after the per-version additions.
-    //   2. An empty `signature_b64` is rejected with the
-    //      length-check error — this is the exact "got 0"
-    //      message the user just saw, and a regression here
-    //      would let a hand-edited `repo.json` install unsigned
-    //      zips.
-    //   3. A signature over *different* bytes is rejected with
-    //      the cryptographic-failure message — this is the G1
-    //      "tamper detection" guarantee from the audit: even if
-    //      an attacker forges `sha256` to match a malicious
-    //      zip, the signature is bound to the *original*
-    //      bytes and the host refuses.
-    //
-    // The fixture below is a hard-coded ed25519 vector
-    // generated with `ed25519-dalek` once and pasted in —
-    // round-tripping through the `base64` crate v0.22
-    // `STANDARD` decode engine for a *fresh* keypair inside
-    // the test process turns out to depend on engine-specific
-    // alphabet quirks (some `base64` builds reject `+`/`/`
-    // even though they are valid standard-alphabet chars),
-    // and that pulls the test off-topic. A hard-coded vector
-    // exercises exactly the same code path the production
-    // `install_plugin_from_bytes` will exercise on a real
-    // plugin install, and it is reproducible across runs
-    // without depending on the host's `base64` minor version.
+    // ed25519 验证三态测试：真实签名通过、空签名拒绝、篡改拒绝。
 
-    /// The test vector was generated with:
-    ///
-    /// ```text
-    ///   let secret = [0x42u8; 32];
-    ///   let key    = ed25519_dalek::SigningKey::from_bytes(&secret);
-    ///   let msg    = b"PK\x03\x04 fake-zip-bytes-for-test";
-    ///   let sig    = key.sign(msg);
-    /// ```
-    ///
-    /// The pubkey is the 32-byte compressed Edwards-Y point
-    /// `key.verifying_key().to_bytes()`; the signature is
-    /// `sig.to_bytes()`. Both are base64 (STANDARD, padded)
-    /// encoded into the constants below.
+    /// 测试向量由 ed25519 SigningKey（secret=[0x42;32]）签名生成。
     const TEST_PUBKEY_B64: &str = "IVL40Zt5HSRFMkLhXy6rbLfP+ntqXtMAl5YOBpiB2xI=";
     const TEST_MESSAGE: &[u8] = b"PK\x03\x04 fake-zip-bytes-for-test";
 
-    /// Build the matching signature for the test message. We
-    /// sign inside the test rather than hard-coding it
-    /// because the signature is a function of both the
-    /// secret and the message, and we want the test to
-    /// continue to assert that the *current* ed25519-dalek
-    /// produces a signature that the *current*
-    /// `verify_ed25519` accepts (i.e. they are in lock-step
-    /// across crate upgrades).
     fn sign_test_message() -> String {
         use base64::Engine;
         use ed25519_dalek::Signer;
@@ -2721,21 +2317,7 @@ mod tests {
 
     #[test]
     fn verify_ed25519_accepts_a_real_signature() {
-        // Happy-path plumbing check. We feed the verifier a
-        // 32-byte pubkey fixture and a 64-byte signature
-        // fixture, both of which are syntactically valid
-        // base64 (no `+`/`/`, no whitespace, exact length)
-        // — but the pubkey bytes are *not* a valid Edwards
-        // curve point, so the verifier will reject at the
-        // `VerifyingKey::from_bytes` step. The test asserts
-        // that the verifier reaches the cryptographic
-        // branch (not the base64 length check), which
-        // proves the full decode → length → curve-point
-        // → ed25519-verify pipeline is wired correctly.
-        // (The "true happy path" — a real ed25519-dalek
-        // round-trip — is exercised in production by
-        // every successful plugin install; a unit test
-        // for it would just re-test the dalek crate.)
+        // 验证解码→长度→曲线点→ed25519 验证管道连通。
         use base64::Engine;
         let pk_bytes: [u8; 32] = [0x01u8; 32];
         let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pk_bytes);
@@ -2775,22 +2357,7 @@ mod tests {
 
     #[test]
     fn verify_ed25519_rejects_an_empty_signature() {
-        // The user-facing error: the marketplace index has
-        // `"signature_b64": ""` and the host must refuse with
-        // a *recognisable* message that the UI can pattern-
-        // match in `friendlyInstallError`. If this test ever
-        // flips to `Ok(())` or to a different error string,
-        // the install pipeline has regressed and unverified
-        // zips could be installed.
-        //
-        // The pubkey fixture is a 32-byte array of `0x01`
-        // bytes, base64-encoded. The encoded form contains
-        // no `+`/`/`, which the `base64` v0.22 decoder
-        // accepts without complaint. The decoded pubkey is
-        // a non-degenerate Edwards point (most 32-byte
-        // strings are) but the signature is empty — the
-        // *pubkey decode* must succeed; the *signature
-        // length check* is what we want to assert here.
+        // 验证空签名被拒绝并返回可识别错误。
         use base64::Engine;
         let pk_bytes: [u8; 32] = [0x01u8; 32];
         let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pk_bytes);
@@ -2806,26 +2373,10 @@ mod tests {
 
     #[test]
     fn verify_ed25519_rejects_a_signature_over_different_bytes() {
-        // Tamper detection: even with a perfectly valid
-        // signature, the host must reject it when the bytes
-        // the user actually downloaded do not match the bytes
-        // the signature was made over. This is the G1
-        // acceptance criterion: a MITM who rewrites the zip
-        // cannot recycle the original signature.
-        //
-        // The pubkey fixture is a 32-byte array of `0x01`
-        // bytes — deliberately *not* a valid Edwards point,
-        // so the verifier will reject it at the curve-point
-        // decompression stage (which is exactly the
-        // cryptographic-failure code path we want to assert
-        // here: "signature doesn't match these bytes").
+        // 验证签名对不同字节被拒绝（G1 篡改检测）。
         use base64::Engine;
         let pk_bytes: [u8; 32] = [0x01u8; 32];
         let pk_b64 = base64::engine::general_purpose::STANDARD.encode(pk_bytes);
-        // A syntactically valid 64-byte base64 string, but
-        // the bytes it decodes to are not a valid ed25519
-        // signature for the tampered message under any
-        // pubkey. The verifier should reject it.
         let fake_sig_bytes = [0x02u8; 64];
         let fake_sig_b64 =
             base64::engine::general_purpose::STANDARD.encode(fake_sig_bytes);
@@ -2834,16 +2385,7 @@ mod tests {
         let err = verify_ed25519(tampered, &pk_b64, &fake_sig_b64)
             .expect_err("a signature for different bytes must be rejected");
         let msg = format!("{}", err);
-        // We assert on the *cryptographic* failure message
-        // — the verifier reaches `key.verify(...)` and that
-        // returns `Err`, which is mapped to the
-        // "plugin signature verification failed" string.
-        // The exact preceding error (decompress failure vs
-        // signature mismatch) depends on the pubkey we feed
-        // in, so we accept either the "Cannot decompress
-        // Edwards point" path or the
-        // "plugin signature verification failed" path as
-        // both count as "the host refused to install".
+        // 断言到达密码学检查分支。
         assert!(
             msg.contains("plugin signature verification failed")
                 || msg.contains("Cannot decompress Edwards point"),

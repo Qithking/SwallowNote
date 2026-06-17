@@ -31,14 +31,7 @@ import { buildPluginContext as sdkBuildPluginContext } from '@swallow-note/plugi
 
 type AnyHandler = PluginEventHandler<PluginEvent>
 
-/**
- * In-process event bus. We use a Map<event, Set<handler>> for O(1)
- * subscribe/unsubscribe and O(n) dispatch where n is the number of
- * subscribers for that event. Synchronous dispatch is intentional –
- * handlers are expected to be fast; long-running work should defer to
- * a microtask. Errors are isolated per handler so one buggy subscriber
- * can't break others.
- */
+/** 进程内事件总线，错误隔离。 */
 class PluginEventBusImpl implements PluginEventBus {
   private readonly handlers = new Map<PluginEvent, Set<AnyHandler>>()
   /**
@@ -231,12 +224,7 @@ class PluginEventBusImpl implements PluginEventBus {
 export const pluginEventBus: PluginEventBus & { emit: PluginEventBusImpl['emit'] } & { removeAllListenersForPlugin: PluginEventBusImpl['removeAllListenersForPlugin'] } =
   new PluginEventBusImpl()
 
-/**
- * Create a per-plugin event bus proxy that automatically tags every
- * handler with `__pluginId`. Plugin code can then call
- * `events.on('note:change', handler)` without manually attaching
- * `__pluginId` to each handler — the proxy does it transparently.
- */
+/** 创建每插件事件总线代理。 */
 export function createPluginEventBus(pluginId: string): PluginEventBus {
   return {
     on: (event, handler) => {
@@ -330,18 +318,7 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   private async flush(): Promise<void> {
-    // Drain the in-flight write first (if any), then re-check the
-    // dirty flag. Concurrent callsites like
-    //   await set('a', 1)
-    //   await set('b', 2)
-    // would otherwise race: the first `set` captures `cache = {a:1}`
-    // into its `JSON.stringify`, the second `set` synchronously
-    // mutates the cache to `{a:1, b:2}` and then awaits the same
-    // writePromise — but that promise's body has *already* snapshotted
-    // the cache without `b`. After it resolves the second `set`
-    // resolves too, the dirty flag is cleared, and `b` is silently
-    // lost. The post-write dirty recheck forces a follow-up flush
-    // whenever a new mutation landed during the in-flight write.
+    // 先排空飞行中写入，再检查 dirty。
     if (this.writePromise) {
       try {
         await this.writePromise
@@ -358,15 +335,7 @@ class PluginStorageImpl implements PluginStorage {
 
   private async doFlush(): Promise<void> {
     if (!this.cache) return
-    // Snapshot the cache and the mutation count synchronously, *before*
-    // any await, so a concurrent `set` that lands during the write can
-    // be detected at write-completion time. The original implementation
-    // read `this.cache` lazily inside the async IIFE, which captured
-    // whatever was on the cache at the moment `JSON.stringify` was
-    // called — usually before concurrent set()s had a chance to run,
-    // but not always. Snapshotting the object reference up front gives
-    // a stable target for the JSON.stringify call and lets us reason
-    // about "what was on disk before any await" cleanly.
+    // 同步快照 cache 和 mutationCount。
     const dataToWrite = this.cache
     const capturedCount = this.mutationCount
     this.writePromise = (async () => {
@@ -592,15 +561,7 @@ class PluginStorageImpl implements PluginStorage {
 /** Storage cache so a plugin asking twice for `getStorage(id)` reuses one impl. */
 const storageCache = new Map<string, PluginStorageImpl>()
 
-/**
- * Look up (or materialise) the concrete `PluginStorageImpl` for
- * a plugin. Used by the host-only storage functions below —
- * `getPluginStorage()` returns the public `PluginStorage`
- * interface, but the host bypass needs the concrete class to
- * reach the `*Host` methods. Caching here keeps the disk cache
- * and write-serialization state shared between host and plugin
- * code paths.
- */
+/** 查找或创建具体 PluginStorageImpl。 */
 function getOrCreateImpl(pluginId: string): PluginStorageImpl {
   let s = storageCache.get(pluginId)
   if (!s) {
@@ -610,12 +571,7 @@ function getOrCreateImpl(pluginId: string): PluginStorageImpl {
   return s
 }
 
-/**
- * Get a per-plugin storage instance. Construction is lazy, so the
- * permission check (which throws on revoke) only fires when a panel
- * actually grabs a reference to `store`. The returned object is
- * reused on subsequent calls to keep disk caches warm.
- */
+/** 获取每插件 storage 实例。 */
 export function getPluginStorage(pluginId: string): PluginStorage {
   return getOrCreateImpl(pluginId)
 }
@@ -742,16 +698,7 @@ export function emitPluginEvent<E extends PluginEvent>(
   pluginEventBus.emit(event, payload)
 }
 
-// Typed, per-event helpers. These exist so call sites get full payload
-// inference without a generic at every emit. The payload is computed
-// inside the helper to make it impossible to construct a malformed
-// event by mistake (e.g. swapping noteId and path).
-//
-// The host owns the global `pluginEventBus`; these helpers emit
-// straight into it (no SDK detour). They are kept as the canonical
-// public API for host-side callers (e.g. the editor store fires
-// `emitNoteChanged` on every keystroke) and stay in this file
-// because they need a write side-effect, not just a re-export.
+// 类型化每事件 emit 辅助函数。
 
 export function emitNoteOpened(noteId: string, path: string): void {
   pluginEventBus.emit('note:open', { noteId, path })

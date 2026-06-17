@@ -189,10 +189,7 @@ pub fn enable_modern_window_style<R: Runtime>(
                         std::mem::size_of::<u32>() as u32,
                     );
 
-                    // Extend the frame into the client area to eliminate the black border
-                    // on Windows 10. By extending the frame with -1 margins, the entire
-                    // window is covered by the DWM frame, making the black border invisible
-                    // while preserving window resizing functionality (WS_THICKFRAME).
+                    // 扩展 frame 至客户区（-1 margins）以消除 Win10 黑边，保留缩放功能。
                     let margins = MARGINS {
                         cxLeftWidth: -1,
                         cxRightWidth: -1,

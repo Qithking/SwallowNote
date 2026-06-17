@@ -1,46 +1,4 @@
-/**
- * PluginSparkline — compact "startup time + error rate" sparkline for
- * the per-plugin Installed card (Task 12 / G12).
- *
- * Visual contract:
- *   - Height: 18px (within the 16–20px band specified in the design).
- *   - Width: auto-fills the parent up to `maxWidth` (default 120px) so
- *     a long line on a wider card just shows more horizontal detail.
- *     The component reports its own measured width via the optional
- *     `onWidthChange` callback so a parent that wants to align a label
- *     to the right of the line can match the rendered extent.
- *   - Colour: the polyline's stroke uses one of three theme tokens,
- *     picked by the *peak* `errorRate` across the rendered buckets:
- *       - `errorRate === 0`  → `--pa-sparkline-ok`   (positive / green)
- *       - `errorRate < 0.25` → `--pa-sparkline-warn` (warn / amber)
- *       - `errorRate ≥ 0.25` → `--pa-sparkline-err`  (negative / red)
- *     The thresholds are deliberately generous: a single failed
- *     hook in 20 successful ones is "warn", not "err". A bucket
- *     with 25%+ errors is treated as a real outage.
- *   - Data contract: the component is *purely presentational*. It
- *     receives pre-aggregated buckets from the parent; the parent
- *     (the Installed card) computes them once per mount via
- *     `aggregateTelemetryByTimeWindow` so re-renders don't re-walk
- *     the metric ring buffers.
- *   - Empty state: when *every* bucket has `totalCount === 0` the
- *     component returns `null`. The card's "no data" behavior is
- *     "no chart at all" — per the spec — rather than a placeholder
- *     line. This keeps the Installed grid's vertical rhythm stable
- *     for new installs that have never recorded a metric.
- *
- * Implementation notes:
- *   - Pure SVG, no chart library. The point set is a polyline of
- *     `bucketCount` points with `stroke-linejoin: round` to soften
- *     the sharp corners; the height is normalised against the
- *     *max* value across the visible window so a 5ms-only
- *     visualisation isn't pinned to the bottom.
- *   - A small "0" baseline guides the eye but only when the chart
- *     has data; it's hidden in the empty case (the whole chart is
- *     hidden anyway).
- *   - `aria-label` summarises the range so a screen-reader user
- *     hears e.g. "Last 30 minutes, peak 12.4ms, 0% errors" instead
- *     of the raw SVG path.
- */
+/** PluginSparkline - 紧凑的"启动时间 + 错误率"sparkline。纯 SVG，按峰值错误率选色，无数据返回 null。 */
 import { useMemo, type CSSProperties } from 'react'
 import type { TelemetryBucket } from '@/lib/plugin-telemetry'
 
@@ -49,67 +7,27 @@ const SPARKLINE_HEIGHT = 18
 /** Padding (top + bottom) inside the SVG so the line doesn't touch
  *  the top/bottom edges. Each value is in pixels. */
 const SPARKLINE_PADDING_Y = 2
-/** Hard cap on the rendered width. The component never grows
- *  beyond this; in practice the parent (the card's right column)
- *  is much narrower than 120px so the value is a guard, not a
- *  target. */
+// 渲染宽度硬上限
 const SPARKLINE_MAX_WIDTH = 120
 /** Minimum rendered width. The chart collapses to 0 instead of
  *  rendering a 1px dot — a 1-dot sparkline is visual noise. */
 const SPARKLINE_MIN_WIDTH = 24
 
-/**
- * Props for `<PluginSparkline />`.
- *
- * The component deliberately does not accept a `pluginId` — it
- * operates on already-aggregated buckets. The parent is
- * responsible for filtering by plugin id (and choosing the
- * window / bucket size) before handing the data down. This
- * keeps the sparkline reusable from any context that has
- * `TelemetryBucket[]` available (the diagnostics dialog, the
- * activity dialog, etc.).
- */
+/** Props。组件不接受 pluginId，操作已聚合的 buckets。 */
 export interface PluginSparklineProps {
-  /**
-   * Pre-aggregated buckets, oldest first. The component treats
-   * the array as opaque: it doesn't know about the underlying
-   * window size, only that each element is a point on the line.
-   * The parent should pass at least 2 buckets — with 1 bucket
-   * the polyline is just a horizontal segment, which renders
-   * the same as a 0-line and wastes pixels.
-   */
+  // 预聚合 buckets（oldest first）
   buckets: readonly TelemetryBucket[]
-  /**
-   * Override the height (in pixels). Mostly useful for tests
-   * that want a deterministic SVG height without depending on
-   * the constant. Must be in the 12–24px range; values outside
-   * are clamped to keep the "compact" contract.
-   */
+  // 覆盖高度（12-24px，超出 clamp）
   height?: number
-  /**
-   * Optional className appended to the wrapping `<svg>`. Kept
-   * for the card's BEM-style hook (`pa-sparkline`) and for any
-   * future per-instance modifier (`is-warn`, `is-err`).
-   */
+  // 附加 className
   className?: string
-  /**
-   * Optional style override. Intended for the card to push the
-   * sparkline flush-right via `marginLeft: 'auto'` from the
-   * outside; the component itself is `display: block`.
-   */
+  // 样式覆盖
   style?: CSSProperties
-  /**
-   * Locale-aware label for the chart. Defaults to a fixed
-   * English string; the Installed card passes a translated
-   * version through `t(...)`.
-   */
+  // locale-aware aria-label
   ariaLabel?: string
 }
 
-/** Pick the sparkline's stroke colour based on the peak error
- *  rate across the rendered buckets. We return both the CSS
- *  variable name and a className so the consumer can style the
- *  wrapper (e.g. tint the background) the same way. */
+// 按峰值错误率返回颜色级别
 function classifyErrorRate(peakErrorRate: number): {
   level: 'ok' | 'warn' | 'err'
   cssVar: string
@@ -136,12 +54,7 @@ export function PluginSparkline({
   style,
   ariaLabel,
 }: PluginSparklineProps) {
-  // Memoize the polyline geometry. The expensive parts are:
-  //   1. Walking the buckets to find `maxValue` and `peakErrorRate`.
-  //   2. Computing the `points` string.
-  // Both are O(N) in bucket count (default 30), so for 50 cards
-  // in the Installed grid the total cost is 1500 iterations per
-  // re-render — well within budget.
+  // memoize 几何计算
   const geometry = useMemo(() => {
     // Empty-state guard. We test for *any* activity in the window
     // (totalCount > 0) because the spec says "no data → don't
@@ -151,20 +64,13 @@ export function PluginSparkline({
     let peakErrorRate = 0
     for (const b of buckets) {
       if (b.totalCount > 0) hasData = true
-      // Use hook duration as the primary Y axis. The bucket
-      // also carries `avgBackendDurationMs`; we blend the two
-      // so a backend-heavy plugin's startup time is still
-      // reflected. Weighted by count so a bucket with 0 hooks
-      // and 1 backend doesn't paint itself entirely as the
-      // backend's duration.
+      // Y 轴用 hook + backend 时长加权平均
       let v = 0
       const total = b.hookCount + b.backendCount
       if (total > 0) {
         v = (b.avgHookDurationMs * b.hookCount + b.avgBackendDurationMs * b.backendCount) / total
       } else if (b.eventCount > 0 || b.storageCount > 0) {
-        // No duration-bearing records; use the error rate as
-        // a stand-in so a bucket with *only* failed storage
-        // ops still shows up on the chart (with a small lift).
+        // 无 duration 记录时用 errorRate 作 stand-in
         v = b.errorRate * 4
       }
       if (v > maxValue) maxValue = v
@@ -175,16 +81,7 @@ export function PluginSparkline({
       return null
     }
 
-    // The width is derived from the bucket count. The card's
-    // right column is roughly 96px wide; we let the chart fill
-    // the available space up to `SPARKLINE_MAX_WIDTH` so a wider
-    // card shows more horizontal resolution. The actual width
-    // is computed in the parent via `useResizeObserver` if it
-    // needs to; for now we just use a width that matches the
-    // bucket count (1.5px per bucket ≈ 45px for 30 buckets).
-    // Real CSS layout is `width: 100%`; this constant is the
-    // `viewBox` width so the polyline coordinates are stable
-    // regardless of the rendered size.
+    // viewBox 宽度按 bucket 数量推导
     const viewW = Math.max(buckets.length * 1.5, 40)
     const usableH = height - SPARKLINE_PADDING_Y * 2
     // Avoid divide-by-zero when every value is 0: we render a
@@ -229,12 +126,7 @@ export function PluginSparkline({
     }
   }, [buckets, height])
 
-  // Empty-state: render nothing. The card's flex layout
-  // collapses around `null` so this is the "no sparkline"
-  // behavior — the meta row simply doesn't get a right-side
-  // companion. The spec requires "no data → don't render"
-  // specifically so new installs don't show an empty grid of
-  // placeholder lines.
+  // 空状态返回 null
   if (!geometry || !geometry.hasData) {
     return null
   }
@@ -256,10 +148,7 @@ export function PluginSparkline({
   return (
     <svg
       className={cls}
-      // `viewBox` makes the SVG resolution-independent; the
-      // `width`/`height` attributes give the layout its size
-      // while `style.maxWidth` / `style.minWidth` clamp the
-      // rendered extent to the design band.
+      // viewBox 保证分辨率无关
       viewBox={`0 0 ${geometry.viewW} ${geometry.viewH}`}
       width="100%"
       height={height}
@@ -277,10 +166,7 @@ export function PluginSparkline({
       aria-label={finalAria}
       data-sparkline-level={geometry.classification.level}
     >
-      {/* Baseline (0-value guide). Drawn as a 1px line at the
-        bottom of the usable area. We use `currentColor` with
-        low opacity so it picks up the card's text colour
-        automatically and remains subtle. */}
+      {/* baseline：1px currentColor 低透明度 */}
       <line
         x1={0}
         y1={geometry.viewH - SPARKLINE_PADDING_Y}
@@ -288,9 +174,7 @@ export function PluginSparkline({
         y2={geometry.viewH - SPARKLINE_PADDING_Y}
         className="pa-sparkline-baseline"
       />
-      {/* The main trend line. `stroke` is set via CSS variable
-        so theme changes (light / dark / system) flow through
-        the same `--pa-*` aliases the rest of the card uses. */}
+      {/* stroke 用 CSS 变量适配主题 */}
       <polyline
         points={geometry.points}
         className="pa-sparkline-line"

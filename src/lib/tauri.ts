@@ -6,11 +6,7 @@ import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { platform } from '@tauri-apps/plugin-os'
 
-/**
- * Normalize path separators to forward slashes for cross-platform consistency.
- * On Windows, Tauri dialogs return paths with backslashes, but the backend
- * normalizes all paths to forward slashes. This ensures consistency.
- */
+// 路径分隔符统一为正斜杠
 function normalizePath(path: string | null): string | null {
   if (!path) return null
   return path.replace(/\\/g, '/')
@@ -110,12 +106,7 @@ export async function saveWorkspaceFileDialog(defaultPath?: string): Promise<str
   return normalizePath(selected)
 }
 
-/**
- * Save dialog filtered to `.zip` for the plugin-configs export.
- * Defaults the file name to `swallownote-plugin-configs.zip` so a
- * user who hits the dialog cold still ends up with a sensible
- * destination.
- */
+// .zip 过滤的保存对话框
 export async function savePluginConfigsDialog(defaultPath?: string): Promise<string | null> {
   const selected = await save({
     defaultPath: defaultPath ?? 'swallownote-plugin-configs.zip',
@@ -194,20 +185,12 @@ export async function writeFile(path: string, content: string): Promise<void> {
   await invoke('write_file', { path, content })
 }
 
-/**
- * Return the absolute path to a plugin's JSON storage file. The frontend
- * (src/lib/plugin-host.ts) uses this to read/write plugin state without
- * having to know the cross-platform app-data layout.
- */
+// 返回插件 storage.json 的绝对路径
 export async function getPluginStoragePath(pluginId: string): Promise<string> {
   return await invoke('get_plugin_storage_path', { pluginId })
 }
 
-// ============================================================================
-// Plugin settings (SQLite-backed). The host builds / migrates the per-plugin
-// table at install / update time, and exposes a thin read / write / delete
-// API here for the settings dialog and the plugin SDK.
-// ============================================================================
+// ── Plugin settings（SQLite 后端）──
 
 /** Mirrors the Rust `PluginSettingsView`. */
 export interface PluginSettingsView {
@@ -239,20 +222,7 @@ export interface PluginSettingsFieldOption {
   label: string
 }
 
-/**
- * Conditional-visibility predicate for a {@link PluginSettingsField}.
- * The field is rendered only when the current value of `key` in
- * the values map strictly equals `equals`. The host currently only
- * supports the equality form — every shipped plugin (picgo
- * `visibleWhen` blocks for smms / imgur / github / custom / etc.)
- * uses this shape, so adding AND / OR / `<` etc. is a future
- * concern, not a present need.
- *
- * When `key` resolves to `undefined` (e.g. a stale rule that
- * references a removed field) the predicate is treated as
- * "hidden" on purpose, so a missing controller doesn't surface
- * a block the user can no longer explain.
- */
+/** 条件可见性谓词：当 values[key] === equals 时显示字段。 */
 export interface PluginSettingsVisibleWhen {
   key: string
   equals: unknown
@@ -289,65 +259,20 @@ export async function deletePluginSettings(pluginId: string): Promise<void> {
   await invoke('delete_plugin_settings', { pluginId })
 }
 
-/**
- * Query the host for the on-disk size of every installed
- * plugin's `storage.json`. Used at app startup to **seed** the
- * in-memory `pluginStorageSize` counter in `plugin-telemetry` —
- * the JS-side delta tracking starts at `0` on every fresh
- * launch, so a plugin with a pre-existing `storage.json` from
- * a previous session would otherwise show as `0 B` in the
- * manager view's storage meter until the next write.
- *
- * Plugins without a `storage.json` (never written to) are
- * returned as `0` and may be absent from the map. The host
- * is best-effort: a missing `plugins/` dir is treated as
- * "no plugins", not an error.
- */
+// 启动时 seed 存储大小计数器
 export async function getAllPluginStorageSizes(): Promise<Record<string, number>> {
   const raw = await invoke<Record<string, number>>('get_all_plugin_storage_sizes')
   return raw ?? {}
 }
 
-/**
- * Query the host for the **real** available bytes on the
- * volume that hosts the plugin-storage tree. Replaces a
- * previously hardcoded `100 * 1024 * 1024` literal in the
- * plugin manager's storage meter — the user-visible cap is
- * now `statvfs` / `GetDiskFreeSpaceExW` on the host side,
- * not a magic number. Returns `null` if the host can't
- * query the volume (path missing, permission denied, etc.),
- * which the manager view treats as "unknown" and falls back
- * to a UI-only baseline.
- *
- * Diagnostics: errors are logged to `console.warn` so the
- * cause is visible in DevTools — historically the most
- * common failure mode is a stale Rust binary (the command
- * isn't registered, `invoke` throws "command not found",
- * and the manager view silently shows "cap unknown"). The
- * log line tells the user (or us, in a bug report) to
- * rebuild the host binary.
- */
+// 查询宿主卷真实可用字节。失败返回 null
 export async function getStorageCap(): Promise<number | null> {
   try {
     const raw = await invoke<number>('get_storage_cap')
     if (typeof raw !== 'number' || raw <= 0) return null
     return raw
   } catch (err) {
-    // Log the underlying error rather than swallowing it.
-    // The previous version silently returned `null`, which
-    // made a stale-binary or permission issue look
-    // indistinguishable from a sandboxed environment.
-    // Common causes:
-    //   1. Stale Rust binary (most common during dev):
-    //      `get_storage_cap` not registered → invoke
-    //      throws. Rebuild the host: `cargo tauri dev`
-    //      (auto-rebuild) or `cargo build --release`.
-    //   2. Permission denied on the volume root (rare;
-    //      macOS sandboxed bundle without `com.apple.security.files.user-selected.read-only`).
-    //   3. Unsupported filesystem (e.g. some network mounts
-    //      return `ENOSYS` for `statvfs`).
-    // The UI cannot recover from any of these, but a
-    // visible log line is essential for debugging.
+    // 记录错误便于调试
     console.warn(
       '[plugin-storage] getStorageCap() failed — storage meter will show "cap unknown". ' +
         'If this is unexpected, try rebuilding the host binary (cargo tauri dev).',
@@ -357,22 +282,14 @@ export async function getStorageCap(): Promise<number | null> {
   }
 }
 
-/**
- * Stat a single plugin's `storage.json` and return its size in
- * bytes. Used by the file-watcher handler in `App.tsx` to
- * refresh the meter on external changes. Returns `0` if the
- * file doesn't exist (e.g. plugin just uninstalled).
- */
+// stat 单个插件 storage.json 大小
 export async function getPluginStorageSize(pluginId: string): Promise<number> {
   try {
     const path = await getPluginStoragePath(pluginId)
     const meta = await invoke<{ file_size: number }>('get_file_metadata', { path })
     return meta?.file_size ?? 0
   } catch {
-    // Plugin may have been uninstalled mid-flight, or the file
-    // may not exist yet for newly-installed plugins. Either
-    // way, treat as 0 — the next refresh will pick up real
-    // values.
+    // 插件可能已卸载或尚未写入
     return 0
   }
 }
@@ -975,12 +892,7 @@ export interface PluginMetadataRust {
   enabled: boolean
   plugin_path: string
   has_backend: boolean
-  /**
-   * True when the installed plugin ships a `settings.json` schema
-   * next to its `index.js`. The plugin manager uses this to decide
-   * whether to render the schema-driven settings button on the
-   * plugin card (paired with `PluginSettingsDialog`).
-   */
+  // 是否随附 settings.json schema
   has_settings_schema: boolean
 }
 
@@ -989,17 +901,7 @@ export async function scanPlugins(): Promise<PluginMetadataRust[]> {
   return await invoke('scan_plugins')
 }
 
-/**
- * Install a plugin from a .zip file.
- *
- * `expectedSha256` is the optional integrity-check digest. When
- * supplied, the host extracts the zip, then hashes the resulting
- * plugin directory (recursive, sorted) and refuses to commit the
- * install on mismatch. Callers that have a marketplace-published
- * digest (e.g. `PluginIndexEntry.sha256`) should pass it through;
- * the user-upload path leaves it `undefined` because no third
- * party vouches for the bytes.
- */
+// 安装 .zip 插件。expectedSha256 可选完整性校验
 export async function installPlugin(
   zipPath: string,
   expectedSha256?: string
@@ -1017,28 +919,12 @@ export async function togglePluginEnabled(pluginId: string, enabled: boolean): P
   return await invoke('toggle_plugin_enabled', { pluginId, enabled })
 }
 
-/**
- * Kill the backend child process for `pluginId` (if any) and forget
- * the entry. Returns `true` if a live process was killed, `false` if
- * no entry existed. Call this *before* `uninstallPlugin` to ensure
- * the OS releases any open file handles on the plugin directory —
- * the uninstall command does this for you, but in pathological
- * cases (e.g. a wedged backend) the explicit kill is the only way
- * to make progress.
- */
+// 杀掉插件后端子进程。uninstall 前调用以释放文件句柄
 export async function killPlugin(pluginId: string): Promise<boolean> {
   return await invoke<boolean>('kill_plugin', { pluginId })
 }
 
-/**
- * Per-plugin import report (Task 10 / G10).
- *
- * `status` is one of:
- *   - `'ok'`      — storage was written
- *   - `'missing'` — plugin is not installed locally
- *   - `'error'`   — extraction / parse / write failure
- *                   (human-readable details in `message`)
- */
+// 单插件导入结果：status 为 ok/missing/error
 export interface PluginConfigImportEntry {
   plugin_id: string
   status: 'ok' | 'missing' | 'error'
@@ -1066,27 +952,12 @@ export interface ExportManifest {
   plugin_ids: string[]
 }
 
-/**
- * Bundle every installed plugin's `storage.json` into a zip at
- * `destPath` and return the manifest describing what was written.
- *
- * Used by the Settings → "Export plugin configs" button. The user
- * picks the destination via Tauri's `save` dialog; the returned
- * `plugin_count` is what the settings page echoes back in a
- * toast ("exported 3 plugin configs").
- */
+// 将所有插件 storage.json 打包为 zip
 export async function exportPluginConfigs(destPath: string): Promise<ExportManifest> {
   return await invoke<ExportManifest>('export_plugin_configs', { destPath })
 }
 
-/**
- * Import a previously-exported zip of plugin configs and merge
- * the contained `storage.json` files into the local plugin tree.
- *
- * Used by the Settings → "Import plugin configs" button. The host
- * refuses bundles whose `schema_version` doesn't match the current
- * build — that's the version-compatibility check (SubTask 10.4).
- */
+// 导入插件配置 zip 并合并
 export async function importPluginConfigs(srcPath: string): Promise<PluginConfigImportResult> {
   return await invoke<PluginConfigImportResult>('import_plugin_configs', { srcPath })
 }

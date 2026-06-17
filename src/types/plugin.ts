@@ -1,30 +1,4 @@
-/**
- * Plugin System Type Definitions
- *
- * Plugin manifest fields:
- * - name:         Plugin display name
- * - icon:         ReactNode for the trigger icon
- * - panel:        ReactNode for the panel content
- * - iconPosition: Where the icon appears (sidebar / editorToolbar / titleBar)
- * - contentPosition: Where the panel appears (leftPanel / rightPanel / fullPanel / editorArea)
- * - publishedAt:  Release date (ISO string)
- * - description:  Plugin description
- *
- * Lifecycle hooks (all optional, all receive a PluginContext):
- * - onLoad:        Called once after the plugin module has been loaded
- * - onUnload:      Called once before the plugin is unregistered
- * - onEnable:      Called once when the plugin transitions to enabled
- * - onDisable:     Called once when the plugin transitions to disabled
- * - onMount:       Called each time the panel component is mounted
- * - onUnmount:     Called each time the panel component is unmounted
- * - onActivate:    Called when the panel becomes the active/visible one
- * - onDeactivate:  Called when the panel stops being the active/visible one
- *
- * Plugin package structure:
- *   <plugin-id>/
- *     index.js    - Plugin entry, exports manifest + React components
- *     backend/    - Optional Rust backend (compiled .so/.dylib/.dll)
- */
+/** 插件系统类型定义：清单、生命周期 hook、运行时定义、市场索引等。 */
 
 import type { ReactNode, ComponentType } from 'react'
 
@@ -59,8 +33,6 @@ export type PluginPermission =
  */
 export interface PermissionInfo {
   permission: PluginPermission
-  name: string
-  description: string
   icon?: string
 }
 
@@ -73,53 +45,17 @@ export interface PluginPermissionStatus {
   requested: boolean
 }
 
-/** Permission descriptions for UI */
+/** 已知权限的规范列表。 */
 export const PLUGIN_PERMISSIONS: PermissionInfo[] = [
-  {
-    permission: 'storage',
-    name: 'Storage',
-    description: 'Access persistent storage for saving plugin data',
-  },
-  {
-    permission: 'events',
-    name: 'Events',
-    description: 'Subscribe to host events (note open/save, theme change, etc.)',
-  },
-  {
-    permission: 'context-menu',
-    name: 'Context Menu',
-    description: 'Add items to right-click menus',
-  },
-  {
-    permission: 'backend',
-    name: 'Backend',
-    description: 'Communicate with native Rust backend',
-  },
-  {
-    permission: 'filesystem-read',
-    name: 'Filesystem Read',
-    description: 'Read files from your system',
-  },
-  {
-    permission: 'filesystem-write',
-    name: 'Filesystem Write',
-    description: 'Write files to your system',
-  },
-  {
-    permission: 'network',
-    name: 'Network',
-    description: 'Make network requests',
-  },
-  {
-    permission: 'clipboard',
-    name: 'Clipboard',
-    description: 'Read from and write to clipboard',
-  },
-  {
-    permission: 'notifications',
-    name: 'Notifications',
-    description: 'Show desktop notifications',
-  },
+  { permission: 'storage' },
+  { permission: 'events' },
+  { permission: 'context-menu' },
+  { permission: 'backend' },
+  { permission: 'filesystem-read' },
+  { permission: 'filesystem-write' },
+  { permission: 'network' },
+  { permission: 'clipboard' },
+  { permission: 'notifications' },
 ]
 
 // ─── Event bus types ───────────────────────────────────────────────────────────
@@ -192,11 +128,7 @@ export interface PluginStorage {
   /** List all keys in this plugin's namespace. Useful for debug
    *  tooling and "export all" features. */
   keys(): Promise<string[]>
-  /** Read-only snapshot of every key with its estimated JSON
-   *  size. Returns `[{ key, size }]` sorted by `size` desc.
-   *  Useful for host-side storage inspectors and the plugin
-   *  "export all" flow. Size is the JSON-encoded byte count of
-   *  the value, not the in-memory object size. */
+  /** keys(): 列出键。entries(): 返回 [{key, size}] 按 size 降序。 */
   entries(): Promise<Array<{ key: string; size: number }>>
 }
 
@@ -212,23 +144,7 @@ export interface PluginEventBus {
   removeAllListenersForPlugin(pluginId: string): void
 }
 
-/**
- * A single plugin-to-plugin dependency declaration.
- *
- * The `version` field follows npm-style semver ranges
- * (https://github.com/npm/node-semver#ranges), e.g.:
- *   - `"1.2.3"`        exact pin
- *   - `"^1.2.3"`       compatible with 1.x.y (>=1.2.3, <2.0.0)
- *   - `"~1.2.3"`       patch-level changes only (>=1.2.3, <1.3.0)
- *   - `">=1.2.3"`      floor only
- *   - `"1.2.x"` / `"*"`  wildcards
- *
- * Use the `*` or empty range to declare a "any version" dependency.
- * Validation of the range is performed in `resolveDependencies`
- * (see `src/lib/plugin-dependencies.ts`); an invalid range
- * surfaces as a resolver error so the user sees a clear failure
- * at install time, not a silent accept.
- */
+/** 插件间依赖声明。version 为 npm 风格 semver 范围。 */
 export interface PluginDependency {
   /** Unique plugin identifier, e.g. "com.example.other-plugin". */
   id: string
@@ -236,17 +152,7 @@ export interface PluginDependency {
   version: string
 }
 
-/**
- * The raw manifest exported by a plugin's index.js.
- *
- * icon and panel can be either:
- * - A React component (ComponentType) – will be rendered with <Icon /> / <Panel />
- * - A ReactNode directly – will be rendered as-is
- *
- * Because we cannot serialize ReactNode across the Rust bridge, the Rust side
- * only stores the metadata (name, description, …). The actual icon/panel
- * components are loaded at the JS layer via dynamic import.
- */
+/** 插件 index.js 导出的原始清单。 */
 export interface PluginManifest {
   /** Unique plugin identifier (e.g. "com.example.my-plugin") */
   id: string
@@ -278,55 +184,20 @@ export interface PluginManifest {
    * For component type, it will receive PluginContext as props.
    */
   panel: ComponentType<PluginPanelProps> | ReactNode
-  /**
-   * Optional custom toolbar button component. When provided, the host
-   * renders this component instead of the default icon + button pattern.
-   * The component receives ToolbarButtonProps and can implement custom
-   * interactions (dropdown menus, direct actions, etc.).
-   * If omitted, the host renders the `icon` inside a standard button
-   * that toggles the panel on click.
-   */
+  /** 可选自定义工具栏按钮组件。 */
   toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
   /**
    * Optional settings UI component. Renders inside a modal opened from
    * the plugin manager. Same props as `panel`; use `close` to dismiss.
    */
   settings?: ComponentType<PluginPanelProps> | ReactNode
-  /**
-   * Permissions required by the plugin. Declare what access the plugin needs
-   * (storage, events, context-menu, backend, filesystem, network, etc.).
-   * Users will be asked to grant these permissions during installation.
-   */
+  /** 插件所需权限。 */
   permissions?: PluginPermission[]
-  /**
-   * Other plugins this manifest requires. The host runs
-   * `resolveDependencies` over this list at install time; missing
-   * or version-mismatched entries block the install and surface
-   * an "auto-resolve" affordance in the UI. See
-   * `src/lib/plugin-dependencies.ts` for the resolver contract.
-   */
+  /** 依赖的其他插件。 */
   dependencies?: PluginDependency[]
-  /**
-   * Command palette ids contributed by this plugin. The host
-   * merges these into its Ctrl+P palette; two plugins declaring
-   * the same id collide, and the conflict is surfaced via the
-   * plugin conflict detector (Task 13 / G13). Optional —
-   * a plugin that doesn't speak to the command palette simply
-   * omits the field.
-   */
+  /** 贡献给命令面板的 id 列表。 */
   commandPalette?: string[]
-  /**
-   * Whether the user has opted in to automatic background
-   * updates for this plugin (Task 11 / G11). When `true` the
-   * app silently downloads and installs newer marketplace
-   * versions on startup; the user is notified via a toast
-   * with an "撤销" (undo) action that rolls back to the
-   * previously-installed version. The flag is *not* read from
-   * the on-disk plugin manifest (which is a build artefact);
-   * it is persisted in the plugin metadata store under
-   * `plugin_auto_update_<id>` and is opt-in per plugin. A
-   * missing value (the common case) is treated as `false`.
-   */
+  /** 用户 opt-in 的自动更新标志，持久化在 localStorage。 */
   autoUpdate?: boolean
   // ── Lifecycle hooks (all optional) ────────────────────────────────────────
   /** Called once after the plugin module has been loaded. */
@@ -375,13 +246,7 @@ export interface PluginDefinition {
    * interactions (dropdown menus, direct actions, etc.).
    */
   toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
-  /**
-   * Optional settings UI component. Rendered in a modal opened from
-   * the plugin manager. Receives the same `PluginPanelProps` as the
-   * main panel so it has access to `store`, `events`, `close`, etc.
-   * Settings dialogs should call `close` from props to dismiss
-   * themselves.
-   */
+  /** 可选设置 UI 组件。 */
   settings?: ComponentType<PluginPanelProps> | ReactNode
   /** Absolute path to the plugin package directory on disk */
   pluginPath: string
@@ -458,14 +323,7 @@ export interface PluginMetadata {
 
 // ─── Plugin load failures (per-plugin bypass) ───────────────────────────────
 
-/**
- * A single failed-to-load plugin. Stored in the plugin store under
- * `loadFailures` and surfaced to the user via a top-of-manager
- * warning banner. The shape is intentionally small and
- * serializable: id, name, the failure reason, and a timestamp.
- * `pluginPath` is included so the UI can offer a "show in folder"
- * affordance in the future without re-querying the Rust side.
- */
+/** 单个加载失败的插件记录。 */
 export interface PluginLoadFailure {
   /** Plugin id (from Rust metadata, since the manifest may be unreadable). */
   id: string
@@ -481,18 +339,7 @@ export interface PluginLoadFailure {
 
 // ─── Plugin load result (loader → caller) ───────────────────────────────────
 
-/**
- * Result of a `loadAllPlugins` call. `plugins` holds the successfully
- * hydrated plugin definitions (including a placeholder "broken plugin"
- * entry for failed packages so the user can still see and uninstall
- * them in the main grid). `failures` is a parallel list of
- * per-plugin failure records keyed by plugin id.
- *
- * The two lists are *intentionally* independent: a failed plugin
- * can still produce a placeholder `PluginDefinition` (so the
- * uninstall button is reachable), and `failures` carries the
- * diagnostic reason that the banner UI needs.
- */
+/** loadAllPlugins 的结果。 */
 export interface PluginLoadResult {
   plugins: PluginDefinition[]
   failures: PluginLoadFailure[]
@@ -518,26 +365,11 @@ export interface PluginIndexEntry {
   signatureB64: string
   /** Override the repo-level key (optional). */
   pubkeyB64: string
-  /**
-   * Optional human-readable changelog for the *latest* version.
-   * The marketplace only ships the latest artifact, so a single
-   * top-level field is enough; older indexes may still ship a
-   * `versions[]` array (kept optional for back-compat) with
-   * per-row notes, and the UI prefers that array when present.
-   */
+  /** 最新版本的可选 changelog。 */
   changelog?: string
   /** Optional ISO-8601 release timestamp for the latest version. */
   publishedAt?: string
-  /**
-   * Optional historical release records. The marketplace only
-   * ships the *latest* version on disk, so `versions` is left
-   * empty for fresh publishes and a no-op for the install
-   * pipeline. Older indexes that carried full history still
-   * parse — the UI uses the per-row changelog / publishedAt
-   * when present, and falls back to the top-level
-   * `changelog` / `publishedAt` (see `PluginMarketView`)
-   * otherwise.
-   */
+  /** 可选历史版本记录。 */
   versions?: PluginIndexEntryVersion[]
   dependencies: string[]
 }
@@ -546,18 +378,7 @@ export interface PluginIndexEntryVersion {
   version: string
   downloadUrl: string
   sha256: string
-  /**
-   * Bug 1: per-version ed25519 signature over the *version's* zip
-   * bytes. Optional — the install pipeline falls back to
-   * `PluginIndexEntry.signatureB64` when this is missing, which
-   * preserves backward compatibility with indexes that pre-date
-   * the per-version protocol. Going forward, multi-version
-   * plugins should set this on every row of `versions[]`; the
-   * entry-level signature should be reserved for the *latest*
-   * version's bytes so the marketplace's "Install latest" path
-   * still verifies even when the user is loading an index that
-   * hasn't been re-signed per release yet.
-   */
+  /** 每版本 ed25519 签名，缺失时回退到 entry 级签名。 */
   signatureB64?: string
   /**
    * Optional per-version pubkey override. Falls back to
@@ -623,21 +444,9 @@ export interface PluginPanelProps {
   activeNoteContent: string
   /** Current active note file path. Empty string if no note is active. */
   activeNotePath: string
-  /**
-   * Read a single value from the plugin's `settings.json`-defined
-   * schema. The host reads from the per-plugin SQLite table; in
-   * standalone preview mode the SDK reads from a localStorage cache.
-   * Returns the stored value, the schema default, or `null` if
-   * neither is set.
-   */
+  /** 读取单个设置值。 */
   getSetting<T = unknown>(key: string): Promise<T | null>
-  /**
-   * Persist a single setting key. Writes through to the host
-   * (SQLite) and fires `plugin-settings:change` on the bus so other
-   * panel/toolbar instances pick up the new value. In standalone
-   * mode the stub updates the in-process cache and notifies local
-   * subscribers.
-   */
+  /** 持久化单个设置键。 */
   setSetting<T = unknown>(key: string, value: T): Promise<void>
   /**
    * Read every stored setting for this plugin. Useful for seeding
@@ -645,29 +454,11 @@ export interface PluginPanelProps {
    * back to schema defaults for missing keys.
    */
   getAllSettings(): Promise<Record<string, unknown>>
-  /**
-   * Subscribe to settings changes. The handler receives the new
-   * full values map on every write. The returned function
-   * detaches the listener. Fires for writes from this plugin's
-   * own code, other panel instances of the same plugin, and the
-   * host's settings dialog.
-   */
+  /** 订阅设置变化。 */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
 }
 
-/**
- * Props for a plugin's custom toolbar button component.
- *
- * When a plugin provides `toolbarButton` in its manifest, the host renders
- * this component instead of the default icon + button. This allows plugins
- * to implement custom interactions such as dropdown menus, direct actions,
- * or any other toolbar-level UI.
- *
- * The `size` prop indicates the recommended icon size for the current
- * toolbar context (14px for editorToolbar/titleBar, 18px for sidebar).
- * Plugins should respect this size for visual consistency but can render
- * larger UI elements (e.g. dropdown menus) that extend beyond the button.
- */
+/** 自定义工具栏按钮 props。size 为推荐 icon 尺寸。 */
 export interface ToolbarButtonProps {
   /** Recommended icon size for the current toolbar context */
   size: number
@@ -725,12 +516,7 @@ export type ContextMenuLocation =
   | 'tab'             // Right-click on a tab
   | 'tabBarEmpty'     // Right-click on the tab bar's empty area
 
-/**
- * Context passed to a menu item's `when` predicate. The host fills in
- * the current state of the surface (selected file, active tab, etc.)
- * so plugins can decide whether to show their entry without
- * re-querying stores.
- */
+/** 传给 when 谓词的上下文。 */
 export interface ContextMenuContext {
   location: ContextMenuLocation
   /** Path under the cursor, if any (file tree, tab, editor). */
@@ -753,18 +539,9 @@ export interface ContextMenuItem {
   iconName?: string
   /** Locations this item should appear in. Omit to appear in all. */
   locations?: ContextMenuLocation[]
-  /**
-   * Predicate. Return false to hide the item. Use this to disable
-   * items that don't make sense for the current selection (e.g. a
-   * "Decode image" entry should hide on a non-image file).
-   * The default (no `when`) is "always show".
-   */
+  /** 谓词，返回 false 隐藏该项。 */
   when?: (ctx: ContextMenuContext) => boolean
-  /**
-   * Click handler. Receives the resolved `ContextMenuContext` so
-   * plugins don't need to thread the surface state through their
-   * own module-scope variables.
-   */
+  /** 点击处理函数。 */
   onClick: (ctx: ContextMenuContext) => void | Promise<void>
 }
 
@@ -773,63 +550,26 @@ export type ContextMenuRegistry = Record<ContextMenuLocation, ContextMenuItem[]>
 
 // ─── Command palette contributions ─────────────────────────────────────────────
 
-/**
- * A single command contributed by a plugin. Appears in the host's
- * command palette (Ctrl/Cmd+P) and is dispatchable via a
- * user-configurable keyboard shortcut set in the settings panel
- * (Task 9 / G9). The host keeps the registry of these entries; the
- * settings panel renders the binding UI by reading
- * `useUIStore().pluginCommandShortcuts` for the actual key string.
- *
- * `id` must be stable across reloads because user-bound shortcuts
- * are keyed by `<pluginId>:<id>` and need to survive plugin
- * reloads without losing the user's customization.
- */
+/** 插件贡献的命令条目，id 必须跨重载稳定。 */
 export interface PluginCommand {
   /** Stable id; required for deduping, settings keying, and updates. */
   id: string
   /** Display label, also used as the search term in the command palette. */
   label: string
-  /**
-   * Optional lucide-react icon name, mapped by the host. Same
-   * convention as `ContextMenuItem.iconName`. Falls back to a
-   * generic "zap" icon when omitted.
-   */
+  /** 可选 lucide-react 图标名，默认 "zap"。 */
   iconName?: string
-  /**
-   * Optional category for grouping inside the command palette.
-   * Plugins that share a category are grouped under the same
-   * heading. Defaults to the plugin's display name.
-   */
+  /** 可选分类，默认为插件显示名。 */
   category?: string
-  /**
-   * Optional predicate. Return false to hide the entry. Useful
-   * for commands that only make sense in a specific state (e.g.
-   * "Commit" needs a git repo).
-   */
+  /** 可选谓词。 */
   when?: () => boolean
-  /**
-   * Click / shortcut handler. Receives no arguments; the entry
-   * owns its own state via the panel/storage handles captured in
-   * its closure.
-   */
+  /** 触发处理函数。 */
   onTrigger: () => void | Promise<void>
 }
 
-/**
- * Listener fired whenever the command registry changes (register
- * / unregister / clearPlugin). Components that want a live view
- * (settings panel, command palette) call `subscribePluginCommands`
- * and re-read the registry inside the callback.
- */
+/** 命令注册表变化监听器。 */
 export type PluginCommandsListener = () => void
 
-/**
- * Public surface of the host-side registry. Plugins should not
- * import this directly — they use the `registerCommand` /
- * `unregisterCommand` helpers from `@/lib/plugin-commands` (host)
- * or `@swallow-note/plugin-sdk` (standalone).
- */
+/** host 端注册表公共接口。 */
 export interface PluginCommandRegistry {
   register(pluginId: string, command: PluginCommand): void
   unregister(pluginId: string, commandId: string): void

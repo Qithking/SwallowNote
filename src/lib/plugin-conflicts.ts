@@ -1,35 +1,6 @@
 /**
- * Plugin Conflict Detection (Task 13 / G13)
- *
- * Scans the active plugin registry for collisions on one kind of
- * identifier:
- *
- *   - `commandPalette`   — two plugins registering the same
- *                          commandPalette id would shadow each
- *                          other in the Ctrl+P palette. The
- *                          commandPalette manifest field is
- *                          optional; conflicts are only reported
- *                          for plugins that declared entries.
- *
- * Note: `iconPosition` (sidebar / editorToolbar / titleBar) and
- * `contentPosition` (leftPanel / rightPanel / fullPanel / editorArea)
- * are NOT considered conflicts:
- *   - Multiple plugins can register icons in the same position and
- *     they will be rendered in sorted order.
- *   - Panels are displayed on-demand (user clicks a button), so
- *     multiple plugins with the same contentPosition won't appear
- *     simultaneously.
- *
- * Detection runs once per registry refresh (see
- * `stores/plugin.ts::setPlugins`) and the result is cached in the
- * store. The store fires `recordPluginConflicts` to surface the
- * conflict set in the existing `plugin-telemetry` ring buffer so the
- * "Logs" popup can render a dedicated "⚠️ Conflict" group.
- *
- * Disabled plugins are ignored on purpose: they don't claim a slot
- * (the registry already filters them out of `getSidebarPlugins` /
- * etc.) and reporting a disabled plugin as a conflict would
- * pollute the UI with stale noise.
+ * Plugin Conflict Detection (Task 13/G13) — scans registry for commandPalette id collisions.
+ * Runs once per registry refresh; disabled plugins ignored.
  */
 
 import type { PluginDefinition } from '@/types/plugin'
@@ -39,13 +10,7 @@ import type { PluginDefinition } from '@/types/plugin'
  *  so the telemetry log line reads naturally to plugin authors. */
 export type PluginConflictKind = 'commandPalette'
 
-/**
- * A single collision record. One `PluginConflict` describes the
- * whole peer group (all plugins that share the same identifier),
- * not just two — three or more plugins may collide on the same
- * slot. The host doesn't need the pairwise list; it just needs
- * to know "these N plugins are all fighting for X".
- */
+/** One collision record describing the whole peer group. */
 export interface PluginConflict {
   /** What kind of identifier collided. */
   kind: PluginConflictKind
@@ -70,30 +35,11 @@ export function formatConflictMessage(conflict: PluginConflict): string {
   return `${conflict.kind} "${conflict.value}": [${conflict.peerIds.join(', ')}]`
 }
 
-/**
- * Detect conflicts across all three kinds in a single pass.
- *
- * The algorithm groups enabled plugins by each identifier, then
- * emits one conflict per group with ≥2 peers. We iterate the
- * plugin list once per kind — three O(N) passes — because
- * `iconPosition` / `contentPosition` / `commandPalette` are
- * different shapes and can't share a single map. The total
- * cost is O(3N + sum of conflict group sizes) and is
- * well under 1ms for the largest install set we expect
- * (~200 plugins).
- *
- * The function is pure: it does not touch the store, telemetry,
- * or any global. The store owns the cache and the side effect
- * (telemetry write), so this module stays trivially unit-testable.
- */
+/** Detect conflicts in single pass. Pure function. */
 export function detectPluginConflicts(
   plugins: readonly PluginDefinition[],
 ): PluginConflict[] {
-  // Only enabled plugins can claim a slot. A disabled plugin
-  // stays in the store for the manager grid (so the user can
-  // re-enable it) but is not in the registry and therefore
-  // doesn't fight for chrome. Filtering up-front keeps the
-  // group maps small and matches the registry semantics.
+  // Only enabled plugins claim slots.
   const enabled = plugins.filter((p) => p.enabled)
 
   const conflicts: PluginConflict[] = []
@@ -107,10 +53,7 @@ export function detectPluginConflicts(
     const entries = p.commandPalette
     if (!entries || entries.length === 0) continue
     for (const cmd of entries) {
-      // The host treats empty strings as "no declaration" — a
-      // plugin author who wrote `commandPalette: ['']` is
-      // almost certainly testing the loader, not asking for
-      // collisions. Skip blanks defensively.
+      // Skip empty commandPalette entries.
       if (!cmd) continue
       pushGroup(byCommand, cmd, p.id)
     }
@@ -151,11 +94,7 @@ function emitConflicts(
   kind: PluginConflictKind,
   groups: Map<string, string[]>,
 ): void {
-  // Sort the keys so the output is deterministic. Map iteration
-  // order is insertion order in V8/JSC, but that depends on the
-  // order of plugins in the source list; we re-sort here so a
-  // plugin manager with 50 installs always emits the same
-  // conflict list across re-scans.
+  // Sort keys for deterministic output.
   const keys = Array.from(groups.keys()).sort()
   for (const key of keys) {
     const peerIds = groups.get(key)!

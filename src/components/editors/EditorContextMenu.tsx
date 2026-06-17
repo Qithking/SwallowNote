@@ -22,6 +22,8 @@ import {
   List,
   FileText,
   AlignLeft,
+  FilePlus,
+  HelpCircle,
 } from 'lucide-react'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 
@@ -33,6 +35,9 @@ const AI_ACTION_ROLES = [
   { key: 'outline', icon: List },
   { key: 'summary', icon: FileText },
   { key: 'format', icon: AlignLeft },
+  { key: 'complete', icon: FilePlus },
+  { key: 'rewrite', icon: PenLine },
+  { key: 'explain', icon: HelpCircle },
 ] as const
 
 interface EditorContextMenuProps {

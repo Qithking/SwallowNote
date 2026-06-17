@@ -4,7 +4,7 @@
   "description": "将本地/剪贴板图片一键上传到云端图床（SM.MS / Imgur / GitHub / 腾讯云 COS / 阿里云 OSS / 七牛云 / 又拍云 / MinIO / 自定义端点），并插入到当前笔记。",
   "version": "0.1.0",
   "author": "SwallowNote",
-  "publishedAt": "2026-06-16T13:11:49Z",
+  "publishedAt": "2026-06-16T13:06:41Z",
   "iconPosition": "titleBar",
   "contentPosition": "rightPanel",
   "order": 50,

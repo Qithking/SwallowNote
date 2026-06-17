@@ -25,12 +25,25 @@ import {
   CustomThemeDialog,
   type CustomTheme,
 } from './CustomThemeDialog'
+import { PushGzhDialog } from './PushGzhDialog'
+import {
+  resolveGzhSettings,
+  isGzhConfigured,
+  type GzhSettings,
+} from './gzhSettings'
 
 interface WenyanDialogProps {
   open: boolean
   onClose: () => void
   activeNoteContent: string
   store: PluginStorage
+  /** Invoke the plugin's backend JSON-RPC command. */
+  invokeBackend: (
+    command: string,
+    args?: Record<string, unknown>
+  ) => Promise<unknown>
+  /** Read every stored setting as a flat key/value map. */
+  getAllSettings: () => Promise<Record<string, unknown>>
 }
 
 const DEFAULT_THEME_OVERRIDES: ThemeOverrides = {
@@ -82,8 +95,8 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 
 export function WenyanDialog(props: WenyanDialogProps): ReactNode {
-  const { open, onClose, activeNoteContent, store } = props
-  const { html, loading, error, render } = useWenyanRenderer()
+  const { open, onClose, activeNoteContent, store, invokeBackend, getAllSettings } = props
+  const { html, title, loading, error, render } = useWenyanRenderer()
   const [options, setOptions] = useState<RenderOptions>(DEFAULT_OPTIONS)
   const [gzhThemes, setGzhThemes] = useState<Array<{ id: string; name: string }>>([])
   const [otherThemes, setOtherThemes] = useState<Array<{ id: string; name: string }>>([])
@@ -92,6 +105,8 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
   const [customDialogOpen, setCustomDialogOpen] = useState(false)
   const [copyBusy, setCopyBusy] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
+  const [pushDialogOpen, setPushDialogOpen] = useState(false)
+  const [gzhSettings, setGzhSettings] = useState<GzhSettings | null>(null)
   const [openSections, setOpenSections] = useState({
     theme: true,
     paragraph: false,
@@ -117,6 +132,20 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
       cancelled = true
     }
   }, [open, store])
+
+  // Load 公众号 push settings on dialog open so the push button
+  // knows whether to open the push dialog or prompt for config.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void getAllSettings().then((raw) => {
+      if (cancelled) return
+      setGzhSettings(resolveGzhSettings(raw))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, getAllSettings])
 
   // Filter the visible theme list to the current platform. For
   // non-WeChat platforms we pin the theme to the platform's default and
@@ -255,6 +284,15 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
       setExportBusy(false)
     }
   }, [exportBusy, options.platform])
+
+  const handlePushClick = useCallback(() => {
+    if (!html || loading) return
+    if (!gzhSettings || !isGzhConfigured(gzhSettings)) {
+      toast.error('请先在插件设置中配置公众号 AppID 和 AppSecret')
+      return
+    }
+    setPushDialogOpen(true)
+  }, [html, loading, gzhSettings])
 
   if (!open) return null
 
@@ -827,6 +865,41 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
                 </svg>
                 {exportBusy ? '导出中…' : '导出长图'}
               </button>
+              <button
+                onClick={handlePushClick}
+                disabled={!html || loading}
+                style={{
+                  marginTop: 6,
+                  width: '100%',
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  borderRadius: 6,
+                  border: '1px solid #1aad19',
+                  background: !html || loading ? '#f3f4f6' : '#fff',
+                  color: !html || loading ? '#9ca3af' : '#1aad19',
+                  cursor: !html || loading ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="22" y1="2" x2="11" y2="13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+                推送到公众号
+              </button>
             </div>
           </div>
 
@@ -916,6 +989,17 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
           toast.success(`已切换到自定义主题「${theme.name}」`)
         }}
       />
+
+      {gzhSettings && (
+        <PushGzhDialog
+          open={pushDialogOpen}
+          onClose={() => setPushDialogOpen(false)}
+          html={html}
+          defaultTitle={title}
+          settings={gzhSettings}
+          invokeBackend={invokeBackend}
+        />
+      )}
     </div>
   )
 }

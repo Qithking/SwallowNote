@@ -10,7 +10,10 @@ html {
 body, #root {
   background-color: transparent;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: 12px;  
+}
+body{
+  border: 1px solid var(--theme-color);
 }
 
 @layer base {

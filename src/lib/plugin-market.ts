@@ -1,28 +1,4 @@
-/**
- * Plugin Marketplace client (Phase 9.2).
- *
- * Responsibilities
- * ================
- *
- * 1. **Fetch a repository index** (`PluginIndex`) from a remote URL.
- * 2. **Cache downloaded zips** in IndexedDB by `sha256` so the second
- *    install of the same artifact is a single IndexedDB read.
- * 3. **Preflight verification** (sha256 + ed25519 signature) is the
- *    Rust host's job (`install_plugin_from_bytes`), but we also
- *    expose `verifyZipFrontmatter()` here so the UI can short-circuit
- *    obviously-bad downloads before crossing the IPC boundary.
- *
- * No ed25519 verification on the JS side — the host has the only
- * `ed25519-dalek` verifier. We just compute SHA-256 (via `crypto.subtle`)
- * and pass the bytes through.
- *
- * Threading
- * =========
- *
- * All operations are async and use the standard `fetch` /
- * `crypto.subtle.digest` / `indexedDB` APIs. The store wraps these in
- * Zustand actions (see `src/stores/plugin-market.ts`).
- */
+/** 插件市场客户端（Phase 9.2）。职责：拉取索引、IndexedDB 缓存 zip、提供 verifyZipFrontmatter。ed25519 验签在 Rust 宿主侧。 */
 import type {
   PluginIndex,
   PluginIndexEntry,
@@ -64,24 +40,7 @@ interface CachedZip {
 }
 
 /**
- * Read a zip from the local cache. Returns `null` on miss or any
- * IndexedDB error — callers should treat a miss as a no-op and fall
- * through to the network.
- *
- * Bug 7: trust boundary. The cache is keyed by `sha256`, but
- * `sha256` is just an `IDBValidKey` string — an attacker with
- * write access to the IndexedDB database (e.g. via a
- * compromised dev tool / browser extension) can plant a
- * `CachedZip` record with `sha256` = X and `bytes` = a malicious
- * zip. On the next install of any plugin whose declared
- * `sha256` happens to equal X, the cache would hand back the
- * malicious bytes and the host's signature check is the only
- * thing standing between the user and a pwn. To shrink that
- * window we re-verify the digest of the cached bytes on every
- * read; a mismatch is treated as a cache miss and the record
- * is deleted in the same transaction. The hash cost is
- * dominated by `fetch` for the very first install, so the
- * per-read hit is just a few milliseconds.
+ * 从缓存读 zip。Bug 7：每次读取重新校验 sha256，不匹配则驱逐。
  */
 async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
   if (typeof indexedDB === 'undefined') return null
@@ -97,15 +56,7 @@ async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
           resolve(null)
           return
         }
-        // Bug 7 second-look. The cache record's declared
-        // `sha256` matches the key by construction, so we
-        // re-hash the *bytes* and compare against the key.
-        // Anything that doesn't match is treated as a
-        // poisoned record and evicted. The hash is computed
-        // inline with `crypto.subtle.digest('SHA-256', ...)`,
-        // which is constant-time for any input size on every
-        // modern browser, and `bytes` is at most a few MB so
-        // the cost is negligible compared to disk IO.
+        // 重新 hash 并比对，不匹配则驱逐。
         try {
           const actual = await sha256Hex(rec.bytes)
           if (actual.toLowerCase() !== sha256.toLowerCase()) {
@@ -165,14 +116,7 @@ async function writeZipToCache(
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-/**
- * Fetch a `PluginIndex` from `url`, parse it, and return it.
- * The Rust-side schema is snake_case; we normalise to camelCase on
- * the way in so the rest of the UI never sees the wire shape.
- *
- * Network errors and parse failures both surface as thrown
- * `Error`; the caller is responsible for user-visible error display.
- */
+/** 拉取并解析 PluginIndex，snake_case 转 camelCase。 */
 export async function fetchPluginIndex(url: string): Promise<PluginIndex> {
   if (!url) {
     throw new Error('repo url is empty')
@@ -240,11 +184,7 @@ export async function fetchWithProgress(
   return text
 }
 
-/**
- * SHA-256 of a byte buffer, returned as lowercase hex. Uses the
- * Web Crypto API so it works in any modern browser and (via the
- * Tauri webview) the desktop shell.
- */
+/** 用 Web Crypto API 计算 SHA-256，返回小写 hex。 */
 export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   const view = new Uint8Array(digest)
@@ -256,38 +196,7 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 }
 
 /**
- * Resolve a `download_url` from the index against the repo URL.
- *
- * `fetch()` resolves relative URLs against the *document's* base
- * URL — inside the Tauri webview that base is `tauri://localhost/`
- * (or whatever the host shell binds), not the URL the index was
- * loaded from. Passing `./export/foo.zip` straight through to
- * `fetch` therefore lands on `tauri://localhost/export/foo.zip`,
- * which is either a 404 (most builds) or worse, an unrelated file
- * that happens to be served from the app's static dir (read
- * through the same response body and we'd hash-verify the wrong
- * bytes). The safe path is to always run the relative URL
- * through `new URL(downloadUrl, repoUrl)` *before* `fetch`. An
- * absolute `downloadUrl` passes through unchanged because
- * `URL`'s second-arg semantics only kick in for relative
- * inputs. The trailing path-segment rules (`.` / `..` / `?` / `#`)
- * are also handled correctly by the platform `URL` parser, so
- * `repo.json` can use any of them without us re-implementing
- * RFC 3986 normalisation.
- *
- * Bug 6: the marketplace UI never lets the user edit the
- * `download_url` of an entry — only the repo URL itself — so a
- * malicious `download_url` is gated by the ability to commit to
- * `repo.json`. Still, defence in depth: we explicitly reject
- * schemes other than `http:` and `https:` here, because
- * `new URL('javascript:...', base)` and `new URL('file:///...', base)`
- * both parse successfully and would land on paths the host's
- * `install_plugin_from_bytes` would then happily hand to
- * `ZipArchive::new` (a zip reader over a JavaScript-served
- * string is harmless, but a zip over `file:///etc/passwd` would
- * surface bytes that nobody approved). The repo URL is gated the
- * same way in `loadRepoUrl` to keep both ends of the protocol on
- * the same threat model.
+ * 用 new URL(downloadUrl, repoUrl) 解析相对路径。Bug 6：仅允许 http/https scheme。
  */
 function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
   if (!downloadUrl) return downloadUrl
@@ -298,21 +207,10 @@ function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
     // tag would behave in a browser loading the index document.
     parsed = new URL(downloadUrl, repoUrl)
   } catch {
-    // Malformed input from a hand-edited repo.json. Fall back
-    // to the literal string so the caller surfaces a network
-    // error (HTTP 4xx / 5xx) rather than a confusing URL parse
-    // exception — the SHA-256 verification that runs on the
-    // downloaded bytes will still reject a wrong file even if
-    // the URL was bogus.
+    // 解析失败时回退原字符串。
     return downloadUrl
   }
-  // Bug 6 scheme allowlist. `http:` and `https:` only. We do not
-  // permit `ftp:`, `data:`, `blob:`, `javascript:`, `file:`, or
-  // any custom scheme — those either leak local files into the
-  // zip-extraction path (file:) or execute code in the webview
-  // (javascript:). The host shell is the only thing that knows
-  // how to safely read those schemes and we deliberately don't
-  // route through it here.
+  // 仅允许 http/https。
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(
       `plugin download_url has disallowed scheme '${parsed.protocol}' (only http/https are accepted)`,
@@ -321,17 +219,7 @@ function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
   return parsed.toString()
 }
 
-/**
- * Download a plugin zip, hitting the IndexedDB cache first. The
- * returned `ArrayBuffer` is the *raw* zip bytes — they're what the
- * host's `install_plugin_from_bytes` hashes and verifies.
- *
- * `repoUrl` is the URL the `PluginIndex` was loaded from; it
- * serves as the base for resolving `entry.downloadUrl` (which
- * the index protocol documents as relative to the index).
- * Without it, relative paths land on the app's own server and
- * every install fails with a sha256 mismatch.
- */
+/** 下载插件 zip，优先走 IndexedDB 缓存。 */
 export async function downloadPluginZip(
   entry: PluginIndexEntry,
   repoUrl: string,
@@ -366,20 +254,7 @@ export async function downloadPluginZip(
   return bytes
 }
 
-/**
- * Download a specific historical version of a plugin. Mirrors
- * {@link downloadPluginZip} but takes the per-version fields from
- * the index's `versions` array (G5) so the marketplace detail UI
- * can let users roll back to / install an old release.
- *
- * Cache key is the per-version `sha256` so a downgrade doesn't
- * collide with the latest-version cache entry, and a follow-up
- * `update_plugin` call to the same version is a single IndexedDB
- * read. The signature is taken from the parent entry (the index
- * protocol attaches one signature per `PluginIndexEntry`, not per
- * version) — if the host rejects the signature for an older
- * version, the caller surfaces that as an install error.
- */
+/** 下载指定历史版本（G5），缓存键为 per-version sha256。 */
 export async function downloadPluginVersion(
   pluginId: string,
   version: { version: string; downloadUrl: string; sha256: string },
@@ -428,12 +303,7 @@ export function effectivePubkey(
 
 // ─── Wire-shape normalisation ─────────────────────────────────────────────────
 
-/**
- * Convert snake_case (the Rust struct shape) to camelCase (the TS
- * shape). We do this by hand because the marketplace is the only
- * caller and the shape is small enough that a generic key-mapping
- * dep would be more code than the explicit code below.
- */
+/** snake_case 转 camelCase。 */
 export function normaliseIndex(raw: any): PluginIndex {
   if (!raw || typeof raw !== 'object') {
     throw new Error('plugin index is not an object')
@@ -471,12 +341,7 @@ function normaliseEntry(raw: any): PluginIndexEntry {
     sha256: raw.sha256,
     signatureB64: raw.signature_b64 ?? '',
     pubkeyB64: raw.pubkey_b64 ?? '',
-    // Top-level changelog / publishedAt are the canonical
-    // release notes for the *latest* version (the only one the
-    // marketplace ships). Older indexes that pre-date this
-    // flattening may still carry a `versions[]` array; we keep
-    // that optional for back-compat and let the detail UI
-    // prefer it when present.
+    // 顶层 changelog/publishedAt 为最新版本；versions[] 可选。
     changelog: raw.changelog,
     publishedAt: raw.published_at ?? raw.publishedAt,
     versions: Array.isArray(raw.versions) ? raw.versions.map(normaliseVersion) : undefined,
@@ -518,14 +383,7 @@ function normaliseVersion(raw: any): PluginIndexEntryVersion {
   }
 }
 
-/**
- * Normalise one `PluginUpdateInfo` row from the host's wire shape
- * (snake_case — see `src-tauri/src/commands/plugin.rs::PluginUpdateInfo`)
- * to the camelCase shape consumed by the UI. The Rust serde default
- * is snake_case, so `local_version` arrives as `local_version` over
- * IPC; without this the store's `localVersion` reads would all be
- * `undefined` and the "Update available" badge would never fire.
- */
+/** PluginUpdateInfo snake_case 转 camelCase。 */
 function normaliseUpdate(raw: any): PluginUpdateInfo {
   return {
     id: raw.id ?? '',
@@ -535,13 +393,7 @@ function normaliseUpdate(raw: any): PluginUpdateInfo {
   }
 }
 
-/**
- * Normalise one `PluginVersionInfo` row from the host's wire shape
- * (snake_case — see `src-tauri/src/commands/plugin.rs::PluginVersionInfo`)
- * to the camelCase shape consumed by the UI. Without this, `isActive`
- * is always `undefined` and the rollback dialog's "current" badge
- * never lights up.
- */
+/** PluginVersionInfo snake_case 转 camelCase。 */
 function normalisePluginVersion(raw: any): PluginVersionInfo {
   return {
     version: raw.version ?? '',
@@ -555,17 +407,7 @@ function normalisePluginVersion(raw: any): PluginVersionInfo {
 
 import { invoke } from '@tauri-apps/api/core'
 
-/**
- * Trigger an in-app install from a zip the marketplace already
- * downloaded. The host re-runs SHA-256 + signature verification on
- * the bytes we send — never trust the frontend to have validated
- * anything.
- *
- * Returns the freshly-installed `PluginMetadataRust` from the host
- * so the caller (e.g. the marketplace detail dialog) can read the
- * id, name, declared permissions, etc. without re-scanning the
- * plugins directory.
- */
+/** 触发宿主从 zip 安装，宿主重新校验 SHA-256 + 签名。 */
 export async function installPluginFromBytes(args: {
   pluginId: string
   version: string
@@ -589,11 +431,7 @@ export async function checkPluginUpdates(repoUrl: string): Promise<PluginUpdateI
   return Array.isArray(raw) ? raw.map(normaliseUpdate) : []
 }
 
-/**
- * Swap the active version of a previously-installed plugin. Returns
- * the metadata of the now-active version so the caller can read the
- * id / name / declared permissions without a separate scan.
- */
+/** 切换已安装插件的活跃版本。 */
 export async function rollbackPlugin(pluginId: string, version: string): Promise<PluginMetadataRust> {
   return invoke<PluginMetadataRust>('rollback_plugin', { pluginId, version })
 }
@@ -608,11 +446,7 @@ export async function listPluginVersions(pluginId: string): Promise<PluginVersio
 const inMemoryIndexCache = new Map<string, { index: PluginIndex; at: number }>()
 const IN_MEMORY_TTL_MS = 60_000
 
-/**
- * Fetch with a 60s in-memory cache. The Rust side fetches the index
- * too (via `check_plugin_updates`); the cache here keeps the UI from
- * re-fetching on every tab switch or filter change.
- */
+/** 带 60s 内存缓存的 fetchPluginIndex。 */
 export async function fetchPluginIndexCached(url: string): Promise<PluginIndex> {
   const now = Date.now()
   const hit = inMemoryIndexCache.get(url)

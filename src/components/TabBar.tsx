@@ -3,7 +3,7 @@
  * Shows file tabs with dirty/saved status indicators
  */
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react'
+import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal, Crosshair } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -78,7 +78,7 @@ function TabBar() {
     try {
       await navigator.clipboard.writeText(tab.path)
       showToast(t('tabBar.pathCopied'))
-    } catch (e) {
+    } catch {
       showToast(t('tabBar.copyFailed'))
     }
   }
@@ -87,7 +87,7 @@ function TabBar() {
     try {
       await navigator.clipboard.writeText(getRelativePath(tab.path))
       showToast(t('tabBar.relativePathCopied'))
-    } catch (e) {
+    } catch {
       showToast(t('tabBar.copyFailed'))
     }
   }
@@ -95,8 +95,19 @@ function TabBar() {
   const handleShowInFinder = async (tab: EditorTab) => {
     try {
       await invoke('open_in_finder', { path: tab.path })
-    } catch (e) {
+    } catch {
       showToast(t('tabBar.openFailed'))
+    }
+  }
+
+  const handleRevealInTree = (tab: EditorTab) => {
+    if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
+      const folder = workspaceFolders.find(f => tab.path.startsWith(f))
+      if (folder) {
+        useFileTreeStore.getState().revealPath(tab.path, folder)
+      }
+    } else if (rootPath) {
+      useFileTreeStore.getState().revealPath(tab.path, rootPath)
     }
   }
 
@@ -139,7 +150,6 @@ function TabBar() {
   // 当 activeTabId 变化时，自动滚动到活动 tab
   useEffect(() => {
     if (!activeTabId || !scrollRef.current) return
-    let rafId: number
     const scrollToActiveTab = () => {
       const tabEl = tabRefs.current.get(activeTabId)
       const scrollEl = scrollRef.current
@@ -147,7 +157,7 @@ function TabBar() {
 
       const scrollRect = scrollEl.getBoundingClientRect()
       const tabRect = tabEl.getBoundingClientRect()
-      
+
       // 计算 tab 相对于滚动容器的位置
       const tabLeft = tabRect.left - scrollRect.left + scrollEl.scrollLeft
       const tabRight = tabLeft + tabRect.width
@@ -160,9 +170,41 @@ function TabBar() {
       }
     }
 
-    rafId = requestAnimationFrame(scrollToActiveTab)
+    const rafId = requestAnimationFrame(scrollToActiveTab)
     return () => cancelAnimationFrame(rafId)
   }, [activeTabId])
+
+  // 统一处理 activeTabId 变化时的文件树同步：
+  // 覆盖点击 tab、⌘1-9 快捷键、关闭 tab、关闭所有 tab、会话恢复等所有路径
+  useEffect(() => {
+    const fileTreeStore = useFileTreeStore.getState()
+    if (!activeTabId) {
+      // 所有 tab 关闭时清理文件树选中状态
+      fileTreeStore.setSelectedPath(null)
+      fileTreeStore.clearMultiSelection()
+      fileTreeStore.setLastClickedPath(null)
+      return
+    }
+    const tab = useEditorStore.getState().tabs.find(t => t.id === activeTabId)
+    if (!tab || !tab.path) return
+    // diff/conflict tab 不对应文件树节点
+    if (tab.type === 'diff' || tab.type === 'conflict') return
+
+    // 清理多选状态，避免切换 tab 后残留
+    fileTreeStore.clearMultiSelection()
+    fileTreeStore.setLastClickedPath(tab.path)
+
+    // 工作区模式下折叠非活动文件夹，单文件夹模式仅 revealPath
+    if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
+      const folder = workspaceFolders.find(f => tab.path.startsWith(f))
+      if (folder) {
+        fileTreeStore.collapseAllExceptPath(tab.path, folder)
+        fileTreeStore.revealPath(tab.path, folder)
+      }
+    } else if (rootPath) {
+      fileTreeStore.revealPath(tab.path, rootPath)
+    }
+  }, [activeTabId, workspaceMode, workspaceFolders, rootPath])
 
   const scroll = (direction: 'left' | 'right') => {
     if (!scrollRef.current) return
@@ -211,11 +253,11 @@ function TabBar() {
   const handleTabClick = (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId)
     if (!tab) return
-    
+
     // Switch tab immediately for better UX
     setActiveTab(tabId)
     scrollToTab(tabId)
-    
+
     // Load content asynchronously after switching tab
     // This prevents blocking the UI and avoids race conditions
     // Check content === undefined to detect unloaded tabs (empty string is valid content)
@@ -225,16 +267,8 @@ function TabBar() {
         useEditorStore.getState().loadTabContent(tabId)
       }, 0)
     }
-    
-    // Reveal in file tree
-    if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
-      const folder = workspaceFolders.find(f => tab.path.startsWith(f))
-      if (folder) {
-        useFileTreeStore.getState().revealPath(tab.path, folder)
-      }
-    } else if (rootPath) {
-      useFileTreeStore.getState().revealPath(tab.path, rootPath)
-    }
+
+    // 文件树同步由 activeTabId useEffect 统一处理，无需在此重复调用
   }
 
   if (tabs.length === 0) {
@@ -398,6 +432,14 @@ function TabBar() {
                   <span>{t('tabBar.copyRelativePath')}</span>
                 </ContextMenuItem>
                 <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
+                <ContextMenuItem
+                  onClick={() => handleRevealInTree(tab)}
+                  style={{ color: 'var(--text-secondary)' }}
+                  className="cursor-pointer"
+                >
+                  <Crosshair size={12} />
+                  <span>{t('tabBar.revealInTree')}</span>
+                </ContextMenuItem>
                 <ContextMenuItem
                   onClick={() => handleShowInFinder(tab)}
                   style={{ color: 'var(--text-secondary)' }}

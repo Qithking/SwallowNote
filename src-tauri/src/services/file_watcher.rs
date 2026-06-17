@@ -120,35 +120,9 @@ pub fn unwatch_directory(path: String) -> Result<(), String> {
     }
 }
 
-/// Wire up a recursive watch on `<app_data>/plugins/` for the
-/// lifetime of the app. Whenever a `storage.json` inside that
-/// tree is created / modified / removed, emit a dedicated
-/// `plugin-storage-changed` event with the resolved plugin id
-/// and current file size (or `0` on remove). The frontend
-/// listens for this event and reconciles its in-memory
-/// `pluginStorageSize` tracker (which otherwise only knows
-/// about deltas observed through the JS-side `set`/`delete`
-/// path).
-///
-/// Why a dedicated event (rather than piggy-backing on
-/// `file-watcher-event`)? The host's storage files live in the
-/// same `app_data` tree as user markdown files, and the
-/// editor's existing `file-watcher-event` handler ignores
-/// non-editor paths. A separate, narrowly-scoped event keeps
-/// the editor's hot path free of plugin-storage concerns and
-/// makes the wiring self-documenting.
-///
-/// Idempotent — re-invoking the function is a no-op (the
-/// existing `init_watcher` setup already early-returns on a
-/// non-empty state).
+/// 监听 plugins 目录下 storage.json 变更，发射 plugin-storage-changed 事件供前端同步存储大小。幂等。
 pub fn watch_plugin_storage(app_handle: AppHandle) {
-    // Walk into the same singleton used by `init_watcher`. If
-    // the host didn't call `init_watcher` first (an
-    // integration mistake), we silently no-op — the file
-    // watcher is required infrastructure for both editor file
-    // tracking and plugin storage tracking, and silently
-    // dropping storage events is strictly better than
-    // panicking.
+    // 复用 init_watcher 单例；未初始化时静默跳过。
     let mut guard = match FILE_WATCHER.lock() {
         Ok(g) => g,
         Err(e) => {
@@ -202,18 +176,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
         return;
     }
 
-    // We've registered the watch. The event-emit filter is
-    // already handled by the global debouncer callback
-    // (defined in `init_watcher`) — we just need to add a
-    // second filter / emitter on top of it that knows about
-    // the plugin-storage shape.
-    //
-    // To avoid racing the global debouncer for ownership of
-    // the same event stream, we install a second lightweight
-    // debouncer on the same path. The notify crate allows
-    // multiple watchers on the same path, so the two
-    // debouncers coexist; the cost is one extra OS handle per
-    // watched path (negligible at 1 path).
+    // 安装第二个 debouncer 监听同一路径；notify 允许多 watcher 共存。
     drop(guard); // release the singleton lock before constructing the second watcher
 
     let app_handle_for_storage = app_handle.clone();
@@ -232,11 +195,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
             };
 
             for event in events {
-                // We're only interested in writes/removes on
-                // a file whose leaf name is `storage.json`.
-                // Anything else (e.g. plugin install creates
-                // a sibling `index.js`, `manifest.json`) gets
-                // dropped on the floor.
+                // 仅关注 storage.json 写入/删除事件。
                 for path in &event.paths {
                     let Some(plugin_id) = extract_plugin_storage_id(path) else {
                         continue;
@@ -263,24 +222,11 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
         }
     };
 
-    // Stash the second debouncer so it lives as long as the
-    // app — dropping it cancels the watch. We piggy-back on
-    // the same static `FILE_WATCHER` for symmetry, but as a
-    // second field. To avoid a schema change, we leak the
-    // debouncer behind a Box into the existing struct's
-    // `debouncer` field position is awkward — instead we use
-    // a `OnceLock` of a separate handle.
+    // 用 OnceLock 持有第二个 debouncer 以避免结构体 schema 变更。
     PLUGIN_STORAGE_DEBOUNCER.set(storage_debouncer).ok();
 }
 
-/// Extract a plugin id from a path that looks like
-/// `<app_data>/plugins/<pluginId>/storage.json`.
-///
-/// Returns `None` if the path doesn't end in `storage.json`
-/// or doesn't have the expected depth (we require **3**
-/// components after the `plugins/` segment so a stray file at
-/// `<app_data>/plugins/storage.json` or a nested
-/// `<app_data>/plugins/<id>/.cache/storage.json` is ignored).
+/// 从 <app_data>/plugins/<pluginId>/storage.json 路径提取 pluginId；路径深度不符返回 None。
 fn extract_plugin_storage_id(path: &Path) -> Option<String> {
     let components: Vec<&str> = path
         .components()

@@ -23,6 +23,7 @@ import { matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { useFileTreeActions } from '@/hooks/useFileTreeActions'
 import { useFileTreeDragDrop } from '@/hooks/useFileTreeDragDrop'
 import { findNodeByPath, collectAllPaths } from '@/lib/utils/treeUtils'
+import { countWords } from '@/lib/utils/wordCount'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
 import { ContextMenuContent } from '@/components/ui/context-menu'
@@ -342,7 +343,7 @@ export const FileTreeView = memo(function FileTreeView() {
           viewMode: 'preview',
           fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
           modifiedTime: new Date().toLocaleString(),
-          wordCount: content.split(/\s+/).filter(Boolean).length,
+          wordCount: countWords(content),
         })
       })
       .catch(console.error)
@@ -461,7 +462,7 @@ export const FileTreeView = memo(function FileTreeView() {
                 <RefreshCw size={16} className="animate-spin" />
               </div>
             ) : nodes.length > 0 ? (
-              <div ref={parentRef} style={{ height: '100%', overflow: 'auto' }}>
+              <div ref={parentRef} data-file-tree-scroll style={{ height: '100%', overflow: 'auto' }}>
                 <div
                   style={{
                     height: `${virtualizer.getTotalSize()}px`,

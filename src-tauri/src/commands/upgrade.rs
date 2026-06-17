@@ -234,20 +234,7 @@ pub fn get_download_dir() -> String {
         .unwrap_or_else(|| ".".to_string())
 }
 
-/// Install the downloaded update and restart the application.
-///
-/// On macOS:
-/// 1. Attach the DMG using hdiutil
-/// 2. Find the .app bundle inside the mounted volume
-/// 3. Copy it to /Applications, replacing the old version
-/// 4. Remove quarantine extended attributes from the new app
-/// 5. Refresh Launch Services registration
-/// 6. Detach the DMG
-/// 7. Write a restart marker file, then exit the current process
-/// 8. A launchd-style restart script detects the marker and launches the new app
-///
-/// On Windows:
-/// Falls back to opening the installer (user handles the rest)
+// 安装下载的更新并重启。macOS：attach DMG → 替换 .app → xattr/lsregister → detach → spawn 重启脚本 → exit。Windows：回退到打开 installer。
 #[tauri::command]
 pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -364,17 +351,14 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
         }
 
         // Step 4: Remove quarantine extended attributes from the new app
-        // Even though ditto --noqtn avoids adding quarantine, the DMG mount itself
-        // may have com.apple.quarantine attrs that propagate. Explicitly remove them
-        // with xattr to ensure macOS Gatekeeper doesn't block the new app.
+        // 显式 xattr -cr 防 Gatekeeper 拦截。
         let dest_app_str = dest_app.to_string_lossy().to_string();
         let _ = std::process::Command::new("xattr")
             .args(["-cr", &dest_app_str])
             .output();
 
         // Step 5: Refresh Launch Services registration so macOS recognizes the new app
-        // After replacing the app bundle, the Launch Services database may still
-        // reference the old app, causing `open` to fail or open the wrong binary.
+        // 刷新 Launch Services 注册，避免 open 开到旧 binary。
         let _ = std::process::Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
             .args(["-f", &dest_app_str])
             .output();
@@ -385,17 +369,7 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
             .output();
 
         // Step 7: Launch the new version AFTER the current process exits
-        //
-        // CRITICAL: On macOS, `open` may refuse to launch the new app while the
-        // old process (with the same bundle identifier) is still running. The old
-        // process may also hold locks on files inside the .app bundle.
-        //
-        // The reliable approach is to spawn a fully detached helper process that:
-        //   1. Waits for the current app's PID to disappear (with a timeout)
-        //   2. Launches the new app with `open`
-        //
-        // On macOS, we use `nohup` with redirected I/O instead of Linux's `setsid`
-        // to create a detached process that survives parent termination.
+        // spawn detached helper 脚本：等当前 PID 退出后再 open 新 app。
         let current_pid = std::process::id();
         let new_app_path = dest_app.to_string_lossy().to_string();
 

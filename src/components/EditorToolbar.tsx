@@ -184,8 +184,10 @@ function EditorToolbar() {
             className="flex items-center gap-1 ml-2 shrink-0 px-1.5 py-0.5 rounded text-[10px] cursor-pointer hover:opacity-80"
             style={{ background: 'var(--bg-warning)', color: 'var(--text-warning)' }}
             onClick={async () => {
-              await useEditorStore.getState().loadTabContent(activeTab.id)
-              useEditorStore.getState().clearExternalChange(activeTab.id)
+              // Force reload to overwrite cached content with external changes.
+              // loadTabContent clears hasExternalChange on success and keeps it
+              // true on failure, so no need to manually clear here.
+              await useEditorStore.getState().loadTabContent(activeTab.id, 0, true)
             }}
           >
             <AlertTriangle size={10} />

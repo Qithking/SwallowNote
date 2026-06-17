@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type FileNode, type Theme } from '@/stores'
+import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { openFolderDialog, openWorkspaceDialog, createFile } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
@@ -8,36 +8,13 @@ import { emitLocaleChanged } from '@/lib/plugin-host'
 import { listPluginCommands } from '@/lib/plugin-commands'
 import { toast } from 'sonner'
 import i18n from 'i18next'
+import { findNodeByPath, generateUniqueName, updateNodesWithChildren } from '@/lib/utils/treeUtils'
 
 function getShortcut(key: ShortcutKey): string {
   return getShortcutKey(key, useUIStore.getState().customShortcuts)
 }
 
-/**
- * Return the first `<pluginId>:<commandId>` key whose stored
- * shortcut string matches `e`, or `null` if no plugin command
- * is bound to this key combination. Used by the
- * `useKeyboardShortcuts` built-in matcher to surface a
- * "shadows a plugin command" warning toast — the user
- * rebound a built-in shortcut but a plugin command was
- * already sitting on the same key, and the host silently
- * favoured the built-in (the previous behaviour). The
- * toast gives the user a chance to fix the conflict
- * instead of wondering why their plugin command stopped
- * firing.
- *
- * We return only the binding key (not the full command
- * object) so the caller doesn't have to know how to look
- * up the registered command — the toast is generic and
- * only needs to know "something is here".
- *
- * Exported (not just module-level) so the matching logic
- * can be unit-tested without standing up a React tree.
- * The function reads from the live `useUIStore` snapshot,
- * which is fine for tests because the test setup already
- * calls `setState` on the store before invoking the
- * function.
- */
+/** 返回与事件匹配的插件命令 binding key，用于检测冲突。 */
 export function findConflictingPluginCommandKey(e: KeyboardEvent): string | null {
   const bindings = useUIStore.getState().pluginCommandShortcuts
   for (const [bindingKey, value] of Object.entries(bindings)) {
@@ -48,47 +25,8 @@ export function findConflictingPluginCommandKey(e: KeyboardEvent): string | null
 }
 
 /**
- * Match a built-in shortcut key against the current event and
- * dispatch its handler. When a plugin command is bound to the
- * same key combination we surface a sonner toast warning
- * (fourth-round review / M16) so the user knows their plugin
- * command is being shadowed. The built-in action still runs —
- * changing the precedence here would silently break every
- * existing user's muscle memory. The toast is short
- * (1.5s) and de-duplicated per keypress; we don't pre-check
- * whether the user already saw it because a fresh toast on
- * every press gives the user a chance to fix the conflict
- * the moment they start wondering why their plugin command
- * isn't firing.
- *
- * `e.preventDefault()` is called only after we know the
- * match is real so we never consume a keypress that the
- * editor / CodeMirror / BlockNote would have wanted.
- *
- * Exported for the same reason as
- * `findConflictingPluginCommandKey`: the dispatch helper
- * is a pure function of `(event, key, action, useUIStore
- * state, sonner)`, and standing up a React tree to test
- * the "toast appears on conflict" contract would be both
- * fragile and slow.
- *
- * Wave B / M1: the toast now carries an explicit
- * description that names the built-in action that
- * "won" the keystroke (e.g. "已执行 commandPalette,请在
- * 设置中解绑"). Without it the user sees "插件 X 的
- * 快捷键被占用" in the toast body *and* the action's
- * side effect (palette opening, file saving, …) and has
- * to guess why both happened.
- *
- * Wave B / M2: in addition to the stable sonner `id`
- * (Wave A / C1) we throttle re-shows of the same
- * conflict within a 200ms window. A user who holds
- * Ctrl+S to spam-save would otherwise still queue a
- * fresh toast (with the same id) on every keydown —
- * sonner does *not* dedupe on the message string, only
- * on the explicit `id`; and the `id` collapse still
- * costs a render. The throttle keeps the toast corner
- * quiet when the user is consciously rapid-pressing.
+ * 匹配并派发内置快捷键；冲突时弹 3s toast（200ms 节流）。
+ * preventDefault 仅在匹配成功后调用。
  */
 const PLUGIN_CONFLICT_THROTTLE_MS = 200
 const lastPluginConflictShownAt = new Map<string, number>()
@@ -102,37 +40,16 @@ export function dispatchBuiltin(
   e.preventDefault()
   const pluginBinding = findConflictingPluginCommandKey(e)
   if (pluginBinding) {
-    // Strip the trailing `:<commandId>` so the toast reads
-    // "<pluginId> 命令 与内置快捷键冲突" instead of
-    // dumping the raw "<pluginId>:<commandId>" key. The
-    // plugin id may itself contain colons (reverse-DNS
-    // style "com.foo.bar:baz"), so we split on the *last*
-    // colon only — same convention the settings panel uses
-    // to render the row (see
-    // `useUIStore.prunePluginCommandShortcuts`).
+    // strip 尾部 commandId（用 lastIndexOf）
     const lastColon = pluginBinding.lastIndexOf(':')
     const pluginId =
       lastColon > 0 ? pluginBinding.slice(0, lastColon) : pluginBinding
-    // Wave B / M2: same-key rapid presses would otherwise
-    // re-render the toast on every keydown even though the
-    // sonner `id` collapses the queue. We additionally
-    // short-circuit when the last toast for this binding
-    // key was shown within `PLUGIN_CONFLICT_THROTTLE_MS`,
-    // so a user holding Ctrl+S for 1s doesn't get a visible
-    // toast refresh. The flag is per binding key (not
-    // global) so a Ctrl+S conflict and a Ctrl+P conflict
-    // can each still surface independently.
+    // 200ms 节流避免连按刷屏
     const now = Date.now()
     const lastShown = lastPluginConflictShownAt.get(pluginBinding) ?? 0
     if (now - lastShown >= PLUGIN_CONFLICT_THROTTLE_MS) {
       lastPluginConflictShownAt.set(pluginBinding, now)
-      // Wave B / M1: surface the built-in action that just
-      // ran in the toast description. Without it the toast
-      // reads as a contradiction: "plugin X's shortcut is
-      // shadowed" *and* the palette opens / file saves —
-      // the user has to guess which side won. The
-      // description text is sourced from i18n (zh-CN / en)
-      // so translators can adjust the wording.
+      // toast 描述携带内置 action 名
       toast(i18n.t('settings.pluginCommandShadowed', { id: pluginId }), {
         // Wave A / C1: stable id so the same conflict
         // doesn't stack a new toast on every keypress.
@@ -150,33 +67,6 @@ export function dispatchBuiltin(
   return true
 }
 
-function findNodeByPath(nodes: FileNode[], path: string): FileNode | null {
-  for (const n of nodes) {
-    if (n.path === path) return n
-    if (n.children) {
-      const found = findNodeByPath(n.children, path)
-      if (found) return found
-    }
-  }
-  return null
-}
-
-function generateUniqueName(baseName: string, siblings: FileNode[]): string {
-  let name = baseName
-  let counter = 1
-  const existingNames = new Set(siblings.map((s) => s.name))
-  while (existingNames.has(name)) {
-    const dotIndex = baseName.lastIndexOf('.')
-    if (dotIndex > 0) {
-      name = baseName.slice(0, dotIndex) + ` ${counter}` + baseName.slice(dotIndex)
-    } else {
-      name = `${baseName} ${counter}`
-    }
-    counter++
-  }
-  return name
-}
-
 async function handleNewFile() {
   const { selectedPath, nodes } = useFileTreeStore.getState()
   const { rootPath } = useWorkspaceStore.getState()
@@ -184,7 +74,7 @@ async function handleNewFile() {
 
   let targetDir = rootPath
   if (selectedPath) {
-    const selected = findNodeByPath(nodes, selectedPath)
+    const selected = findNodeByPath(selectedPath, nodes)
     if (selected?.isDirectory) {
       targetDir = selected.path
     } else if (selectedPath.includes('/')) {
@@ -192,7 +82,7 @@ async function handleNewFile() {
     }
   }
 
-  const children = (findNodeByPath(nodes, targetDir)?.children) || []
+  const children = (findNodeByPath(targetDir, nodes)?.children) || []
   const defaultFileName = i18n.t('fileTree.defaultFileName')
   const name = generateUniqueName(defaultFileName, children)
   const fullPath = targetDir + '/' + name
@@ -202,7 +92,7 @@ async function handleNewFile() {
     const { showAllFiles, markdownOnly } = useUIStore.getState()
     const newChildren = await loadDirectory(targetDir, showAllFiles, markdownOnly)
     useFileTreeStore.getState().setNodes(
-      updateNodesWithChildrenInList(nodes, targetDir, newChildren)
+      updateNodesWithChildren(nodes, targetDir, newChildren)
     )
     useFileTreeStore.getState().setSelectedPath(fullPath)
   } catch (e) {
@@ -217,7 +107,7 @@ async function handleNewFolder() {
 
   let targetDir = rootPath
   if (selectedPath) {
-    const selected = findNodeByPath(nodes, selectedPath)
+    const selected = findNodeByPath(selectedPath, nodes)
     if (selected?.isDirectory) {
       targetDir = selected.path
     } else if (selectedPath.includes('/')) {
@@ -225,7 +115,7 @@ async function handleNewFolder() {
     }
   }
 
-  const children = (findNodeByPath(nodes, targetDir)?.children) || []
+  const children = (findNodeByPath(targetDir, nodes)?.children) || []
   const defaultFolderName = i18n.t('fileTree.defaultFolderName')
   const name = generateUniqueName(defaultFolderName, children)
   const fullPath = targetDir + '/' + name
@@ -235,19 +125,11 @@ async function handleNewFolder() {
     const { showAllFiles, markdownOnly } = useUIStore.getState()
     const newChildren = await loadDirectory(targetDir, showAllFiles, markdownOnly)
     useFileTreeStore.getState().setNodes(
-      updateNodesWithChildrenInList(nodes, targetDir, newChildren)
+      updateNodesWithChildren(nodes, targetDir, newChildren)
     )
   } catch (e) {
     console.error('Failed to create folder:', e)
   }
-}
-
-function updateNodesWithChildrenInList(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return list.map((n) => {
-    if (n.path === path) return { ...n, children }
-    if (n.children) return { ...n, children: updateNodesWithChildrenInList(n.children, path, children) }
-    return n
-  })
 }
 
 async function handleOpenFile() {
@@ -291,7 +173,9 @@ async function handleSaveFile() {
     const { gitAutoCommit } = await import('@/lib/tauri')
     try {
       await gitAutoCommit(activeTab.path)
-    } catch {}
+    } catch {
+      // git auto-commit is best-effort; failures (no git repo, no identity) are non-fatal
+    }
     window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
   } catch (e) {
     console.error('Failed to save file:', e)
@@ -409,27 +293,12 @@ export function useKeyboardShortcuts() {
       )
         return
 
-      // Plugin commands (Task 9 / G9): after the built-in
-      // shortcuts we let plugin-registered commands claim any
-      // remaining key combination the user has bound. We look up
-      // the binding in `useUIStore().pluginCommandShortcuts` on
-      // every keypress so a freshly bound / unbound shortcut is
-      // picked up without rebuilding the listener. The `when()`
-      // predicate is intentionally not re-checked here — a
-      // command that's currently hidden via `when()` should still
-      // be triggerable by a direct shortcut if the user
-      // explicitly bound one. Plugins that want state-aware
-      // gating are expected to do it inside `onTrigger`.
+      // 派发插件命令快捷键；每次 keypress 查最新绑定
       const bindings = useUIStore.getState().pluginCommandShortcuts
       for (const [bindingKey, value] of Object.entries(bindings)) {
         if (!value) continue
         if (!matchShortcut(e, value)) continue
-        // `bindingKey` is encoded by `useUIStore` as
-        // `${pluginId}:${commandId}`. `validate_plugin_id` rejects
-        // `:` inside the plugin id, so the *first* colon is a
-        // reliable separator — we deliberately use `indexOf` here
-        // (not `lastIndexOf`) so a commandId that itself contains
-        // `:` (legal) doesn't get sliced into the pluginId.
+        // bindingKey 格式 pluginId:commandId
         const firstColon = bindingKey.indexOf(':')
         if (firstColon <= 0) continue
         const pluginId = bindingKey.slice(0, firstColon)
@@ -437,9 +306,7 @@ export function useKeyboardShortcuts() {
         const registered = listPluginCommands().find(
           (cmd) =>
             cmd.id === commandId &&
-            // Stamp carried on the registry entry; see
-            // `RegisteredPluginCommand` in
-            // `src/lib/plugin-commands.ts`.
+            // 校验 __pluginId stamp 匹配
             (cmd as { __pluginId?: string }).__pluginId === pluginId
         )
         if (!registered) continue
@@ -447,8 +314,7 @@ export function useKeyboardShortcuts() {
         try {
           void registered.onTrigger()
         } catch (err) {
-          // A buggy plugin must not break the global keydown
-          // listener. Log and let the next keystroke through.
+          // buggy 插件不能破坏全局 listener
           // eslint-disable-next-line no-console
           console.error('[useKeyboardShortcuts] plugin onTrigger threw:', err)
         }

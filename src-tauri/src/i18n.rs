@@ -1,7 +1,4 @@
-/// Backend i18n module for SwallowNote
-/// Embeds translation JSON files at compile time using include_str!,
-/// and provides a thread-safe way to get translated messages based on the
-/// current locale setting.
+//! 后端 i18n 模块：编译期嵌入翻译 JSON，提供线程安全 locale 查询。
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::RwLock;

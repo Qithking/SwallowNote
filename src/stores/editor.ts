@@ -5,25 +5,7 @@ import { create } from 'zustand'
 import { loadFileContent } from '@/lib/api'
 import { writeFile, gitAutoCommit } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
-
-/**
- * Count words in content, properly handling CJK (Chinese, Japanese, Korean) characters.
- * CJK characters are counted individually as words, while Latin words are counted by whitespace separation.
- */
-function countWords(content: string): number {
-  let count = 0
-  // Match CJK ideographs (Han), Hiragana, Katakana, Hangul
-  const cjkRegex = /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g
-  const cjkMatches = content.match(cjkRegex)
-  if (cjkMatches) {
-    count += cjkMatches.length
-  }
-  // Remove CJK characters and count remaining words
-  const withoutCjk = content.replace(cjkRegex, ' ')
-  const latinWords = withoutCjk.split(/\s+/).filter(Boolean)
-  count += latinWords.length
-  return count
-}
+import { countWords } from '@/lib/utils/wordCount'
 
 export interface EditorTab {
   id: string
@@ -70,7 +52,7 @@ export interface EditorState {
   removeTab: (id: string) => void
   removeTabs: (ids: string[]) => void
   setActiveTab: (id: string) => void
-  loadTabContent: (id: string, retryCount?: number) => Promise<void>
+  loadTabContent: (id: string, retryCount?: number, force?: boolean) => Promise<void>
   updateTabContent: (id: string, content: string) => void
   updateTabDirty: (id: string, isDirty: boolean) => void
   updateTabEdited: (id: string, isEdited: boolean) => void
@@ -89,7 +71,6 @@ export interface EditorState {
   saveAllDirtyTabs: () => Promise<void>
   resetDirtyTabs: () => Promise<void>
   getDirtyTabsCount: () => number
-  restoreTabsState: () => Promise<void>
   isPathSaving: (path: string) => boolean
 }
 
@@ -101,8 +82,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => {
       const existing = state.tabs.find((t) => t.path === tab.path)
       if (existing) {
-        // If same path exists, always reuse the existing tab's id for consistency
-        if (!existing.content && tab.content) {
+        // If same path exists, always reuse the existing tab's id for consistency.
+        // Only update content when existing tab hasn't been loaded yet (undefined).
+        // Using === undefined instead of !content to avoid overwriting empty files ('').
+        if (existing.content === undefined && tab.content !== undefined) {
           return {
             tabs: state.tabs.map((t) =>
               t.path === tab.path
@@ -248,12 +231,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { tabs, activeTabId: id }
     })
   },
-  loadTabContent: async (id, retryCount = 0) => {
+  loadTabContent: async (id, retryCount = 0, force = false) => {
     const tab = get().tabs.find((t) => t.id === id)
     // Check if tab exists and needs loading
     // tab.content === undefined means not loaded yet
     // tab.content === '' means loaded but empty file
-    if (!tab || tab.content !== undefined || tab.isLoading) return
+    // force=true bypasses the content check to support reload (e.g. external changes)
+    if (!tab || tab.isLoading) return
+    if (!force && tab.content !== undefined) return
     // Conflict and diff tabs don't have file content to load
     if (tab.type === 'conflict' || tab.type === 'diff') return
 
@@ -298,6 +283,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
                 ...t,
                 content,
                 isLoading: false,
+                hasExternalChange: false,
                 fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
                 modifiedTime,
                 wordCount: countWords(content),
@@ -314,15 +300,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     } catch (e) {
       console.error('Failed to load tab content after retries:', e)
       // Instead of closing the tab, mark it as having external change
-      // This keeps the tab open and lets the user decide what to do
+      // This keeps the tab open and lets the user decide what to do.
+      // Set content to '' (loaded but empty) to prevent EditorView useEffect
+      // from infinitely retrying (content === undefined triggers reload).
       set((state) => ({
         tabs: state.tabs.map((t) =>
-          t.id === id ? { ...t, isLoading: false, hasExternalChange: true } : t
+          t.id === id ? { ...t, content: '', isLoading: false, hasExternalChange: true } : t
         ),
       }))
-      // Only show error dialog for initial load (when content is empty)
+      // Only show error dialog for initial load (when content was not loaded before)
       // Don't show for external file changes to avoid interrupting user
-      if (tab.content === undefined || tab.content === '') {
+      if (tab.content === undefined) {
         window.dispatchEvent(new CustomEvent('tab-load-error', {
           detail: { id, path: tab.path, name: tab.name }
         }))
@@ -503,52 +491,5 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   isPathSaving: (path: string) => {
     return get().savingPaths.has(path)
-  },
-  restoreTabsState: async () => {
-    const { getSessionState, pathExists } = await import('@/lib/tauri')
-    try {
-      const state = await getSessionState()
-      if (state.tabs) {
-        const tabs: EditorTab[] = JSON.parse(state.tabs)
-        const validTabs: EditorTab[] = []
-        for (const tab of tabs) {
-          if (tab.path && tab.path.trim()) {
-            // Conflict tabs use repo path (directory) — always include them
-            // and validate against the conflict repo database later
-            if (tab.type === 'conflict') {
-              validTabs.push({
-                ...tab,
-                content: tab.content || '',
-                isDirty: false,
-                isEdited: false,
-                type: 'conflict',
-                viewMode: tab.viewMode || 'source',
-                conflictRepoPath: tab.conflictRepoPath,
-                conflictRepoName: tab.conflictRepoName,
-                conflictAutoHideTree: tab.conflictAutoHideTree ?? false,
-                conflictSelectedFile: tab.conflictSelectedFile,
-                conflictCursorLine: tab.conflictCursorLine,
-              })
-              continue
-            }
-            const exists = await pathExists(tab.path)
-            if (exists) {
-              validTabs.push({
-                ...tab,
-                content: tab.content || '',
-                isDirty: tab.isDirty ?? false,
-                isEdited: tab.isEdited ?? false,
-                type: tab.type || 'file',
-                viewMode: tab.viewMode || 'preview',
-              })
-            }
-          }
-        }
-        const activeTabId = (validTabs.find(t => t.id === state.activeTabId)?.id) || (validTabs.length > 0 ? validTabs[0].id : null)
-        set({ tabs: validTabs, activeTabId })
-      }
-    } catch (e) {
-      console.error('Failed to restore tabs state:', e)
-    }
   },
 }))
