@@ -768,6 +768,7 @@
       "selectNone": "Select none",
       "noPermissionWarning": "No permissions granted. The plugin may not work correctly.",
       "items": {
+        "editor": { "name": "Editor", "description": "Register custom file editors to extend supported file types" },
         "storage": { "name": "Storage", "description": "Access persistent storage for saving plugin data" },
         "events": { "name": "Events", "description": "Subscribe to host events (note open/save, theme change, etc.)" },
         "context-menu": { "name": "Context Menu", "description": "Add items to right-click menus" },

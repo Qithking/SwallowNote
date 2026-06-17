@@ -768,6 +768,7 @@
       "selectNone": "全不选",
       "noPermissionWarning": "未授权任何权限，插件可能无法正常工作",
       "items": {
+        "editor": { "name": "编辑器", "description": "注册自定义文件编辑器以扩展支持的文件类型" },
         "storage": { "name": "存储", "description": "访问持久化存储以保存插件数据" },
         "events": { "name": "事件", "description": "订阅宿主事件（笔记打开/保存、主题切换等）" },
         "context-menu": { "name": "右键菜单", "description": "在右键菜单中添加项目" },
