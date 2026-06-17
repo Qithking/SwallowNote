@@ -447,7 +447,21 @@
       "watermark": "水印",
       "zoomIn": "放大",
       "zoomOut": "缩小",
-      "fitCanvas": "适应画布"
+      "fitCanvas": "适应画布",
+      "logicalStructure": "逻辑结构图",
+      "logicalStructureLeft": "向左逻辑结构图",
+      "mindMap": "思维导图",
+      "organizationStructure": "组织结构图",
+      "catalogOrganization": "目录组织图",
+      "timeline": "时间轴",
+      "timeline2": "时间轴2",
+      "verticalTimeline": "竖向时间轴",
+      "verticalTimeline2": "竖向时间轴2",
+      "verticalTimeline3": "竖向时间轴3",
+      "fishbone": "鱼骨图",
+      "fishbone2": "鱼骨图2",
+      "themeDefault": "默认",
+      "themeDark": "深色"
     },
     "dialog": {
       "setHyperlink": "设置超链接",

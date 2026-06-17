@@ -54,44 +54,47 @@ interface TagItem {
   style?: { fill?: string }
 }
 
+// Each layout group has a Chinese label restored from the historical
+// hard-coded version (commit 33d3dd8 "优化布局"). We map every
+// simple-mind-map layout name to a dedicated i18n key so the host
+// can swap the language without each row drifting back to a
+// generic term like "布局" or "放大".
 const getLayoutGroups = (t: any) => [
   {
-    label: t('mindMap.toolbar.layout'),
+    label: t('mindMap.toolbar.logicalStructure'),
     children: [
-      { value: 'logicalStructure', label: t('mindMap.toolbar.layout') },
-      { value: 'logicalStructureLeft', label: `${t('mindMap.toolbar.layout')} (←)` },
+      { value: 'logicalStructure', label: t('mindMap.toolbar.logicalStructure') },
+      { value: 'logicalStructureLeft', label: t('mindMap.toolbar.logicalStructureLeft') },
     ],
   },
   {
-    label: t('mindMap.toolbar.theme'),
+    label: t('mindMap.toolbar.mindMap'),
     children: [
-      { value: 'mindMap', label: t('mindMap.toolbar.theme') },
+      { value: 'mindMap', label: t('mindMap.toolbar.mindMap') },
     ],
   },
   {
-    label: t('mindMap.toolbar.layout'),
+    label: t('mindMap.toolbar.organizationStructure'),
     children: [
-      { value: 'organizationStructure', label: t('mindMap.toolbar.layout') },
-      { value: 'catalogOrganization', label: t('mindMap.toolbar.outline') },
+      { value: 'organizationStructure', label: t('mindMap.toolbar.organizationStructure') },
+      { value: 'catalogOrganization', label: t('mindMap.toolbar.catalogOrganization') },
     ],
   },
   {
-    label: t('mindMap.toolbar.zoomIn'),
+    label: t('mindMap.toolbar.timeline'),
     children: [
-      { value: 'timeline', label: `${t('mindMap.toolbar.zoomIn')} 1` },
-      { value: 'timeline2', label: `${t('mindMap.toolbar.zoomIn')} 2` },
-      { value: 'verticalTimeline', label: `| ${t('mindMap.toolbar.zoomIn')} 1` },
-      { value: 'verticalTimeline2', label: `| ${t('mindMap.toolbar.zoomIn')} 2` },
-      { value: 'verticalTimeline3', label: `| ${t('mindMap.toolbar.zoomIn')} 3` },
+      { value: 'timeline', label: t('mindMap.toolbar.timeline') },
+      { value: 'timeline2', label: t('mindMap.toolbar.timeline2') },
+      { value: 'verticalTimeline', label: t('mindMap.toolbar.verticalTimeline') },
+      { value: 'verticalTimeline2', label: t('mindMap.toolbar.verticalTimeline2') },
+      { value: 'verticalTimeline3', label: t('mindMap.toolbar.verticalTimeline3') },
     ],
   },
   {
-    label: t('mindMap.dialog.setTag'),
+    label: t('mindMap.toolbar.fishbone'),
     children: [
-      { value: 'fishbone', label: `→ ${t('mindMap.dialog.setTag')} 1` },
-      { value: 'fishbone2', label: `→ ${t('mindMap.dialog.setTag')} 2` },
-      { value: 'rightFishbone', label: `→→ ${t('mindMap.dialog.setTag')} 1` },
-      { value: 'rightFishbone2', label: `→→ ${t('mindMap.dialog.setTag')} 2` },
+      { value: 'fishbone', label: t('mindMap.toolbar.fishbone') },
+      { value: 'fishbone2', label: t('mindMap.toolbar.fishbone2') },
     ],
   },
 ]
@@ -99,8 +102,8 @@ const getLayoutGroups = (t: any) => [
 // simple-mind-map 的 dist 文件只包含 default 主题
 // 其他主题需要通过 MindMap.defineTheme() 注册或使用 setThemeConfig() 自定义
 const getThemeOptions = (t: any) => [
-  { value: 'default', label: t('mindMap.toolbar.basic') },
-  { value: 'dark', label: t('editorSettings.darkMode') },
+  { value: 'default', label: t('mindMap.toolbar.themeDefault') },
+  { value: 'dark', label: t('mindMap.toolbar.themeDark') },
 ]
 
 const ICON_LIST = [

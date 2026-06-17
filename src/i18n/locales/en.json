@@ -447,7 +447,21 @@
       "watermark": "Watermark",
       "zoomIn": "Zoom In",
       "zoomOut": "Zoom Out",
-      "fitCanvas": "Fit Canvas"
+      "fitCanvas": "Fit Canvas",
+      "logicalStructure": "Logical Structure",
+      "logicalStructureLeft": "Left Logical Structure",
+      "mindMap": "Mind Map",
+      "organizationStructure": "Organization Chart",
+      "catalogOrganization": "Catalog Organisation",
+      "timeline": "Timeline",
+      "timeline2": "Timeline 2",
+      "verticalTimeline": "Vertical Timeline",
+      "verticalTimeline2": "Vertical Timeline 2",
+      "verticalTimeline3": "Vertical Timeline 3",
+      "fishbone": "Fishbone",
+      "fishbone2": "Fishbone 2",
+      "themeDefault": "Default",
+      "themeDark": "Dark"
     },
     "dialog": {
       "setHyperlink": "Set Hyperlink",
