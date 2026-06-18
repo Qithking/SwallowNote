@@ -646,11 +646,11 @@ function App() {
   return (
     <TooltipProvider>
       <div
-        className="h-screen w-screen flex flex-col"
-        style={{ background: 'transparent', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
+        className="h-screen w-screen flex flex-col p-px rounded-[12px]"
+        style={{ background: 'var(--theme-color)', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
         onContextMenu={handleContextMenu}
       >
-        <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))'}}>
+        <div className="flex-1 flex flex-col overflow-hidden rounded-[11px]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))'}}>
         {/* Title Bar */}
         <TitleBar />
 
