@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SwallowNote · 插件市场</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════
+   Design Tokens — 匹配 .pa-root 变量体系
+   ═══════════════════════════════════════════ */
+:root {
+  --pa-font-display: 'Instrument Serif', 'Times New Roman', serif;
+  --pa-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --pa-font-ui: 'Manrope', system-ui, sans-serif;
+
+  --pa-paper: #ffffff;
+  --pa-paper-2: #EDEFF2;
+  --pa-paper-3: rgba(0, 0, 0, 0.04);
+  --pa-ink: #1f1f1f;
+  --pa-ink-2: #666666;
+  --pa-mute: #999999;
+  --pa-mute-2: #999999;
+  --pa-accent: hsl(221.2, 83.2%, 53.3%);
+  --pa-accent-2: hsl(221.2, 83.2%, 60%);
+  --pa-accent-soft: color-mix(in srgb, hsl(221.2, 83.2%, 53.3%) 12%, transparent);
+  --pa-accent-glow: color-mix(in srgb, hsl(221.2, 83.2%, 53.3%) 18%, transparent);
+  --pa-positive: #2d6a4f;
+  --pa-positive-soft: rgba(45, 106, 79, 0.10);
+  --pa-warn: #b97a1f;
+  --pa-warn-soft: rgba(185, 122, 31, 0.12);
+  --pa-negative: #b83a2a;
+  --pa-negative-soft: rgba(184, 58, 42, 0.10);
+  --pa-line: #e5e5e5;
+  --pa-line-2: color-mix(in srgb, #e5e5e5 75%, transparent);
+  --pa-line-3: color-mix(in srgb, #e5e5e5 55%, transparent);
+
+  --pa-radius: 6px;
+  --pa-radius-lg: 10px;
+  --pa-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --pa-shadow-2: 0 4px 14px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --pa-shadow-3: 0 24px 60px rgba(0, 0, 0, 0.20), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --pa-spine-w: 60px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pa-paper: #1e1e1e;
+    --pa-paper-2: #2a2a2a;
+    --pa-paper-3: rgba(255, 255, 255, 0.06);
+    --pa-ink: #e0e0e0;
+    --pa-ink-2: #a0a0a0;
+    --pa-mute: #707070;
+    --pa-mute-2: #707070;
+    --pa-accent: hsl(221.2, 83.2%, 62%);
+    --pa-accent-2: hsl(221.2, 83.2%, 70%);
+    --pa-accent-soft: color-mix(in srgb, hsl(221.2, 83.2%, 62%) 15%, transparent);
+    --pa-accent-glow: color-mix(in srgb, hsl(221.2, 83.2%, 62%) 20%, transparent);
+    --pa-positive: #4ade80;
+    --pa-positive-soft: rgba(74, 222, 128, 0.12);
+    --pa-warn: #e8a33e;
+    --pa-warn-soft: rgba(232, 163, 62, 0.15);
+    --pa-negative: #f87171;
+    --pa-negative-soft: rgba(248, 113, 113, 0.12);
+    --pa-line: #3a3a3a;
+    --pa-line-2: color-mix(in srgb, #3a3a3a 75%, transparent);
+    --pa-line-3: color-mix(in srgb, #3a3a3a 55%, transparent);
+  }
+}
+
+/* ═══════════════════════════════════════════
+   Reset & Base
+   ═══════════════════════════════════════════ */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+body {
+  font-family: var(--pa-font-ui);
+  color: var(--pa-ink);
+  background: var(--pa-paper);
+  line-height: 1.6;
+}
+
+/* ═══════════════════════════════════════════
+   Layout Shell — 匹配 .pa-root + .pa-market
+   ═══════════════════════════════════════════ */
+.pa-root {
+  font-family: var(--pa-font-ui);
+  color: var(--pa-ink);
+  background: var(--pa-paper);
+  position: relative;
+  isolation: isolate;
+}
+.pa-market {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  gap: 0;
+  overflow: hidden;
+}
+.pa-market-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 22px 22px;
+}
+
+/* ═══════════════════════════════════════════
+   Hero — 匹配 .pa-market-hero
+   ═══════════════════════════════════════════ */
+.pa-market-hero {
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr;
+  gap: 24px;
+  align-items: center;
+  padding: 18px 22px;
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius-lg);
+  margin: 18px 22px 14px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--pa-shadow-1);
+  flex-shrink: 0;
+}
+.pa-market-hero::before {
+  display: none;
+}
+.pa-market-hero::after {
+  content: '';
+  position: absolute;
+  right: -60px;
+  top: -60px;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, var(--pa-accent-soft), transparent 70%);
+  pointer-events: none;
+}
+.pa-market-hero-head {
+  position: relative;
+  z-index: 1;
+}
+.pa-market-hero-title {
+  font-family: var(--pa-font-display);
+  font-size: 26px;
+  line-height: 1.1;
+  margin: 0 0 6px;
+  color: var(--pa-ink);
+  letter-spacing: -0.01em;
+}
+.pa-market-hero-title em {
+  font-style: italic;
+  color: var(--pa-accent);
+}
+.pa-market-hero-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--pa-ink-2);
+  max-width: 360px;
+  margin: 0;
+}
+.pa-market-hero-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+.pa-market-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════
+   Repo Input — 匹配 .pa-repo-input
+   ═══════════════════════════════════════════ */
+.pa-repo-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--pa-paper);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  padding: 0 6px 0 10px;
+  height: 36px;
+  font-family: var(--pa-font-mono);
+  font-size: 11.5px;
+  color: var(--pa-ink);
+  min-width: 360px;
+  transition: border-color 0.15s;
+}
+.pa-repo-input:focus-within { border-color: var(--pa-ink); }
+.pa-repo-input svg { color: var(--pa-mute); width: 14px; height: 14px; flex-shrink: 0; }
+.pa-repo-input input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--pa-ink);
+  font-family: var(--pa-font-mono);
+  font-size: 11.5px;
+  min-width: 0;
+}
+.pa-repo-input input::placeholder { color: var(--pa-mute); }
+.pa-repo-input button {
+  border: 0;
+  background: var(--pa-ink);
+  color: var(--pa-paper);
+  padding: 0 12px;
+  height: 26px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--pa-font-ui);
+  transition: background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.pa-repo-input button:hover { background: var(--pa-accent); }
+.pa-repo-input button.is-outline {
+  background: transparent;
+  color: var(--pa-ink-2);
+  border: 1px solid var(--pa-line);
+  padding: 0 8px;
+}
+.pa-repo-input button.is-outline:hover { background: var(--pa-paper-2); color: var(--pa-ink); border-color: var(--pa-line-2); }
+
+/* ═══════════════════════════════════════════
+   Buttons — 匹配 .pa-btn
+   ═══════════════════════════════════════════ */
+.pa-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--pa-radius);
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid var(--pa-line);
+  background: var(--pa-paper);
+  color: var(--pa-ink);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
+  font-family: var(--pa-font-ui);
+}
+.pa-btn:hover { background: var(--pa-paper-2); border-color: var(--pa-line-2); }
+.pa-btn:active { transform: translateY(1px); }
+.pa-btn svg { color: var(--pa-mute); width: 14px; height: 14px; }
+.pa-btn:hover svg { color: var(--pa-ink); }
+.pa-btn-ghost { background: transparent; border-color: transparent; }
+.pa-btn-ghost:hover { background: var(--pa-paper-2); }
+
+/* ═══════════════════════════════════════════
+   Toolbar — 匹配 .pa-market-toolbar
+   ═══════════════════════════════════════════ */
+.pa-market-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 0 14px;
+  border-bottom: 1px dashed var(--pa-line);
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+
+/* Segmented — 匹配 .pa-segmented */
+.pa-segmented {
+  display: inline-flex;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  overflow: hidden;
+}
+.pa-segmented button {
+  border: 0;
+  border-right: 1px solid var(--pa-line);
+  background: var(--pa-paper);
+  color: var(--pa-ink-2);
+  padding: 4px 12px;
+  font-size: 11.5px;
+  font-family: var(--pa-font-ui);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.pa-segmented button:last-child { border-right: 0; }
+.pa-segmented button:hover { background: var(--pa-paper-2); color: var(--pa-ink); }
+.pa-segmented button.is-active { background: var(--pa-ink); color: var(--pa-paper); }
+
+/* Search — 匹配 .pa-search */
+.pa-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 260px;
+  min-width: 140px;
+}
+.pa-search svg {
+  position: absolute;
+  left: 8px;
+  color: var(--pa-mute);
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+.pa-search input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px 0 28px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  background: var(--pa-paper);
+  color: var(--pa-ink);
+  font-size: 12px;
+  font-family: var(--pa-font-ui);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.pa-search input::placeholder { color: var(--pa-mute); }
+.pa-search input:focus { border-color: var(--pa-ink); }
+
+/* Meta — 匹配 .pa-market-meta */
+.pa-market-meta {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  letter-spacing: 0.04em;
+  margin-left: auto;
+}
+.pa-market-meta b { color: var(--pa-ink); font-weight: 600; }
+
+/* ═══════════════════════════════════════════
+   Grid — 匹配 .pa-market-grid
+   ═══════════════════════════════════════════ */
+.pa-market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+/* ═══════════════════════════════════════════
+   Card — 匹配 .pa-market-card
+   ═══════════════════════════════════════════ */
+.pa-market-card {
+  background: var(--pa-paper);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.12s, box-shadow 0.12s;
+  text-align: left;
+  overflow: hidden;
+  position: relative;
+}
+.pa-market-card:hover {
+  border-color: var(--pa-line-2);
+  transform: translateY(-1px);
+  box-shadow: var(--pa-shadow-2);
+}
+.pa-market-card-body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pa-market-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pa-market-card-name {
+  font-family: var(--pa-font-display);
+  font-style: italic;
+  font-size: 18px;
+  line-height: 1.2;
+  color: var(--pa-ink);
+}
+.pa-market-card-id {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+}
+
+/* Byline — 匹配 .pa-installed-byline */
+.pa-installed-byline {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 6px;
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  letter-spacing: 0.02em;
+  margin-top: -2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.pa-installed-byline b { color: var(--pa-ink-2); font-weight: 600; }
+.pa-installed-byline .pa-sep { color: var(--pa-mute-2); }
+.pa-installed-byline .pa-local-version { color: var(--pa-warn); }
+
+/* Description — 匹配 .pa-market-card-desc */
+.pa-market-card-desc {
+  font-size: 12px;
+  color: var(--pa-ink-2);
+  line-height: 16px;
+  height: 32px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tags — 匹配 .pa-market-card-meta + .pa-market-badge */
+.pa-market-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.pa-market-badge {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+  border: 1px solid var(--pa-line);
+}
+.pa-market-badge.is-update {
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  border-color: var(--pa-accent-soft);
+}
+.pa-market-badge.is-installed {
+  background: var(--pa-positive-soft);
+  color: var(--pa-positive);
+  border-color: var(--pa-positive-soft);
+}
+.pa-market-badge.is-install {
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+}
+
+/* Actions — 匹配 .pa-installed-actions */
+.pa-installed-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--pa-line);
+}
+.pa-icon-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pa-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--pa-mute);
+  border-radius: var(--pa-radius);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+.pa-icon-btn:hover {
+  background: var(--pa-paper-2);
+  color: var(--pa-ink);
+}
+.pa-icon-btn svg { width: 14px; height: 14px; }
+
+/* CTA — 匹配 .pa-market-cta */
+.pa-market-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 3px;
+  border: 1px solid var(--pa-accent);
+  background: var(--pa-accent);
+  color: var(--pa-paper);
+  font-family: var(--pa-font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+}
+.pa-market-cta:hover { opacity: 0.88; }
+.pa-market-cta.is-install {
+  background: var(--pa-accent);
+  border-color: var(--pa-accent);
+  color: var(--pa-paper);
+}
+.pa-market-cta.is-update {
+  background: var(--pa-accent);
+  border-color: var(--pa-accent);
+  color: var(--pa-paper);
+}
+
+/* ═══════════════════════════════════════════
+   Progress bar — 匹配 .pa-market-progress
+   ═══════════════════════════════════════════ */
+.pa-market-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 0 2px;
+}
+.pa-market-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--pa-paper-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.pa-market-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--pa-accent), var(--pa-accent-2));
+  border-radius: 2px;
+  transition: width 0.2s ease-out;
+}
+.pa-market-progress-text {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ═══════════════════════════════════════════
+   Empty State — 匹配 .pa-empty
+   ═══════════════════════════════════════════ */
+.pa-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 16px;
+  color: var(--pa-mute);
+  text-align: center;
+}
+.pa-empty svg { opacity: 0.4; }
+.pa-empty-title {
+  font-family: var(--pa-font-display);
+  font-style: italic;
+  font-size: 16px;
+  color: var(--pa-ink-2);
+}
+.pa-empty-hint {
+  font-size: 12px;
+  color: var(--pa-mute);
+}
+
+/* ═══════════════════════════════════════════
+   Detail Dialog — .pmd-*
+   ═══════════════════════════════════════════ */
+
+/* Overlay */
+.pmd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+}
+.pmd-overlay.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Dialog shell */
+.pmd-dialog {
+  position: relative;
+  width: 560px;
+  max-width: calc(100vw - 40px);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--pa-paper);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius-lg);
+  box-shadow: var(--pa-shadow-3);
+  overflow: hidden;
+  transform: translateY(8px) scale(0.98);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pmd-overlay.is-open .pmd-dialog {
+  transform: translateY(0) scale(1);
+}
+
+/* Header */
+.pmd-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--pa-line);
+  flex-shrink: 0;
+}
+.pmd-header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--pa-radius);
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  flex-shrink: 0;
+}
+.pmd-header-icon svg { width: 18px; height: 18px; }
+.pmd-header-info {
+  flex: 1;
+  min-width: 0;
+}
+.pmd-header-title {
+  font-family: var(--pa-font-display);
+  font-style: italic;
+  font-size: 20px;
+  line-height: 1.2;
+  color: var(--pa-ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pmd-header-id {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  margin-top: 2px;
+}
+.pmd-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--pa-mute);
+  border-radius: var(--pa-radius);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  padding: 0;
+}
+.pmd-close:hover { background: var(--pa-paper-2); color: var(--pa-ink); }
+.pmd-close svg { width: 16px; height: 16px; }
+
+/* Tab strip */
+.pmd-tabstrip {
+  display: flex;
+  gap: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--pa-line);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.pmd-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--pa-font-ui);
+  font-weight: 400;
+  color: var(--pa-ink-2);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  min-height: 32px;
+}
+.pmd-tab:hover { color: var(--pa-ink); }
+.pmd-tab.is-active {
+  color: var(--pa-accent);
+  font-weight: 600;
+  border-bottom-color: var(--pa-accent);
+}
+.pmd-tab svg { width: 12px; height: 12px; }
+.pmd-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+}
+.pmd-tab.is-active .pmd-tab-badge {
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+}
+
+/* Scrollable body */
+.pmd-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+/* Footer */
+.pmd-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--pa-line);
+  flex-shrink: 0;
+}
+.pmd-footer .pa-btn-primary {
+  background: var(--pa-accent);
+  color: #fff;
+  border-color: var(--pa-accent);
+}
+.pmd-footer .pa-btn-primary:hover {
+  opacity: 0.88;
+}
+
+/* ── Overview Tab ─────────────────────────── */
+.pmd-overview { display: flex; flex-direction: column; gap: 12px; }
+.pmd-desc {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--pa-ink-2);
+  margin: 0;
+}
+.pmd-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  letter-spacing: 0.01em;
+}
+.pmd-meta-dot { color: var(--pa-mute); }
+.pmd-meta-sep { color: var(--pa-line); }
+.pmd-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── Changelog Tab ────────────────────────── */
+.pmd-changelog { display: flex; flex-direction: column; gap: 12px; }
+.pmd-version-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  font-size: 12px;
+}
+.pmd-version-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pmd-version-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-family: var(--pa-font-mono);
+  font-size: 12px;
+}
+.pmd-version-date {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pmd-version-date svg { width: 10px; height: 10px; }
+.pmd-version-notes {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--pa-ink-2);
+  white-space: pre-wrap;
+}
+.pmd-version-sha {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  word-break: break-all;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pmd-version-sha svg { width: 10px; height: 10px; flex-shrink: 0; }
+.pmd-version-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--pa-line);
+  border-radius: 4px;
+  background: var(--pa-paper);
+  color: var(--pa-ink-2);
+  font-size: 11px;
+  font-family: var(--pa-font-ui);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pmd-version-action:hover { background: var(--pa-paper-2); border-color: var(--pa-line-2); }
+.pmd-version-action svg { width: 12px; height: 12px; }
+
+/* ── Permissions Tab ──────────────────────── */
+.pmd-permissions { display: flex; flex-direction: column; gap: 6px; }
+.pmd-perm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  font-size: 12px;
+}
+.pmd-perm-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  flex-shrink: 0;
+}
+.pmd-perm-icon svg { width: 14px; height: 14px; }
+.pmd-perm-info { flex: 1; min-width: 0; }
+.pmd-perm-name {
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pmd-perm-desc {
+  font-size: 11px;
+  color: var(--pa-ink-2);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* ── Dependencies Tab ─────────────────────── */
+.pmd-deps { display: flex; flex-direction: column; gap: 4px; }
+.pmd-dep-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  font-size: 12px;
+  font-family: var(--pa-font-mono);
+}
+.pmd-dep-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.pmd-dep-status.is-ok { color: var(--pa-positive); }
+.pmd-dep-status.is-missing { color: var(--pa-negative); }
+.pmd-dep-status.is-unsatisfied { color: var(--pa-warn); }
+.pmd-dep-status svg { width: 12px; height: 12px; }
+.pmd-dep-id { flex: 1; min-width: 0; }
+.pmd-dep-label {
+  font-size: 11px;
+  font-family: var(--pa-font-ui);
+  color: var(--pa-ink-2);
+}
+
+/* ── Reviews Tab (empty state) ────────────── */
+.pmd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 16px;
+  text-align: center;
+}
+.pmd-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background: var(--pa-paper-3);
+  color: var(--pa-mute);
+}
+.pmd-empty-icon svg { width: 24px; height: 24px; }
+.pmd-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink-2);
+}
+.pmd-empty-hint {
+  font-size: 12px;
+  color: var(--pa-mute);
+}
+
+/* ═══════════════════════════════════════════
+   Animations
+   ═══════════════════════════════════════════ */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.pa-market-card {
+  animation: fadeInUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.pa-market-card:nth-child(1) { animation-delay: 0.02s; }
+.pa-market-card:nth-child(2) { animation-delay: 0.05s; }
+.pa-market-card:nth-child(3) { animation-delay: 0.08s; }
+.pa-market-card:nth-child(4) { animation-delay: 0.11s; }
+.pa-market-card:nth-child(5) { animation-delay: 0.14s; }
+.pa-market-card:nth-child(6) { animation-delay: 0.17s; }
+.pa-market-card:nth-child(7) { animation-delay: 0.20s; }
+
+/* ═══════════════════════════════════════════
+   Responsive
+   ═══════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .pa-market-hero {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .pa-repo-input { min-width: 0; }
+  .pa-market-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="pa-root">
+<div class="pa-market">
+
+  <!-- ─── Hero — 匹配原有 .pa-market-hero 布局 ─── -->
+  <section class="pa-market-hero">
+    <div class="pa-market-hero-head">
+      <h3 class="pa-market-hero-title">
+        浏览插件<em>目录</em>
+      </h3>
+      <p class="pa-market-hero-hint">
+        粘贴一个 repo.json URL 来加载插件目录。
+      </p>
+    </div>
+    <div class="pa-market-hero-cta">
+      <div class="pa-repo-input">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <input
+          type="text"
+          placeholder="https://…/repo.json"
+          value="https://plugins.swallownote.dev/repo.json"
+        />
+        <button type="button" title="刷新" class="is-outline">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
+        <button type="button">应用</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Toolbar — 匹配原有 .pa-market-toolbar ─── -->
+  <div class="pa-market-toolbar" style="padding-left:22px;padding-right:22px;">
+    <div class="pa-segmented" role="tablist">
+      <button type="button" role="tab" class="is-active" data-tag="all">all</button>
+      <button type="button" role="tab" data-tag="editor">editor</button>
+      <button type="button" role="tab" data-tag="markdown">markdown</button>
+      <button type="button" role="tab" data-tag="theme">theme</button>
+      <button type="button" role="tab" data-tag="ai">ai</button>
+    </div>
+    <div class="pa-search" style="max-width:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" placeholder="搜索插件名 / 描述 / 标签" />
+    </div>
+    <div class="pa-market-meta">
+      <b>7</b> 项
+    </div>
+  </div>
+
+  <!-- ─── Scrollable Body ─── -->
+  <div class="pa-market-scroll">
+
+    <!-- ─── Plugin Grid ─── -->
+    <div class="pa-market-grid">
+
+      <!-- Card 1: 未安装 → 显示 Install 按钮 -->
+      <article class="pa-market-card" data-status="install" data-tags="editor markdown">
+        <div class="pa-market-card-body">
+          <div class="pa-market-card-head">
+            <div style="min-width:0">
+              <div class="pa-market-card-name">Mermaid Renderer</div>
+              <div class="pa-market-card-id">@swallow/mermaid-renderer</div>
+            </div>
+            <span class="pa-market-badge is-install">INSTALL</span>
+          </div>
+          <div class="pa-installed-byline">
+            <span><b>swallow-dev</b></span>
+            <span class="pa-sep">·</span>
+            <span>2026-05-20</span>
+            <span class="pa-sep">·</span>
+            <span>v1.2.0</span>
+          </div>
+          <div class="pa-market-card-desc">在笔记中直接渲染 Mermaid 流程图、时序图与甘特图，支持实时预览与导出 SVG。</div>
+          <div class="pa-market-card-meta">
+            <span class="pa-market-badge">editor</span>
+            <span class="pa-market-badge">markdown</span>
+          </div>
+          <div class="pa-installed-actions">
+            <div class="pa-icon-row">
+              <button type="button" class="pa-icon-btn" title="查看详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+              <button type="button" class="pa-icon-btn" title="立即安装">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Card 2: 已安装且最新 → 仅 Installed 徽章，无操作按钮 -->
+      <article class="pa-market-card" data-status="installed" data-tags="editor">
+        <div class="pa-market-card-body">
+          <div class="pa-market-card-head">
+            <div style="min-width:0">
+              <div class="pa-market-card-name">Word Counter</div>
+              <div class="pa-market-card-id">@swallow/word-counter</div>
+            </div>
+            <span class="pa-market-badge is-installed">INSTALLED</span>
+          </div>
+          <div class="pa-installed-byline">
+            <span><b>ink-lab</b></span>
+            <span class="pa-sep">·</span>
+            <span>2026-04-10</span>
+            <span class="pa-sep">·</span>
+            <span>v2.0.1</span>
+          </div>
+          <div class="pa-market-card-desc">实时统计字数、词数与阅读时长，在状态栏显示简洁的计数指标。</div>
+          <div class="pa-market-card-meta">
+            <span class="pa-market-badge">editor</span>
+          </div>
+          <div class="pa-installed-actions">
+            <div class="pa-icon-row">
+              <button type="button" class="pa-icon-btn" title="查看详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Card 3: 已安装有更新 → 显示 Update 按钮 + 本地版本 -->
+      <article class="pa-market-card" data-status="update" data-tags="markdown">
+        <div class="pa-market-card-body">
+          <div class="pa-market-card-head">
+            <div style="min-width:0">
+              <div class="pa-market-card-name">Markdown Lint</div>
+              <div class="pa-market-card-id">@swallow/markdown-lint</div>
+            </div>
+            <span class="pa-market-badge is-update">UPDATE</span>
+          </div>
+          <div class="pa-installed-byline">
+            <span><b>prose-tools</b></span>
+            <span class="pa-sep">·</span>
+            <span>2026-06-01</span>
+            <span class="pa-sep">·</span>
+            <span>v3.1.0</span>
+            <span class="pa-sep">·</span>
+            <span class="pa-local-version">本地 v3.0.4</span>
+          </div>
+          <div class="pa-market-card-desc">基于 markdownlint 规则引擎，为 Markdown 文本提供实时语法检查与自动修复建议。</div>
+          <div class="pa-market-card-meta">
+            <span class="pa-market-badge">markdown</span>
+            <span class="pa-market-badge is-update">UPDATE</span>
+          </div>
+          <div class="pa-installed-actions">
+            <div class="pa-icon-row">
+              <button type="button" class="pa-icon-btn" title="查看详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+              <button type="button" class="pa-icon-btn" title="更新到 v3.1.0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Card 4: 未安装 -->
+      <article class="pa-market-card" data-status="install" data-tags="ai">
+        <div class="pa-market-card-body">
+          <div class="pa-market-card-head">
+            <div style="min-width:0">
+              <div class="pa-market-card-name">AI Summarizer</div>
+              <div class="pa-market-card-id">@swallow/ai-summarizer</div>
+            </div>
+            <span class="pa-market-badge is-install">INSTALL</span>
+          </div>
+          <div class="pa-installed-byline">
+            <span><b>neural-ink</b></span>
+            <span class="pa-sep">·</span>
+            <span>2026-06-12</span>
+            <span class="pa-sep">·</span>
+            <span>v1.0.0</span>
+          </div>
+          <div class="pa-market-card-desc">调用本地大语言模型，一键生成笔记摘要、关键要点与思维导图结构。</div>
+          <div class="pa-market-card-meta">
+            <span class="pa-market-badge">ai</span>
+          </div>
+          <div class="pa-installed-actions">
+            <div class="pa-icon-row">
+              <button type="button" class="pa-icon-btn" title="查看详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+              <button type="button" class="pa-icon-btn" title="立即安装">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Card 5: 已安装且最新 → 无操作按钮 -->
+      <article class="pa-market-card" data-status="installed" data-tags="theme">
+        <div class="pa-market-card-body">
+          <div class="pa-market-card-head">
+            <div style="min-width:0">
+              <div class="pa-market-card-name">Noctis Theme</div>
+              <div class="pa-market-card-id">@swallow/noctis-theme</div>
+            </div>
+            <span class="pa-market-badge is-installed">INSTALLED</span>
+          </div>
+          <div class="pa-installed-byline">
+            <span><b>studio-dusk</b></span>
+            <span class="pa-sep">·</span>
+            <span>2026-03-28</span>
+            <span class="pa-sep">·</span>
+            <span>v1.4.2</span>
+          </div>
+          <div class="pa-market-card-desc">精心调校的暗色主题，适配长时间写作场景，提供柔和的对比度与舒适的阅读体验。</div>
+          <div class="pa-market-card-meta">
+            <span class="pa-market-badge">theme</span>
+          </div>
+          <div class="pa-installed-actions">
+            <div class="pa-icon-row">
+              <button type="button" class="pa-icon-btn" title="查看详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Card 6: 未安装 -->
+      <article class="pa-market-card" data-status="install" data-tags="editor markdown">
+        <div class="pa-market-card-body">
+          <div class="pa-market-card-head">
+            <div style="min-width:0">
+              <div class="pa-market-card-name">Table Editor</div>
+              <div class="pa-market-card-id">@swallow/table-editor</div>
+            </div>
+            <span class="pa-market-badge is-install">INSTALL</span>
+          </div>
+          <div class="pa-installed-byline">
+            <span><b>grid-craft</b></span>
+            <span class="pa-sep">·</span>
+            <span>2026-05-05</span>
+            <span class="pa-sep">·</span>
+            <span>v2.3.1</span>
+          </div>
+          <div class="pa-market-card-desc">可视化表格编辑器，支持行列增删、排序与公式计算，告别手工对齐 Markdown 表格。</div>
+          <div class="pa-market-card-meta">
+            <span class="pa-market-badge">editor</span>
+            <span class="pa-market-badge">markdown</span>
+            <span class="pa-market-badge">2 deps</span>
+          </div>
+          <div class="pa-installed-actions">
+            <div class="pa-icon-row">
+              <button type="button" class="pa-icon-btn" title="查看详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+              <button type="button" class="pa-icon-btn" title="立即安装">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Card 7: 已安装有更新 → Update 按钮 -->
+      <article class="pa-market-card" data-status="update" data-tags="ai">
+        <div class="pa-market-card-body">
+          <div class="pa-market-card-head">
+            <div style="min-width:0">
+              <div class="pa-market-card-name">Smart Tag</div>
+              <div class="pa-market-card-id">@swallow/smart-tag</div>
+            </div>
+            <span class="pa-market-badge is-update">UPDATE</span>
+          </div>
+          <div class="pa-installed-byline">
+            <span><b>neural-ink</b></span>
+            <span class="pa-sep">·</span>
+            <span>2026-06-15</span>
+            <span class="pa-sep">·</span>
+            <span>v2.1.0</span>
+            <span class="pa-sep">·</span>
+            <span class="pa-local-version">本地 v2.0.0</span>
+          </div>
+          <div class="pa-market-card-desc">基于语义分析自动为笔记打标签，支持自定义分类体系与多级标签层级。</div>
+          <div class="pa-market-card-meta">
+            <span class="pa-market-badge">ai</span>
+            <span class="pa-market-badge is-update">UPDATE</span>
+          </div>
+          <div class="pa-installed-actions">
+            <div class="pa-icon-row">
+              <button type="button" class="pa-icon-btn" title="查看详情">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+              <button type="button" class="pa-icon-btn" title="更新到 v2.1.0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ─── Detail Dialog Overlay ─── -->
+<div class="pmd-overlay" id="detailOverlay">
+  <div class="pmd-dialog">
+    <!-- Header -->
+    <div class="pmd-header">
+      <div class="pmd-header-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+      </div>
+      <div class="pmd-header-info">
+        <div class="pmd-header-title">
+          <span id="pmdName">Markdown Lint</span>
+          <span class="pa-market-badge" id="pmdVersionBadge">v3.1.0</span>
+          <span class="pa-market-badge is-update" id="pmdStatusBadge">UPDATE</span>
+        </div>
+        <div class="pmd-header-id" id="pmdId">@swallow/markdown-lint</div>
+      </div>
+      <button type="button" class="pmd-close" onclick="closeDetail()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Tab strip -->
+    <div class="pmd-tabstrip" role="tablist">
+      <button type="button" role="tab" class="pmd-tab is-active" data-tab="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        基本信息
+      </button>
+
+      <button type="button" role="tab" class="pmd-tab" data-tab="permissions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        权限
+        <span class="pmd-tab-badge">3</span>
+      </button>
+      <button type="button" role="tab" class="pmd-tab" data-tab="dependencies">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        依赖
+        <span class="pmd-tab-badge">2</span>
+      </button>
+
+    </div>
+
+    <!-- Scrollable body -->
+    <div class="pmd-body">
+      <!-- Overview -->
+      <div class="pmd-tabpanel" data-panel="overview">
+        <div class="pmd-overview">
+          <!-- 描述 -->
+          <p class="pmd-desc">基于 markdownlint 规则引擎，为 Markdown 文本提供实时语法检查与自动修复建议。支持 40+ 内置规则，可自定义规则配置文件，在编辑器中即时标注问题位置并提供一键修复。</p>
+
+          <!-- 元信息行 -->
+          <div class="pmd-meta-line">
+            <span class="pmd-meta-dot">v3.1.0</span>
+            <span class="pmd-meta-sep">·</span>
+            <span class="pmd-meta-dot">prose-tools</span>
+            <span class="pmd-meta-sep">·</span>
+            <span class="pmd-meta-dot">2026-06-01</span>
+            <span class="pmd-meta-sep">·</span>
+            <span class="pa-market-badge is-update" style="font-size:8.5px;padding:0 5px;">UPDATE</span>
+            <span class="pmd-meta-dot" style="color:var(--pa-warn)">本地 v3.0.4</span>
+          </div>
+
+          <!-- 标签 -->
+          <div class="pmd-tags-row">
+            <span class="pa-market-badge">markdown</span>
+            <span class="pa-market-badge">lint</span>
+            <span class="pa-market-badge">editor</span>
+          </div>
+        </div>
+      </div>
+
+<!-- Permissions -->
+      <div class="pmd-tabpanel" data-panel="permissions" style="display:none">
+        <div class="pmd-permissions">
+          <div class="pmd-perm-row">
+            <div class="pmd-perm-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div class="pmd-perm-info">
+              <div class="pmd-perm-name">文件读写 <span class="pa-market-badge is-installed">已请求</span></div>
+              <div class="pmd-perm-desc">读取和修改笔记文件内容，用于实时检查与自动修复。</div>
+            </div>
+          </div>
+          <div class="pmd-perm-row">
+            <div class="pmd-perm-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </div>
+            <div class="pmd-perm-info">
+              <div class="pmd-perm-name">编辑器访问 <span class="pa-market-badge is-installed">已请求</span></div>
+              <div class="pmd-perm-desc">访问当前编辑器内容与光标位置，用于实时标注问题。</div>
+            </div>
+          </div>
+          <div class="pmd-perm-row">
+            <div class="pmd-perm-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </div>
+            <div class="pmd-perm-info">
+              <div class="pmd-perm-name">配置存储 <span class="pa-market-badge is-installed">已请求</span></div>
+              <div class="pmd-perm-desc">持久化存储规则配置与自定义规则集。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dependencies -->
+      <div class="pmd-tabpanel" data-panel="dependencies" style="display:none">
+        <div class="pmd-deps">
+          <div class="pmd-dep-row">
+            <span class="pmd-dep-status is-ok">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </span>
+            <span class="pmd-dep-id">@swallow/editor-core</span>
+            <span class="pmd-dep-label">已满足</span>
+          </div>
+          <div class="pmd-dep-row">
+            <span class="pmd-dep-status is-missing">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </span>
+            <span class="pmd-dep-id">@swallow/markdown-ast</span>
+            <span class="pmd-dep-label">未找到来源</span>
+          </div>
+        </div>
+      </div>
+
+
+    </div>
+
+    <!-- Footer -->
+    <div class="pmd-footer">
+      <button type="button" class="pa-btn" onclick="closeDetail()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        关闭
+      </button>
+      <button type="button" class="pa-btn pa-btn-primary" id="pmdActionBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        更新到 v3.1.0
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 交互脚本 ─── -->
+<script>
+  // ── Card click → open detail dialog ──
+  const overlay = document.getElementById('detailOverlay');
+
+  document.querySelectorAll('.pa-market-card').forEach(card => {
+    card.addEventListener('click', () => {
+      overlay.classList.add('is-open');
+    });
+  });
+
+  function closeDetail() {
+    overlay.classList.remove('is-open');
+  }
+
+  // Close on overlay click (not dialog)
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeDetail();
+  });
+
+  // Close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDetail();
+  });
+
+  // ── Tab switching ──
+  document.querySelectorAll('.pmd-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.pmd-tab').forEach(t => t.classList.remove('is-active'));
+      tab.classList.add('is-active');
+      const target = tab.dataset.tab;
+      document.querySelectorAll('.pmd-tabpanel').forEach(p => {
+        p.style.display = p.dataset.panel === target ? '' : 'none';
+      });
+    });
+  });
+
+  // ── Segmented filter toggle ──
+  document.querySelectorAll('.pa-segmented button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.pa-segmented button').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
+      const tag = btn.dataset.tag;
+      filterCards(tag);
+    });
+  });
+
+  // Search
+  const searchInput = document.querySelector('.pa-search input');
+  searchInput.addEventListener('input', () => {
+    const activeTag = document.querySelector('.pa-segmented button.is-active')?.dataset.tag || 'all';
+    filterCards(activeTag);
+  });
+
+  function filterCards(tag) {
+    const q = searchInput.value.toLowerCase().trim();
+    const cards = document.querySelectorAll('.pa-market-card');
+    let visible = 0;
+    cards.forEach(card => {
+      const cardTags = (card.dataset.tags || '').toLowerCase();
+      const name = card.querySelector('.pa-market-card-name').textContent.toLowerCase();
+      const id = card.querySelector('.pa-market-card-id').textContent.toLowerCase();
+      const desc = card.querySelector('.pa-market-card-desc').textContent.toLowerCase();
+      const tagMatch = tag === 'all' || cardTags.includes(tag);
+      const qMatch = !q || name.includes(q) || id.includes(q) || desc.includes(q) || cardTags.includes(q);
+      const show = tagMatch && qMatch;
+      card.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    document.querySelector('.pa-market-meta').innerHTML = `<b>${visible}</b> 项`;
+  }
+</script>
+
+</body>
+</html>

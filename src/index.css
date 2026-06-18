@@ -1453,17 +1453,7 @@ body, #root {
   flex-shrink: 0;
 }
 .pa-market-hero::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 2px;
-  background: linear-gradient(
-    to right,
-    var(--pa-accent) 0%,
-    var(--pa-accent) 12%,
-    transparent 12%,
-    transparent 100%
-  );
+  display: none;
 }
 .pa-market-hero::after {
   content: '';
@@ -1592,10 +1582,21 @@ body, #root {
   font-family: var(--pa-font-ui);
 }
 .pa-repo-input button:hover { background: var(--pa-accent); }
+.pa-repo-input button.is-outline {
+  background: transparent;
+  color: var(--pa-ink-2);
+  border: 1px solid var(--pa-line);
+  padding: 0 8px;
+}
+.pa-repo-input button.is-outline:hover {
+  background: var(--pa-paper-2);
+  color: var(--pa-ink);
+  border-color: var(--pa-line-2);
+}
 
 .pa-market-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 12px;
 }
 .pa-market-card {
@@ -1722,7 +1723,7 @@ body, #root {
 .pa-installed-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
   padding-top: 8px;
@@ -1838,6 +1839,315 @@ body, #root {
   cursor: default;
 }
 .pa-market-cta.is-installed:hover { opacity: 1; }
+
+/* ── Plugin Market Detail (.pmd-*) ────────────────────
+   Detail dialog styles for the plugin marketplace.
+   Uses the same pa-* design tokens. */
+
+/* Header */
+.pmd-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  flex-shrink: 0;
+}
+.pmd-header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--pa-radius);
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  flex-shrink: 0;
+}
+.pmd-header-icon svg { width: 18px; height: 18px; }
+.pmd-header-info {
+  flex: 1;
+  min-width: 0;
+}
+.pmd-header-title {
+  font-family: var(--pa-font-display);
+  font-style: italic;
+  font-size: 20px;
+  line-height: 1.2;
+  color: var(--pa-ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pmd-header-id {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  margin-top: 2px;
+}
+.pmd-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--pa-mute);
+  border-radius: var(--pa-radius);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  padding: 0;
+}
+.pmd-close:hover { background: var(--pa-paper-2); color: var(--pa-ink); }
+.pmd-close svg { width: 16px; height: 16px; }
+
+/* Scrollable body */
+.pmd-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+/* Tab panel */
+.pmd-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+/* Overview */
+.pmd-overview { display: flex; flex-direction: column; gap: 12px; }
+.pmd-desc {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--pa-ink-2);
+  margin: 0;
+}
+.pmd-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  letter-spacing: 0.01em;
+}
+.pmd-meta-dot { color: var(--pa-mute); }
+.pmd-meta-sep { color: var(--pa-line); }
+.pmd-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Tab strip */
+.pmd-tabstrip {
+  display: flex;
+  gap: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--pa-line);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.pmd-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--pa-font-ui);
+  font-weight: 400;
+  color: var(--pa-ink-2);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  min-height: 32px;
+}
+.pmd-tab:hover { color: var(--pa-ink); }
+.pmd-tab.is-active {
+  color: var(--pa-accent);
+  font-weight: 600;
+  border-bottom-color: var(--pa-accent);
+}
+.pmd-tab svg { width: 12px; height: 12px; }
+.pmd-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+}
+.pmd-tab.is-active .pmd-tab-badge {
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+}
+
+/* Empty state */
+.pmd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  text-align: center;
+}
+.pmd-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background: var(--pa-paper-3);
+  color: var(--pa-mute);
+}
+.pmd-empty-icon svg { width: 28px; height: 28px; }
+.pmd-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink);
+}
+.pmd-empty-hint {
+  font-size: 12px;
+  color: var(--pa-mute);
+}
+
+/* Error alert */
+.pmd-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.3);
+  border-radius: 4px;
+  color: var(--pa-negative);
+  font-size: 12px;
+}
+
+/* Dependencies blocking alert */
+.pmd-deps-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px;
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.3);
+  border-radius: 4px;
+  color: var(--pa-negative);
+  font-size: 12px;
+}
+
+/* Meta dot warn variant */
+.pmd-meta-dot.is-warn { color: var(--pa-warn); }
+
+/* Badge small variant for meta line */
+.pa-market-badge.is-xs {
+  font-size: 8.5px;
+  padding: 0 5px;
+}
+
+/* Permissions list reset */
+.pmd-permissions { display: flex; flex-direction: column; gap: 6px; list-style: none; margin: 0; padding: 0; }
+
+/* Dependencies list reset */
+.pmd-deps { display: flex; flex-direction: column; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.pmd-perm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  font-size: 12px;
+}
+.pmd-perm-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  flex-shrink: 0;
+}
+.pmd-perm-icon svg { width: 14px; height: 14px; }
+.pmd-perm-info { flex: 1; min-width: 0; }
+.pmd-perm-name {
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pmd-perm-desc {
+  font-size: 11px;
+  color: var(--pa-ink-2);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* Dependencies */
+.pmd-dep-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  font-size: 12px;
+  font-family: var(--pa-font-mono);
+}
+.pmd-dep-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.pmd-dep-status.is-ok { color: var(--pa-positive); }
+.pmd-dep-status.is-missing { color: var(--pa-negative); }
+.pmd-dep-status.is-unsatisfied { color: var(--pa-warn); }
+.pmd-dep-status.is-cycle { color: var(--pa-negative); }
+.pmd-dep-status svg { width: 12px; height: 12px; }
+.pmd-dep-id { flex: 1; min-width: 0; }
+.pmd-dep-label {
+  font-size: 11px;
+  font-family: var(--pa-font-ui);
+  color: var(--pa-ink-2);
+}
+
+/* Footer */
+.pmd-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--pa-line);
+  flex-shrink: 0;
+}
+.pmd-footer .pa-btn-primary {
+  background: var(--pa-accent);
+  color: #fff;
+  border-color: var(--pa-accent);
+}
+.pmd-footer .pa-btn-primary:hover { opacity: 0.88; }
 
 /* ── Plugin Storage Inspector (.psi-*) ────────────────────
    The inspector dialog uses a 3-column table: key (truncated,

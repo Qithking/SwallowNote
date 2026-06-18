@@ -911,7 +911,7 @@
       },
       "viewMeta": {
         "installed": "{{total}} total · {{active}} active · {{updates}} updates · last scan <b>{{scan}}</b>",
-        "marketplace": "{{count}} entries · key verified"
+        "marketplace": "{{count}} entries"
       },
       "btn": {
         "search": "Search",
@@ -1030,7 +1030,7 @@
         "keyVerified": "Key verified · ed25519:7f4a…b21c",
         "search": "Search…",
         "heroTitle": "Browse the Atlas",
-        "heroHint": "Paste a repo.json URL to load the catalogue. Updates are verified against an ed25519 signature."
+        "heroHint": "Paste a repo.json URL to load the catalogue."
       },
       "batch": {
         "selectAll": "Select all",

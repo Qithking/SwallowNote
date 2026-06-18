@@ -6,7 +6,6 @@ import {
   RefreshCw,
   X,
   Download,
-  CheckCircle2,
   AlertCircle,
   Package,
   Search,
@@ -213,16 +212,10 @@ function PluginMarketView() {
               placeholder={t('plugin.market.repoPlaceholder', { defaultValue: 'https://…/repo.json' })}
               aria-label="Repository URL"
             />
-            <button type="button" onClick={applyRepoUrl} disabled={!draftUrl.trim()}>
-              {t('plugin.market.apply', { defaultValue: '应用' })}
-            </button>
-          </div>
-          <div className="pa-market-hero-meta">
             <button
               type="button"
-              className="pa-btn pa-btn-ghost"
+              className="is-outline"
               onClick={() => {
-                // Manual refresh with progress tracking
                 void refreshIndexWithProgress()
                 void refreshUpdates()
               }}
@@ -230,12 +223,10 @@ function PluginMarketView() {
               title={t('plugin.market.refresh', { defaultValue: '刷新' })}
             >
               <RefreshCw size={12} className={isFetchingIndex ? 'animate-spin' : ''} />
-              {t('plugin.market.refresh', { defaultValue: '刷新' })}
             </button>
-            <span className="pa-pill" title={t('plugin.pa.market.keyVerified')}>
-              <CheckCircle2 size={10} />
-              {t('plugin.pa.market.keyVerified')}
-            </span>
+            <button type="button" onClick={applyRepoUrl} disabled={!draftUrl.trim()}>
+              {t('plugin.market.apply', { defaultValue: '应用' })}
+            </button>
           </div>
           {/* Progress bar for index fetch */}
           {isFetchingIndex && (
@@ -465,12 +456,8 @@ const PluginMarketCard = memo(function PluginMarketCard({
     ? { cls: 'pa-market-badge is-installed', label: t('plugin.market.badgeInstalled', { defaultValue: 'Installed' }) }
     : { cls: 'pa-market-badge is-install', label: t('plugin.market.badgeInstall', { defaultValue: 'Install' }) }
 
-  // CTA 总是 enabled，点击打开详情对话框
-  const cta = isUpdateAvailable
-    ? { cls: 'pa-market-cta is-update', label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }) }
-    : isInstalled
-    ? { cls: 'pa-market-cta is-installed', label: t('plugin.market.upToDate', { defaultValue: 'Up to date' }) }
-    : { cls: 'pa-market-cta is-install', label: t('plugin.market.badgeInstall', { defaultValue: 'Install' }) }
+  // 已安装且最新时不显示下载图标，仅显示详情图标
+  const showDownloadIcon = !isInstalled || isUpdateAvailable
 
   return (
     <article
@@ -525,22 +512,8 @@ const PluginMarketCard = memo(function PluginMarketCard({
           ))}
         </div>
 
-        {/* actions 行：stopPropagation 防止冒泡 */}
+        {/* actions 行：stopPropagation 防止冒泡，仅保留图标按钮 */}
         <div className="pa-installed-actions" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className={cta.cls}
-            onClick={onClick}
-            title={
-              isUpdateAvailable
-                ? t('plugin.market.updateTo', { defaultValue: 'Update', version })
-                : isInstalled
-                ? t('plugin.market.upToDate', { defaultValue: 'Up to date' })
-                : t('plugin.market.badgeInstall', { defaultValue: 'Install' })
-            }
-          >
-            {cta.label}
-          </button>
           <div className="pa-icon-row">
             <button
               type="button"
@@ -550,18 +523,20 @@ const PluginMarketCard = memo(function PluginMarketCard({
             >
               <Info />
             </button>
-            <button
-              type="button"
-              className="pa-icon-btn"
-              title={
-                isUpdateAvailable
-                  ? t('plugin.market.updateTo', { defaultValue: '更新到 v{{version}}', version })
-                  : t('plugin.market.installNow', { defaultValue: '立即安装' })
-              }
-              onClick={onClick}
-            >
-              <Download />
-            </button>
+            {showDownloadIcon && (
+              <button
+                type="button"
+                className="pa-icon-btn"
+                title={
+                  isUpdateAvailable
+                    ? t('plugin.market.updateTo', { defaultValue: '更新到 v{{version}}', version })
+                    : t('plugin.market.installNow', { defaultValue: '立即安装' })
+                }
+                onClick={onClick}
+              >
+                <Download />
+              </button>
+            )}
           </div>
         </div>
       </div>

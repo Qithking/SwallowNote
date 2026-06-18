@@ -911,7 +911,7 @@
       },
       "viewMeta": {
         "installed": "共 <b>{{total}}</b> · 启用 <b>{{active}}</b> · 更新 <b>{{updates}}</b> · 上次扫描 <b>{{scan}}</b>",
-        "marketplace": "<b>{{count}}</b> 项 · 已验证密钥"
+        "marketplace": "<b>{{count}}</b> 项"
       },
       "btn": {
         "search": "搜索",
@@ -1030,7 +1030,7 @@
         "keyVerified": "密钥已验证 · ed25519:7f4a…b21c",
         "search": "搜索…",
         "heroTitle": "浏览插件目录",
-        "heroHint": "粘贴一个 repo.json URL 来加载插件目录。更新通过 ed25519 签名验证。"
+        "heroHint": "粘贴一个 repo.json URL 来加载插件目录。"
       },
       "batch": {
         "selectAll": "全选",
