@@ -19,13 +19,6 @@ function systemPrefersDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
-function resolveEffective(theme: string | undefined): EffectiveTheme {
-  if (theme === 'dark') return 'dark'
-  if (theme === 'light') return 'light'
-  // 'system' (or anything unrecognised) follows the OS.
-  return systemPrefersDark() ? 'dark' : 'light'
-}
-
 let currentTheme = 'system'
 const themeListeners = new Set<(t: string) => void>()
 

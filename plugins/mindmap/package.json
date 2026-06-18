@@ -1,6 +1,6 @@
 {
   "name": "swallownote-plugin-mindmap",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "description": "Mind map editor plugin for SwallowNote, powered by simple-mind-map",
   "type": "module",
   "scripts": {

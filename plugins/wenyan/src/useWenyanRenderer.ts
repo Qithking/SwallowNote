@@ -266,6 +266,7 @@ export function useWenyanRenderer() {
         const isWechatPlatform = options.platform === 'wechat'
         const wenyan = await ensureCore(isWechatPlatform)
         const fm = await wenyan.handleFrontMatter(markdown)
+        setTitle(fm.title || '')
         const rawHtml = await wenyan.renderMarkdown(fm.content)
         const article = ensureContainer()
         article.innerHTML = rawHtml
@@ -283,11 +284,10 @@ export function useWenyanRenderer() {
         if (options.customThemeCss) {
           applyOptions.themeCss = options.customThemeCss
         }
-        const styledHtml = await wenyan.applyStylesWithTheme(article, applyOptions)
+        await wenyan.applyStylesWithTheme(article, applyOptions)
         // For non-WeChat platforms, run the platform-specific post-
         // processing. It mutates the article in place and returns its
         // outerHTML.
-        let finalHtml = styledHtml
         if (!isWechatPlatform) {
           const mod = await getWenyanModule()
           const platformFn =
@@ -299,9 +299,10 @@ export function useWenyanRenderer() {
                   ? mod.getContentForMedium
                   : null
           if (platformFn) {
-            finalHtml = platformFn(article)
+            platformFn(article)
           }
-          // Juejin: no platform-specific function, styledHtml is final.
+          // Juejin: no platform-specific function, the article is
+          // used as-is after `applyStylesWithTheme` mutates it.
         }
         // Append user overrides as a <style> tag inside the article so
         // they ride along with the copied HTML.

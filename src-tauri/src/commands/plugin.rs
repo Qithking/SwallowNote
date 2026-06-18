@@ -116,7 +116,7 @@ pub(crate) fn resolve_plugin_dir(plugins_root: &Path, plugin_id: &str) -> Option
             continue;
         }
         // Skip hidden bookkeeping dirs
-        if path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.')) {
+        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
             continue;
         }
         if let Some(active_dir) = active_version_dir(&path) {
@@ -413,7 +413,7 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
 
         // Hidden bookkeeping directories under the plugin root — skip them
         // if they show up as bare entries (e.g. an unversioned install).
-        if path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with('.')) {
+        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
             // Skip known internal directories: .versions, .installing-*
             continue;
         }
@@ -816,7 +816,7 @@ pub fn get_all_plugin_storage_sizes(
         if path
             .file_name()
             .and_then(|n| n.to_str())
-            .map_or(false, |n| n.starts_with('.'))
+            .is_some_and(|n| n.starts_with('.'))
         {
             continue;
         }
@@ -1349,8 +1349,8 @@ pub async fn check_plugin_updates(
     use std::time::{Duration, Instant};
     use tokio::sync::Mutex;
 
-    static UPDATES_CACHE: OnceLock<Mutex<Option<(String, Instant, Vec<PluginUpdateInfo>)>>> =
-        OnceLock::new();
+    type UpdatesCacheEntry = (String, Instant, Vec<PluginUpdateInfo>);
+    static UPDATES_CACHE: OnceLock<Mutex<Option<UpdatesCacheEntry>>> = OnceLock::new();
     let cache = UPDATES_CACHE.get_or_init(|| Mutex::new(None));
     const UPDATES_CACHE_TTL: Duration = Duration::from_secs(30);
     const UPDATES_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1969,6 +1969,7 @@ fn read_export_manifest<R: std::io::Read + std::io::Seek>(
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 mod tests {
     use super::*;
 
@@ -2208,7 +2209,7 @@ mod tests {
         // bundle 可触发 OOM。如果未来需要修改这个值,本测试
         // 需要同步更新并 review 风险。
         assert_eq!(MAX_PLUGIN_CONFIG_SIZE, 16 * 1024 * 1024);
-        assert!(MAX_PLUGIN_CONFIG_SIZE > 0);
+        const { assert!(MAX_PLUGIN_CONFIG_SIZE > 0) };
     }
 
     /// Wave B / M5: 旧测试用 2 MiB 触发 "oversized" 分支,新阈值
@@ -2279,9 +2280,9 @@ mod tests {
     #[test]
     fn test_max_plugin_config_size_boundary() {
         // 恰好等于上限:允许
-        assert!(!(MAX_PLUGIN_CONFIG_SIZE > MAX_PLUGIN_CONFIG_SIZE));
+        const { assert!(!(MAX_PLUGIN_CONFIG_SIZE > MAX_PLUGIN_CONFIG_SIZE)) };
         // 上限 + 1:拒绝
-        assert!(MAX_PLUGIN_CONFIG_SIZE + 1 > MAX_PLUGIN_CONFIG_SIZE);
+        const { assert!(MAX_PLUGIN_CONFIG_SIZE + 1 > MAX_PLUGIN_CONFIG_SIZE) };
     }
 
     /// M5: 用 semver crate 比较版本。

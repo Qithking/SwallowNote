@@ -50,7 +50,7 @@ pub fn t(key: &str) -> String {
 
 /// Get a translated string for the given key using the specified locale.
 pub fn t_with_locale(key: &str, locale: &str) -> String {
-    let translations = TRANSLATIONS.read().unwrap();
+    let translations = TRANSLATIONS.read().unwrap_or_else(|e| e.into_inner());
 
     // Try the requested locale first
     if let Some(value) = translations.get(locale) {

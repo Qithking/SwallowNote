@@ -47,11 +47,6 @@ export class ImageValidationError extends Error {
   readonly name = 'ImageValidationError'
 }
 
-function getExtension(filename: string): string {
-  const i = filename.lastIndexOf('.')
-  return i >= 0 ? filename.slice(i + 1).toLowerCase() : ''
-}
-
 function replaceExtension(filename: string, ext: string): string {
   const i = filename.lastIndexOf('.')
   const base = i >= 0 ? filename.slice(0, i) : filename

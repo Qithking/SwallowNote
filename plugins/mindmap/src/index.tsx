@@ -39,9 +39,9 @@ const manifest: PluginManifest = {
   name: '思维导图',
   description:
     '基于 simple-mind-map 的独立 .smm 文件编辑器，提供逻辑结构图/思维导图/组织结构/时间轴/鱼骨图等多种布局',
-  version: '0.1.0',
+  version: '0.2.2',
   author: 'SwallowNote',
-  publishedAt: '2026-06-17',
+  publishedAt: '2026-06-18T06:59:47Z',
   order: 50,
   enabled: true,
   editorFileExtensions: ['.smm'],

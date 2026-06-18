@@ -72,7 +72,9 @@ async function loadPluginModuleWithRef(
     const { readFile } = await import('@/lib/tauri')
     code = await readFile(indexJsPath)
 
-    console.log(`[PluginLoader] Read ${indexJsPath}: ${code.length} chars, hasReactImport: ${code.includes('from "react"')}, hasBundledReact: ${code.includes('__SECRET_INTERNALS')}`)
+    if (import.meta.env.DEV) {
+      console.log(`[PluginLoader] Read ${indexJsPath}: ${code.length} chars, hasReactImport: ${code.includes('from "react"')}, hasBundledReact: ${code.includes('__SECRET_INTERNALS')}`)
+    }
 
     // If the plugin bundles its own React copy (not just references
     // window.React's internals), it will crash at runtime with
@@ -275,7 +277,9 @@ async function loadPluginModuleWithRef(
         'const $1 = window.ReactI18Next;'
       )
 
-    console.log(`[PluginLoader] After transform: ${code.length} chars, still hasReactImport: ${code.includes('from "react"')}, first 300 chars:`, code.substring(0, 300))
+    if (import.meta.env.DEV) {
+      console.log(`[PluginLoader] After transform: ${code.length} chars, still hasReactImport: ${code.includes('from "react"')}, first 300 chars:`, code.substring(0, 300))
+    }
 
     const blob = new Blob([code], { type: 'application/javascript' })
     const blobUrl = URL.createObjectURL(blob)
@@ -287,20 +291,24 @@ async function loadPluginModuleWithRef(
       URL.revokeObjectURL(blobUrl)
     }
 
-    console.log(`[PluginLoader] Loaded module from ${pluginPath}`, {
-      keys: Object.keys(module),
-      hasDefault: 'default' in module,
-      defaultType: typeof module.default,
-    })
+    if (import.meta.env.DEV) {
+      console.log(`[PluginLoader] Loaded module from ${pluginPath}`, {
+        keys: Object.keys(module),
+        hasDefault: 'default' in module,
+        defaultType: typeof module.default,
+      })
+    }
     const manifest = (module.default || module.manifest || null) as PluginManifest | null
     if (manifest) {
-      console.log(`[PluginLoader] Manifest for ${manifest.id}:`, {
-        iconPosition: manifest.iconPosition,
-        contentPosition: manifest.contentPosition,
-        hasToolbarButton: !!manifest.toolbarButton,
-        hasIcon: !!manifest.icon,
-        hasPanel: !!manifest.panel,
-      })
+      if (import.meta.env.DEV) {
+        console.log(`[PluginLoader] Manifest for ${manifest.id}:`, {
+          iconPosition: manifest.iconPosition,
+          contentPosition: manifest.contentPosition,
+          hasToolbarButton: !!manifest.toolbarButton,
+          hasIcon: !!manifest.icon,
+          hasPanel: !!manifest.panel,
+        })
+      }
     } else {
       console.warn(`[PluginLoader] No manifest found in module from ${pluginPath}`)
     }
@@ -482,7 +490,9 @@ interface PluginLoadOutcome {
 export async function loadAllPlugins(
   rustMetas: PluginMetadataRust[]
 ): Promise<PluginLoadResult> {
-  console.log(`[PluginLoader] loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
+  if (import.meta.env.DEV) {
+    console.log(`[PluginLoader] loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
+  }
   return loadWithConcurrency(rustMetas, async (meta) => {
       // loadPluginModuleWithRef already catches synchronous and
       // async errors and returns `{ manifest: null, module: null }`

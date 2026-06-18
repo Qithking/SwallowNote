@@ -236,6 +236,30 @@ export interface ToolbarButtonProps {
   activeNoteContent: string
   /** Current active note file path. Empty string if no note is active. */
   activeNotePath: string
+  /**
+   * Current active note file name (last path segment, e.g.
+   * `note.md`). Empty string when no note is active. Plugins use
+   * this for UI hints without re-parsing `activeNotePath`.
+   */
+  activeNoteName: string
+  /**
+   * Lower-cased file extension of the active note (without the
+   * leading dot, e.g. `"md"`, `"markdown"`, `"json"`). Empty string
+   * when no note is active or the file has no extension. Plugins
+   * gate visibility on this value (e.g. return `null` from the
+   * toolbar button when the extension is not in their supported
+   * set) instead of re-deriving a regex from the path.
+   */
+  activeNoteExt: string
+  /**
+   * `true` when the host has detected that the active note is a
+   * Markdown file (i.e. `activeNoteExt` is `md` or `markdown`).
+   * Plugins that only make sense for Markdown can either return
+   * `null` from their toolbar button (so the host renders nothing
+   * for non-markdown files) or use it as a shorter check than
+   * `activeNoteExt === 'md' || activeNoteExt === 'markdown'`.
+   */
+  isActiveNoteMarkdown: boolean
   /** Read a single setting from the plugin's schema. See
    *  {@link PluginPanelProps.getSetting} for details. */
   getSetting<T = unknown>(key: string): Promise<T | null>

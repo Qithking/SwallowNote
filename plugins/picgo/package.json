@@ -1,6 +1,6 @@
 {
   "name": "swallownote-plugin-picgo",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "PicGo-style image host plugin for SwallowNote",
   "type": "module",
   "scripts": {

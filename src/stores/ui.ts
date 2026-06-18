@@ -3,6 +3,7 @@
  */
 import { create } from 'zustand'
 import { toast } from 'sonner'
+import i18n from '@/i18n'
 import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
 import { AiModelConfig, generateModelId } from '@/lib/ai'
@@ -510,7 +511,7 @@ export interface UIState {
   loadSettings: () => Promise<void>
 }
 
-export const useUIStore = create<UIState>((set) => ({
+export const useUIStore = create<UIState>((set, get) => ({
   theme: 'light',
   themeColor: '#005fb8',
   sidebarView: 'explorer',
@@ -624,7 +625,14 @@ export const useUIStore = create<UIState>((set) => ({
   setAutoStart: (value) => {
     set({ autoStart: value })
     saveAppSettings({ autoStart: String(value) })
-    setAutoStartEnabled(value).catch(() => {})
+    setAutoStartEnabled(value).catch((err) => {
+      // OS-level registration (LaunchAgent / registry) failed — the
+      // UI is now ahead of reality. Roll back the optimistic state
+      // and surface the error so the user isn't silently misled.
+      console.error('[ui] setAutoStartEnabled failed', err)
+      toast.error(i18n.t('settings.general.autoStart.failed'), { description: String(err) })
+      get().setAutoStart(!value)
+    })
     queueMicrotask(() => emitSettingChanged('autoStart', value))
   },
   setAutoCheckUpdate: (value) => {
@@ -695,7 +703,13 @@ export const useUIStore = create<UIState>((set) => ({
       saveAppSettings({ aiApiKey: encrypted })
       const { aiProvider, aiBaseUrl, aiModel, aiPort } = useUIStore.getState()
       if (aiProvider) {
-        restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch(() => {})
+        // Restart failure means the new key is persisted but chat
+        // still proxies through the old config — surface this so
+        // the user knows the change hasn't taken effect yet.
+        restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch((err) => {
+          console.error('[ui] restartAiProxy failed', err)
+          toast.error(i18n.t('settings.ai.restartFailed'), { description: String(err) })
+        })
       }
     } catch {
       set({ aiApiKeyDecrypted: key })

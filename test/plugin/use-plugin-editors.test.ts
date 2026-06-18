@@ -9,7 +9,7 @@
  * function unsubscribes the handler so a hot-reload or
  * remount doesn't double-subscribe.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import {
   pluginEditorRegistry,
@@ -20,7 +20,6 @@ import {
 import { setHost as sdkSetHost, clearHost as sdkClearHost } from '@swallow-note/plugin-sdk'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
 import { clearAll as clearPermissions, setGranted } from '@/lib/plugin-permission-guard'
-import { pluginEventBus } from '@/lib/plugin-host'
 import type { PluginDefinition } from '@/types/plugin'
 import type { PluginContext, HostOverrides } from '@swallow-note/plugin-sdk'
 

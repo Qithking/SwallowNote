@@ -747,7 +747,7 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
     activeNoteContent,
     activeNotePath,
     activeNoteName,
-    isActiveNoteMarkdown,
+    activeNoteExt,
   } = props
   const [menuOpen, setMenuOpen] = useState(false)
   // We track the in-flight state via both a ref (for synchronous
@@ -761,6 +761,18 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   // re-render that updates `window.__SWALLOW_LOCALE__` will be
   // picked up on the next render.
   const strings = getStrings(readLocale())
+
+  // Markdown-only: the backend serialises Markdown to HTML / DOCX /
+  // PDF, so the toolbar button only makes sense for Markdown files.
+  // The host passes the lower-cased `activeNoteExt` (without the
+  // leading dot) so we can branch on the extension directly
+  // instead of re-parsing `activeNotePath`. Returning `null` for
+  // non-Markdown files hides the entire dropdown (and its icon)
+  // from the editor toolbar, which is the desired behaviour for
+  // `Code` / `Binary` / `MindMap` notes.
+  if (activeNoteExt !== 'md' && activeNoteExt !== 'markdown') {
+    return null
+  }
 
   // Derive note name from path. Falls back to the full path so
   // the user always sees a meaningful filename in the save
@@ -776,17 +788,6 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   // handlers, and a document with only whitespace is still
   // considered "empty".
   const hasContent = activeNoteContent.trim().length > 0
-  // Markdown-only: backend serialises Markdown to HTML/DOCX/PDF.
-  // We disable the entire toolbar button (and the menu items) for
-  // any other file type, and rely on the host's pre-computed
-  // `isActiveNoteMarkdown` flag so we don't drift from the
-  // host's notion of "markdown".
-  const notMarkdown = !isActiveNoteMarkdown
-  const disabledTitle = notMarkdown
-    ? activeNoteName
-      ? `文档导出仅支持 Markdown 文件（当前：${activeNoteName}）`
-      : '文档导出仅支持 Markdown 文件'
-    : strings.tooltip
 
   // Close menu on outside click.
   useEffect(() => {
@@ -931,20 +932,15 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   return (
     <div ref={menuRef} className="relative">
       <button
-        onClick={() => {
-          if (notMarkdown) return
-          setMenuOpen(!menuOpen)
-        }}
-        disabled={notMarkdown}
-        aria-disabled={notMarkdown}
-        className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        onClick={() => setMenuOpen(!menuOpen)}
+        className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
         style={{ color: menuOpen ? 'var(--theme-color)' : 'var(--text-primary)' }}
-        title={disabledTitle}
-        aria-label={disabledTitle}
+        title={strings.tooltip}
+        aria-label={strings.tooltip}
       >
         <ExportIcon size={size} />
       </button>
-      {menuOpen && !notMarkdown && (
+      {menuOpen && (
         <div
           className="absolute right-0 top-full mt-1 z-50 rounded-lg py-1 min-w-[140px]"
           style={{
@@ -1016,7 +1012,7 @@ const manifest: PluginManifest = {
   id: 'com.swallownote.export',
   name: '文档导出',
   description: '将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式',
-  version: '0.2.1',
+  version: '0.2.3',
   author: 'SwallowNote',
   publishedAt: '2026-06-13',
   iconPosition: 'editorToolbar',

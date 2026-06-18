@@ -1,6 +1,6 @@
 {
   "name": "swallownote-plugin-export",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "Export Markdown documents to Word (.docx) or PDF format",
   "type": "module",
   "scripts": {

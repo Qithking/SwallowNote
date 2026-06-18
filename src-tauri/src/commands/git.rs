@@ -130,7 +130,7 @@ pub async fn git_status(path: String) -> Result<GitStatus, String> {
 /// Get git diff for a specific file
 #[tauri::command]
 pub async fn git_diff(path: String, file_path: String) -> Result<String, String> {
-    run_git(&path, &["diff", "--", &file_path]).map_err(|e| e)
+    run_git(&path, &["diff", "--", &file_path])
 }
 
 /// Stage all changes and commit
@@ -1948,7 +1948,7 @@ async fn do_git_clone(
     }));
 
     // If credentials provided, set up GIT_ASKPASS
-    let askpass_script_path = if username.is_some() && password.is_some() {
+    let askpass_script_path = if let (Some(username), Some(password)) = (username, password) {
         let temp_dir = std::env::temp_dir();
         let unique_id = uuid::Uuid::new_v4().to_string();
         let askpass_script = temp_dir.join(format!("swallownote_clone_askpass_{}.sh", unique_id));
@@ -1956,15 +1956,15 @@ async fn do_git_clone(
         #[cfg(not(target_os = "windows"))]
         let script_content = format!(
             "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
-            username.unwrap().replace('\'', "'\\''"),
-            password.unwrap().replace('\'', "'\\''")
+            username.replace('\'', "'\\''"),
+            password.replace('\'', "'\\''")
         );
 
         #[cfg(target_os = "windows")]
         let script_content = format!(
             "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
-            username.unwrap().replace('"', "\"\""),
-            password.unwrap().replace('"', "\"\"")
+            username.replace('"', "\"\""),
+            password.replace('"', "\"\"")
         );
 
         std::fs::write(&askpass_script, &script_content)
@@ -2003,14 +2003,12 @@ async fn do_git_clone(
     // Read stderr for progress (git clone outputs progress to stderr)
     if let Some(stderr) = child.stderr.take() {
         let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                // Send progress update
-                let _ = app.emit("git-clone-progress", serde_json::json!({
-                    "status": "progress",
-                    "message": line
-                }));
-            }
+        for line in reader.lines().map_while(Result::ok) {
+            // Send progress update
+            let _ = app.emit("git-clone-progress", serde_json::json!({
+                "status": "progress",
+                "message": line
+            }));
         }
     }
 

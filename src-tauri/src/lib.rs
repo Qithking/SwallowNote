@@ -65,6 +65,13 @@ fn show_dock_icon() {
     let _ = set_dock_icon_visibility_inner(true);
 }
 
+/// 1x1 透明 RGBA 图标，用作 tray 图标加载失败时的兜底，避免在
+/// `tauri.conf.json` 缺 `bundle.icon` 等场景下 panic 整应用。
+fn default_tray_icon() -> tauri::image::Image<'static> {
+    let rgba = vec![0u8, 0, 0, 0]; // 透明 1x1
+    tauri::image::Image::new_owned(rgba, 1, 1)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -231,9 +238,17 @@ pub fn run() {
                 .build()?;
 
             let tray_icon = if let Ok(tray_icon_path) = app.path().resolve("icons/tray-icon.png", BaseDirectory::Resource) {
-                Image::from_path(&tray_icon_path).unwrap_or_else(|_| app.default_window_icon().unwrap().clone())
+                Image::from_path(&tray_icon_path).unwrap_or_else(|_| {
+                    app.default_window_icon()
+                        .cloned()
+                        .map(|img| img.to_owned())
+                        .unwrap_or_else(default_tray_icon)
+                })
             } else {
-                app.default_window_icon().unwrap().clone()
+                app.default_window_icon()
+                    .cloned()
+                    .map(|img| img.to_owned())
+                    .unwrap_or_else(default_tray_icon)
             };
 
             let _tray = TrayIconBuilder::new()

@@ -265,14 +265,14 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
                 if parts.len() >= 3 {
                     // The last part(s) form the mount point path
                     // hdiutil output: tab-separated, last field is mount point
-                    let mount = line.split('\t').last().unwrap_or("").trim();
+                    let mount = line.split('\t').next_back().unwrap_or("").trim();
                     if mount.starts_with("/Volumes/") {
                         return Some(mount.to_string());
                     }
                 }
                 None
             })
-            .last()
+            .next_back()
             .ok_or_else(|| "Could not determine DMG mount point".to_string())?;
 
         // Step 2: Find the .app bundle in the mounted volume

@@ -16,7 +16,7 @@
  * `onEnable` (the store does this on re-enable so the plugin
  * catches up on any state it missed while disabled).
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
 import {
   registerEditor as sdkRegisterEditor,

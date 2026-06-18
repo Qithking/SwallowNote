@@ -8,7 +8,7 @@
  * off→on doesn't re-render the file tree context menu or
  * re-render an open `.smm` tab.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
 import {
   registerEditor as sdkRegisterEditor,

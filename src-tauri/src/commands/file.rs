@@ -481,7 +481,7 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
             .arg("-e")
             .arg("pb's clearContents()")
             .arg("-e")
-            .arg(&format!(
+            .arg(format!(
                 "set fileURL to current application's NSURL's fileURLWithPath:\"{}\"",
                 escaped_path
             ))
@@ -858,7 +858,7 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
             
             if let Ok(file) = std::fs::File::open(&path) {
                 let reader = BufReader::new(file);
-                let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+                let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
                 
                 let mut line_matches: Vec<LineMatch> = Vec::new();
                 

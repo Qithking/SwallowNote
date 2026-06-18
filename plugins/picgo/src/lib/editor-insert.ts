@@ -20,7 +20,7 @@ export function buildInsertText(
   result: UploadResult,
   format: LinkFormat
 ): string {
-  const alt = (result.filename || 'image').replace(/[\[\]]/g, '')
+  const alt = (result.filename || 'image').replace(/[[\]]/g, '')
   switch (format) {
     case 'markdown':
       return `![${alt}](${result.url})`

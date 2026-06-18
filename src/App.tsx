@@ -203,7 +203,9 @@ function App() {
         await saveSessionStateNow()
         await win.hide()
         const { setDockIconVisibility } = await import('@/lib/tauri')
-        setDockIconVisibility(false).catch(() => {})
+        // Cosmetic side effect — a failure here doesn't block close,
+        // but log it so the silent loss isn't completely invisible.
+        setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
       } else {
         await saveSessionStateNow()
         await win.destroy()
@@ -461,7 +463,9 @@ function App() {
     if (closeWithoutExit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
-      setDockIconVisibility(false).catch(() => {})
+      // Cosmetic side effect — a failure here doesn't block close,
+      // but log it so the silent loss isn't completely invisible.
+      setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
     } else {
       await win.destroy()
     }
@@ -482,7 +486,9 @@ function App() {
     if (closeWithoutExit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
-      setDockIconVisibility(false).catch(() => {})
+      // Cosmetic side effect — a failure here doesn't block close,
+      // but log it so the silent loss isn't completely invisible.
+      setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
     } else {
       await win.destroy()
     }

@@ -1,6 +1,6 @@
 [package]
 name = "swallownote-plugin-export"
-version = "0.1.0"
+version = "0.2.3"
 description = "SwallowNote export plugin backend — Markdown to DOCX conversion"
 authors = ["SwallowNote"]
 edition = "2021"
