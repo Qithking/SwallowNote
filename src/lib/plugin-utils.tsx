@@ -116,15 +116,24 @@ export function isFullPanelPluginActive(
 
 /**
  * Render a plugin's icon. Handles both ComponentType and ReactNode.
+ *
+ * Returns `null` when the icon is `undefined` so the caller can
+ * safely invoke the helper on a headless plugin (one that
+ * doesn't declare a UI surface) without a type guard. This is
+ * what lets a file-format editor (e.g. the `mindmap` plugin)
+ * slip through `buildRegistry` / `getActivePluginExtensions`
+ * paths without crashing the title bar / activity bar
+ * rendering.
  */
 export function renderPluginIcon(
-  icon: ComponentType<{ size?: number }> | ReactNode,
+  icon: ComponentType<{ size?: number }> | ReactNode | undefined,
   size: number = 18
 ): ReactNode {
   // Use isComponentLike to correctly identify component-like values,
   // including those wrapped in forwardRef / memo. A bare
   // `typeof === 'function'` check would miss those wrappers and try to
   // render them as a function rather than a component.
+  if (icon == null) return null
   if (isComponentLike(icon)) {
     const IconComponent = icon as ComponentType<{ size?: number }>
     return <IconComponent size={size} />

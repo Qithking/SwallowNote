@@ -172,6 +172,18 @@ function buildRegistry(plugins: PluginDefinition[]): PluginRegistry {
   const registry: PluginRegistry = { sidebar: [], editorToolbar: [], titleBar: [] }
   for (const plugin of plugins) {
     if (!plugin.enabled) continue
+    // Plugins without a `iconPosition` are headless — they
+    // don't render anywhere in the title bar / activity bar /
+    // editor toolbar. Typical example: a file-format editor
+    // (e.g. the `com.swallownote.mindmap` plugin for `.smm`
+    // files) that only contributes `editorFileExtensions`.
+    // The plugin is still loaded, its lifecycle hooks still
+    // fire, and its `editorFileExtensions` claim is still
+    // honoured — it just doesn't appear in any chrome
+    // surface. We intentionally skip the unknown-position
+    // warning here because a missing position is a valid
+    // choice, not a typo.
+    if (!plugin.iconPosition) continue
     const key = plugin.iconPosition
     if (key in registry) {
       registry[key].push(plugin)

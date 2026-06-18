@@ -8,9 +8,10 @@
  *     the host delegates rendering of any `.smm` note to this
  *     plugin's React component instead of the built-in Markdown
  *     / code editor.
- *   - `iconPosition: 'titleBar'` + `panel` so users can still
- *     open the plugin's own panel from the title-bar icon
- *     (shows a hint pointing them to a `.smm` file).
+ *
+ * The plugin has no title-bar icon and no standalone panel: it
+ * is only triggered when the user opens a `.smm` file from the
+ * file tree.
  *
  * Lifecycle wiring: declaring `editorFileExtensions` +
  * `editorComponent` in the manifest is **not enough** to take
@@ -31,8 +32,6 @@
 import type { PluginContext, PluginManifest } from '@swallow-note/plugin-sdk'
 import { registerEditor, unregisterEditor } from '@swallow-note/plugin-sdk'
 export { setHost } from '@swallow-note/plugin-sdk'
-import { MindMapIcon } from './MindMapIcon'
-import { MindMapPanel } from './MindMapPanel'
 import { MindMapEditorView } from './MindMapEditorView'
 
 const manifest: PluginManifest = {
@@ -43,12 +42,8 @@ const manifest: PluginManifest = {
   version: '0.1.0',
   author: 'SwallowNote',
   publishedAt: '2026-06-17',
-  iconPosition: 'titleBar',
-  contentPosition: 'fullPanel',
   order: 50,
   enabled: true,
-  icon: MindMapIcon,
-  panel: MindMapPanel,
   editorFileExtensions: ['.smm'],
   editorComponent: MindMapEditorView as PluginManifest['editorComponent'],
   permissions: ['editor', 'events', 'storage'],

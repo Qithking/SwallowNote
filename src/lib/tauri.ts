@@ -886,8 +886,21 @@ export interface PluginMetadataRust {
   version: string
   author: string
   published_at: string
-  icon_position: string
-  content_position: string
+  /**
+   * Where to show the plugin's icon. `null` / `undefined`
+   * means the plugin has no UI surface (e.g. a file-format
+   * editor that's only triggered by opening the matching
+   * file). The host's `buildRegistry` skips the plugin in
+   * that case, but the plugin's other capabilities
+   * (`editorFileExtensions`, lifecycle hooks, settings, …)
+   * are still honoured.
+   */
+  icon_position: string | null
+  /**
+   * Where to show the plugin's panel content. Optional for
+   * the same reason as `icon_position`.
+   */
+  content_position: string | null
   order: number
   enabled: boolean
   plugin_path: string

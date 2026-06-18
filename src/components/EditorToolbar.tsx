@@ -124,7 +124,7 @@ function EditorToolbar() {
   }
 
   // Helper: compute activate/deactivate callbacks for a plugin
-  const getPluginActivateCallbacks = (pluginId: string, contentPosition: string) => {
+  const getPluginActivateCallbacks = (pluginId: string, contentPosition: string | undefined) => {
     const activate = () => {
       if (contentPosition === 'rightPanel') {
         setRightPanelType(pluginRightPanelType(pluginId))
@@ -162,7 +162,7 @@ function EditorToolbar() {
   }
 
   // Helper: check if a plugin is currently active
-  const isPluginActive = (plugin: { id: string; contentPosition: string }): boolean => {
+  const isPluginActive = (plugin: { id: string; contentPosition?: string }): boolean => {
     if (plugin.contentPosition === 'rightPanel') {
       return rightPanelType === pluginRightPanelType(plugin.id)
     } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {

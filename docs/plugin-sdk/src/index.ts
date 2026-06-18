@@ -266,12 +266,41 @@ export interface PluginManifest {
   version?: string
   author?: string
   publishedAt?: string
-  iconPosition: IconPosition
-  contentPosition: ContentPosition
+  /**
+   * Where to show the plugin's icon. Optional: a plugin that
+   * does not provide a UI surface (e.g. a file-format editor
+   * that's only triggered by opening the matching file) can
+   * omit this field. When omitted, the host's
+   * `buildRegistry` simply skips the plugin (no icon is
+   * rendered anywhere, no panel mount is attempted) but the
+   * plugin's other capabilities (`editorFileExtensions`,
+   * lifecycle hooks, settings, …) are still honoured.
+   */
+  iconPosition?: IconPosition
+  /**
+   * Where to show the plugin's panel content. Optional for
+   * the same reason as `iconPosition`: a plugin that only
+   * contributes an `editorComponent` (e.g. mind map) has no
+   * standalone panel to mount, so this field can be omitted.
+   */
+  contentPosition?: ContentPosition
   order?: number
   enabled?: boolean
-  icon: ComponentType<{ size?: number }>
-  panel: ComponentType<PluginPanelProps>
+  /**
+   * Icon component. Optional: omit when the plugin does not
+   * provide a UI surface. A plugin that omits both `icon`
+   * and `iconPosition` will not be rendered in any of the
+   * host's chrome surfaces (title bar / activity bar /
+   * editor toolbar). It can still contribute
+   * `editorFileExtensions`, lifecycle hooks, and settings.
+   */
+  icon?: ComponentType<{ size?: number }>
+  /**
+   * Panel content component. Optional: omit when the plugin
+   * does not provide a standalone panel. The host will not
+   * try to mount a panel for the plugin.
+   */
+  panel?: ComponentType<PluginPanelProps>
   /**
    * Optional custom toolbar button component. When provided, the host
    * renders this component instead of the default icon + button pattern.
@@ -337,12 +366,34 @@ export interface PluginDefinition {
   version: string
   author: string
   publishedAt: string
-  iconPosition: IconPosition
-  contentPosition: ContentPosition
+  /**
+   * Where to show the plugin's icon. Optional: a plugin that
+   * does not provide a UI surface (e.g. a file-format editor)
+   * can omit this field. The host's `buildRegistry` skips
+   * plugins whose `iconPosition` is undefined so they never
+   * appear in the title bar / activity bar / editor toolbar.
+   */
+  iconPosition?: IconPosition
+  /**
+   * Where to show the plugin's panel content. Optional for
+   * the same reason as `iconPosition`.
+   */
+  contentPosition?: ContentPosition
   order: number
   enabled: boolean
-  icon: ComponentType<{ size?: number }>
-  panel: ComponentType<PluginPanelProps>
+  /**
+   * Resolved icon component. Optional: omitted when the
+   * manifest does not declare a UI surface. A plugin without
+   * `icon` and `iconPosition` does not render anywhere in the
+   * host's chrome but can still register
+   * `editorFileExtensions`, lifecycle hooks, etc.
+   */
+  icon?: ComponentType<{ size?: number }>
+  /**
+   * Resolved panel component. Optional: omitted when the
+   * manifest does not declare a standalone panel.
+   */
+  panel?: ComponentType<PluginPanelProps>
   /** Custom toolbar button component (overrides default icon rendering) */
   toolbarButton?: ComponentType<ToolbarButtonProps>
   settings?: ComponentType<PluginPanelProps>

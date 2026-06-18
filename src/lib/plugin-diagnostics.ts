@@ -32,8 +32,8 @@ export interface DiagnosticBundle {
     version: string
     author: string
     enabled: boolean
-    iconPosition: string
-    contentPosition: string
+    iconPosition?: string
+    contentPosition?: string
     pluginPath: string
     hasBackend: boolean
   }>

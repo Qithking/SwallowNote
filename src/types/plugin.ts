@@ -172,10 +172,24 @@ export interface PluginManifest {
   author?: string
   /** ISO-8601 published date */
   publishedAt?: string
-  /** Where to show the icon */
-  iconPosition: IconPosition
-  /** Where to show the panel */
-  contentPosition: ContentPosition
+  /**
+   * Where to show the icon. Optional: a plugin that does not
+   * provide a UI surface (e.g. a file-format editor that's
+   * only triggered by opening the matching file) can omit
+   * this field. When omitted, the host's
+   * `buildRegistry` simply skips the plugin (no icon is
+   * rendered anywhere, no panel mount is attempted) but the
+   * plugin's other capabilities (`editorFileExtensions`,
+   * lifecycle hooks, settings, …) are still honoured.
+   */
+  iconPosition?: IconPosition
+  /**
+   * Where to show the panel. Optional for the same reason as
+   * `iconPosition`: a plugin that only contributes an
+   * `editorComponent` (e.g. mind map) has no standalone
+   * panel to mount, so this field can be omitted.
+   */
+  contentPosition?: ContentPosition
   /** Sort order in the icon bar (lower = higher), default 100 */
   order?: number
   /** Whether the plugin is enabled, default true */
@@ -183,13 +197,22 @@ export interface PluginManifest {
   /**
    * Icon – can be a React component or ReactNode.
    * For component type, it will receive { size?: number } props.
+   * Optional: omit when the plugin does not provide a UI
+   * surface. A plugin that omits both `icon` and `iconPosition`
+   * will not be rendered in any of the host's chrome surfaces
+   * (title bar / activity bar / editor toolbar). It can
+   * still contribute `editorFileExtensions`, lifecycle hooks,
+   * and settings.
    */
-  icon: ComponentType<{ size?: number }> | ReactNode
+  icon?: ComponentType<{ size?: number }> | ReactNode
   /**
    * Panel content – can be a React component or ReactNode.
    * For component type, it will receive PluginContext as props.
+   * Optional: omit when the plugin does not provide a
+   * standalone panel. The host will not try to mount a panel
+   * for the plugin.
    */
-  panel: ComponentType<PluginPanelProps> | ReactNode
+  panel?: ComponentType<PluginPanelProps> | ReactNode
   /** 可选自定义工具栏按钮组件。 */
   toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
   /**
@@ -258,14 +281,34 @@ export interface PluginDefinition {
   version: string
   author: string
   publishedAt: string
-  iconPosition: IconPosition
-  contentPosition: ContentPosition
+  /**
+   * Where to show the icon. Optional: a plugin that does not
+   * provide a UI surface (e.g. a file-format editor) can
+   * omit this field. The host's `buildRegistry` skips
+   * plugins whose `iconPosition` is undefined so they never
+   * appear in the title bar / activity bar / editor toolbar.
+   */
+  iconPosition?: IconPosition
+  /**
+   * Where to show the panel. Optional for the same reason as
+   * `iconPosition`.
+   */
+  contentPosition?: ContentPosition
   order: number
   enabled: boolean
-  /** Resolved icon component or ReactNode */
-  icon: ComponentType<{ size?: number }> | ReactNode
-  /** Resolved panel component or ReactNode */
-  panel: ComponentType<PluginPanelProps> | ReactNode
+  /**
+   * Resolved icon component or ReactNode. Optional: omitted
+   * when the manifest does not declare a UI surface. A
+   * plugin without `icon` and `iconPosition` does not render
+   * anywhere in the host's chrome but can still register
+   * `editorFileExtensions`, lifecycle hooks, etc.
+   */
+  icon?: ComponentType<{ size?: number }> | ReactNode
+  /**
+   * Resolved panel component or ReactNode. Optional: omitted
+   * when the manifest does not declare a standalone panel.
+   */
+  panel?: ComponentType<PluginPanelProps> | ReactNode
   /**
    * Optional custom toolbar button component. When provided, the host
    * renders this component instead of the default icon + button pattern.
@@ -350,8 +393,18 @@ export interface PluginMetadata {
   version: string
   author: string
   publishedAt: string
-  iconPosition: IconPosition
-  contentPosition: ContentPosition
+  /**
+   * Where the icon should be shown. Optional: a plugin that
+   * does not provide a UI surface (e.g. a file-format editor)
+   * can omit this field. The host's `buildRegistry` skips
+   * plugins whose `iconPosition` is undefined.
+   */
+  iconPosition?: IconPosition
+  /**
+   * Where the panel should be shown. Optional for the same
+   * reason as `iconPosition`.
+   */
+  contentPosition?: ContentPosition
   order: number
   enabled: boolean
   /** Absolute path to the plugin package directory */

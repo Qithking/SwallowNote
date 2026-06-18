@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-17T09:23:39Z",
+  "updated_at": "2026-06-18T01:59:50Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -15,9 +15,9 @@
         "brainstorm"
       ],
       "download_url": "./mindmap/com.swallownote.mindmap.zip",
-      "sha256": "05ee274c093d4f24465d893bdb3c673677587dadfda5b0ba9c2fb6b7ed14b305",
+      "sha256": "46b92c0811699a43f3a5f7eb926709db61a201c212fffa84d2f0d902f6d7d0e9",
       "changelog": "初版发布：从 host 抽出为独立插件，支持 .smm 文件编辑、5 大布局组（逻辑结构/思维导图/组织结构/时间轴/鱼骨图）、多种主题、外框/水印/节点样式",
-      "published_at": "2026-06-17T09:23:37Z",
+      "published_at": "2026-06-18T01:59:48Z",
       "dependencies": []
     },
     {

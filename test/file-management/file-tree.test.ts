@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { useFileTreeStore, FileNode, findNodeInList, updateNodesWithChildren } from '@/stores/filetree'
+import { useFileTreeStore, FileNode } from '@/stores/filetree'
+import { findNodeByPath, updateNodesWithChildren } from '@/lib/utils/treeUtils'
 
 const createTestNode = (path: string, isDirectory: boolean, children?: FileNode[]): FileNode => ({
   id: path,
@@ -82,16 +83,16 @@ describe('TC-001: 文件树导航测试', () => {
 })
 
 describe('文件树工具函数测试', () => {
-  it('TC-001-05: findNodeInList 查找根级节点', () => {
+  it('TC-001-05: findNodeByPath 查找根级节点', () => {
     const tree = createTestTree()
-    const result = findNodeInList(tree, '/workspace/note1.md')
+    const result = findNodeByPath('/workspace/note1.md', tree)
     expect(result).not.toBeNull()
     expect(result?.name).toBe('note1.md')
   })
 
-  it('TC-001-06: findNodeInList 查找嵌套节点', () => {
+  it('TC-001-06: findNodeByPath 查找嵌套节点', () => {
     const tree = createTestTree()
-    const result = findNodeInList(tree, '/workspace/documents/data/analysis.csv')
+    const result = findNodeByPath('/workspace/documents/data/analysis.csv', tree)
     expect(result).not.toBeNull()
     expect(result?.name).toBe('analysis.csv')
   })
@@ -100,8 +101,8 @@ describe('文件树工具函数测试', () => {
     const tree = createTestTree()
     const newChildren = [createTestNode('/workspace/newfile.md', false)]
     const updated = updateNodesWithChildren(tree, '/workspace', newChildren)
-    
-    const workspace = findNodeInList(updated, '/workspace')
+
+    const workspace = findNodeByPath('/workspace', updated)
     expect(workspace?.children?.length).toBe(1)
     expect(workspace?.children?.[0].name).toBe('newfile.md')
   })

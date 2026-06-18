@@ -40,8 +40,27 @@ pub struct PluginMetadataRust {
     pub version: String,
     pub author: String,
     pub published_at: String,
-    pub icon_position: String,      // "sidebar" | "editorToolbar" | "titleBar"
-    pub content_position: String,   // "leftPanel" | "rightPanel" | "fullPanel" | "editorArea"
+    /// Where to show the plugin's icon. Optional: a plugin
+    /// that does not provide a UI surface (e.g. a file-format
+    /// editor that's only triggered by opening the matching
+    /// file) can omit this field. When omitted, the frontend's
+    /// `buildRegistry` simply skips the plugin (no icon is
+    /// rendered anywhere, no panel mount is attempted) but
+    /// the plugin's other capabilities (editor file
+    /// extensions, lifecycle hooks, settings, …) are still
+    /// honoured. Valid values when present: "sidebar" |
+    /// "editorToolbar" | "titleBar". Empty string is
+    /// normalised to `None` so a manifest that serialised a
+    /// missing value as `""` is treated identically to a
+    /// manifest that omits the key.
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub icon_position: Option<String>,
+    /// Where to show the plugin's panel content. Optional for
+    /// the same reason as `icon_position`. Valid values when
+    /// present: "leftPanel" | "rightPanel" | "fullPanel" |
+    /// "editorArea". Empty string is normalised to `None`.
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub content_position: Option<String>,
     pub order: i32,
     pub enabled: bool,
     #[serde(default)]
@@ -53,6 +72,22 @@ pub struct PluginMetadataRust {
     /// to show the schema-driven settings button on the plugin card.
     #[serde(default)]
     pub has_settings_schema: bool,
+}
+
+/// Helper: deserialise a `String` field into `Option<String>`,
+/// treating an empty string as `None`. This is what lets
+/// older manifests (which used `""` as a "no icon" sentinel)
+/// keep working while new manifests can simply omit the key.
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    if raw.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(raw))
+    }
 }
 
 /// Get the plugins directory path.
@@ -438,8 +473,8 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
                 version: String::new(),
                 author: String::new(),
                 published_at: String::new(),
-                icon_position: String::from("sidebar"),
-                content_position: String::from("leftPanel"),
+                icon_position: Some(String::from("sidebar")),
+                content_position: Some(String::from("leftPanel")),
                 order: 100,
                 enabled,
                 plugin_path: active_dir.to_string_lossy().to_string(),
@@ -599,8 +634,8 @@ pub fn install_plugin(
         version: String::new(),
         author: String::new(),
         published_at: String::new(),
-        icon_position: String::from("sidebar"),
-        content_position: String::from("leftPanel"),
+        icon_position: Some(String::from("sidebar")),
+        content_position: Some(String::from("leftPanel")),
         order: 100,
         enabled,
         plugin_path: final_version_dir.to_string_lossy().to_string(),
@@ -1287,8 +1322,8 @@ pub async fn install_plugin_from_bytes(
         version: version.clone(),
         author: String::new(),
         published_at: String::new(),
-        icon_position: String::from("sidebar"),
-        content_position: String::from("leftPanel"),
+        icon_position: Some(String::from("sidebar")),
+        content_position: Some(String::from("leftPanel")),
         order: 100,
         enabled,
         plugin_path: version_dir.to_string_lossy().to_string(),
@@ -1509,8 +1544,8 @@ pub fn rollback_plugin(
         version: version.clone(),
         author: String::new(),
         published_at: String::new(),
-        icon_position: String::from("sidebar"),
-        content_position: String::from("leftPanel"),
+        icon_position: Some(String::from("sidebar")),
+        content_position: Some(String::from("leftPanel")),
         order: 100,
         enabled,
         plugin_path: version_dir.to_string_lossy().to_string(),
@@ -1954,6 +1989,35 @@ mod tests {
         let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
         assert_eq!(meta.id, "com.example.test");
         assert!(!meta.has_backend);
+    }
+
+    /// A plugin that does not declare a UI surface (e.g. the
+    /// mind-map plugin's `.smm` file editor) omits
+    /// `icon_position` and `content_position` from its manifest.
+    /// The deserialiser should treat both omitted keys and
+    /// empty-string values as `None` so the frontend's
+    /// `buildRegistry` can skip the plugin in the chrome
+    /// surfaces but still honour its other capabilities
+    /// (`editorFileExtensions`, lifecycle hooks, etc.).
+    #[test]
+    fn test_parse_manifest_no_ui() {
+        let json = r#"{"id":"com.swallownote.mindmap","name":"思维导图","description":"","version":"0.2.0","author":"SwallowNote","published_at":"2026-06-18","order":50,"enabled":true,"has_backend":false}"#;
+        let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.id, "com.swallownote.mindmap");
+        assert!(meta.icon_position.is_none());
+        assert!(meta.content_position.is_none());
+    }
+
+    /// Empty-string `icon_position` / `content_position` should
+    /// be normalised to `None` for the same reason. This is the
+    /// shape older manifests (or the `manifest.json` written by
+    /// `package.sh` for plugins without a UI surface) may use.
+    #[test]
+    fn test_parse_manifest_empty_positions() {
+        let json = r#"{"id":"com.example","name":"x","description":"","version":"1.0","author":"A","published_at":"","icon_position":"","content_position":"","order":0,"enabled":true}"#;
+        let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
+        assert!(meta.icon_position.is_none());
+        assert!(meta.content_position.is_none());
     }
 
     /// Build a fake "version directory" mirroring the layout that
