@@ -16,7 +16,8 @@ import {
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { PluginDefinition } from '@/types/plugin'
-import { usePluginStore } from '@/stores'
+import { usePluginStore, usePluginMarketStore } from '@/stores'
+import { OFFICIAL_REPO_URL } from '@/stores/plugin-market'
 
 // Stable style object to avoid per-render allocation.
 const ICON_STYLE = { marginRight: 3, verticalAlign: -1 } as const
@@ -27,6 +28,8 @@ export interface PluginInstalledCardProps {
   index: number
   /** Whether the card should render the "has update" badge. */
   hasUpdate?: boolean
+  /** Remote version string (from market index), used for "更新到 vX.X.X" tooltip. */
+  remoteVersion?: string
   /** Optional host error to render in the error bar. */
   error?: string | null
   onToggle?: (enabled: boolean) => void | Promise<void>
@@ -45,6 +48,7 @@ export interface PluginInstalledCardProps {
 const PluginInstalledCardInner = memo(function PluginInstalledCard({
   plugin,
   hasUpdate = false,
+  remoteVersion,
   error = null,
   onToggle,
   onUninstall,
@@ -56,6 +60,15 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
   onClick,
 }: PluginInstalledCardProps) {
   const { t } = useTranslation()
+  // Resolve source URL → display name and style variant for the source label.
+  const repoSources = usePluginMarketStore(useShallow((s) => s.repoSources))
+  const sourceInfo = useMemo(() => {
+    if (plugin.source === 'local') return { label: '本地', variant: 'local' as const }
+    if (!plugin.source) return { label: '未知来源', variant: 'unknown' as const }
+    if (plugin.source === OFFICIAL_REPO_URL) return { label: '官网', variant: 'official' as const }
+    const match = repoSources.find((s) => s.url === plugin.source)
+    return match ? { label: match.name, variant: 'custom' as const } : { label: '未知来源', variant: 'unknown' as const }
+  }, [plugin.source, repoSources])
   // Local switch state. The host's `plugin.enabled` is the
   // source of truth, but we mirror it locally for snappy
   // optimistic feedback (the host often round-trips to a
@@ -94,14 +107,6 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
     () => (plugin.publishedAt ? formatDate(plugin.publishedAt) : ''),
     [plugin.publishedAt],
   )
-
-  // Status badge in the card head: green for enabled, muted
-  // for disabled. Mirrors the `is-installed` colour family
-  // of the marketplace so the two views speak the same
-  // language (positive / accent / paper-3).
-  const statusBadge = plugin.enabled
-    ? { cls: 'pa-market-badge is-installed', label: t('plugin.pa.card.statusOn', { defaultValue: 'On' }) }
-    : { cls: 'pa-market-badge', label: t('plugin.pa.card.statusOff', { defaultValue: 'Off' }) }
 
   // Health badge: healthy=green, unhealthy=red, unknown=muted.
   const healthBadge = useMemo(() => {
@@ -159,8 +164,8 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               {t('plugin.pa.card.conflict', { defaultValue: 'Conflict' })}
             </span>
           )}
-          <span className={statusBadge.cls}>{statusBadge.label}</span>
-        </div>       
+          <span className={`pa-source-label is-${sourceInfo.variant}`}>{sourceInfo.label}</span>
+        </div>
 
         {plugin.description && (
           <div className="pa-market-card-desc">{plugin.description}</div>
@@ -191,20 +196,17 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
           </div>
         )}
 
-        {/* ── Actions row (toggle + icon buttons) ──────── */}
+        {/* ── Actions row: 开关靠左，其他按钮靠右 ──────── */}
         <div className="pa-installed-actions" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
             className={`pa-switch ${switchOn ? 'is-on' : ''}`}
             role="switch"
             aria-checked={switchOn}
-            aria-label={`${plugin.name} ${t(switchOn ? 'plugin.pa.card.switchOn' : 'plugin.pa.card.switchOff')}`}
+            aria-label={`${plugin.name} ${switchOn ? '禁用' : '启用'}`}
             onClick={() => {
               const next = !switchOn
               setSwitchOn(next)
-              // If the host callback rejects, revert the optimistic
-              // switch state so the UI stays consistent with the
-              // actual enabled state.
               const result = onToggle?.(next)
               if (result && typeof result === 'object' && 'catch' in result) {
                 ;(result as Promise<unknown>).catch(() => {
@@ -216,9 +218,9 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
             <span className="pa-switch-track">
               <span className="pa-switch-thumb" />
             </span>
-            <span className="pa-switch-label">{switchOn ? 'on' : 'off'}</span>
+            <span className="pa-switch-label">{switchOn ? '启用' : '禁用'}</span>
           </button>
-          <div className="pa-icon-row">
+          <div className="pa-icon-row" style={{ marginLeft: 'auto' }}>
             <button
               type="button"
               className={`pa-icon-btn ${autoUpdateOn ? 'is-on' : ''}`}
@@ -229,11 +231,6 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               aria-pressed={autoUpdateOn}
               data-plugin-auto-update={autoUpdateOn ? 'on' : 'off'}
               onClick={() => {
-                // The store mirrors the new value back onto
-                // the plugin definition (see
-                // `setPluginAutoUpdate`), so the next render
-                // already reflects the change without a
-                // separate re-read.
                 usePluginStore.getState().setPluginAutoUpdate(plugin.id, !autoUpdateOn)
               }}
             >
@@ -243,7 +240,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               <button
                 type="button"
                 className="pa-icon-btn"
-                title={t('plugin.market.updateTo', { defaultValue: 'Update' })}
+                title={remoteVersion ? `更新到 v${remoteVersion}` : t('plugin.market.updateTo', { defaultValue: 'Update' })}
                 onClick={onUpdate}
               >
                 <Download />

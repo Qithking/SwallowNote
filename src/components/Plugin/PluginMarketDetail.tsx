@@ -277,6 +277,7 @@ export function PluginMarketDetail({
       version: e.version,
       bytes,
       sha256: e.sha256,
+      source: repoUrl,
     })
   }
 
@@ -430,6 +431,7 @@ export function PluginMarketDetail({
         version: version.version,
         bytes,
         sha256: version.sha256,
+        source: repoUrl,
       })
       await reloadAfterInstall()
       await refreshUpdates()

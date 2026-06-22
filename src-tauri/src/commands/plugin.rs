@@ -72,6 +72,11 @@ pub struct PluginMetadataRust {
     /// to show the schema-driven settings button on the plugin card.
     #[serde(default)]
     pub has_settings_schema: bool,
+    /// The repository URL this plugin was installed from. Populated
+    /// from the `.source` file in the plugin's active version
+    /// directory. Empty when installed from a local zip upload.
+    #[serde(default)]
+    pub source: String,
 }
 
 /// Helper: deserialise a `String` field into `Option<String>`,
@@ -440,6 +445,12 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
         // The host uses this flag to decide whether to show the
         // schema-driven settings button on the plugin card.
         let has_settings_schema = active_dir.join("settings.json").exists();
+        // Read the `.source` file to recover the repo URL the plugin
+        // was installed from. Missing / unreadable → empty string.
+        let source = fs::read_to_string(active_dir.join(".source"))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
 
         let parsed_manifest = parse_manifest_from_index_js(&index_js);
 
@@ -463,6 +474,7 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
             meta.plugin_path = active_dir.to_string_lossy().to_string();
             meta.has_backend = has_backend;
             meta.has_settings_schema = has_settings_schema;
+            meta.source = source;
             meta
         } else {
             // Fallback: create minimal metadata from directory name
@@ -480,6 +492,7 @@ pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRu
                 plugin_path: active_dir.to_string_lossy().to_string(),
                 has_backend,
                 has_settings_schema,
+                source,
             }
         };
         plugins.push(meta);
@@ -493,6 +506,7 @@ pub fn install_plugin(
     app_handle: tauri::AppHandle,
     zip_path: String,
     expected_sha256: Option<String>,
+    source: Option<String>,
 ) -> Result<PluginMetadataRust, PluginError> {
     let app_data_dir = app_handle
         .path()
@@ -605,6 +619,15 @@ pub fn install_plugin(
     let final_version_dir = final_plugin_dir.join(".versions").join(UPLOAD_VERSION);
     set_current_version(&final_plugin_dir, UPLOAD_VERSION)?;
 
+    // Write the `.source` file if a source URL was provided.
+    if let Some(ref src) = source {
+        if !src.is_empty() {
+            if let Err(e) = fs::write(final_version_dir.join(".source"), src.as_bytes()) {
+                eprintln!("[plugin] failed to write .source for '{}': {}", real_plugin_id, e);
+            }
+        }
+    }
+
     // Materialise / migrate the settings table for this plugin id.
     // Best-effort: a missing or malformed settings.json is not a
     // reason to fail the install. We log to stderr so the user can
@@ -625,9 +648,10 @@ pub fn install_plugin(
     let has_backend = final_version_dir.join("backend").exists();
     let has_settings_schema = final_version_dir.join("settings.json").exists();
     let enabled = !final_plugin_dir.join(".disabled").exists();
+    let source_value = source.clone().unwrap_or_default();
 
     let final_index_js = final_version_dir.join("index.js");
-    let meta = parse_manifest_from_index_js(&final_index_js).unwrap_or(PluginMetadataRust {
+    let mut meta = parse_manifest_from_index_js(&final_index_js).unwrap_or(PluginMetadataRust {
         id: real_plugin_id.clone(),
         name: real_plugin_id.clone(),
         description: String::new(),
@@ -641,7 +665,9 @@ pub fn install_plugin(
         plugin_path: final_version_dir.to_string_lossy().to_string(),
         has_backend,
         has_settings_schema,
+        source: source_value.clone(),
     });
+    meta.source = source_value;
 
     Ok(meta)
 }
@@ -1233,6 +1259,7 @@ pub async fn install_plugin_from_bytes(
     sha256: String,
     pubkey_b64: String,
     signature_b64: String,
+    source: Option<String>,
 ) -> Result<PluginMetadataRust, PluginError> {
     // Strict validation: plugin_id and version are joined onto the
     // filesystem path unconditionally, so we reject anything that
@@ -1297,6 +1324,15 @@ pub async fn install_plugin_from_bytes(
 
     set_current_version(&plugin_dir, &version)?;
 
+    // Write the `.source` file if a source URL was provided.
+    if let Some(ref src) = source {
+        if !src.is_empty() {
+            if let Err(e) = fs::write(version_dir.join(".source"), src.as_bytes()) {
+                eprintln!("[plugin] failed to write .source for '{}': {}", plugin_id, e);
+            }
+        }
+    }
+
     // 物化/迁移插件 settings 表（best-effort）。
     if let Some(db) = app_handle.try_state::<crate::db::Database>() {
         if let Ok(conn) = db.conn.lock() {
@@ -1314,8 +1350,9 @@ pub async fn install_plugin_from_bytes(
     let has_backend = version_dir.join("backend").exists();
     let has_settings_schema = version_dir.join("settings.json").exists();
     let enabled = !plugin_dir.join(".disabled").exists();
+    let source_value = source.clone().unwrap_or_default();
 
-    let meta = parse_manifest_from_index_js(&index_js).unwrap_or(PluginMetadataRust {
+    let mut meta = parse_manifest_from_index_js(&index_js).unwrap_or(PluginMetadataRust {
         id: plugin_id.clone(),
         name: plugin_id.clone(),
         description: String::new(),
@@ -1329,7 +1366,9 @@ pub async fn install_plugin_from_bytes(
         plugin_path: version_dir.to_string_lossy().to_string(),
         has_backend,
         has_settings_schema,
+        source: source_value.clone(),
     });
+    meta.source = source_value;
 
     Ok(meta)
 }
@@ -1487,6 +1526,7 @@ pub async fn update_plugin(
     sha256: String,
     pubkey_b64: String,
     signature_b64: String,
+    source: Option<String>,
 ) -> Result<PluginMetadataRust, PluginError> {
     install_plugin_from_bytes(
         app_handle,
@@ -1496,6 +1536,7 @@ pub async fn update_plugin(
         sha256,
         pubkey_b64,
         signature_b64,
+        source,
     )
     .await
 }
@@ -1537,7 +1578,11 @@ pub fn rollback_plugin(
     let has_backend = version_dir.join("backend").exists();
     let has_settings_schema = version_dir.join("settings.json").exists();
     let enabled = !plugin_dir.join(".disabled").exists();
-    let meta = parse_manifest_from_index_js(&index_js).unwrap_or(PluginMetadataRust {
+    let source = fs::read_to_string(version_dir.join(".source"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let mut meta = parse_manifest_from_index_js(&index_js).unwrap_or(PluginMetadataRust {
         id: plugin_id.clone(),
         name: plugin_id.clone(),
         description: String::new(),
@@ -1551,7 +1596,9 @@ pub fn rollback_plugin(
         plugin_path: version_dir.to_string_lossy().to_string(),
         has_backend,
         has_settings_schema,
+        source: source.clone(),
     });
+    meta.source = source;
     Ok(meta)
 }
 

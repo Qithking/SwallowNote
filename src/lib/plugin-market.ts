@@ -415,6 +415,7 @@ export async function installPluginFromBytes(args: {
   sha256: string
   pubkeyB64?: string
   signatureB64?: string
+  source?: string
 }): Promise<PluginMetadataRust> {
   return invoke<PluginMetadataRust>('install_plugin_from_bytes', {
     pluginId: args.pluginId,
@@ -423,6 +424,7 @@ export async function installPluginFromBytes(args: {
     sha256: args.sha256,
     pubkeyB64: args.pubkeyB64 ?? '',
     signatureB64: args.signatureB64 ?? '',
+    source: args.source,
   })
 }
 

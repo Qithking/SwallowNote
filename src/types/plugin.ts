@@ -364,6 +364,8 @@ export interface PluginDefinition {
    * well — the flag is opt-in, never opt-out by default.
    */
   autoUpdate?: boolean
+  /** The repo URL this plugin was installed from. Empty for local zip uploads. */
+  source: string
   /** Lifecycle hooks carried over from the original manifest. The store
    *  invokes these at register / unregister / enable / disable. All are
    *  optional; missing hooks are simply skipped. */
@@ -411,6 +413,8 @@ export interface PluginMetadata {
   pluginPath: string
   /** Whether a backend/ directory exists */
   hasBackend: boolean
+  /** The repo URL this plugin was installed from. Empty for local zip uploads. */
+  source: string
 }
 
 // ─── Plugin load failures (per-plugin bypass) ───────────────────────────────
