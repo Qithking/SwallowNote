@@ -38,7 +38,6 @@ function PluginMarketView() {
   const fetchProgress = usePluginMarketStore((s) => s.fetchProgress)
   const searchQuery = usePluginMarketStore((s) => s.searchQuery)
   const tagFilter = usePluginMarketStore((s) => s.tagFilter)
-  const updates = usePluginMarketStore((s) => s.updates)
   // Actions are stable refs from Zustand — safe to select individually.
   const setRepoUrl = usePluginMarketStore((s) => s.setRepoUrl)
   const refreshIndex = usePluginMarketStore((s) => s.refreshIndex)
@@ -75,17 +74,7 @@ function PluginMarketView() {
     })
   }, [index, searchQuery, tagFilter])
   const localVersionFor = usePluginMarketStore((s) => s.localVersionFor)
-  
-  // Pre-compute update info map to avoid O(N) find() for every card
-  const updateInfoMap = useMemo(() => {
-    const map = new Map<string, { localVersion: string; remoteVersion: string; sha256: string }>()
-    for (const u of updates) {
-      if (u.localVersion !== u.remoteVersion) {
-        map.set(u.id, { localVersion: u.localVersion, remoteVersion: u.remoteVersion, sha256: u.sha256 })
-      }
-    }
-    return map
-  }, [updates])
+
 
   const [draftUrl, setDraftUrl] = useState(repoUrl)
   const [detailEntry, setDetailEntry] = useState<PluginIndexEntry | null>(null)
@@ -345,7 +334,6 @@ function PluginMarketView() {
               key={entry.id}
               entry={entry}
               localVersion={localVersionFor(entry.id)}
-              updateInfo={updateInfoMap.get(entry.id)}
               onClick={() => openDetail(entry.id)}
             />
           )}
@@ -399,17 +387,15 @@ function EmptyState({
 const PluginMarketCard = memo(function PluginMarketCard({
   entry,
   localVersion,
-  updateInfo,
   onClick,
 }: {
   entry: PluginIndexEntry
   localVersion: string | undefined
-  updateInfo?: { localVersion: string; remoteVersion: string; sha256: string }
   onClick: () => void
 }) {
   const { t } = useTranslation()
   const isInstalled = !!localVersion
-  const isUpdateAvailable = !!updateInfo && updateInfo.localVersion !== updateInfo.remoteVersion
+  const isUpdateAvailable = isInstalled && localVersion !== entry.version
 
   // 最新版本为 versions[0]
   const publishedAt =
@@ -421,7 +407,7 @@ const PluginMarketCard = memo(function PluginMarketCard({
   )
   const version = entry.version || '—'
 
-  // 显示最多 3 个 tag + deps 计数器 + 更新徽章
+  // 显示最多 3 个 tag + deps 计数器
   const tags = useMemo(() => {
     const result: { key: string; cls: string; label: string }[] = []
     if (entry.tags) {
@@ -436,15 +422,8 @@ const PluginMarketCard = memo(function PluginMarketCard({
         label: `${entry.dependencies.length} deps`,
       })
     }
-    if (isUpdateAvailable) {
-      result.push({
-        key: 'update',
-        cls: 'pa-market-badge is-update',
-        label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }),
-      })
-    }
     return result
-  }, [entry.tags, entry.dependencies, isUpdateAvailable, t])
+  }, [entry.tags, entry.dependencies])
 
   // Status badge in the card head. Mirrors the `is-installed`
   // colour family of the Installed card, plus an accent colour
@@ -480,7 +459,7 @@ const PluginMarketCard = memo(function PluginMarketCard({
           {entry.author && (
             <span className="inline-flex items-center">
               <User size={9} style={ICON_STYLE} />
-              <b>{entry.author}</b>
+              {entry.author}
             </span>
           )}
           {entry.author && dateText && <span className="pa-sep">·</span>}
@@ -492,14 +471,6 @@ const PluginMarketCard = memo(function PluginMarketCard({
           )}
           <span className="pa-sep">·</span>
           <span>v{version}</span>
-          {localVersion && localVersion !== version && (
-            <>
-              <span className="pa-sep">·</span>
-              <span>
-                {t('plugin.market.local', { defaultValue: '本地' })} v{localVersion}
-              </span>
-            </>
-          )}
         </div>
 
         {entry.description && (
@@ -514,7 +485,12 @@ const PluginMarketCard = memo(function PluginMarketCard({
 
         {/* actions 行：stopPropagation 防止冒泡，仅保留图标按钮 */}
         <div className="pa-installed-actions" onClick={(e) => e.stopPropagation()}>
-          <div className="pa-icon-row">
+          {isUpdateAvailable && localVersion && (
+            <span className="pa-market-card-local-ver">
+              已安装：v{localVersion}
+            </span>
+          )}
+          <div className="pa-icon-row" style={{ marginLeft: 'auto' }}>
             <button
               type="button"
               className="pa-icon-btn"
