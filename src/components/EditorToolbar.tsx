@@ -322,7 +322,14 @@ function EditorToolbar() {
             const toolbarProps = createToolbarButtonProps(plugin.id, active, 14, activate, deactivate, activeTab.content ?? '', activeTab.path ?? '')
             try {
               return (
-                <PluginErrorBoundary key={plugin.id} pluginId={plugin.id} resetKey={plugin.id}>
+                <PluginErrorBoundary
+                  key={plugin.id}
+                  pluginId={plugin.id}
+                  pluginName={plugin.name}
+                  resetKey={`${plugin.id}-${activeTab.id}`}
+                  variant="toolbar"
+                  onCrash={(_id, err) => console.error(`[EditorToolbar] Plugin ${plugin.name} crashed:`, err)}
+                >
                   {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}
                 </PluginErrorBoundary>
               )

@@ -14,6 +14,7 @@
  */
 import { Component, type ReactNode } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 
 interface Props {
   children: ReactNode
@@ -26,6 +27,8 @@ interface Props {
   /** Called when the boundary recovers from an error (retry or resetKey change). */
   onRecover?: (pluginId: string) => void
   onReset?: () => void
+  /** Fallback UI variant: 'toolbar' shows a compact icon, 'card' (default) shows the full card */
+  variant?: 'toolbar' | 'card'
 }
 
 interface State {
@@ -64,6 +67,31 @@ export class PluginErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      const isToolbar = this.props.variant === 'toolbar'
+      const errMsg = this.state.error?.message || String(this.state.error || '')
+
+      if (isToolbar) {
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={this.handleReset}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: 'var(--pa-negative)' }}
+              >
+                <AlertCircle size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent style={{ maxWidth: 260 }}>
+              <div style={{ fontSize: 11, wordBreak: 'break-all' }}>
+                {this.props.pluginName || this.props.pluginId}: {errMsg}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )
+      }
+
       return (
         <div
           className="pa-market-card"
@@ -80,8 +108,11 @@ export class PluginErrorBoundary extends Component<Props, State> {
               {this.props.pluginName || this.props.pluginId}
             </span>
           </div>
-          <div style={{ fontSize: 12, color: 'var(--pa-mute)', marginBottom: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--pa-mute)', marginBottom: 4 }}>
             插件渲染出错
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--pa-mute)', marginBottom: 12, wordBreak: 'break-all' }}>
+            {errMsg}
           </div>
           <button
             type="button"

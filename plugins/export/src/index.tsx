@@ -762,17 +762,7 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   // picked up on the next render.
   const strings = getStrings(readLocale())
 
-  // Markdown-only: the backend serialises Markdown to HTML / DOCX /
-  // PDF, so the toolbar button only makes sense for Markdown files.
-  // The host passes the lower-cased `activeNoteExt` (without the
-  // leading dot) so we can branch on the extension directly
-  // instead of re-parsing `activeNotePath`. Returning `null` for
-  // non-Markdown files hides the entire dropdown (and its icon)
-  // from the editor toolbar, which is the desired behaviour for
-  // `Code` / `Binary` / `MindMap` notes.
-  if (activeNoteExt !== 'md' && activeNoteExt !== 'markdown') {
-    return null
-  }
+  const isMarkdown = activeNoteExt === 'md' || activeNoteExt === 'markdown'
 
   // Derive note name from path. Falls back to the full path so
   // the user always sees a meaningful filename in the save
@@ -928,6 +918,18 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
       })) as string
     })
   }, [activeNoteContent, invokeBackend, runExport])
+
+  // Markdown-only: the backend serialises Markdown to HTML / DOCX /
+  // PDF, so the toolbar button only makes sense for Markdown files.
+  // The host passes the lower-cased `activeNoteExt` (without the
+  // leading dot) so we can branch on the extension directly
+  // instead of re-parsing `activeNotePath`. Returning `null` for
+  // non-Markdown files hides the entire dropdown (and its icon)
+  // from the editor toolbar, which is the desired behaviour for
+  // `Code` / `Binary` / `MindMap` notes.
+  if (!isMarkdown) {
+    return null
+  }
 
   return (
     <div ref={menuRef} className="relative">
