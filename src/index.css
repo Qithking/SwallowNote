@@ -1607,15 +1607,16 @@ body, #root {
   display: flex;
   flex-direction: column;
   cursor: pointer;
-  transition: border-color 0.15s, transform 0.12s, box-shadow 0.12s;
+  transition: border-color 0.15s, box-shadow 0.12s;
   text-align: left;
   overflow: hidden;
   position: relative;
 }
 .pa-market-card:hover {
   border-color: var(--pa-line-2);
-  transform: translateY(-1px);
   box-shadow: var(--pa-shadow-2);
+  position: relative;
+  z-index: 1;
 }
 .pa-market-card-body {
   padding: 12px 14px 14px;
@@ -1686,7 +1687,7 @@ body, #root {
    the chrome is defined. */
 .pa-installed-grid { gap: 12px; }
 .pa-market-card.is-disabled { opacity: 0.62; }
-.pa-market-card.is-disabled:hover { transform: none; }
+.pa-market-card.is-disabled:hover { box-shadow: none; z-index: auto; }
 .pa-installed-byline {
   display: flex;
   align-items: center;
