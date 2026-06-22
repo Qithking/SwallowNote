@@ -39,6 +39,8 @@ export interface PluginInstalledCardProps {
   onPermissions?: () => void
   /** Opens per-plugin storage inspector. */
   onStorage?: () => void
+  /** Click on card body to view detail. */
+  onClick?: () => void
 }
 
 const PluginInstalledCardInner = memo(function PluginInstalledCard({
@@ -52,6 +54,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
   onOpenSchemaSettings,
   onPermissions,
   onStorage,
+  onClick,
 }: PluginInstalledCardProps) {
   const { t } = useTranslation()
   // Local switch state. The host's `plugin.enabled` is the
@@ -128,6 +131,8 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
     <article
       className={`pa-market-card ${!plugin.enabled ? 'is-disabled' : ''}`}
       data-plugin-id={plugin.id}
+      onClick={onClick}
+      style={{ cursor: onClick ? 'pointer' : undefined }}
     >
       <div className="pa-market-card-body">
         <div className="pa-market-card-head">

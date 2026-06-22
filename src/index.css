@@ -1723,7 +1723,7 @@ body, #root {
 .pa-installed-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   margin-top: 8px;
   padding-top: 8px;

@@ -48,7 +48,7 @@ import { usePluginTelemetryVersion } from '@/hooks'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
 import { getAllPluginMetrics, getTotalPluginStorageBytes } from '@/lib/plugin-telemetry'
 import { getStorageCap } from '@/lib/tauri'
-import type { PluginDefinition, PluginPanelProps, PluginPermission } from '@/types/plugin'
+import type { PluginDefinition, PluginPanelProps, PluginPermission, PluginIndexEntry, PluginIndex } from '@/types/plugin'
 
 
 // Lazy load dialog components - only loaded when user clicks the corresponding button
@@ -68,6 +68,8 @@ const PluginMarketView = lazy(() => import('./PluginMarketView').then(m => ({ de
 const PluginLoadFailuresDialog = lazy(() =>
   import('./PluginLoadFailuresDialog').then((m) => ({ default: m.PluginLoadFailuresDialog })),
 )
+// Lazy load PluginMarketDetail for installed-card detail view
+const PluginMarketDetail = lazy(() => import('./PluginMarketDetail').then(m => ({ default: m.PluginMarketDetail })))
 
 /** Active tab. Kept as a string-literal union so the value can be
  *  serialised (e.g. if we ever decide to persist the active tab
@@ -129,6 +131,10 @@ function PluginManagerView() {
   // doesn't remove a plugin the user meant to keep. Confirmed uninstalls
   // fall through to `handleUninstall`.
   const [uninstallConfirmPlugin, setUninstallConfirmPlugin] = useState<PluginDefinition | null>(null)
+  // Detail dialog target for installed plugins. When set, the
+  // PluginMarketDetail dialog opens with a synthetic PluginIndexEntry
+  // constructed from the installed plugin's data.
+  const [detailPlugin, setDetailPlugin] = useState<PluginDefinition | null>(null)
   // Permissions-to-grant queue. When the install flow finishes
   // extracting a plugin package, we open the dialog with the
   // declared permissions and let the user opt in/out before any
@@ -453,6 +459,43 @@ function PluginManagerView() {
     }
   }, [t])
 
+  /** Construct a synthetic PluginIndexEntry from an installed plugin definition. */
+  const toIndexEntry = useCallback((plugin: PluginDefinition): PluginIndexEntry => ({
+    id: plugin.id,
+    name: plugin.name,
+    version: plugin.version,
+    description: plugin.description,
+    author: plugin.author,
+    tags: [],
+    downloadUrl: '',
+    sha256: '',
+    signatureB64: '',
+    pubkeyB64: '',
+    publishedAt: plugin.publishedAt || undefined,
+    dependencies: (plugin.dependencies ?? []).map((d) => `${d.id}@${d.version}`),
+  }), [])
+
+  /** Construct a minimal PluginIndex for the detail dialog's dependency resolver. */
+  const toSyntheticIndex = useCallback((plugin: PluginDefinition): PluginIndex => ({
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    pubkeyB64: '',
+    plugins: [{
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      description: plugin.description,
+      author: plugin.author,
+      tags: [],
+      downloadUrl: '',
+      sha256: '',
+      signatureB64: '',
+      pubkeyB64: '',
+      publishedAt: plugin.publishedAt || undefined,
+      dependencies: (plugin.dependencies ?? []).map((d) => `${d.id}@${d.version}`),
+    }],
+  }), [])
+
   // Handle plugin update from marketplace
   const handleUpdatePlugin = useCallback(async (plugin: PluginDefinition) => {
     // Find update info from market updates
@@ -623,6 +666,7 @@ function PluginManagerView() {
               onOpenSchemaSettings={openSchemaSettings}
               onPermissions={openPermissions}
               onStorage={openStorage}
+              onDetail={setDetailPlugin}
             />
           </div>
           <div style={{ display: activeTab === 'market' ? 'block' : 'none', height: '100%' }}>
@@ -803,6 +847,21 @@ function PluginManagerView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Detail dialog for installed plugins ────────────
+            Opens when user clicks an installed card. Uses a
+            synthetic PluginIndexEntry/PluginIndex constructed
+            from the installed plugin's data. */}
+      {detailPlugin && (
+        <Suspense fallback={null}>
+          <PluginMarketDetail
+            entry={toIndexEntry(detailPlugin)}
+            index={toSyntheticIndex(detailPlugin)}
+            localVersion={detailPlugin.version}
+            onClose={() => setDetailPlugin(null)}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }
@@ -848,6 +907,8 @@ interface ManageTabProps {
    * mode is active.
    */
   onStorage: (plugin: PluginDefinition) => void
+  /** Open the detail dialog for an installed plugin. */
+  onDetail: (plugin: PluginDefinition) => void
 }
 
 function ManageTab({
@@ -868,6 +929,7 @@ function ManageTab({
   onOpenSchemaSettings,
   onPermissions,
   onStorage,
+  onDetail,
 }: ManageTabProps) {
   const { t } = useTranslation()
   const searchRef = useRef<HTMLInputElement>(null)
@@ -963,6 +1025,7 @@ function ManageTab({
                 onOpenSchemaSettings={() => onOpenSchemaSettings(plugin)}
                 onPermissions={() => onPermissions(plugin)}
                 onStorage={() => onStorage(plugin)}
+                onClick={() => onDetail(plugin)}
               />
             </PluginErrorBoundary>
           )}
