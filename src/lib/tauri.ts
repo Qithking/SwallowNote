@@ -259,6 +259,33 @@ export async function deletePluginSettings(pluginId: string): Promise<void> {
   await invoke('delete_plugin_settings', { pluginId })
 }
 
+// ── Market source management ──────────────────────────────
+export interface MarketSourceView {
+  name: string
+  url: string
+  is_active: boolean
+}
+
+export async function listMarketSources(): Promise<MarketSourceView[]> {
+  return await invoke<MarketSourceView[]>('list_market_sources')
+}
+
+export async function addMarketSource(name: string, url: string): Promise<void> {
+  await invoke('add_market_source', { name, url })
+}
+
+export async function removeMarketSource(url: string): Promise<void> {
+  await invoke('remove_market_source', { url })
+}
+
+export async function setActiveMarketSource(url: string): Promise<void> {
+  await invoke('set_active_market_source', { url })
+}
+
+export async function getActiveMarketSource(): Promise<MarketSourceView | null> {
+  return await invoke<MarketSourceView | null>('get_active_market_source')
+}
+
 // 启动时 seed 存储大小计数器
 export async function getAllPluginStorageSizes(): Promise<Record<string, number>> {
   const raw = await invoke<Record<string, number>>('get_all_plugin_storage_sizes')

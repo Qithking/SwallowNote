@@ -2,7 +2,7 @@
  * Plugin Marketplace store (Phase 9.2).
  *
  * Holds:
- * - The currently-selected repo URL (persisted to localStorage so
+ * - The currently-selected repo URL (persisted to SQLite so
  *   the marketplace tab opens to the same repo the user last viewed).
  * - The latest fetched `PluginIndex` and the in-flight fetch state.
  * - A search query and tag-filter applied to the index.
@@ -23,24 +23,36 @@ import {
   invalidateIndexCache,
   normaliseIndex,
 } from '@/lib/plugin-market'
+import {
+  listMarketSources,
+  addMarketSource as tauriAddSource,
+  removeMarketSource as tauriRemoveSource,
+  setActiveMarketSource as tauriSetActiveSource,
+  getActiveMarketSource,
+} from '@/lib/tauri'
 import { usePluginStore } from './plugin'
 
-const REPO_URL_STORAGE_KEY = 'swallow-plugin-market:repo-url'
-const DEFAULT_REPO_URL = ''
+export const OFFICIAL_REPO_URL = 'https://raw.githubusercontent.com/Qithking/SwallowNote/refs/heads/main/plugins/repo.json'
 
-function loadRepoUrl(): string {
-  try {
-    return localStorage.getItem(REPO_URL_STORAGE_KEY) ?? DEFAULT_REPO_URL
-  } catch {
-    return DEFAULT_REPO_URL
-  }
+export interface RepoSource {
+  name: string
+  url: string
 }
 
 export interface PluginMarketState {
   /** Currently configured repo URL. */
   repoUrl: string
-  /** Set the repo URL and persist it. */
+  /** Set the repo URL and persist it to SQLite. */
   setRepoUrl: (url: string) => void
+
+  /** All saved repo sources (from SQLite, excluding official). */
+  repoSources: RepoSource[]
+  /** Load sources from SQLite. */
+  loadRepoSources: () => Promise<void>
+  /** Add a new repo source to SQLite. */
+  addRepoSource: (source: RepoSource) => Promise<void>
+  /** Remove a repo source from SQLite. */
+  removeRepoSource: (url: string) => Promise<void>
 
   /** Plugin ID to auto-open in the detail dialog on next mount/render.
    *  Set by `PluginManagerView.handleUpdatePlugin` and consumed by
@@ -95,16 +107,44 @@ export interface PluginMarketState {
 }
 
 export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
-  repoUrl: loadRepoUrl(),
+  repoUrl: OFFICIAL_REPO_URL,
   setRepoUrl: (url) => {
-    try {
-      localStorage.setItem(REPO_URL_STORAGE_KEY, url)
-    } catch {
-      /* private mode / quota — ignore */
-    }
     // Changing the URL invalidates the cached index and update list.
     invalidateIndexCache(url)
     set({ repoUrl: url, index: null, updates: [] })
+  },
+
+  repoSources: [],
+  loadRepoSources: async () => {
+    try {
+      const sources = await listMarketSources()
+      // 从 SQLite 读取所有来源（不含官网），同时获取活跃来源
+      const activeSource = await getActiveMarketSource()
+      const repoSources: RepoSource[] = sources.map((s) => ({
+        name: s.name,
+        url: s.url,
+      }))
+      set({
+        repoSources,
+        repoUrl: activeSource?.url ?? OFFICIAL_REPO_URL,
+      })
+    } catch {
+      // SQLite 不可用时回退到官网
+      set({ repoSources: [], repoUrl: OFFICIAL_REPO_URL })
+    }
+  },
+  addRepoSource: async (source) => {
+    await tauriAddSource(source.name, source.url)
+    // 重新加载来源列表
+    await get().loadRepoSources()
+  },
+  removeRepoSource: async (url) => {
+    await tauriRemoveSource(url)
+    // 如果删除的是当前活跃来源，切回官网
+    if (get().repoUrl === url) {
+      await tauriSetActiveSource(OFFICIAL_REPO_URL)
+    }
+    await get().loadRepoSources()
   },
 
   pendingDetailId: null,
@@ -147,11 +187,6 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
         set({ fetchProgress: percent })
       })
       const raw = JSON.parse(text)
-      // Normalise the index using the shared normaliser so all fields
-      // (schemaVersion, pubkeyB64, signatureB64, versions, etc.) are
-      // present. The previous hand-rolled mapping missed critical
-      // fields like pubkeyB64 (breaking signature verification) and
-      // versions/dependencies (breaking the detail dialog).
       const index = normaliseIndex(raw)
       set({ index, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
@@ -224,12 +259,6 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
   },
 
   localVersionFor: (id) => {
-    // Prefer the host's update info (it tracks the *active* semver,
-    // not just any version on disk). Fall back to the local plugin
-    // store so a plugin that's installed and up-to-date — and
-    // therefore absent from the `updates` list — still resolves
-    // correctly. Without the fallback the marketplace card flips
-    // to "Install" for a plugin the user has already installed.
     const u = get().updates.find((x) => x.id === id)
     if (u?.localVersion) return u.localVersion
     return usePluginStore.getState().plugins.find((p) => p.id === id)?.version

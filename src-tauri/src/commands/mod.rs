@@ -6,6 +6,7 @@ pub mod error;
 pub mod file;
 pub mod git;
 pub mod folder_history;
+pub mod market_sources;
 pub mod plugin;
 pub mod plugin_invoke;
 pub mod plugin_settings;

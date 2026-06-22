@@ -1531,13 +1531,132 @@ body, #root {
 .pa-market-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
-  padding: 8px 0 14px;
+  padding: 20px 0 14px;
   border-bottom: 1px dashed var(--pa-line);
   margin-bottom: 14px;
   flex-shrink: 0;
 }
+.pa-market-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.pa-market-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+/* 来源下拉框 */
+.pa-source-select {
+  position: relative;
+  flex-shrink: 0;
+}
+.pa-source-select select {
+  appearance: none;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  background: var(--pa-paper);
+  color: var(--pa-ink);
+  font-family: var(--pa-font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.pa-source-select select:focus {
+  outline: none;
+  border-color: var(--pa-ink);
+}
+.pa-source-select-arrow {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--pa-mute);
+}
+/* 来源管理弹窗 */
+.pa-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pa-source-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  background: var(--pa-paper);
+}
+.pa-source-item.is-active {
+  border-color: var(--pa-accent-soft);
+  background: var(--pa-accent-soft);
+}
+.pa-source-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pa-source-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink);
+}
+.pa-source-item-url {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-source-add {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--pa-line);
+}
+.pa-source-add-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pa-ink-2);
+  margin-bottom: 8px;
+}
+.pa-source-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pa-source-add-input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  background: var(--pa-paper);
+  color: var(--pa-ink);
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  flex: 1;
+  min-width: 0;
+  transition: border-color 0.15s;
+}
+.pa-source-add-input:focus {
+  outline: none;
+  border-color: var(--pa-ink);
+}
+.pa-source-add-input::placeholder { color: var(--pa-mute); }
 .pa-market-meta {
   font-family: var(--pa-font-mono);
   font-size: 10.5px;

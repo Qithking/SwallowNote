@@ -1,6 +1,6 @@
 /** PluginMarketView - 应用内插件市场浏览（Plugin Atlas）。类名 .pa-market-* 限定在 .pa-root 内。 */
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
-import { useTranslation, Trans } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 import {
   Store,
   RefreshCw,
@@ -12,18 +12,27 @@ import {
   User,
   Calendar,
   Info,
+  Settings2,
+  Plus,
+  Trash2,
+  ChevronDown,
 } from 'lucide-react'
 import { usePluginMarketStore, usePluginStore } from '@/stores'
+import { OFFICIAL_REPO_URL } from '@/stores/plugin-market'
+import type { RepoSource } from '@/stores'
 import { PluginMarketDetail } from './PluginMarketDetail'
 import { PluginPermissionDialog } from './PluginPermissionDialog'
 import { VirtualizedCardGrid } from './VirtualizedCardGrid'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
+import { setActiveMarketSource } from '@/lib/tauri'
 import type {
   PluginIndexEntry,
   PluginPermission,
   PluginPermissionStatus,
 } from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 // 提取为常量避免每次渲染分配新对象
 const ICON_STYLE = { marginRight: 3, verticalAlign: -1 } as const
@@ -43,20 +52,9 @@ function PluginMarketView() {
   const refreshIndex = usePluginMarketStore((s) => s.refreshIndex)
   const refreshIndexWithProgress = usePluginMarketStore((s) => s.refreshIndexWithProgress)
   const setSearchQuery = usePluginMarketStore((s) => s.setSearchQuery)
-  const toggleTag = usePluginMarketStore((s) => s.toggleTag)
   const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
   const pendingDetailId = usePluginMarketStore((s) => s.pendingDetailId)
   const setPendingDetailId = usePluginMarketStore((s) => s.setPendingDetailId)
-  // 用 useMemo 派生 allTags/filteredEntries，避免 selector 返回新数组导致死循环
-  const allTags = useMemo(() => {
-    const idx = index
-    if (!idx) return []
-    const set = new Set<string>()
-    for (const p of idx.plugins) {
-      for (const tag of p.tags) set.add(tag)
-    }
-    return Array.from(set).sort()
-  }, [index])
   const filteredEntries = useMemo(() => {
     if (!index) return []
     const q = searchQuery.trim().toLowerCase()
@@ -76,7 +74,26 @@ function PluginMarketView() {
   const localVersionFor = usePluginMarketStore((s) => s.localVersionFor)
 
 
-  const [draftUrl, setDraftUrl] = useState(repoUrl)
+  const repoSources = usePluginMarketStore((s) => s.repoSources)
+  const loadRepoSources = usePluginMarketStore((s) => s.loadRepoSources)
+  const addRepoSource = usePluginMarketStore((s) => s.addRepoSource)
+  const removeRepoSource = usePluginMarketStore((s) => s.removeRepoSource)
+
+  const [showSourceManager, setShowSourceManager] = useState(false)
+
+  // 启动时从 SQLite 加载来源列表
+  useEffect(() => {
+    void loadRepoSources()
+  }, [loadRepoSources])
+
+  // 切换来源：更新 store + 持久化到 SQLite
+  const handleSourceChange = useCallback(
+    (url: string) => {
+      setRepoUrl(url)
+      void setActiveMarketSource(url)
+    },
+    [setRepoUrl],
+  )
   const [detailEntry, setDetailEntry] = useState<PluginIndexEntry | null>(null)
   // 稳定 callback 避免新闭包
   const openDetail = useCallback(
@@ -137,11 +154,6 @@ function PluginMarketView() {
     })
   }
 
-  // 同步 draftUrl 与 store URL
-  useEffect(() => {
-    setDraftUrl(repoUrl)
-  }, [repoUrl])
-
   // 消费 pendingDetailId 打开详情对话框
   const consumedDetailRef = useRef<string | null>(null)
   useEffect(() => {
@@ -171,126 +183,89 @@ function PluginMarketView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoUrl])
 
-  const applyRepoUrl = () => {
-    if (draftUrl !== repoUrl) {
-      setRepoUrl(draftUrl.trim())
-    }
-  }
-
   return (
     <div className="pa-flex-col pa-market" style={{ height: '100%', gap: 0 }}>
       {/* marketplace 独立视觉外壳 */}
-      <section className="pa-market-hero">
-        <div className="pa-market-hero-head">
-          <h3 className="pa-market-hero-title">
-            {t('plugin.pa.market.heroTitle')}
-          </h3>
-          <p className="pa-market-hero-hint">
-            {t('plugin.pa.market.heroHint')}
-          </p>
-        </div>
-        <div className="pa-market-hero-cta">
-          <div className="pa-repo-input">
-            <Store />
-            <input
-              value={draftUrl}
-              onChange={(e) => setDraftUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') applyRepoUrl()
-              }}
-              placeholder={t('plugin.market.repoPlaceholder', { defaultValue: 'https://…/repo.json' })}
-              aria-label="Repository URL"
-            />
-            <button
-              type="button"
-              className="is-outline"
-              onClick={() => {
-                void refreshIndexWithProgress()
-                void refreshUpdates()
-              }}
-              disabled={!repoUrl || isFetchingIndex}
-              title={t('plugin.market.refresh', { defaultValue: '刷新' })}
-            >
-              <RefreshCw size={12} className={isFetchingIndex ? 'animate-spin' : ''} />
-            </button>
-            <button type="button" onClick={applyRepoUrl} disabled={!draftUrl.trim()}>
-              {t('plugin.market.apply', { defaultValue: '应用' })}
-            </button>
-          </div>
-          {/* Progress bar for index fetch */}
-          {isFetchingIndex && (
-            <div className="pa-market-progress">
-              <div className="pa-market-progress-bar">
-                <div
-                  className="pa-market-progress-fill"
-                  style={{ width: `${fetchProgress}%` }}
-                />
-              </div>
-              <span className="pa-market-progress-text">{fetchProgress}%</span>
-            </div>
-          )}
-        </div>
-      </section>
+     
 
-      {/* ── Search + tag filter (toolbar) ─────────────── */}
-      <div className="pa-market-toolbar">        
-        {allTags.length > 0 && (
-          <div className="pa-segmented" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tagFilter.length === 0}
-              className={tagFilter.length === 0 ? 'is-active' : ''}
-              onClick={() => usePluginMarketStore.getState().setTagFilter([])}
+      {/* ── Search toolbar: 左侧来源下拉 + 搜索框，右侧来源管理 ── */}
+      <div className="pa-market-toolbar">
+        <div className="pa-market-toolbar-left">
+          {/* 来源下拉框：官网始终在首位，其余为用户添加的来源 */}
+          <div className="pa-source-select">
+            <select
+              value={repoUrl}
+              onChange={(e) => handleSourceChange(e.target.value)}
+              aria-label={t('plugin.market.sourceSelect', { defaultValue: '选择来源' })}
             >
-              all
-            </button>
-            {allTags.slice(0, 5).map((tag) => {
-              const active = tagFilter.length === 1 && tagFilter[0] === tag
-              return (
-                <button
-                  key={tag}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={active ? 'is-active' : ''}
-                  onClick={() => toggleTag(tag)}
-                >
-                  {tag}
-                </button>
-              )
-            })}
+              <option value={OFFICIAL_REPO_URL}>官网</option>
+              {repoSources.map((source) => (
+                <option key={source.url} value={source.url}>
+                  {source.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={12} className="pa-source-select-arrow" />
           </div>
-        )}        
-        <div className="pa-search" style={{ maxWidth: 'none' }}>
-          <Search />
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('plugin.market.searchPlaceholder', { defaultValue: '搜索插件名 / 描述 / 标签' })}
-            aria-label="Search marketplace"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              className="pa-btn pa-btn-ghost pa-btn is-icon"
-              style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}
-              onClick={() => setSearchQuery('')}
-              aria-label="clear"
-            >
-              <X size={12} />
-            </button>
-          )}
+          {/* 搜索框 */}
+          <div className="pa-search" style={{ maxWidth: 'none' }}>
+            <Search />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('plugin.market.searchPlaceholder', { defaultValue: '搜索插件名 / 描述 / 标签' })}
+              aria-label="Search marketplace"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="pa-btn pa-btn-ghost pa-btn is-icon"
+                style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)' }}
+                onClick={() => setSearchQuery('')}
+                aria-label="clear"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          {/* 刷新按钮 */}
+          <button
+            type="button"
+            className="pa-icon-btn"
+            onClick={() => {
+              void refreshIndexWithProgress()
+              void refreshUpdates()
+            }}
+            disabled={!repoUrl || isFetchingIndex}
+            title={t('plugin.market.refresh', { defaultValue: '刷新' })}
+          >
+            <RefreshCw size={14} className={isFetchingIndex ? 'animate-spin' : ''} />
+          </button>
         </div>
-        <div className="pa-market-meta">
-          {/* 用 Trans 让 count 渲染为 <b> 子组件 */}
-          <Trans
-            i18nKey="plugin.pa.viewMeta.marketplace"
-            values={{ count: index ? index.plugins.length : 0 }}
-            components={{ b: <b /> }}
-          />
+        <div className="pa-market-toolbar-right">
+          <button
+            type="button"
+            className="pa-icon-btn"
+            title={t('plugin.market.manageSources', { defaultValue: '来源管理' })}
+            onClick={() => setShowSourceManager(true)}
+          >
+            <Settings2 size={14} />
+          </button>
         </div>
       </div>
+
+      {/* Progress bar for index fetch */}
+      {isFetchingIndex && (
+        <div className="pa-market-progress">
+          <div className="pa-market-progress-bar">
+            <div
+              className="pa-market-progress-fill"
+              style={{ width: `${fetchProgress}%` }}
+            />
+          </div>
+          <span className="pa-market-progress-text">{fetchProgress}%</span>
+        </div>
+      )}
 
       {/* ── Error / status row ────────────────────────── */}
       {fetchError && (
@@ -359,6 +334,21 @@ function PluginMarketView() {
           permissions={pendingPermissionGrant.requested}
           currentStatus={permissionStatus}
           onClose={() => setPendingPermissionGrant(null)}
+        />
+      )}
+
+      {/* ── Source manager dialog ─────────────────────── */}
+      {showSourceManager && (
+        <SourceManagerDialog
+          sources={repoSources}
+          currentUrl={repoUrl}
+          onSelect={(url) => {
+            handleSourceChange(url)
+            setShowSourceManager(false)
+          }}
+          onAdd={(source) => addRepoSource(source)}
+          onRemove={(url) => removeRepoSource(url)}
+          onClose={() => setShowSourceManager(false)}
         />
       )}
     </div>
@@ -533,6 +523,145 @@ function formatDate(dateStr: string): string {
   } catch {
     return dateStr
   }
+}
+
+/** 来源管理弹窗 */
+function SourceManagerDialog({
+  sources,
+  currentUrl,
+  onSelect,
+  onAdd,
+  onRemove,
+  onClose,
+}: {
+  sources: RepoSource[]
+  currentUrl: string
+  onSelect: (url: string) => void
+  onAdd: (source: RepoSource) => void
+  onRemove: (url: string) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const [newName, setNewName] = useState('')
+  const [newUrl, setNewUrl] = useState('')
+
+  const handleAdd = () => {
+    const name = newName.trim()
+    const url = newUrl.trim()
+    if (!name || !url) return
+    onAdd({ name, url })
+    setNewName('')
+    setNewUrl('')
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="pa-popup" style={{ maxWidth: 520, maxHeight: '70vh', display: 'flex', flexDirection: 'column', gap: 0 }}>
+        <div className="pmd-header">
+          <span className="pmd-header-icon">
+            <Store size={18} />
+          </span>
+          <span className="pmd-header-info">
+            <span className="pmd-header-title">
+              {t('plugin.market.sourceManager', { defaultValue: '来源管理' })}
+            </span>
+          </span>
+        </div>
+
+        <div className="pmd-body">
+          {sources.length === 0 ? (
+            <div className="pmd-empty">
+              <span className="pmd-empty-icon"><Package size={28} /></span>
+              <div className="pmd-empty-title">
+                {t('plugin.market.sourceEmpty', { defaultValue: '暂无自定义来源' })}
+              </div>
+              <div className="pmd-empty-hint">
+                {t('plugin.market.sourceEmptyHint', { defaultValue: '点击下方添加新的插件来源。' })}
+              </div>
+            </div>
+          ) : (
+            <ul className="pa-source-list">
+              {sources.map((source) => (
+                <li
+                  key={source.url}
+                  className={`pa-source-item ${source.url === currentUrl ? 'is-active' : ''}`}
+                >
+                  <div className="pa-source-item-info">
+                    <span className="pa-source-item-name">{source.name}</span>
+                    <span className="pa-source-item-url">{source.url}</span>
+                  </div>
+                  {source.url !== currentUrl && (
+                    <button
+                      type="button"
+                      className="pa-btn pa-btn-sm"
+                      onClick={() => onSelect(source.url)}
+                    >
+                      {t('plugin.market.sourceSwitch', { defaultValue: '切换' })}
+                    </button>
+                  )}
+                  {source.url === currentUrl && (
+                    <span className="pa-market-badge is-installed is-xs">
+                      {t('plugin.market.sourceCurrent', { defaultValue: '当前' })}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="pa-icon-btn is-danger"
+                    style={{ width: 24, height: 24 }}
+                    title={t('plugin.market.sourceRemove', { defaultValue: '删除来源' })}
+                    onClick={() => onRemove(source.url)}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {/* 添加新来源 */}
+          <div className="pa-source-add">
+            <div className="pa-source-add-title">
+              {t('plugin.market.sourceAdd', { defaultValue: '添加来源' })}
+            </div>
+            <div className="pa-source-add-row">
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder={t('plugin.market.sourceNamePlaceholder', { defaultValue: '名称' })}
+                className="pa-source-add-input"
+              />
+              <input
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+                placeholder={t('plugin.market.sourceUrlPlaceholder', { defaultValue: 'https://…/repo.json' })}
+                className="pa-source-add-input"
+                style={{ flex: 2 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAdd()
+                }}
+              />
+              <button
+                type="button"
+                className="pa-icon-btn"
+                disabled={!newName.trim() || !newUrl.trim()}
+                onClick={handleAdd}
+                title={t('plugin.market.sourceAddBtn', { defaultValue: '添加' })}
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="pmd-footer">
+          <Button variant="outline" onClick={onClose}>
+            <X size={14} />
+            {t('common.close', { defaultValue: '关闭' })}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 export { PluginMarketView }

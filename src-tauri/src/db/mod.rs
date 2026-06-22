@@ -3,6 +3,7 @@ pub mod ai_chat;
 pub mod ai_role_prompts;
 pub mod conflict_repo;
 pub mod folder_history;
+pub mod market_sources;
 pub mod plugin_settings;
 pub mod session_state;
 
@@ -84,6 +85,9 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
 
     // conflict_repos table
     conflict_repo::create_table(&conn)?;
+
+    // plugin_market_sources table
+    market_sources::create_table(&conn)?;
 
     // plugin_settings 单表设计：每插件一行，JSON blob 存值。
     conn.execute(

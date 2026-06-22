@@ -199,6 +199,11 @@ pub fn run() {
             commands::plugin_settings::read_plugin_settings,
             commands::plugin_settings::write_plugin_settings,
             commands::plugin_settings::delete_plugin_settings,
+            commands::market_sources::list_market_sources,
+            commands::market_sources::add_market_source,
+            commands::market_sources::remove_market_source,
+            commands::market_sources::set_active_market_source,
+            commands::market_sources::get_active_market_source,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
