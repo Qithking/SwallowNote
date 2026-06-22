@@ -550,13 +550,42 @@ body, #root {
    "Installed" (list) from "Marketplace" (card grid). */
 .pa-tab-strip {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: space-between;
   padding: 0 28px;
   border-bottom: 1px solid var(--pa-line);
   background: var(--pa-paper);
   position: relative;
   z-index: 5;
   flex-shrink: 0;
+}
+.pa-tab-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pa-tab-title {
+  font-family: var(--pa-font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pa-ink);
+  letter-spacing: 0.01em;
+}
+.pa-tab-sync {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute-2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pa-tab-sync b {
+  color: var(--pa-ink);
+  font-weight: 600;
+  font-family: var(--pa-font-mono);
+}
+.pa-tab-right {
+  display: flex;
+  align-items: stretch;
 }
 .pa-tab {
   display: inline-flex;
@@ -578,13 +607,6 @@ body, #root {
 }
 .pa-tab:hover { color: var(--pa-ink); }
 .pa-tab.is-active { color: var(--pa-ink); border-bottom-color: var(--pa-ink); }
-.pa-tab-num {
-  font-family: var(--pa-font-mono);
-  font-size: 10px;
-  color: var(--pa-mute-2);
-  letter-spacing: 0.08em;
-}
-.pa-tab.is-active .pa-tab-num { color: var(--pa-accent); }
 .pa-tab-icon { width: 13px; height: 13px; stroke-width: 1.6; }
 .pa-tab-label { font-family: var(--pa-font-ui); font-size: 15px; font-weight: 500; letter-spacing: 0.01em; text-transform: none; }
 .pa-tab-count {
@@ -600,25 +622,6 @@ body, #root {
 .pa-tab.is-active .pa-tab-count {
   background: var(--pa-ink);
   color: var(--pa-paper);
-}
-.pa-tab-divider {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 8px;
-  font-family: var(--pa-font-mono);
-  font-size: 10px;
-  color: var(--pa-mute-2);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  justify-content: end;
-}
-
-.pa-tab-divider-text b {
-  color: var(--pa-ink);
-  font-weight: 600;
-  font-family: var(--pa-font-mono);
 }
 
 /* ── Body grid (main + rail) ───────────────────────────────────

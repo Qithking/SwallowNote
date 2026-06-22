@@ -529,27 +529,7 @@ function PluginManagerView() {
 
   return (
     <div className="pa-root flex flex-col h-full">
-      {/* ── Hero header (editorial) ───────────────────────── */}
-      <header className="pa-hero">
-        <div className="pa-title-row">
-          <h1 className="pa-page-title">{t('plugin.pa.title')}</h1>
-          {marketUpdates.length > 0 && (
-            <button
-              type="button"
-              className="pa-update-chip"
-              onClick={() => setActiveTab('market')}
-              title={t('plugin.market.tabMarket', { defaultValue: '插件市场' })}
-            >
-              <ChevronUp size={11} className="pa-arrow" />
-              <Trans
-                i18nKey="plugin.pa.update.available"
-                values={{ count: marketUpdates.length }}
-                components={{}}
-              />
-            </button>
-          )}
-        </div>
-      </header>
+      
 
       {/* ── Load-failure banner (Task 2 / G2) ─────────────
             Top-of-page warning strip. Rendered conditionally —
@@ -589,43 +569,41 @@ function PluginManagerView() {
         </div>
       )}
 
-      {/* ── Tab strip (Installed / Marketplace) — the spine of the page.
-             Each tab carries a leading 01 / 02 mono number and a count
-             badge in the active tab. The right side shows the latest
-             sync time so the user always knows the data is fresh. ── */}
+      {/* ── Tab strip: 左侧标题+同步时间，右侧 tab 按钮 ── */}
       <nav className="pa-tab-strip" role="tablist" aria-label={t('plugin.pa.tabs.aria')}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'manage'}
-          className={`pa-tab ${activeTab === 'manage' ? 'is-active' : ''}`}
-          onClick={() => setActiveTab('manage')}
-        >
-          <span className="pa-tab-num">01</span>
-          <List size={13} className="pa-tab-icon" />
-          <span className="pa-tab-label">{t('plugin.pa.view.installed')}</span>
-          <span className="pa-tab-count">{plugins.length}</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'market'}
-          className={`pa-tab ${activeTab === 'market' ? 'is-active' : ''}`}
-          onClick={() => setActiveTab('market')}
-        >
-          <span className="pa-tab-num">02</span>
-          <Store size={13} className="pa-tab-icon" />
-          <span className="pa-tab-label">{t('plugin.pa.view.marketplace')}</span>
-          <span className="pa-tab-count">
-            {marketUpdates.length > 0
-              ? t('plugin.pa.tab.badge.new', { count: marketUpdates.length })
-              : '—'}
-          </span>
-        </button>
-        <div className="pa-tab-divider">
-          <span className="pa-tab-divider-text">
+        <div className="pa-tab-left">
+          <span className="pa-tab-title">{t('plugin.pa.title')}</span>
+          <span className="pa-tab-sync">
             {t('plugin.pa.tab.sync')} <b>{lastSyncLabel}</b>
           </span>
+        </div>
+        <div className="pa-tab-right">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'manage'}
+            className={`pa-tab ${activeTab === 'manage' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('manage')}
+          >
+            <List size={13} className="pa-tab-icon" />
+            <span className="pa-tab-label">{t('plugin.pa.view.installed')}</span>
+            <span className="pa-tab-count">{plugins.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'market'}
+            className={`pa-tab ${activeTab === 'market' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('market')}
+          >
+            <Store size={13} className="pa-tab-icon" />
+            <span className="pa-tab-label">{t('plugin.pa.view.marketplace')}</span>
+            <span className="pa-tab-count">
+              {marketUpdates.length > 0
+                ? t('plugin.pa.tab.badge.new', { count: marketUpdates.length })
+                : '—'}
+            </span>
+          </button>
         </div>
       </nav>
 
