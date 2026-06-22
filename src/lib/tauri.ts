@@ -6,11 +6,7 @@ import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { platform } from '@tauri-apps/plugin-os'
 
-/**
- * Normalize path separators to forward slashes for cross-platform consistency.
- * On Windows, Tauri dialogs return paths with backslashes, but the backend
- * normalizes all paths to forward slashes. This ensures consistency.
- */
+// 路径分隔符统一为正斜杠
 function normalizePath(path: string | null): string | null {
   if (!path) return null
   return path.replace(/\\/g, '/')
@@ -110,6 +106,34 @@ export async function saveWorkspaceFileDialog(defaultPath?: string): Promise<str
   return normalizePath(selected)
 }
 
+// .zip 过滤的保存对话框
+export async function savePluginConfigsDialog(defaultPath?: string): Promise<string | null> {
+  const selected = await save({
+    defaultPath: defaultPath ?? 'swallownote-plugin-configs.zip',
+    filters: [
+      { name: 'Zip archive', extensions: ['zip'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  })
+  return normalizePath(selected)
+}
+
+/**
+ * Open dialog filtered to `.zip` for the plugin-configs import.
+ * Multiple selection is disabled — a bundle is a single archive.
+ */
+export async function openPluginConfigsDialog(): Promise<string | null> {
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    filters: [
+      { name: 'Zip archive', extensions: ['zip'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  })
+  return normalizePath(selected as string | null)
+}
+
 // File System APIs (using Tauri commands)
 export async function pathExists(path: string): Promise<boolean> {
   return await invoke('path_exists', { path })
@@ -159,6 +183,142 @@ export async function readFile(path: string): Promise<string> {
 
 export async function writeFile(path: string, content: string): Promise<void> {
   await invoke('write_file', { path, content })
+}
+
+// 返回插件 storage.json 的绝对路径
+export async function getPluginStoragePath(pluginId: string): Promise<string> {
+  return await invoke('get_plugin_storage_path', { pluginId })
+}
+
+// ── Plugin settings（SQLite 后端）──
+
+/** Mirrors the Rust `PluginSettingsView`. */
+export interface PluginSettingsView {
+  exists: boolean
+  values: Record<string, unknown>
+  schema: PluginSettingsSchema | null
+}
+
+/** Mirrors the Rust `SettingsSchema`. */
+export interface PluginSettingsSchema {
+  version: number
+  title?: string
+  description?: string
+  fields: PluginSettingsField[]
+}
+
+export type PluginSettingsFieldType =
+  | 'string'
+  | 'string-multiline'
+  | 'number'
+  | 'boolean'
+  | 'select'
+  | 'color'
+  | 'directory'
+  | 'password'
+
+export interface PluginSettingsFieldOption {
+  value: unknown
+  label: string
+}
+
+/** 条件可见性谓词：当 values[key] === equals 时显示字段。 */
+export interface PluginSettingsVisibleWhen {
+  key: string
+  equals: unknown
+}
+
+export interface PluginSettingsField {
+  key: string
+  type: PluginSettingsFieldType
+  label: string
+  default?: unknown
+  required?: boolean
+  secret?: boolean
+  placeholder?: string
+  options?: PluginSettingsFieldOption[]
+  visibleWhen?: PluginSettingsVisibleWhen
+}
+
+export async function readPluginSettings(
+  pluginId: string
+): Promise<PluginSettingsView> {
+  return await invoke<PluginSettingsView>('read_plugin_settings', {
+    pluginId,
+  })
+}
+
+export async function writePluginSettings(
+  pluginId: string,
+  values: Record<string, unknown>
+): Promise<void> {
+  await invoke('write_plugin_settings', { args: { pluginId, values } })
+}
+
+export async function deletePluginSettings(pluginId: string): Promise<void> {
+  await invoke('delete_plugin_settings', { pluginId })
+}
+
+// ── Market source management ──────────────────────────────
+export interface MarketSourceView {
+  name: string
+  url: string
+  is_active: boolean
+}
+
+export async function listMarketSources(): Promise<MarketSourceView[]> {
+  return await invoke<MarketSourceView[]>('list_market_sources')
+}
+
+export async function addMarketSource(name: string, url: string): Promise<void> {
+  await invoke('add_market_source', { name, url })
+}
+
+export async function removeMarketSource(url: string): Promise<void> {
+  await invoke('remove_market_source', { url })
+}
+
+export async function setActiveMarketSource(url: string): Promise<void> {
+  await invoke('set_active_market_source', { url })
+}
+
+export async function getActiveMarketSource(): Promise<MarketSourceView | null> {
+  return await invoke<MarketSourceView | null>('get_active_market_source')
+}
+
+// 启动时 seed 存储大小计数器
+export async function getAllPluginStorageSizes(): Promise<Record<string, number>> {
+  const raw = await invoke<Record<string, number>>('get_all_plugin_storage_sizes')
+  return raw ?? {}
+}
+
+// 查询宿主卷真实可用字节。失败返回 null
+export async function getStorageCap(): Promise<number | null> {
+  try {
+    const raw = await invoke<number>('get_storage_cap')
+    if (typeof raw !== 'number' || raw <= 0) return null
+    return raw
+  } catch (err) {
+    // 记录错误便于调试
+    console.warn(
+      '[plugin-storage] getStorageCap() failed — storage meter will show "cap unknown". ' +
+        'If this is unexpected, try rebuilding the host binary (cargo tauri dev).',
+      err,
+    )
+    return null
+  }
+}
+
+// stat 单个插件 storage.json 大小
+export async function getPluginStorageSize(pluginId: string): Promise<number> {
+  try {
+    const path = await getPluginStoragePath(pluginId)
+    const meta = await invoke<{ file_size: number }>('get_file_metadata', { path })
+    return meta?.file_size ?? 0
+  } catch {
+    // 插件可能已卸载或尚未写入
+    return 0
+  }
 }
 
 export async function writeBinaryFile(path: string, data: string): Promise<void> {
@@ -472,6 +632,7 @@ export interface AppSettings {
   syncInterval: string
   autoSyncPush: string
   customShortcuts: string
+  pluginCommandShortcuts: string
   customThemes: string
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
@@ -502,6 +663,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     syncInterval: get('syncInterval', '10'),
     autoSyncPush: get('autoSyncPush', 'false'),
     customShortcuts: get('customShortcuts', '{}'),
+    pluginCommandShortcuts: get('pluginCommandShortcuts', '{}'),
     customThemes: get('customThemes', '[]'),
     activeLightCustomThemeId: get('activeLightCustomThemeId', 'builtin-light'),
     activeDarkCustomThemeId: get('activeDarkCustomThemeId', 'builtin-dark'),
@@ -740,4 +902,102 @@ export interface BuiltinAiModel {
 
 export async function getBuiltinAiModels(): Promise<BuiltinAiModel[]> {
   return await invoke('get_builtin_ai_models')
+}
+
+// ── Plugin APIs ────────────────────────────────────────────────────────────────
+
+export interface PluginMetadataRust {
+  id: string
+  name: string
+  description: string
+  version: string
+  author: string
+  published_at: string
+  /**
+   * Where to show the plugin's icon. `null` / `undefined`
+   * means the plugin has no UI surface (e.g. a file-format
+   * editor that's only triggered by opening the matching
+   * file). The host's `buildRegistry` skips the plugin in
+   * that case, but the plugin's other capabilities
+   * (`editorFileExtensions`, lifecycle hooks, settings, …)
+   * are still honoured.
+   */
+  icon_position: string | null
+  /**
+   * Where to show the plugin's panel content. Optional for
+   * the same reason as `icon_position`.
+   */
+  content_position: string | null
+  order: number
+  enabled: boolean
+  plugin_path: string
+  has_backend: boolean
+  // 是否随附 settings.json schema
+  has_settings_schema: boolean
+}
+
+/** Scan the plugins directory and return metadata for each plugin */
+export async function scanPlugins(): Promise<PluginMetadataRust[]> {
+  return await invoke('scan_plugins')
+}
+
+// 安装 .zip 插件。expectedSha256 可选完整性校验
+export async function installPlugin(
+  zipPath: string,
+  expectedSha256?: string
+): Promise<PluginMetadataRust> {
+  return await invoke('install_plugin', { zipPath, expectedSha256 })
+}
+
+/** Uninstall a plugin by id */
+export async function uninstallPlugin(pluginId: string): Promise<void> {
+  return await invoke('uninstall_plugin', { pluginId })
+}
+
+/** Enable or disable a plugin */
+export async function togglePluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
+  return await invoke('toggle_plugin_enabled', { pluginId, enabled })
+}
+
+// 杀掉插件后端子进程。uninstall 前调用以释放文件句柄
+export async function killPlugin(pluginId: string): Promise<boolean> {
+  return await invoke<boolean>('kill_plugin', { pluginId })
+}
+
+// 单插件导入结果：status 为 ok/missing/error
+export interface PluginConfigImportEntry {
+  plugin_id: string
+  status: 'ok' | 'missing' | 'error'
+  message: string
+}
+
+/** Outcome of an `importPluginConfigs` call. */
+export interface PluginConfigImportResult {
+  swallow_version: string
+  schema_version: number
+  plugin_count: number
+  /** Number of storages successfully written. */
+  imported: number
+  /** Number of entries that were skipped (missing / error). */
+  skipped: number
+  entries: PluginConfigImportEntry[]
+}
+
+/** Manifest at the root of an export bundle. */
+export interface ExportManifest {
+  schema_version: number
+  swallow_version: string
+  exported_at: string
+  plugin_count: number
+  plugin_ids: string[]
+}
+
+// 将所有插件 storage.json 打包为 zip
+export async function exportPluginConfigs(destPath: string): Promise<ExportManifest> {
+  return await invoke<ExportManifest>('export_plugin_configs', { destPath })
+}
+
+// 导入插件配置 zip 并合并
+export async function importPluginConfigs(srcPath: string): Promise<PluginConfigImportResult> {
+  return await invoke<PluginConfigImportResult>('import_plugin_configs', { srcPath })
 }

@@ -23,7 +23,11 @@ import { matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { useFileTreeActions } from '@/hooks/useFileTreeActions'
 import { useFileTreeDragDrop } from '@/hooks/useFileTreeDragDrop'
 import { findNodeByPath, collectAllPaths } from '@/lib/utils/treeUtils'
+import { countWords } from '@/lib/utils/wordCount'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
+import { ContextMenuContent } from '@/components/ui/context-menu'
+import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 
 // 扁平化的树节点，用于虚拟化
 interface FlattenedNode {
@@ -210,12 +214,19 @@ const TreeNodeItem = memo(function TreeNodeItem({
 
   return (
     <div
+      data-tree-node="true"
       draggable={!isEditing}
       onDragStart={(e) => onDragStart(e, node)}
       onDragOver={(e) => onDragOver(e, node)}
       onDragLeave={onDragLeave}
       onDrop={(e) => onDrop(e, node)}
       onDragEnd={onDragEnd}
+      // Stop the contextmenu event from bubbling to the outer
+      // ScrollArea trigger (fileTreeEmpty) so per-node and empty-area
+      // menus don't both open on the same right-click. Use the native
+      // event because Radix registers its listener via
+      // addEventListener, which sits below React's synthetic handler.
+      onContextMenu={(e) => e.nativeEvent.stopImmediatePropagation()}
     >
       <TreeNodeContextMenu
         node={node}
@@ -267,6 +278,12 @@ export const FileTreeView = memo(function FileTreeView() {
     handleCancelNewItem,
     handleDeleteSelected,
   } = useFileTreeActions()
+
+  // ── 空区域右键菜单（fileTreeEmpty）──
+  // 节点自身已带 trigger；外层 trigger 接收不到节点区域的右键事件
+  // （Radix 通过 capture 找到最近的 trigger 打开 menu）。
+  // 我们不需要在空白区域做特殊处理——外层 trigger 监听 ScrollArea
+  // 整体右键，节点 trigger 在子元素上优先触发，自然分流。
 
   // ── 拖拽逻辑 ──
   const {
@@ -326,7 +343,7 @@ export const FileTreeView = memo(function FileTreeView() {
           viewMode: 'preview',
           fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
           modifiedTime: new Date().toLocaleString(),
-          wordCount: content.split(/\s+/).filter(Boolean).length,
+          wordCount: countWords(content),
         })
       })
       .catch(console.error)
@@ -437,74 +454,94 @@ export const FileTreeView = memo(function FileTreeView() {
           )}
         </div>
       </div>
-      <ScrollArea className="flex-1 py-1">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
-            <RefreshCw size={16} className="animate-spin" />
-          </div>
-        ) : nodes.length > 0 ? (
-          <div ref={parentRef} style={{ height: '100%', overflow: 'auto' }}>
-            <div
-              style={{
-                height: `${virtualizer.getTotalSize()}px`,
-                width: '100%',
-                position: 'relative',
-              }}
-            >
-              {virtualItems.map((virtualItem) => {
-                const { node, depth } = flattenedNodes[virtualItem.index]
-                return (
-                  <div
-                    key={node.path}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: `${virtualItem.size}px`,
-                      transform: `translateY(${virtualItem.start}px)`,
-                    }}
-                  >
-                    <TreeNodeItem
-                      node={node}
-                      depth={depth}
-                      isEditing={editingPath === node.path}
-                      isSelected={node.path === selectedPath}
-                      isMultiSelected={multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1}
-                      isDragOver={dragOverPath === node.path}
-                      isDragging={dragSourcePaths.includes(node.path)}
-                      expanded={expanded}
-                      editingName={editingName}
-                      newItem={newItem}
-                      inputRef={inputRef}
-                      onSelect={handleSelect}
-                      onToggle={toggleNode}
-                      onStartEdit={handleStartEdit}
-                      onNewItem={handleNewItem}
-                      onFinishEdit={handleFinishEdit}
-                      onCancelEdit={handleCancelEdit}
-                      onFinishNewItem={handleFinishNewItem}
-                      onCancelNewItem={handleCancelNewItem}
-                      onDragStart={handleDragStart}
-                      onDragOver={handleDragOver}
-                      onDragLeave={handleDragLeave}
-                      onDrop={handleDrop}
-                      onDragEnd={handleDragEnd}
-                      setEditingName={setEditingName}
-                      setNewItem={setNewItem}
-                    />
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
-            <FolderOpen size={24} className="mb-2 opacity-50" />
-            <p>{t('fileTree.noFolderOpened')}</p>
-          </div>
-        )}
-      </ScrollArea>
+      <ContextMenuPrimitive.Root>
+        <ContextMenuPrimitive.Trigger asChild>
+          <ScrollArea className="flex-1 py-1">
+            {isLoading ? (
+              <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
+                <RefreshCw size={16} className="animate-spin" />
+              </div>
+            ) : nodes.length > 0 ? (
+              <div ref={parentRef} data-file-tree-scroll style={{ height: '100%', overflow: 'auto' }}>
+                <div
+                  style={{
+                    height: `${virtualizer.getTotalSize()}px`,
+                    width: '100%',
+                    position: 'relative',
+                  }}
+                >
+                  {virtualItems.map((virtualItem) => {
+                    const { node, depth } = flattenedNodes[virtualItem.index]
+                    return (
+                      <div
+                        key={node.path}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: `${virtualItem.size}px`,
+                          transform: `translateY(${virtualItem.start}px)`,
+                        }}
+                      >
+                        <TreeNodeItem
+                          node={node}
+                          depth={depth}
+                          isEditing={editingPath === node.path}
+                          isSelected={node.path === selectedPath}
+                          isMultiSelected={multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1}
+                          isDragOver={dragOverPath === node.path}
+                          isDragging={dragSourcePaths.includes(node.path)}
+                          expanded={expanded}
+                          editingName={editingName}
+                          newItem={newItem}
+                          inputRef={inputRef}
+                          onSelect={handleSelect}
+                          onToggle={toggleNode}
+                          onStartEdit={handleStartEdit}
+                          onNewItem={handleNewItem}
+                          onFinishEdit={handleFinishEdit}
+                          onCancelEdit={handleCancelEdit}
+                          onFinishNewItem={handleFinishNewItem}
+                          onCancelNewItem={handleCancelNewItem}
+                          onDragStart={handleDragStart}
+                          onDragOver={handleDragOver}
+                          onDragLeave={handleDragLeave}
+                          onDrop={handleDrop}
+                          onDragEnd={handleDragEnd}
+                          setEditingName={setEditingName}
+                          setNewItem={setNewItem}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
+                <FolderOpen size={24} className="mb-2 opacity-50" />
+                <p>{t('fileTree.noFolderOpened')}</p>
+              </div>
+            )}
+          </ScrollArea>
+        </ContextMenuPrimitive.Trigger>
+        {/* Plugin-contributed items for the file-tree empty area. The
+            helper renders nothing when no plugin is registered, so
+            the menu is invisible until a contribution exists.
+            Per-node right-clicks open TreeNodeContextMenu (the inner
+            trigger fires first), so this outer menu is effectively
+            only shown for the empty / non-node region. */}
+        <ContextMenuContent
+          className="min-w-[160px]"
+          style={{
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+          }}
+        >
+          <PluginContextMenuItems location="fileTreeEmpty" ctx={{}} />
+        </ContextMenuContent>
+      </ContextMenuPrimitive.Root>
     </div>
   )
 })

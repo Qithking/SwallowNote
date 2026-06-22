@@ -11,9 +11,33 @@ const AIView = lazy(() => import('@/components/AI/AIView').then(m => ({ default:
 const DirectoryView = lazy(() => import('@/components/Directory/DirectoryView').then(m => ({ default: m.DirectoryView })))
 const HistoryView = lazy(() => import('@/components/History/HistoryView').then(m => ({ default: m.HistoryView })))
 const EditorSettings = lazy(() => import('@/components/EditorSettings/EditorSettings').then(m => ({ default: m.EditorSettings })))
+const PluginManagerView = lazy(() => import('@/components/Plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })))
+
+// Simple loading placeholder for PluginManager
+function PluginManagerLoading() {
+  return (
+    <div className="flex-1 flex items-center justify-center" style={{ background: 'var(--bg-secondary)' }}>
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+        <span className="text-sm text-muted-foreground">Loading...</span>
+      </div>
+    </div>
+  )
+}
+
+// Preload function for PluginManagerView - can be called on hover
+let pluginManagerPreloaded = false
+export function preloadPluginManager() {
+  if (!pluginManagerPreloaded) {
+    pluginManagerPreloaded = true
+    // Preload the main component and its sub-components
+    void import('@/components/Plugin/PluginManagerView')
+  }
+}
+import { PluginPanelHost } from '@/components/Plugin/PluginPanelHost'
 import { StatusBar } from '@/components/StatusBar'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useGitStore } from '@/stores'
+import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useGitStore, usePluginStore } from '@/stores'
 import type { UIState, EditorState, GitState, PullResult } from '@/stores'
 import type { GitRepository } from '@/stores/git'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
@@ -29,6 +53,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { useEditorSettingsStore } from '@/stores'
+import { isPluginSidebarView, isPluginRightPanelType, extractPluginId, pluginRightPanelType, createPluginPanelProps } from '@/lib/plugin-utils'
 
 function App() {
   useTheme()
@@ -45,6 +70,8 @@ function App() {
   const autoSyncPush = useUIStore((s: UIState) => s.autoSyncPush)
   const sidebarView = useUIStore((s: UIState) => s.sidebarView)
   const tabs = useEditorStore((s: EditorState) => s.tabs)
+  const activeTabId = useEditorStore((s: EditorState) => s.activeTabId)
+  const activeTab = tabs.find((t) => t.id === activeTabId)
   const cachedRepositories = useGitStore((s: GitState) => s.cachedRepositories)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
@@ -85,14 +112,70 @@ function App() {
       // This depends on file tree being loaded first
       await restoreSessionState()
       
+      // Step 5: 异步加载插件（不阻塞首屏）
+      const { scanPlugins } = await import('@/lib/tauri')
+      const { loadAllPlugins } = await import('@/lib/plugin-loader')
+      // usePluginStore 已静态导入
+      scanPlugins()
+        .then(loadAllPlugins)
+        .then(async (result) => {
+          const { plugins: defs, failures } = result
+          usePluginStore.getState().setPlugins(defs)
+          // 记录加载失败信息
+          usePluginStore.getState().setLoadFailures(failures)
+          usePluginStore.getState().setLoaded(true)
+          // 用宿主端权威字节数 seed 存储大小追踪器
+          const { seedPluginStorageSizes } = await import('@/lib/plugin-telemetry')
+          const { getAllPluginStorageSizes } = await import('@/lib/tauri')
+          void getAllPluginStorageSizes()
+            .then((sizes) => seedPluginStorageSizes(sizes))
+            .catch((err) => {
+              // 非致命：下次写入时会重新填充
+              console.warn('[App] failed to seed plugin storage sizes:', err)
+            })
+          // 订阅宿主存储变更事件，reconcile 绕过 JS 路径的写入
+          const { subscribeToPluginStorageChanges } = await import('@/lib/plugin-telemetry')
+          void subscribeToPluginStorageChanges().catch((err) => {
+            console.warn('[App] failed to subscribe to plugin storage changes:', err)
+          })
+          // Hydrate 权限守卫缓存，确保跨 tab 授权变更即时生效
+          const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
+          void hydratePermissionGuard(defs.map((d) => d.id))
+          // Hydrate 自动更新配置并触发后台更新链（fire-and-forget）
+          const { hydrateAutoUpdateFromLocalStorage, runAutoUpdateOnStartup } =
+            await import('@/lib/plugin-auto-update')
+          hydrateAutoUpdateFromLocalStorage()
+          void runAutoUpdateOnStartup()
+        })
+        .catch((err) => {
+          // 仅传输层错误到达此 catch
+          console.error('[App] Failed to load plugins on startup:', err)
+          usePluginStore.getState().setLoaded(true)
+        })
+
       // Sync current i18n language to the Rust backend
       const { default: i18n } = await import('i18next')
       setAppLocale(i18n.language).catch(() => {})
 
-      // Window was created hidden (visible:false) to prevent white→black flash.
-      // Now that theme and settings are loaded, show the window.
+      // 主题/设置加载完成后显示窗口，避免闪烁
       try {
         await getCurrentWindow().show()
+      } catch { /* ignore */ }
+
+      // 窗口可见后发射 app:ready
+      try {
+        const { emitAppReady } = await import('@/lib/plugin-host')
+        emitAppReady()
+      } catch { /* ignore */ }
+
+      // 空闲时段预加载 PluginManagerView chunk
+      try {
+        if ('requestIdleCallback' in window) {
+          ;(window as unknown as { requestIdleCallback: (cb: () => void) => void })
+            .requestIdleCallback(() => { void preloadPluginManager() })
+        } else {
+          setTimeout(() => { void preloadPluginManager() }, 1500)
+        }
       } catch { /* ignore */ }
     }
     init()
@@ -101,6 +184,12 @@ function App() {
   useEffect(() => {
     const win = getCurrentWindow()
     const unlisten = win.listen('tauri://close-requested', async () => {
+      // 通知插件 app 退出（不 await）
+      try {
+        const { emitAppExit } = await import('@/lib/plugin-host')
+        emitAppExit()
+      } catch { /* ignore */ }
+
       const { closeWithoutExit } = useUIStore.getState()
       const dirtyCount = useEditorStore.getState().getDirtyTabsCount()
       if (dirtyCount > 0) {
@@ -114,7 +203,9 @@ function App() {
         await saveSessionStateNow()
         await win.hide()
         const { setDockIconVisibility } = await import('@/lib/tauri')
-        setDockIconVisibility(false).catch(() => {})
+        // Cosmetic side effect — a failure here doesn't block close,
+        // but log it so the silent loss isn't completely invisible.
+        setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
       } else {
         await saveSessionStateNow()
         await win.destroy()
@@ -161,7 +252,9 @@ function App() {
           if (tab.isDirty) {
             editorStore.markExternalChange(tab.id)
           } else {
-            editorStore.loadTabContent(tab.id)
+            // Force reload: loadTabContent skips when content !== undefined,
+            // but external modifications need to overwrite the cached content.
+            editorStore.loadTabContent(tab.id, 0, true)
           }
         }
       } else if (type === 'created' || type === 'removed' || type === 'renamed') {
@@ -177,6 +270,15 @@ function App() {
           )
           for (const tab of tabsToClose) {
             editorStore.removeTab(tab.id)
+          }
+
+          // 清理文件树选中状态：若删除的是当前选中文件/其父目录，则清空 selectedPath
+          const fileTreeStore = useFileTreeStore.getState()
+          const currentSelectedPath = fileTreeStore.selectedPath
+          if (currentSelectedPath && (currentSelectedPath === path || currentSelectedPath.startsWith(path + '/'))) {
+            fileTreeStore.setSelectedPath(null)
+            fileTreeStore.clearMultiSelection()
+            fileTreeStore.setLastClickedPath(null)
           }
         }
 
@@ -361,7 +463,9 @@ function App() {
     if (closeWithoutExit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
-      setDockIconVisibility(false).catch(() => {})
+      // Cosmetic side effect — a failure here doesn't block close,
+      // but log it so the silent loss isn't completely invisible.
+      setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
     } else {
       await win.destroy()
     }
@@ -382,7 +486,9 @@ function App() {
     if (closeWithoutExit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
-      setDockIconVisibility(false).catch(() => {})
+      // Cosmetic side effect — a failure here doesn't block close,
+      // but log it so the silent loss isn't completely invisible.
+      setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
     } else {
       await win.destroy()
     }
@@ -484,7 +590,50 @@ function App() {
     }
   }, [isDraggingLeft, isDraggingRight, handleMouseMoveLeft, handleMouseMoveRight, handleMouseUp])
 
+  // Get plugins for rendering
+  const allPlugins = usePluginStore((s) => s.plugins)
+
+  // Check if a full-panel/editorArea plugin is currently active
+  const activeFullPanelPlugin = settingsPanelVisible && isPluginSidebarView(sidebarView)
+    ? allPlugins.find((p) => {
+        const pluginViewId = `plugin:${p.id}`
+        return sidebarView === pluginViewId && (p.contentPosition === 'fullPanel' || p.contentPosition === 'editorArea')
+      })
+    : null
+
+  // Check if the plugin manager is active
+  const isPluginManagerActive = settingsPanelVisible && sidebarView === 'plugin:__plugin_manager'
+
   const renderRightPanel = () => {
+    // Check for plugin right panel
+    if (rightPanelType && isPluginRightPanelType(rightPanelType)) {
+      const pluginId = extractPluginId(rightPanelType)
+      const plugin = allPlugins.find((p) => p.id === pluginId)
+      if (plugin) {
+        const panel = plugin.panel
+        const isActive = rightPanelType === pluginRightPanelType(plugin.id)
+        const panelProps = createPluginPanelProps(
+          plugin.id,
+          isActive,
+          () => {
+            // Symmetric close path: hide the right panel and clear the
+            // active plugin id, matching the ActivityBar/TitleBar close
+            // paths.
+            useUIStore.getState().setRightPanelType(null)
+            usePluginStore.getState().setActivePlugin(null, 'rightPanel')
+          },
+          activeTab?.content ?? '',
+          activeTab?.path ?? ''
+        )
+        // `key={pluginId}` on PluginPanelHost forces a remount when
+        // the user switches from one right-panel plugin to another,
+        // so onUnmount / onMount fire for the previous plugin. The
+        // host itself dispatches onActivate / onDeactivate based on
+        // the isActive prop.
+        return <PluginPanelHost key={plugin.id} plugin={plugin} panel={panel} isActive={isActive} panelProps={panelProps} />
+      }
+      return null
+    }
     switch (rightPanelType) {
       case 'ai': return <Suspense fallback={null}><AIView /></Suspense>
       case 'directory': return <Suspense fallback={null}><DirectoryView /></Suspense>
@@ -497,27 +646,27 @@ function App() {
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
   const handleContextMenu = useCallback((_e: React.MouseEvent) => {
-    _e.preventDefault()
+    //_e.preventDefault()
   }, [])
 
   return (
     <TooltipProvider>
       <div
-        className="h-screen w-screen flex flex-col p-[6px]"
-        style={{ background: 'transparent', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
+        className="h-screen w-screen flex flex-col p-px rounded-[12px]"
+        style={{ background: 'var(--theme-color)', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
         onContextMenu={handleContextMenu}
       >
-        <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))', boxShadow: 'var(--shadow-app)' }}>
+        <div className="flex-1 flex flex-col overflow-hidden rounded-[11px]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))'}}>
         {/* Title Bar */}
         <TitleBar />
 
         {/* Main Content */}
-        <div className="flex-1 flex overflow-hidden gap-x-0.5 pr-0.5">
+        <div className="flex-1 flex overflow-hidden gap-x-0.5 px-1 pr-1.5">
           {/* Activity Bar */}
           <ActivityBar />
 
-          {/* Sidebar - hidden when settings panel is open, sidebar is collapsed, or sidebar view is 'settings' (settings shown in main area) */}
-          {!settingsPanelVisible && sidebarVisible && sidebarView !== 'settings' && (
+          {/* Sidebar - hidden when settings/fullPanel/pluginManager is open, sidebar is collapsed, or sidebar view is 'settings' (settings shown in main area) */}
+          {!settingsPanelVisible && sidebarVisible && sidebarView !== 'settings' && !activeFullPanelPlugin && !isPluginManagerActive && (
             <div 
               className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 
               style={{ width: sidebarWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))' }}
@@ -527,7 +676,7 @@ function App() {
           )}
 
           {/* Left Resize Handle */}
-          {!settingsPanelVisible && sidebarVisible && sidebarView !== 'settings' && (
+          {!settingsPanelVisible && sidebarVisible && sidebarView !== 'settings' && !activeFullPanelPlugin && !isPluginManagerActive && (
             <div
               className="flex-shrink-0 w-[1px] h-full flex items-center justify-center cursor-col-resize"
               onMouseDown={handleMouseDownLeft}
@@ -544,10 +693,45 @@ function App() {
             </div>
           )}
 
-          {/* Editor Area */}
+          {/* Editor Area / Full Panel / Plugin Manager */}
           <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary-gradient, var(--bg-secondary))'}}>
-            {settingsPanelVisible ? (
+            {settingsPanelVisible && sidebarView === 'settings' ? (
               <SettingsView />
+            ) : isPluginManagerActive ? (
+              <Suspense fallback={<PluginManagerLoading />}><PluginManagerView /></Suspense>
+            ) : activeFullPanelPlugin ? (
+              <Suspense fallback={null}>{(() => {
+                const panel = activeFullPanelPlugin.panel
+                const panelProps = createPluginPanelProps(
+                  activeFullPanelPlugin.id,
+                  true,
+                  () => {
+                    // Close the full-panel plugin AND reset sidebarView so
+                    // the next time the user opens the sidebar, the default
+                    // view is shown instead of this plugin's stale view.
+                    // Also clear the active plugin id to match the
+                    // ActivityBar/TitleBar close paths.
+                    useUIStore.getState().setSettingsPanelVisible(false)
+                    useUIStore.getState().setSidebarView('explorer')
+                    usePluginStore.getState().setActivePlugin(null, 'fullPanel')
+                  },
+                  activeTab?.content ?? '',
+                  activeTab?.path ?? ''
+                )
+                // `key={id}` ensures a fresh mount (and onMount /
+                // onUnmount) when the user switches from one fullPanel
+                // plugin to another. onActivate fires on the
+                // initial mount because isActive=true.
+                return (
+                  <PluginPanelHost
+                    key={activeFullPanelPlugin.id}
+                    plugin={activeFullPanelPlugin}
+                    panel={panel}
+                    isActive={true}
+                    panelProps={panelProps}
+                  />
+                )
+              })()}</Suspense>
             ) : (
               <div className="flex-1 flex flex-col overflow-hidden">
                 {tabs.length > 0 && (

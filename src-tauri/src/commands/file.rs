@@ -122,11 +122,7 @@ fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) 
         return Err(format!("Path is not a directory: {}", path.display()));
     }
 
-    // Use jwalk for high-performance parallel directory scanning.
-    // jwalk pre-fetches metadata in parallel, which is significantly faster than
-    // sequential tokio::fs::read_dir + metadata calls, especially on Windows and
-    // network drives. For single-level listing, we set sort to true for consistent
-    // ordering and use max_depth(1) to avoid unnecessary recursion.
+    // 用 jwalk 并行预取 metadata；max_depth(1)+sort 保证单层一致排序。
     let mut nodes: Vec<FileNode> = Vec::new();
 
     for entry_result in jwalk::WalkDir::new(path)
@@ -228,11 +224,7 @@ pub async fn list_directory(
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
-/// Batch-list multiple directories in a single IPC call.
-/// Each directory is scanned on the blocking thread pool in parallel,
-/// then all results are returned together. This dramatically reduces the
-/// overhead of repeated IPC round-trips when the frontend needs to load
-/// several expanded directories at once (e.g. during refresh or workspace restore).
+// 批量列出多个目录：blocking 线程池并行扫描，一次 IPC 返回全部结果。
 #[derive(Serialize)]
 pub struct BatchDirResult {
     pub path: String,
@@ -489,7 +481,7 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
             .arg("-e")
             .arg("pb's clearContents()")
             .arg("-e")
-            .arg(&format!(
+            .arg(format!(
                 "set fileURL to current application's NSURL's fileURLWithPath:\"{}\"",
                 escaped_path
             ))
@@ -866,7 +858,7 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
             
             if let Ok(file) = std::fs::File::open(&path) {
                 let reader = BufReader::new(file);
-                let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+                let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
                 
                 let mut line_matches: Vec<LineMatch> = Vec::new();
                 

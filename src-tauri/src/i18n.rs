@@ -1,7 +1,4 @@
-/// Backend i18n module for SwallowNote
-/// Embeds translation JSON files at compile time using include_str!,
-/// and provides a thread-safe way to get translated messages based on the
-/// current locale setting.
+//! 后端 i18n 模块：编译期嵌入翻译 JSON，提供线程安全 locale 查询。
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -53,7 +50,7 @@ pub fn t(key: &str) -> String {
 
 /// Get a translated string for the given key using the specified locale.
 pub fn t_with_locale(key: &str, locale: &str) -> String {
-    let translations = TRANSLATIONS.read().unwrap();
+    let translations = TRANSLATIONS.read().unwrap_or_else(|e| e.into_inner());
 
     // Try the requested locale first
     if let Some(value) = translations.get(locale) {

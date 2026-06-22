@@ -1,0 +1,11 @@
+{
+  "id": "com.example.hello-world",
+  "name": "Hello World",
+  "description": "A minimal example plugin that shows a single greeting panel.",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "iconPosition": "sidebar",
+  "contentPosition": "fullPanel",
+  "hasBackend": false,
+  "entry": "index.tsx"
+}

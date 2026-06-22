@@ -193,19 +193,8 @@ export function useSessionPersistence() {
         }
       }
 
-      if (states.activeTabId) {
-        const editorState = useEditorStore.getState()
-        const activeTab = editorState.tabs.find((t) => t.id === states.activeTabId)
-        if (activeTab?.path) {
-          // Only expand the directory path for the active tab's file,
-          // not all previously expanded directories (avoid flash of expanded-then-collapsed dirs)
-          await useFileTreeStore.getState().revealPath(activeTab.path, 
-            workspaceMode === 'workspace' && workspaceFolders.length > 0
-              ? workspaceFolders.find((f: string) => activeTab.path.startsWith(f)) || rootPath!
-              : rootPath!
-          )
-        }
-      }
+      // 文件树定位由 TabBar 的 useEffect 监听 activeTabId 统一处理，
+      // restoreTabs 设置 activeTabId 后会自动触发 revealPath，无需在此重复调用。
 
       if (states.sidebarWidth) setSidebarWidth(Number(states.sidebarWidth))
       if (states.rightPanelWidth) setRightPanelWidth(Number(states.rightPanelWidth))

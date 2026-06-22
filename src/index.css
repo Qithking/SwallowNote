@@ -307,3 +307,2305 @@ body, #root {
 .blocknote-editor-container .bn-block-group > .bn-block-outer:last-child {
   margin-bottom: 0 !important;
 }
+
+/* =============================================================
+   PLUGIN ATLAS — layout & typography for the plugin manager.
+   All *colors* come from the app's own theme variables
+   (`--bg-primary` / `--text-primary` / `--theme-color` / etc.),
+   so the panel automatically follows the application's
+   light / dark / system theme. No manual toggle, no
+   independent palette.
+
+   Two non-color tokens stay scoped to `.pa-root`:
+     - `--pa-font-*` typography (Instrument Serif / JetBrains
+       Mono / Manrope, sourced from Google Fonts above)
+     - `--pa-radius` / `--pa-shadow-*` for the editorial card
+       silhouette
+   ============================================================= */
+.pa-root {
+  /* === Theme aliases ===
+     The `.pa-*` styles below reference `var(--pa-*)` for visual
+     consistency. We re-bind those aliases here to the *application's*
+     theme variables, so the plugin manager inherits the app's
+     light / dark / system theme automatically — no independent
+     palette, no `data-pa-theme` attribute. */
+  /* surfaces (paper → content area background) */
+  --pa-paper: var(--bg-secondary);
+  --pa-paper-2: var(--bg-primary);
+  --pa-paper-3: var(--bg-hover);
+  /* text (ink → app text) */
+  --pa-ink: var(--text-primary);
+  --pa-ink-2: var(--text-secondary);
+  --pa-mute: var(--text-muted);
+  --pa-mute-2: var(--text-muted);
+  /* accent (terracotta → app theme color) */
+  --pa-accent: var(--theme-color);
+  --pa-accent-2: var(--theme-color-hover);
+  --pa-accent-soft: color-mix(in srgb, var(--theme-color) 12%, transparent);
+  --pa-accent-glow: color-mix(in srgb, var(--theme-color) 18%, transparent);
+  /* status: kept as fixed values (no app-wide equivalent) */
+  --pa-positive: #2d6a4f;
+  --pa-positive-soft: rgba(45, 106, 79, 0.10);
+  --pa-warn: #b97a1f;
+  --pa-warn-soft: rgba(185, 122, 31, 0.12);
+  --pa-negative: #b83a2a;
+  --pa-negative-soft: rgba(184, 58, 42, 0.10);
+  /* lines (bound to the app's border color, with mix-blend for
+     two extra depths so dividers don't visually disappear in
+     either light or dark) */
+  --pa-line: var(--border-color);
+  --pa-line-2: color-mix(in srgb, var(--border-color) 75%, transparent);
+  --pa-line-3: color-mix(in srgb, var(--border-color) 55%, transparent);
+
+  /* === Typography === (font is not theme color, scoped here) */
+  --pa-font-display: 'Instrument Serif', 'Times New Roman', serif;
+  --pa-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --pa-font-ui: 'Manrope', system-ui, sans-serif;
+
+  /* === Layout-only tokens === */
+  --pa-radius: 6px;
+  --pa-radius-lg: 10px;
+  --pa-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --pa-shadow-2: 0 4px 14px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --pa-shadow-3: 0 24px 60px rgba(0, 0, 0, 0.20), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --pa-spine-w: 60px;
+
+  font-family: var(--pa-font-ui);
+  color: var(--text-primary);
+  background: var(--bg-secondary-gradient, var(--bg-secondary));
+  position: relative;
+  isolation: isolate;
+}
+
+/* ── Hero / title row ───────────────────────────────────────────
+   The hero is intentionally minimal: a single title row that
+   pairs the h1 with an optional update-available chip on the
+   right. No eyebrow, no version label, no action buttons, no
+   stats — those have all been pulled into the page body
+   (tab strip + stats ribbon + toolbar) to reduce visual noise. */
+.pa-hero {
+  padding: 18px 28px;
+  position: relative;
+  flex-shrink: 0;
+}
+.pa-title-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  flex-wrap: wrap;
+}
+.pa-page-title {
+  font-family: var(--pa-font-display);
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--pa-ink);
+  margin: 0;
+}
+.pa-page-title em {
+  font-style: italic;
+  color: var(--pa-accent);
+  font-weight: 400;
+}
+/* ── Pill / kbd (small mono labels) ──────────────────────────── */
+.pa-pill {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border: 1px solid var(--pa-line);
+  background: var(--pa-paper-2);
+  color: var(--pa-ink-2);
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pa-kbd {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--pa-mute);
+}
+.pa-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--pa-radius);
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid var(--pa-line);
+  background: var(--pa-paper);
+  color: var(--pa-ink);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
+  font-family: var(--pa-font-ui);
+}
+.pa-btn:hover { background: var(--pa-paper-2); border-color: var(--pa-line-2); }
+.pa-btn:active { transform: translateY(1px); }
+.pa-btn svg { color: var(--pa-mute); }
+.pa-btn:hover svg { color: var(--pa-ink); }
+.pa-btn-ghost { background: transparent; border-color: transparent; }
+.pa-btn-ghost:hover { background: var(--pa-paper-2); }
+.pa-btn-outline { background: var(--pa-paper); }
+.pa-btn-primary {
+  background: var(--pa-ink);
+  color: var(--pa-paper);
+  border-color: var(--pa-ink);
+}
+.pa-btn-primary svg { color: var(--pa-paper); }
+.pa-btn-primary:hover { background: var(--pa-accent); border-color: var(--pa-accent); }
+.pa-btn-primary:hover svg { color: var(--pa-paper); }
+.pa-btn.is-icon {
+  width: 32px; padding: 0; justify-content: center;
+}
+/* ── Update-available chip (sits inline with the page title) ──
+   A small clickable button that appears next to the title
+   when the marketplace has updates. It jumps the user to the
+   Marketplace tab. Renders only when `marketUpdates.length > 0`. */
+.pa-update-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-accent);
+  background: var(--pa-accent-soft);
+  border: 1px solid var(--pa-accent-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  height: 24px;
+  align-self: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pa-update-chip:hover { background: var(--pa-accent-glow); border-color: var(--pa-accent); }
+.pa-update-chip .pa-arrow { color: var(--pa-accent); }
+
+/* ── Stats ribbon (sits inside the right rail, on the Installed tab) ─
+   The ribbon shares the rail's narrow 268px-wide column with the
+   storage meter and the open buttons. The rail reads top-to-bottom
+   as: install stats (2×N grid) → storage meter → open buttons.
+   `grid-template-columns: repeat(2, 1fr)` so each cell is half the
+   rail's content width; 5 cells fall into 3 rows (2+2+1). The last
+   cell on an odd row stretches to full width via the
+   `.pa-stat.is-last` rule. */
+.pa-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius-lg);
+  overflow: hidden;
+}
+.pa-stat {
+  padding: 10px 12px;
+  border-right: 1px solid var(--pa-line);
+  border-bottom: 1px solid var(--pa-line);
+  display: flex; flex-direction: column; gap: 3px;
+  position: relative;
+}
+.pa-stat:nth-child(2n) { border-right: 0; }
+.pa-stat:nth-last-child(-n+2):nth-child(2n+1) { border-bottom: 0; }
+/* last odd cell spans the full width so the 5th cell doesn't
+   look stranded on its own row */
+.pa-stat.is-last { grid-column: 1 / -1; border-right: 0; }
+.pa-stat-label {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--pa-mute);
+}
+.pa-stat-num {
+  font-family: var(--pa-font-display);
+  font-size: 20px;
+  line-height: 1;
+  color: var(--pa-ink);
+  display: flex; align-items: baseline; gap: 6px;
+}
+.pa-stat-delta {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  color: var(--pa-mute);
+  display: flex; align-items: center; gap: 3px;
+}
+.pa-stat-delta.is-up { color: var(--pa-positive); }
+.pa-stat-delta.is-down { color: var(--pa-negative); }
+.pa-stat-delta.is-warn { color: var(--pa-warn); }
+
+/* ── Tab strip (Installed / Marketplace) ───────────────────────
+   A strong, sticky tab nav. Each tab carries a leading 01 / 02
+   mono number, an icon, the label, and a count badge — a small
+   `— Latest sync HH:MM` indicator sits on the right edge so the
+   user always knows the data is fresh. The active tab gets the
+   primary text colour and a thick underline; inactive tabs are
+   muted. This is the spine of the page: it's the first thing the
+   eye lands on after the hero, and it visually separates
+   "Installed" (list) from "Marketplace" (card grid). */
+.pa-tab-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--pa-line);
+  background: var(--pa-paper);
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+}
+.pa-tab-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pa-tab-title {
+  font-family: var(--pa-font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--pa-ink);
+  letter-spacing: 0.01em;
+}
+.pa-tab-sync {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute-2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pa-tab-sync b {
+  color: var(--pa-ink);
+  font-weight: 600;
+  font-family: var(--pa-font-mono);
+}
+.pa-tab-right {
+  display: flex;
+  align-items: stretch;
+}
+.pa-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--pa-mute);
+  cursor: pointer;
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  position: relative;
+  transition: color 0.15s, border-color 0.15s;
+}
+.pa-tab:hover { color: var(--pa-ink); }
+.pa-tab.is-active { color: var(--pa-ink); border-bottom-color: var(--pa-ink); }
+.pa-tab-icon { width: 13px; height: 13px; stroke-width: 1.6; }
+.pa-tab-label { font-family: var(--pa-font-ui); font-size: 15px; font-weight: 500; letter-spacing: 0.01em; text-transform: none; }
+.pa-tab-count {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--pa-paper-2);
+  color: var(--pa-mute);
+  padding: 2px 7px;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}
+.pa-tab.is-active .pa-tab-count {
+  background: var(--pa-ink);
+  color: var(--pa-paper);
+}
+
+/* ── Body grid (main + rail) ───────────────────────────────────
+   Two-column by default (main + 268px rail). The `is-fullwidth`
+   modifier collapses to a single column on the Marketplace tab
+   where the right rail (storage / open buttons) is hidden —
+   storage info is irrelevant to browsing a remote repo. */
+.pa-body {
+  display: grid;
+  grid-template-columns: 1fr 268px;
+  min-height: 0;
+  flex: 1;
+}
+.pa-body.is-fullwidth { grid-template-columns: 1fr; }
+.pa-main { padding: 0 28px 20px; overflow: hidden; min-width: 0; display: flex; flex-direction: column; }
+.pa-rail {
+  padding: 18px 16px 20px;
+  border-left: 1px solid var(--pa-line);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.pa-rail > * { width: 100%; }
+.pa-rail-title {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--pa-mute);
+  margin-bottom: 10px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* ── View head / toolbar ─────────────────────────────────────── */
+.pa-view-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  padding: 18px 0 12px;
+  border-bottom: 1px solid var(--pa-line);
+  margin-bottom: 12px;
+}
+.pa-view-title {
+  font-family: var(--pa-font-display);
+  font-size: 28px;
+  line-height: 1;
+  margin: 0;
+  color: var(--pa-ink);
+}
+.pa-view-title em { font-style: italic; color: var(--pa-accent); font-weight: 400; }
+.pa-view-meta {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+}
+.pa-view-meta b { color: var(--pa-ink); font-weight: 500; }
+.pa-toolbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 20px 0 14px;
+  border-bottom: 1px dashed var(--pa-line);
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+.pa-search {
+  position: relative;
+  flex: 1 1 280px; min-width: 220px;
+  max-width: 420px;
+}
+.pa-search input {
+  width: 100%;
+  height: 32px;
+  padding: 0 56px 0 30px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  background: var(--pa-paper);
+  color: var(--pa-ink);
+  font-size: 12.5px;
+  font-family: var(--pa-font-ui);
+  transition: border-color 0.15s, background 0.15s;
+}
+.pa-search input::placeholder { color: var(--pa-mute); }
+.pa-search input:focus {
+  outline: none;
+  border-color: var(--pa-ink);
+  background: var(--pa-paper);
+}
+.pa-search svg {
+  position: absolute;
+  left: 10px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--pa-mute);
+  width: 14px; height: 14px;
+}
+.pa-search .pa-kbd {
+  position: absolute;
+  right: 8px; top: 50%;
+  transform: translateY(-50%);
+}
+.pa-segmented {
+  display: inline-flex;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  overflow: hidden;
+  background: var(--pa-paper);
+}
+.pa-segmented button {
+  border: 0;
+  background: transparent;
+  padding: 0 12px;
+  height: 30px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--pa-mute);
+  cursor: pointer;
+  border-right: 1px solid var(--pa-line);
+  font-family: var(--pa-font-mono);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, color 0.15s;
+}
+.pa-segmented button:last-child { border-right: 0; }
+.pa-segmented button:hover { background: var(--pa-paper-2); color: var(--pa-ink); }
+.pa-segmented button.is-active { background: var(--pa-ink); color: var(--pa-paper); }
+
+/* ── Book-spine list card ────────────────────────────────────── */
+.pa-list { display: flex; flex-direction: column; gap: 0; }
+.pa-card {
+  display: grid;
+  grid-template-columns: var(--pa-spine-w) 1fr auto;
+  border-top: 1px solid var(--pa-line);
+  position: relative;
+  transition: background 0.15s, transform 0.12s;
+}
+.pa-card:hover { background: var(--pa-paper-2); }
+.pa-card:hover .pa-spine-rail { background: var(--pa-accent); }
+.pa-card:last-child { border-bottom: 1px solid var(--pa-line); }
+.pa-card.is-focused { background: var(--pa-paper-2); }
+.pa-card.is-focused .pa-spine-rail { background: var(--pa-accent); }
+.pa-card.is-focused .pa-name::after { content: ' →'; color: var(--pa-accent); font-style: normal; }
+.pa-card.is-disabled { opacity: 0.55; }
+
+/* spine colors (12 hues) — only used by the legacy
+ * `pa-market-card-spine` decorative 4px bar that sat on
+ * top of each plugin card. The bar and its color map were
+ * removed in 2026-06-15; the color classes are kept for
+ * the standalone `.pa-spine` book-spine list element below
+ * (which still reads `--pa-spine-color`) but are not used
+ * by the plugin-card system any more. */
+.pa-spine-c1  { --pa-spine-color: #c73e1d; }
+.pa-spine-c2  { --pa-spine-color: #d4a017; }
+.pa-spine-c3  { --pa-spine-color: #2d6a4f; }
+.pa-spine-c4  { --pa-spine-color: #5a4e8c; }
+.pa-spine-c5  { --pa-spine-color: #b85c8e; }
+.pa-spine-c6  { --pa-spine-color: #1f6e8c; }
+.pa-spine-c7  { --pa-spine-color: #c4741d; }
+.pa-spine-c8  { --pa-spine-color: #6b7c3f; }
+.pa-spine-c9  { --pa-spine-color: #8c3a52; }
+.pa-spine-c10 { --pa-spine-color: #3a6e8c; }
+.pa-spine-c11 { --pa-spine-color: #6b4e2d; }
+.pa-spine-c12 { --pa-spine-color: #4a5d8c; }
+
+.pa-spine {
+  position: relative;
+  background: var(--pa-spine-color, var(--pa-accent));
+  color: rgba(255, 255, 255, 0.95);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: space-between;
+  padding: 16px 0 14px;
+  text-align: center;
+  font-family: var(--pa-font-mono);
+}
+.pa-spine-rail {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.pa-spine-num {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+}
+.pa-spine-mark {
+  font-family: var(--pa-font-display);
+  font-size: 30px;
+  line-height: 1;
+  font-style: italic;
+  font-weight: 400;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+}
+.pa-spine-version {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+  font-family: var(--pa-font-mono);
+  background: rgba(0, 0, 0, 0.18);
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+/* body */
+.pa-body-card {
+  padding: 14px 18px;
+  min-width: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.pa-card-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.pa-name {
+  font-family: var(--pa-font-display);
+  font-size: 24px;
+  line-height: 1.1;
+  color: var(--pa-ink);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 360px;
+}
+.pa-status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--pa-positive);
+  display: inline-block;
+}
+.pa-status-dot.is-off { background: var(--pa-mute-2); }
+.pa-status-dot.is-warn { background: var(--pa-warn); }
+.pa-byline {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.pa-byline b { color: var(--pa-ink-2); font-weight: 500; }
+.pa-byline .pa-sep { color: var(--pa-mute-2); }
+.pa-desc {
+  font-size: 12.5px;
+  color: var(--pa-ink-2);
+  line-height: 1.45;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pa-meta-row {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.pa-tag {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+  border: 1px solid var(--pa-line);
+}
+.pa-tag.is-update {
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  border-color: var(--pa-accent-soft);
+}
+.pa-tag.is-warn {
+  background: var(--pa-warn-soft);
+  color: var(--pa-warn);
+  border-color: var(--pa-warn-soft);
+}
+.pa-error-bar {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px;
+  color: var(--pa-negative);
+  background: var(--pa-negative-soft);
+  border: 1px solid var(--pa-negative-soft);
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-family: var(--pa-font-mono);
+}
+
+/* actions */
+.pa-actions {
+  padding: 14px 18px 14px 0;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  min-width: 120px;
+}
+.pa-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.pa-switch-track {
+  position: relative;
+  width: 40px; height: 22px;
+  background: var(--pa-paper-3);
+  border: 1px solid var(--pa-line-2);
+  border-radius: 999px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.pa-switch-thumb {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  background: var(--pa-paper);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  transition: left 0.22s cubic-bezier(0.4, 1.3, 0.6, 1), background 0.2s;
+}
+.pa-switch.is-on .pa-switch-track { background: var(--pa-positive); border-color: var(--pa-positive); }
+.pa-switch.is-on .pa-switch-thumb { left: 21px; background: var(--pa-paper); }
+.pa-switch-label {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--pa-mute);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pa-switch.is-on .pa-switch-label { color: var(--pa-positive); }
+.pa-icon-row {
+  display: flex; align-items: center; gap: 4px;
+}
+.pa-icon-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--pa-mute);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pa-icon-btn:hover { background: var(--pa-paper-2); color: var(--pa-ink); border-color: var(--pa-line); }
+.pa-icon-btn.is-danger:hover { color: var(--pa-negative); border-color: var(--pa-negative-soft); background: var(--pa-negative-soft); }
+.pa-icon-btn svg { width: 14px; height: 14px; }
+
+/* manifest line */
+.pa-manifest {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--pa-line);
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap;
+}
+.pa-manifest b { color: var(--pa-ink-2); font-weight: 500; }
+.pa-manifest .pa-sep { color: var(--pa-mute-2); }
+
+/* ── Rail: storage meter + entry buttons ─────────────────────── */
+.pa-meter {
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.pa-meter-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.pa-meter-title {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.pa-meter-value {
+  font-family: var(--pa-font-display);
+  font-size: 18px;
+  color: var(--pa-ink);
+}
+.pa-meter-bar {
+  height: 5px;
+  background: var(--pa-paper-3);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.pa-meter-bar::after {
+  content: '';
+  display: block;
+  width: 34%;
+  height: 100%;
+  background: linear-gradient(to right, var(--pa-accent), var(--pa-accent-2));
+  border-radius: 999px;
+}
+/* StorageMeter: a "real" data-driven bar that draws its
+ * own fill via an absolutely-positioned inner div, so the
+ * default 34% ::after would lie about usage. Suppress it
+ * — we want the rail to be empty when there's no fill
+ * (cap unknown) and show 0% when usage is genuinely 0. */
+.pa-meter-bar--storage::after {
+  content: none;
+}
+.pa-meter-foot {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  color: var(--pa-mute);
+  display: flex; justify-content: space-between;
+}
+
+.pa-rail-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--pa-line);
+  background: var(--pa-paper);
+  border-radius: var(--pa-radius);
+  color: var(--pa-ink);
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.08s;
+  font-family: var(--pa-font-ui);
+}
+.pa-rail-btn:hover { background: var(--pa-paper-2); border-color: var(--pa-line-2); }
+.pa-rail-btn:active { transform: translateY(1px); }
+.pa-rail-btn svg { color: var(--pa-mute); flex-shrink: 0; }
+.pa-rail-btn:hover svg { color: var(--pa-ink); }
+.pa-rail-btn span { flex: 1; text-align: left; }
+.pa-rail-btn-meta {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  color: var(--pa-mute);
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  padding: 2px 6px;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+  flex: 0 0 auto !important;
+}
+.pa-rail-btn:hover .pa-rail-btn-meta { background: var(--pa-paper); }
+
+/* ── Activity feed (used in popup) ─────────────────────────── */
+.pa-activity { display: flex; flex-direction: column; gap: 0; }
+.pa-feed-item {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--pa-line);
+  align-items: baseline;
+}
+.pa-feed-item:last-child { border-bottom: 0; }
+.pa-feed-time {
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  color: var(--pa-mute);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.pa-feed-text {
+  font-size: 12.5px;
+  color: var(--pa-ink-2);
+  line-height: 1.5;
+}
+.pa-feed-text b { color: var(--pa-ink); font-weight: 600; }
+
+/* ── Diagnostics grid (used in popup) ──────────────────────── */
+.pa-diag-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  overflow: hidden;
+}
+.pa-diag-cell {
+  padding: 14px 16px;
+  border-right: 1px dotted var(--pa-line);
+  border-bottom: 1px dotted var(--pa-line);
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--pa-paper);
+}
+.pa-diag-cell:nth-child(2n) { border-right: 0; }
+.pa-diag-cell:nth-last-child(-n+2) { border-bottom: 0; }
+.pa-diag-label {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--pa-mute);
+  display: flex; align-items: center; gap: 6px;
+}
+.pa-diag-label::before {
+  content: '';
+  width: 5px; height: 5px;
+  background: var(--pa-mute-2);
+  display: inline-block;
+  border-radius: 0;
+}
+.pa-diag-cell.is-ok .pa-diag-label::before { background: var(--pa-positive); }
+.pa-diag-cell.is-warn .pa-diag-label::before { background: var(--pa-warn); }
+.pa-diag-num {
+  font-family: var(--pa-font-display);
+  font-size: 28px;
+  line-height: 1;
+  color: var(--pa-ink);
+  display: flex; align-items: baseline; gap: 4px;
+}
+.pa-diag-num small {
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  color: var(--pa-mute);
+  font-weight: 500;
+}
+.pa-diag-meta {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+}
+.pa-diag-meta.is-up { color: var(--pa-positive); }
+.pa-diag-meta.is-warn { color: var(--pa-warn); }
+
+.pa-spark {
+  margin-top: 6px;
+  height: 22px;
+  display: flex; align-items: flex-end; gap: 2px;
+}
+.pa-spark span {
+  flex: 1;
+  background: var(--pa-paper-3);
+  border-radius: 1px;
+  min-height: 2px;
+}
+.pa-spark.is-events span:nth-last-child(-n+3) { background: var(--pa-accent); }
+.pa-spark.is-events span:nth-last-child(-n+6) { background: var(--pa-accent-soft); }
+
+/* per-plugin load row */
+.pa-load-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 80px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--pa-line);
+}
+.pa-load-row:last-child { border-bottom: 0; }
+.pa-load-name { color: var(--pa-ink-2); font-weight: 500; }
+.pa-load-bar {
+  height: 6px;
+  background: var(--pa-paper-3);
+  border: 1px solid var(--pa-line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.pa-load-bar > div {
+  height: 100%;
+  background: linear-gradient(to right, var(--pa-accent), var(--pa-accent-2));
+  border-radius: 2px;
+}
+.pa-load-val {
+  font-family: var(--pa-font-display);
+  font-size: 14px;
+  color: var(--pa-ink);
+  text-align: right;
+}
+.pa-load-val small {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  color: var(--pa-mute);
+  font-weight: 500;
+  margin-left: 2px;
+}
+
+/* ── Log stream (used in popup) ─────────────────────────────── */
+.pa-log-stream {
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--pa-ink-2);
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  padding: 12px 14px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.pa-log-line {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 1px 0;
+}
+.pa-log-time { color: var(--pa-mute-2); flex-shrink: 0; font-size: 10px; padding-top: 1px; }
+.pa-log-lvl {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  min-width: 38px;
+  text-align: center;
+}
+.pa-log-lvl.is-info { background: var(--pa-paper); color: var(--pa-mute); border: 1px solid var(--pa-line); }
+.pa-log-lvl.is-ok { background: var(--pa-positive-soft); color: var(--pa-positive); }
+.pa-log-lvl.is-warn { background: var(--pa-warn-soft); color: var(--pa-warn); }
+.pa-log-lvl.is-err { background: var(--pa-negative-soft); color: var(--pa-negative); }
+.pa-log-msg { flex: 1; color: var(--pa-ink-2); }
+.pa-log-msg b { color: var(--pa-ink); font-weight: 600; }
+/* Conflict group header (Task 13 / G13). Renders a sticky
+   band above the conflict log lines so a user scanning the
+   stream can tell the "⚠️ Conflict" section apart from the
+   plain metric feed without reading each line. Lives inside
+   the `.pa-log-stream` so the rounded corners of the parent
+   container clip the header's top edge cleanly. */
+.pa-log-group {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pa-warn);
+  background: var(--pa-warn-soft);
+  border: 1px solid var(--pa-warn-soft);
+  border-radius: 2px;
+  padding: 3px 8px;
+  margin: 6px 0 4px 0;
+}
+.pa-log-group .pa-log-group-count {
+  margin-left: auto;
+  color: var(--pa-ink-2);
+  font-weight: 500;
+}
+
+/* ── Popup (modal) styling ─────────────────────────────────── */
+.pa-popup {
+  /*
+   * Re-declare the pa-* alias tokens on `.pa-popup` itself so
+   * the popup paints correctly even when portalled outside
+   * the .pa-root tree. The Radix DialogContent uses Portal
+   * to render into `document.body`, which is outside
+   * `.pa-root`; without this rebind, `var(--pa-paper)` etc.
+   * resolve to `unset` on the portalled node and the popup
+   * background / border / shadow all collapse to `transparent`
+   * — making the dialog look "broken" (no surface, no border,
+   * overlay visible through it).
+   *
+   * We mirror the same alias values the `.pa-root` block
+   * defines, so a popup rendered inline inside `.pa-root`
+   * (the previous path) gets the same result.
+   */
+  --pa-paper: var(--bg-secondary);
+  --pa-paper-2: var(--bg-primary);
+  --pa-paper-3: var(--bg-hover);
+  --pa-ink: var(--text-primary);
+  --pa-ink-2: var(--text-secondary);
+  --pa-mute: var(--text-muted);
+  --pa-line: var(--border-color);
+  --pa-line-2: color-mix(in srgb, var(--border-color) 75%, transparent);
+  --pa-radius: 6px;
+  --pa-radius-lg: 10px;
+  --pa-shadow-3: 0 24px 60px rgba(0, 0, 0, 0.20), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --pa-accent: var(--theme-color);
+  --pa-accent-soft: color-mix(in srgb, var(--theme-color) 18%, transparent);
+  --pa-accent-glow: color-mix(in srgb, var(--theme-color) 18%, transparent);
+
+  background: var(--pa-paper) !important;
+  border: 1px solid var(--pa-line) !important;
+  color: var(--pa-ink) !important;
+  border-radius: var(--pa-radius-lg) !important;
+  box-shadow: var(--pa-shadow-3) !important;
+  padding: 0 !important;
+  overflow: hidden;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+}
+.pa-popup.is-wide { width: 760px; }
+.pa-popup-head {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--pa-line);
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  position: relative;
+  background: radial-gradient(ellipse 80% 100% at 100% 0%, var(--pa-accent-soft), transparent 60%);
+}
+.pa-popup-head::after {
+  content: '';
+  position: absolute;
+  left: 22px; right: 22px; bottom: -1px; height: 1px;
+  background: linear-gradient(to right, var(--pa-line), transparent 30%, transparent 70%, var(--pa-line));
+}
+.pa-popup-eyebrow {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pa-mute);
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px;
+}
+.pa-popup-eyebrow::before {
+  content: '';
+  width: 5px; height: 5px;
+  background: var(--pa-accent);
+  border-radius: 50%;
+}
+.pa-popup-title {
+  font-family: var(--pa-font-display);
+  font-size: 30px;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--pa-ink);
+  margin: 0;
+}
+.pa-popup-title em { font-style: italic; color: var(--pa-accent); }
+.pa-popup-tabs {
+  display: flex;
+  align-items: center;
+  padding: 0 18px 12px;
+  border-bottom: 1px dashed var(--pa-line);
+}
+.pa-popup-tabs .pa-segmented {
+  display: inline-flex;
+  align-items: center;
+}
+.pa-popup-tabs .pa-segmented button {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+.pa-popup-close {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  color: var(--pa-mute);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.pa-popup-close:hover { background: var(--pa-paper-2); color: var(--pa-ink); border-color: var(--pa-ink); }
+.pa-popup-close svg { width: 14px; height: 14px; }
+.pa-popup-body {
+  flex: 1; overflow-y: auto;
+  padding: 16px 22px 18px;
+  font-size: 13px;
+  color: var(--pa-ink-2);
+}
+.pa-popup-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 22px;
+  border-top: 1px solid var(--pa-line);
+  background: var(--pa-paper-2);
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  letter-spacing: 0.04em;
+}
+.pa-popup-foot .pa-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.pa-popup-foot .pa-btn { height: 26px; padding: 0 10px; font-size: 11px; }
+
+/* ── Logs dialog actions (Task 8 / G8) ────────────────────
+   The footer of the Logs popup carries three controls (filter
+   dropdown / Copy / Export). The container pins to the right
+   edge via `margin-left: auto` so it lines up with the other
+   popup footers. The filter wrapper is an inline group (icon +
+   `<select>`) that keeps the visual height of a single `.pa-btn`
+   so the footer's vertical rhythm doesn't break. */
+.pa-popup-foot .pa-logs-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pa-logs-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pa-mute);
+}
+.pa-logs-filter-trigger {
+  height: 26px;
+  min-width: 140px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-family: var(--pa-font-mono);
+  background: var(--pa-paper);
+  border: 1px solid var(--pa-line);
+  color: var(--pa-ink);
+  border-radius: var(--pa-radius);
+}
+.pa-logs-filter-trigger[data-state="open"] { border-color: var(--pa-ink); }
+.pa-logs-filter-trigger[data-disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Marketplace (light restyle using pa tokens) ──────────── */
+/*
+  The marketplace gets a distinct visual chrome from the
+  Installed list. The `pa-market-hero` is a paper-2 card with
+  a bold heading on the left and the repo URL + key-verified
+  pill on the right, separated by a thick top accent. It
+  deliberately uses a different surface (paper-2) and a
+  different layout (1.2fr / 1fr grid) so the user's eye can
+  tell the two views apart at a glance, even before the tab
+  strip's active state.
+*/
+.pa-market {
+  --pa-surface-accent: linear-gradient(
+    to right,
+    var(--pa-accent) 0%,
+    var(--pa-accent) 30%,
+    transparent 30%,
+    transparent 100%
+  );
+  background: var(--pa-paper);
+}
+.pa-market-hero {
+  display: grid;
+  grid-template-columns: 1.1fr 1.4fr;
+  gap: 24px;
+  align-items: center;
+  padding: 18px 22px;
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius-lg);
+  margin: 18px 0 14px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--pa-shadow-1);
+  flex-shrink: 0;
+}
+.pa-market-hero::before {
+  display: none;
+}
+.pa-market-hero::after {
+  content: '';
+  position: absolute;
+  right: -60px;
+  top: -60px;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, var(--pa-accent-soft), transparent 70%);
+  pointer-events: none;
+}
+.pa-market-hero-head { position: relative; z-index: 1; }
+.pa-market-hero-title {
+  font-family: var(--pa-font-display);
+  font-size: 26px;
+  line-height: 1.1;
+  margin: 0 0 6px;
+  color: var(--pa-ink);
+  letter-spacing: -0.01em;
+}
+.pa-market-hero-title em { font-style: italic; color: var(--pa-accent); }
+.pa-market-hero-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--pa-ink-2);
+  max-width: 360px;
+  margin: 0;
+}
+.pa-market-hero-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+.pa-market-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Progress bar for market index fetch */
+.pa-market-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 0 2px;
+}
+.pa-market-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--pa-paper-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.pa-market-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--pa-accent), var(--pa-accent-2));
+  border-radius: 2px;
+  transition: width 0.2s ease-out;
+}
+.pa-market-progress-text {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  min-width: 28px;
+  text-align: right;
+}
+.pa-market-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 0 14px;
+  border-bottom: 1px dashed var(--pa-line);
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+.pa-market-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.pa-market-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+/* 来源下拉框 */
+.pa-source-select {
+  position: relative;
+  flex-shrink: 0;
+}
+.pa-source-select select {
+  appearance: none;
+  height: 32px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  background: var(--pa-paper);
+  color: var(--pa-ink);
+  font-family: var(--pa-font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.pa-source-select select:focus {
+  outline: none;
+  border-color: var(--pa-ink);
+}
+.pa-source-select-arrow {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--pa-mute);
+}
+/* 来源管理弹窗 */
+.pa-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pa-source-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  background: var(--pa-paper);
+}
+.pa-source-item.is-active {
+  border-color: var(--pa-accent-soft);
+  background: var(--pa-accent-soft);
+}
+.pa-source-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pa-source-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink);
+}
+.pa-source-item-url {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-source-add {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--pa-line);
+}
+.pa-source-add-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pa-ink-2);
+  margin-bottom: 8px;
+}
+.pa-source-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pa-source-add-input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  background: var(--pa-paper);
+  color: var(--pa-ink);
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  flex: 1;
+  min-width: 0;
+  transition: border-color 0.15s;
+}
+.pa-source-add-input:focus {
+  outline: none;
+  border-color: var(--pa-ink);
+}
+.pa-source-add-input::placeholder { color: var(--pa-mute); }
+.pa-market-meta {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  letter-spacing: 0.04em;
+}
+.pa-market-meta b { color: var(--pa-ink); font-weight: 600; }
+.pa-repo-input {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--pa-paper);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  padding: 0 6px 0 10px;
+  height: 36px;
+  font-family: var(--pa-font-mono);
+  font-size: 11.5px;
+  color: var(--pa-ink);
+  min-width: 360px;
+  transition: border-color 0.15s;
+}
+.pa-repo-input:focus-within { border-color: var(--pa-ink); }
+.pa-repo-input svg { color: var(--pa-mute); width: 14px; height: 14px; }
+.pa-repo-input input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--pa-ink);
+  font-family: var(--pa-font-mono);
+  font-size: 11.5px;
+}
+.pa-repo-input button {
+  border: 0;
+  background: var(--pa-ink);
+  color: var(--pa-paper);
+  padding: 0 12px;
+  height: 26px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--pa-font-ui);
+}
+.pa-repo-input button:hover { background: var(--pa-accent); }
+.pa-repo-input button.is-outline {
+  background: transparent;
+  color: var(--pa-ink-2);
+  border: 1px solid var(--pa-line);
+  padding: 0 8px;
+}
+.pa-repo-input button.is-outline:hover {
+  background: var(--pa-paper-2);
+  color: var(--pa-ink);
+  border-color: var(--pa-line-2);
+}
+
+.pa-market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.pa-market-card {
+  background: var(--pa-paper);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.12s;
+  text-align: left;
+  overflow: hidden;
+  position: relative;
+}
+.pa-market-card:hover {
+  border-color: var(--pa-line-2);
+  box-shadow: var(--pa-shadow-2);
+  position: relative;
+  z-index: 1;
+}
+.pa-market-card-body {
+  padding: 12px 14px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.pa-market-card-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+}
+.pa-market-card-name {
+  font-family: var(--pa-font-display);
+  font-style: italic;
+  font-size: 18px;
+  line-height: 1.2;
+  color: var(--pa-ink);
+}
+.pa-market-card-id {
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+}
+.pa-market-card-desc {
+  font-size: 12px;
+  color: var(--pa-ink-2);
+  line-height: 16px;
+  height: 32px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pa-market-card-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: 4px;
+}
+.pa-market-badge {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+  border: 1px solid var(--pa-line);
+}
+.pa-market-badge.is-update { background: var(--pa-accent-soft); color: var(--pa-accent); border-color: var(--pa-accent-soft); }
+.pa-market-badge.is-installed { background: var(--pa-positive-soft); color: var(--pa-positive); border-color: var(--pa-positive-soft); }
+.pa-market-badge.is-install { background: var(--pa-paper-3); color: var(--pa-ink-2); }
+/* Health badge palette (Task 3 / G3). Each variant maps to a
+   semantic CSS variable already used by the marketplace card
+   chrome so the three states share a visual language with
+   the rest of the card. The conflict variant (Task 13 / G13)
+   reuses the warn palette so a "Conflict" badge reads as a
+   higher-severity cousin of the "Unhealthy" pulse, not a
+   separate colour family. */
+.pa-market-badge.is-healthy { background: var(--pa-positive-soft); color: var(--pa-positive); border-color: var(--pa-positive-soft); }
+.pa-market-badge.is-unhealthy { background: var(--pa-danger-soft, #fde2e1); color: var(--pa-danger, #c4302b); border-color: var(--pa-danger-soft, #fde2e1); }
+.pa-market-badge.is-unknown { background: var(--pa-paper-3); color: var(--pa-ink-2); border-color: var(--pa-line); }
+.pa-market-badge.is-conflict { background: var(--pa-warn-soft, #fff4d6); color: var(--pa-warn, #b46a00); border-color: var(--pa-warn-soft, #fff4d6); }
+
+/* ── Installed-card specifics (`.pa-market-card` + plugin ops) ─
+   The Installed view reuses the marketplace card chrome
+   (spine + body + name + description + tags). What it adds:
+   a byline (author · date · version), an actions row (on/off
+   switch + icon buttons), and a disabled state. The styles
+   below live in the marketplace section because that's where
+   the chrome is defined. */
+.pa-installed-grid { gap: 12px; }
+.pa-market-card.is-disabled { opacity: 0.62; }
+.pa-market-card.is-disabled:hover { box-shadow: none; z-index: auto; }
+.pa-installed-byline {
+  display: flex;
+  align-items: center;
+  /* Force the byline to a single line so the author/date/version
+     tuple doesn't wrap under the plugin id on narrow cards. Each
+     child gets `min-width: 0` to allow the inner text to ellipsise
+     (via `text-overflow: ellipsis` below) rather than push the
+     flex row onto a second line. */
+  flex-wrap: nowrap;
+  gap: 6px;
+  font-family: var(--pa-font-mono);
+  font-size: 10px;
+  color: var(--pa-mute);
+  letter-spacing: 0.02em;
+  margin-top: -2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.pa-installed-byline b { color: var(--pa-ink-2); font-weight: 600; }
+.pa-installed-byline .pa-sep { color: var(--pa-mute-2); }
+.pa-installed-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--pa-negative);
+  background: var(--pa-negative-soft);
+  border-radius: 3px;
+  padding: 4px 8px;
+  margin-top: 4px;
+}
+.pa-installed-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--pa-line);
+}
+.pa-market-card-local-ver {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--pa-accent);
+  color: #fff;
+}
+
+/* ── Installed-card sparkline (Task 12 / G12) ─────────────
+   The sparkline is a 18px-tall, auto-width SVG that sits on
+   the right edge of the meta row. It visualises per-plugin
+   "startup time" (avg hook duration) over the most recent
+   30 buckets, with the line's stroke colour shifting from
+   green → amber → red as the peak error rate climbs.
+
+   The component sets a `data-sparkline-level` attribute
+   (`ok` / `warn` / `err`) on the `<svg>` so this stylesheet
+   can tint a soft background pill around the chart without
+   the JSX having to inline a colour. The three CSS
+   variables are aliased to the existing `--pa-positive` /
+   `--pa-warn` / `--pa-negative` tokens so the chart
+   automatically follows light / dark / system themes. */
+.pa-market-card-meta {
+  /* The meta row is `display: flex` already; the sparkline
+     pushed in by the card uses `margin-left: auto` to
+     sit on the right edge. We make the flex alignment
+     `center` so the sparkline's 18px height doesn't push
+     the row taller than the badges want. */
+  align-items: center;
+}
+.pa-sparkline {
+  /* The wrapper SVG itself has no decoration – the line
+     inside it is the only visible element. `display: block`
+     is already set inline; we re-state it here so a future
+     edit to the JSX's inline `style` doesn't accidentally
+     revert the layout. */
+  display: block;
+  flex-shrink: 0;
+  /* The polyline is 1.2px; we let the GPU do the
+     smoothing. `vector-effect: non-scaling-stroke` would
+     crisp the line at any rendered size, but the chart
+     is small enough that the default scaling looks fine. */
+}
+.pa-sparkline.is-ok   { --pa-sparkline-ok:   var(--pa-positive); }
+.pa-sparkline.is-warn { --pa-sparkline-warn: var(--pa-warn); }
+.pa-sparkline.is-err  { --pa-sparkline-err:  var(--pa-negative); }
+
+/* The baseline guides the eye to "0ms" without taking up
+   the chart's full height. We use `currentColor` and a low
+   opacity so the line inherits the card's text colour and
+   fades against the paper background. */
+.pa-sparkline-baseline {
+  stroke: currentColor;
+  stroke-width: 0.5;
+  opacity: 0.18;
+  vector-effect: non-scaling-stroke;
+}
+/* The trend line's `stroke` is set inline by the component
+   (so a single line can switch colours mid-array via
+   per-segment overrides in the future). Today every
+   segment shares the same colour picked by
+   `classifyErrorRate`. */
+.pa-sparkline-line {
+  /* Nothing here – the JSX owns the stroke. We keep the
+     selector so a future dark-mode override can target
+     the polyline class without us renaming it. */
+}
+
+/* ── Marketplace primary CTA ───────────────────────────────
+   The marketplace card shares the Installed card's
+   `.pa-installed-actions` row layout (dashed divider, icon
+   row on the right), but the left half is a primary call-
+   to-action button instead of an on/off switch. The
+   `.pa-market-cta` button is sized to occupy the same
+   horizontal space as `.pa-switch` so the two card
+   types line up row-by-row in the marketplace grid.
+
+   Three colour themes mirror the badge system:
+   - `.is-install`   — accent (terracotta). "I want this."
+   - `.is-update`    — accent (same colour; the badge above
+                       already conveys the urgency).
+   - `.is-installed` — positive (green). "You have this." */
+.pa-market-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 3px;
+  border: 1px solid var(--pa-accent);
+  background: var(--pa-accent);
+  color: var(--pa-paper);
+  font-family: var(--pa-font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+}
+.pa-market-cta:hover { opacity: 0.88; }
+.pa-market-cta.is-install {
+  background: var(--pa-accent);
+  border-color: var(--pa-accent);
+  color: var(--pa-paper);
+}
+.pa-market-cta.is-update {
+  background: var(--pa-accent);
+  border-color: var(--pa-accent);
+  color: var(--pa-paper);
+}
+.pa-market-cta.is-installed {
+  background: var(--pa-positive-soft);
+  border-color: var(--pa-positive-soft);
+  color: var(--pa-positive);
+  cursor: default;
+}
+.pa-market-cta.is-installed:hover { opacity: 1; }
+
+/* ── Plugin Market Detail (.pmd-*) ────────────────────
+   Detail dialog styles for the plugin marketplace.
+   Uses the same pa-* design tokens. */
+
+/* Header */
+.pmd-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  flex-shrink: 0;
+}
+.pmd-header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--pa-radius);
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  flex-shrink: 0;
+}
+.pmd-header-icon svg { width: 18px; height: 18px; }
+.pmd-header-info {
+  flex: 1;
+  min-width: 0;
+}
+.pmd-header-title {
+  font-family: var(--pa-font-display);
+  font-style: italic;
+  font-size: 20px;
+  line-height: 1.2;
+  color: var(--pa-ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pmd-header-id {
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  margin-top: 2px;
+}
+.pmd-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--pa-mute);
+  border-radius: var(--pa-radius);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  padding: 0;
+}
+.pmd-close:hover { background: var(--pa-paper-2); color: var(--pa-ink); }
+.pmd-close svg { width: 16px; height: 16px; }
+
+/* Scrollable body */
+.pmd-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+/* Tab panel */
+.pmd-tabpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+/* Overview */
+.pmd-overview { display: flex; flex-direction: column; gap: 12px; }
+.pmd-desc {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--pa-ink-2);
+  margin: 0;
+}
+.pmd-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+  letter-spacing: 0.01em;
+}
+.pmd-meta-dot { color: var(--pa-mute); }
+.pmd-meta-sep { color: var(--pa-line); }
+.pmd-tags-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Tab strip */
+.pmd-tabstrip {
+  display: flex;
+  gap: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--pa-line);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.pmd-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--pa-font-ui);
+  font-weight: 400;
+  color: var(--pa-ink-2);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  min-height: 32px;
+}
+.pmd-tab:hover { color: var(--pa-ink); }
+.pmd-tab.is-active {
+  color: var(--pa-accent);
+  font-weight: 600;
+  border-bottom-color: var(--pa-accent);
+}
+.pmd-tab svg { width: 12px; height: 12px; }
+.pmd-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 8px;
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+}
+.pmd-tab.is-active .pmd-tab-badge {
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+}
+
+/* Empty state */
+.pmd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  text-align: center;
+}
+.pmd-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background: var(--pa-paper-3);
+  color: var(--pa-mute);
+}
+.pmd-empty-icon svg { width: 28px; height: 28px; }
+.pmd-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink);
+}
+.pmd-empty-hint {
+  font-size: 12px;
+  color: var(--pa-mute);
+}
+
+/* Error alert */
+.pmd-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.3);
+  border-radius: 4px;
+  color: var(--pa-negative);
+  font-size: 12px;
+}
+
+/* Dependencies blocking alert */
+.pmd-deps-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px;
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.3);
+  border-radius: 4px;
+  color: var(--pa-negative);
+  font-size: 12px;
+}
+
+/* Meta dot warn variant */
+.pmd-meta-dot.is-warn { color: var(--pa-warn); }
+
+/* Badge small variant for meta line */
+.pa-market-badge.is-xs {
+  font-size: 8.5px;
+  padding: 0 5px;
+}
+
+/* Permissions list reset */
+.pmd-permissions { display: flex; flex-direction: column; gap: 6px; list-style: none; margin: 0; padding: 0; }
+
+/* Dependencies list reset */
+.pmd-deps { display: flex; flex-direction: column; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.pmd-perm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  font-size: 12px;
+}
+.pmd-perm-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  flex-shrink: 0;
+}
+.pmd-perm-icon svg { width: 14px; height: 14px; }
+.pmd-perm-info { flex: 1; min-width: 0; }
+.pmd-perm-name {
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pmd-perm-desc {
+  font-size: 11px;
+  color: var(--pa-ink-2);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* Dependencies */
+.pmd-dep-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  font-size: 12px;
+  font-family: var(--pa-font-mono);
+}
+.pmd-dep-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.pmd-dep-status.is-ok { color: var(--pa-positive); }
+.pmd-dep-status.is-missing { color: var(--pa-negative); }
+.pmd-dep-status.is-unsatisfied { color: var(--pa-warn); }
+.pmd-dep-status.is-cycle { color: var(--pa-negative); }
+.pmd-dep-status svg { width: 12px; height: 12px; }
+.pmd-dep-id { flex: 1; min-width: 0; }
+.pmd-dep-label {
+  font-size: 11px;
+  font-family: var(--pa-font-ui);
+  color: var(--pa-ink-2);
+}
+
+/* Footer */
+.pmd-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--pa-line);
+  flex-shrink: 0;
+}
+.pmd-footer .pa-btn-primary {
+  background: var(--pa-accent);
+  color: #fff;
+  border-color: var(--pa-accent);
+}
+.pmd-footer .pa-btn-primary:hover { opacity: 0.88; }
+
+/* ── Plugin Storage Inspector (.psi-*) ────────────────────
+   The inspector dialog uses a 3-column table: key (truncated,
+   full path on hover), right-aligned size, and a single icon
+   button for per-row delete. The design language stays in the
+   pa-* family: the same paper / line / ink tokens, the same
+   mono font for sizes, and a danger colour reserved for the
+   destructive actions (single delete + "clear all" + the
+   inline confirm panel). */
+.psi-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+  overflow: hidden;
+  background: var(--pa-paper);
+}
+.psi-head, .psi-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 36px;
+  align-items: center;
+  font-size: 12px;
+}
+.psi-head {
+  background: var(--pa-paper-2);
+  color: var(--pa-mute);
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--pa-line);
+  padding: 8px 10px;
+}
+.psi-row {
+  border-top: 1px solid var(--pa-line);
+  padding: 6px 10px;
+  transition: background 0.12s;
+}
+.psi-row:first-of-type { border-top: none; }
+.psi-row:hover { background: var(--pa-paper-2); }
+.psi-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--pa-ink);
+}
+.psi-cell-key { font-family: var(--pa-font-mono); font-size: 11.5px; }
+.psi-key-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  display: block;
+}
+.psi-cell-size {
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  color: var(--pa-mute);
+  justify-content: flex-end;
+  text-align: right;
+}
+.psi-cell-action { justify-content: flex-end; }
+.psi-row-del {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--pa-mute);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.psi-row-del:hover {
+  background: var(--pa-negative-soft);
+  color: var(--pa-negative);
+  border-color: var(--pa-negative-soft);
+}
+.psi-row-del:disabled { opacity: 0.4; cursor: not-allowed; }
+.psi-row-del:disabled:hover { background: transparent; color: var(--pa-mute); border-color: transparent; }
+
+/* Danger-tinted button variant for the inspector's "clear all"
+   footer action and the destructive primary in the confirm
+   panel. Reuses the .pa-btn-outline chrome so it stays on
+   brand; only the hover state is shifted to the negative family
+   so the user gets a "this is destructive" cue without us
+   inventing a new button shape. */
+.psi-danger { color: var(--pa-negative); border-color: var(--pa-negative-soft); }
+.psi-danger:hover {
+  background: var(--pa-negative-soft);
+  color: var(--pa-negative);
+  border-color: var(--pa-negative);
+}
+.psi-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.psi-danger:disabled:hover { background: transparent; color: var(--pa-negative); border-color: var(--pa-negative-soft); }
+
+/* Inline confirm panel. Lives inside the popup body — keeps a
+   single focus trap, avoids the a11y cost of nested dialogs. */
+.psi-confirm {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 18px 18px;
+  background: var(--pa-negative-soft);
+  border: 1px solid var(--pa-negative-soft);
+  border-radius: var(--pa-radius);
+}
+.psi-confirm-icon {
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--pa-paper);
+  color: var(--pa-negative);
+  border: 1px solid var(--pa-negative);
+  border-radius: 999px;
+}
+.psi-confirm-text { min-width: 0; }
+.psi-confirm-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink);
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+.psi-confirm-hint {
+  font-size: 11.5px;
+  color: var(--pa-ink-2);
+  line-height: 1.5;
+}
+.psi-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Misc helpers ──────────────────────────────────────────── */
+.pa-flex-col { display: flex; flex-direction: column; }
+.pa-flex-row { display: flex; align-items: center; }
+.pa-gap-2 { gap: 8px; }
+.pa-gap-3 { gap: 12px; }
+.pa-mt-3 { margin-top: 12px; }
+.pa-mt-4 { margin-top: 16px; }
+.pa-mb-2 { margin-bottom: 8px; }
+.pa-mb-3 { margin-bottom: 12px; }
+.pa-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 60px 20px;
+  color: var(--pa-mute);
+  text-align: center;
+  gap: 6px;
+}
+.pa-empty .pa-empty-title { font-size: 13px; font-weight: 500; color: var(--pa-ink-2); }
+.pa-empty .pa-empty-hint { font-size: 11px; }
+.pa-error { color: var(--pa-negative); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+
+/* ── Plugin load-failure banner (Task 2 / G2) ─────────────
+   A clickable warning strip that surfaces at the very top of
+   the plugin manager whenever the load-time scan captured one
+   or more per-plugin failures. Tapping the strip opens the
+   failure list dialog. Rendered conditionally (the manager
+   only mounts it when `loadFailures` is non-empty), so the
+   styles are scoped to `.pa-loadfailures-banner` to avoid
+   leaking into the rest of the manager. */
+.pa-loadfailures-banner {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 28px 0;
+  margin-top: 8px;
+  padding: 9px 14px;
+  font-size: 12.5px;
+  font-family: var(--pa-font-ui);
+  color: var(--pa-negative);
+  background: var(--pa-negative-soft);
+  border: 1px solid color-mix(in srgb, var(--pa-negative) 22%, transparent);
+  border-radius: var(--pa-radius);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+}
+.pa-loadfailures-banner:hover {
+  background: color-mix(in srgb, var(--pa-negative) 18%, transparent);
+  border-color: color-mix(in srgb, var(--pa-negative) 35%, transparent);
+}
+.pa-loadfailures-banner-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  color: var(--pa-negative);
+}
+.pa-loadfailures-banner-text {
+  flex: 1;
+  font-weight: 500;
+  color: var(--pa-ink);
+}
+.pa-loadfailures-banner-text b { color: var(--pa-negative); font-weight: 600; }
+.pa-loadfailures-banner-arrow {
+  color: var(--pa-mute);
+  display: inline-flex; align-items: center;
+}
+
+/* ── Plugin load-failure dialog (Task 2 / G2) ─────────────
+   Popover body. Each row is a single-plugin failure card with
+   three regions: a left icon (warning), a centred main block
+   (name / reason / meta), and a right action stack (Dismiss /
+   Uninstall). The .is-confirming modifier swaps the action
+   stack for an inline Cancel/Confirm strip so a destructive
+   uninstall never needs a second modal. */
+.pa-popup-desc {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--pa-ink-2);
+}
+.pa-loadfailures-body { padding-top: 12px; }
+.pa-loadfailures-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px;
+  padding: 36px 20px;
+  color: var(--pa-mute);
+  font-size: 12.5px;
+  text-align: center;
+}
+.pa-loadfailures-empty svg { color: var(--pa-mute); }
+.pa-loadfailures-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column;
+  gap: 8px;
+}
+.pa-loadfailures-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  background: var(--pa-paper-2);
+  border: 1px solid var(--pa-line);
+  border-radius: var(--pa-radius);
+}
+.pa-loadfailures-row.is-confirming {
+  border-color: color-mix(in srgb, var(--pa-negative) 45%, transparent);
+  background: var(--pa-negative-soft);
+}
+.pa-loadfailures-icon {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--pa-paper);
+  color: var(--pa-negative);
+  border: 1px solid color-mix(in srgb, var(--pa-negative) 35%, transparent);
+  border-radius: 999px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.pa-loadfailures-main { min-width: 0; }
+.pa-loadfailures-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pa-ink);
+  margin-bottom: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pa-loadfailures-reason {
+  font-size: 12px;
+  color: var(--pa-ink-2);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  margin-bottom: 4px;
+}
+.pa-loadfailures-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--pa-font-mono);
+  font-size: 10.5px;
+  color: var(--pa-mute);
+}
+.pa-loadfailures-meta-id { font-weight: 500; }
+.pa-loadfailures-meta-sep { opacity: 0.6; }
+.pa-loadfailures-actions {
+  display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0;
+  align-self: center;
+}
+.pa-loadfailures-actions .pa-btn { height: 28px; padding: 0 10px; font-size: 11px; }
+.pa-loadfailures-count {
+  font-weight: 500;
+  color: var(--pa-ink-2);
+}
+
+/* Danger variant of `.pa-btn`. Reused by the batch action bar
+   and the failure dialog's Uninstall button. Pairs with the
+   app's `--pa-negative` token so light / dark / system theme
+   automatically pick up the right shade. */
+.pa-btn-danger {
+  color: var(--pa-negative);
+  border-color: color-mix(in srgb, var(--pa-negative) 35%, transparent);
+}
+.pa-btn-danger:hover {
+  background: var(--pa-negative-soft);
+  color: var(--pa-negative);
+  border-color: var(--pa-negative);
+}
+.pa-btn-danger svg { color: var(--pa-negative); }
+.pa-btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Batch action bar (G7.3). Sits between the toolbar and the
+   card grid; the parent renders it only when the user has
+   selected at least one row. Tinted background reads as a
+   transient mode without overpowering the rest of the page. */
+.pa-batch-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 28px 8px;
+  padding: 8px 14px;
+  background: var(--pa-accent-soft);
+  border: 1px solid var(--pa-accent-soft);
+  border-radius: var(--pa-radius);
+}
+.pa-batch-count {
+  font-family: var(--pa-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--pa-accent);
+  letter-spacing: 0.04em;
+}
+.pa-batch-actions {
+  display: flex; align-items: center; gap: 6px;
+  margin-left: 8px;
+}
+.pa-batch-bar .pa-right { margin-left: auto; }
+.pa-batch-bar .pa-btn { height: 28px; padding: 0 10px; font-size: 11px; }

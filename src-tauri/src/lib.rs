@@ -21,9 +21,7 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-/// Set Dock icon visibility on macOS
-/// When visible=true: NSApplicationActivationPolicyRegular (shows in Dock)
-/// When visible=false: NSApplicationActivationPolicyAccessory (hides from Dock)
+/// macOS Dock 图标可见性切换（Regular/Accessory 策略）。
 #[tauri::command]
 fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
     set_dock_icon_visibility_inner(visible)
@@ -65,6 +63,13 @@ fn set_dock_icon_visibility_inner(_visible: bool) -> Result<(), String> {
 /// This function is a no-op on non-macOS platforms
 fn show_dock_icon() {
     let _ = set_dock_icon_visibility_inner(true);
+}
+
+/// 1x1 透明 RGBA 图标，用作 tray 图标加载失败时的兜底，避免在
+/// `tauri.conf.json` 缺 `bundle.icon` 等场景下 panic 整应用。
+fn default_tray_icon() -> tauri::image::Image<'static> {
+    let rgba = vec![0u8, 0, 0, 0]; // 透明 1x1
+    tauri::image::Image::new_owned(rgba, 1, 1)
 }
 
 pub fn run() {
@@ -175,6 +180,30 @@ pub fn run() {
             commands::ai_role_prompts::update_ai_role_prompt_name,
             commands::ai_role_prompts::reset_ai_role_prompt,
             commands::ai_builtin_models::get_builtin_ai_models,
+            commands::plugin::scan_plugins,
+            commands::plugin::install_plugin,
+            commands::plugin::uninstall_plugin,
+            commands::plugin::toggle_plugin_enabled,
+            commands::plugin::get_plugin_storage_path,
+            commands::plugin::get_all_plugin_storage_sizes,
+            commands::plugin::get_storage_cap,
+            commands::plugin::install_plugin_from_bytes,
+            commands::plugin::check_plugin_updates,
+            commands::plugin::update_plugin,
+            commands::plugin::rollback_plugin,
+            commands::plugin::list_plugin_versions,
+            commands::plugin::kill_plugin,
+            commands::plugin::export_plugin_configs,
+            commands::plugin::import_plugin_configs,
+            commands::plugin_invoke::invoke_plugin,
+            commands::plugin_settings::read_plugin_settings,
+            commands::plugin_settings::write_plugin_settings,
+            commands::plugin_settings::delete_plugin_settings,
+            commands::market_sources::list_market_sources,
+            commands::market_sources::add_market_source,
+            commands::market_sources::remove_market_source,
+            commands::market_sources::set_active_market_source,
+            commands::market_sources::get_active_market_source,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
@@ -195,8 +224,12 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle.clone());
+            // 监听 plugins 树，外部 storage.json 变更时通知前端。幂等。
+            services::file_watcher::watch_plugin_storage(app_handle.clone());
 
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
+            // 每插件后端子进程状态；启动为空，首次 invoke_plugin 时懒加载。
+            app.handle().manage(commands::plugin_invoke::new_shared_plugin_process_state());
 
             // AI proxy is no longer auto-started on launch to save memory.
             // It will be started on-demand when the user opens the AI panel.
@@ -210,9 +243,17 @@ pub fn run() {
                 .build()?;
 
             let tray_icon = if let Ok(tray_icon_path) = app.path().resolve("icons/tray-icon.png", BaseDirectory::Resource) {
-                Image::from_path(&tray_icon_path).unwrap_or_else(|_| app.default_window_icon().unwrap().clone())
+                Image::from_path(&tray_icon_path).unwrap_or_else(|_| {
+                    app.default_window_icon()
+                        .cloned()
+                        .map(|img| img.to_owned())
+                        .unwrap_or_else(default_tray_icon)
+                })
             } else {
-                app.default_window_icon().unwrap().clone()
+                app.default_window_icon()
+                    .cloned()
+                    .map(|img| img.to_owned())
+                    .unwrap_or_else(default_tray_icon)
             };
 
             let _tray = TrayIconBuilder::new()

@@ -4,11 +4,13 @@
  */
 import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
-import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore } from '@/stores'
+import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore, usePluginStore } from '@/stores'
 import type { ConflictRepoRecord } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
+import { pluginRightPanelType, renderPluginIcon, pluginSidebarView, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
+import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 
 function EditorToolbar() {
   const tabs = useEditorStore((s) => s.tabs)
@@ -17,6 +19,9 @@ function EditorToolbar() {
   const rightPanelType = useUIStore((s) => s.rightPanelType)
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
   const noteWidth = useUIStore((s) => s.noteWidth)
+  const sidebarView = useUIStore((s) => s.sidebarView)
+  const sidebarVisible = useUIStore((s) => s.sidebarVisible)
+  const settingsPanelVisible = useUIStore((s) => s.settingsPanelVisible)
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
   const workspaceMode = useUIStore((s) => s.workspaceMode)
@@ -26,6 +31,7 @@ function EditorToolbar() {
   const widePaddingHorizontal = useEditorSettingsStore((s) => s.widePaddingHorizontal)
   const conflictFilesMap = useGitStore((s) => s.conflictFilesMap)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
+  const editorToolbarPlugins = usePluginStore((s) => s.registry.editorToolbar)
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [copied, setCopied] = useState(false)
   const [isWide, setIsWide] = useState(noteWidth === 'wide')
@@ -117,6 +123,57 @@ function EditorToolbar() {
     useUIStore.getState().setNoteWidth(newWide ? 'wide' : 'normal')
   }
 
+  // Helper: compute activate/deactivate callbacks for a plugin
+  const getPluginActivateCallbacks = (pluginId: string, contentPosition: string | undefined) => {
+    const activate = () => {
+      if (contentPosition === 'rightPanel') {
+        setRightPanelType(pluginRightPanelType(pluginId))
+        usePluginStore.getState().setActivePlugin(pluginId, 'rightPanel')
+      } else if (contentPosition === 'leftPanel') {
+        const pluginViewId = pluginSidebarView(pluginId)
+        const uiState = useUIStore.getState()
+        uiState.setSidebarVisible(true)
+        uiState.setSidebarView(pluginViewId)
+        usePluginStore.getState().setActivePlugin(pluginId, 'leftPanel')
+      } else if (contentPosition === 'fullPanel' || contentPosition === 'editorArea') {
+        const pluginViewId = pluginSidebarView(pluginId)
+        const uiState = useUIStore.getState()
+        uiState.setSettingsPanelVisible(true)
+        uiState.setSidebarView(pluginViewId)
+        usePluginStore.getState().setActivePlugin(pluginId, 'fullPanel')
+      }
+    }
+    const deactivate = () => {
+      if (contentPosition === 'rightPanel') {
+        setRightPanelType(null)
+        usePluginStore.getState().setActivePlugin(null, 'rightPanel')
+      } else if (contentPosition === 'leftPanel') {
+        const uiState = useUIStore.getState()
+        uiState.toggleSidebar()
+        usePluginStore.getState().setActivePlugin(null, 'leftPanel')
+      } else if (contentPosition === 'fullPanel' || contentPosition === 'editorArea') {
+        const uiState = useUIStore.getState()
+        uiState.setSettingsPanelVisible(false)
+        uiState.setSidebarView('explorer')
+        usePluginStore.getState().setActivePlugin(null, 'fullPanel')
+      }
+    }
+    return { activate, deactivate }
+  }
+
+  // Helper: check if a plugin is currently active
+  const isPluginActive = (plugin: { id: string; contentPosition?: string }): boolean => {
+    if (plugin.contentPosition === 'rightPanel') {
+      return rightPanelType === pluginRightPanelType(plugin.id)
+    } else if (plugin.contentPosition === 'fullPanel' || plugin.contentPosition === 'editorArea') {
+      const pluginViewId = pluginSidebarView(plugin.id)
+      return settingsPanelVisible && sidebarView === pluginViewId
+    } else {
+      const pluginViewId = pluginSidebarView(plugin.id)
+      return sidebarView === pluginViewId && sidebarVisible
+    }
+  }
+
   return (
     <div className="flex items-center justify-between h-[25px] pl-3 pr-1 text-[11px]   select-none">
       {/* Left: File path - display relative path from root */}
@@ -127,8 +184,10 @@ function EditorToolbar() {
             className="flex items-center gap-1 ml-2 shrink-0 px-1.5 py-0.5 rounded text-[10px] cursor-pointer hover:opacity-80"
             style={{ background: 'var(--bg-warning)', color: 'var(--text-warning)' }}
             onClick={async () => {
-              await useEditorStore.getState().loadTabContent(activeTab.id)
-              useEditorStore.getState().clearExternalChange(activeTab.id)
+              // Force reload to overwrite cached content with external changes.
+              // loadTabContent clears hasExternalChange on success and keeps it
+              // true on failure, so no need to manually clear here.
+              await useEditorStore.getState().loadTabContent(activeTab.id, 0, true)
             }}
           >
             <AlertTriangle size={10} />
@@ -177,7 +236,7 @@ function EditorToolbar() {
               </button>
             </TooltipTrigger>
             <TooltipContent>{t('editorToolbar.openMarkdownFolder')}</TooltipContent>
-          </Tooltip>        
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -252,6 +311,53 @@ function EditorToolbar() {
           </TooltipTrigger>
           <TooltipContent>{t('editorToolbar.copyFullPath')}</TooltipContent>
         </Tooltip>
+
+        {/* Plugin icons with iconPosition === 'editorToolbar' */}
+        {editorToolbarPlugins.map((plugin) => {
+          const active = isPluginActive(plugin)
+
+          // If the plugin provides a custom toolbarButton, render it
+          if (plugin.toolbarButton) {
+            const { activate, deactivate } = getPluginActivateCallbacks(plugin.id, plugin.contentPosition)
+            const toolbarProps = createToolbarButtonProps(plugin.id, active, 14, activate, deactivate, activeTab.content ?? '', activeTab.path ?? '')
+            try {
+              return (
+                <PluginErrorBoundary key={plugin.id} pluginId={plugin.id} resetKey={plugin.id}>
+                  {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}
+                </PluginErrorBoundary>
+              )
+            } catch {
+              // If toolbarButton throws synchronously during render,
+              // fall through to the default icon rendering below
+            }
+          }
+
+          // Default rendering: icon + button that toggles panel
+          const handleClick = () => {
+            if (active) {
+              const { deactivate } = getPluginActivateCallbacks(plugin.id, plugin.contentPosition)
+              deactivate()
+            } else {
+              const { activate } = getPluginActivateCallbacks(plugin.id, plugin.contentPosition)
+              activate()
+            }
+          }
+
+          return (
+            <Tooltip key={plugin.id}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleClick}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: active ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  {renderPluginIcon(plugin.icon, 14)}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{plugin.name}</TooltipContent>
+            </Tooltip>
+          )
+        })}
       </div>
     </div>
   )

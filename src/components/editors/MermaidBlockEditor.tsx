@@ -122,9 +122,6 @@ function SafeSvgDiv({ svg, className, responsive }: { svg: string; className?: s
     if (svgNode) {
       const imported = document.importNode(svgNode, true) as SVGElement
       if (responsive) {
-        // Remove fixed width/height to allow SVG to scale with container
-        imported.removeAttribute('width')
-        imported.removeAttribute('height')
         // Ensure viewBox exists for proper aspect ratio scaling
         if (!imported.getAttribute('viewBox')) {
           const style = (svgNode as SVGElement).style
@@ -132,6 +129,16 @@ function SafeSvgDiv({ svg, className, responsive }: { svg: string; className?: s
           const h = style.height || svgNode.getAttribute('height') || '600'
           imported.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(h)}`)
         }
+        // Remove fixed width/height from ALL <svg> elements (outer + nested) so
+        // the diagram scales with the container. Required because mermaid with
+        // securityLevel:'loose' can emit nested <svg> nodes (foreignObject,
+        // internal icons) carrying empty width=""/height="" attributes, which
+        // the browser rejects with "Invalid value for <svg> attribute width=''"
+        // when the imported node is attached to the live document.
+        imported.querySelectorAll('svg').forEach((el) => {
+          el.removeAttribute('width')
+          el.removeAttribute('height')
+        })
         imported.style.width = '100%'
         imported.style.height = '100%'
       }

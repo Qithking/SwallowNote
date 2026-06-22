@@ -130,7 +130,7 @@ pub async fn git_status(path: String) -> Result<GitStatus, String> {
 /// Get git diff for a specific file
 #[tauri::command]
 pub async fn git_diff(path: String, file_path: String) -> Result<String, String> {
-    run_git(&path, &["diff", "--", &file_path]).map_err(|e| e)
+    run_git(&path, &["diff", "--", &file_path])
 }
 
 /// Stage all changes and commit
@@ -188,21 +188,14 @@ pub async fn git_pull(path: String) -> Result<(), String> {
         return Ok(()); // No remote, nothing to pull
     }
 
-    // Check if already in a rebase/merge state
-    // IMPORTANT: Never auto-resolve or auto-continue. Only two resolution paths exist:
-    // 1. User clicks "Overwrite Local/Remote" in file history
-    // 2. User clicks "Mark as Resolved" in the ConflictResolver panel
+    // 检查 rebase/merge 状态：有真实冲突则报错；仅 stale 状态则清理后继续。永不自动 resolve/continue。
     if is_rebase_or_merge_in_progress(&path) {
         if has_real_conflicts(&path) {
             // Real conflicts exist - require explicit user resolution
             return Err("REBASE_CONFLICT:Already in a conflict state. Please resolve conflicts first.".to_string());
         } else {
-            // Stale rebase/merge state: state files exist but no unmerged files.
-            // Abort the stale state to clean up - this is NOT resolving conflicts,
-            // it's cleaning up invalid git state before proceeding with the pull.
-            // All patches will be re-applied during the actual pull --rebase below.
+            // Stale rebase/merge state: clean up before proceeding with the pull.
             cleanup_stale_rebase_state(&path);
-            // Fall through to proceed with the actual pull
         }
     }
 
@@ -1155,14 +1148,7 @@ fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<S
     }
 }
 
-/// After a rebase conflict, git writes conflict markers into the working tree files.
-/// This function restores each conflicted file to its local version (without conflict markers),
-/// while preserving the rebase/conflict state for the UI to resolve.
-///
-/// IMPORTANT: During `git rebase`, "ours" and "theirs" are SWAPPED:
-///   - --ours  = the upstream branch (what we're rebasing onto)
-///   - --theirs = our local commits (being rebased)
-/// So we use `--theirs` to restore the LOCAL version.
+// rebase 冲突后恢复工作树文件到本地版本（去除冲突标记）。注意 rebase 中 --theirs 才是本地。
 fn restore_conflicted_files_to_local(repo_path: &str) {
     eprintln!("[INFO] Restoring conflicted files to local versions in {}", repo_path);
     
@@ -1179,8 +1165,7 @@ fn restore_conflicted_files_to_local(repo_path: &str) {
             if checkout_result.is_ok() {
                 eprintln!("[INFO] Restored conflicted file to local version: {}", rel_path);
             } else {
-                // checkout --theirs may fail for delete/modify conflicts (stage 3 doesn't exist)
-                // Fall back to using git show to get local content and write it manually
+                // checkout --theirs 失败时用 git show 获取本地内容写入；仍失败则保持原样。
                 eprintln!("[WARN] checkout --theirs failed for '{}', trying git show fallback", rel_path);
                 let local_content = get_conflict_content(repo_path, rel_path, "local");
                 match local_content {
@@ -1503,16 +1488,7 @@ pub async fn git_get_conflict_files(repo_path: String) -> Result<Vec<ConflictFil
     Ok(files)
 }
 
-/// Get the local version of a conflicting file (the user's own version).
-///
-/// IMPORTANT: During `git rebase`, "ours" and "theirs" are SWAPPED:
-///   - Stage 2 (ours)  = upstream/remote (the branch being rebased onto)
-///   - Stage 3 (theirs) = local (the commits being rebased)
-///   - HEAD:           = upstream/remote
-///   - REBASE_HEAD:    = local
-///
-/// So during rebase, we use stage 3 / REBASE_HEAD for local content.
-/// During merge, we use stage 2 / HEAD for local content.
+// 获取冲突文件的本地版本。rebase 用 stage 3/REBASE_HEAD，merge 用 stage 2/HEAD。
 #[tauri::command]
 pub async fn git_get_conflict_local_content(repo_path: String, file_path: String) -> Result<String, String> {
     eprintln!("[INFO] git_get_conflict_local_content: repo_path={}, file_path={}", repo_path, file_path);
@@ -1612,16 +1588,7 @@ pub async fn git_get_conflict_local_content(repo_path: String, file_path: String
     Ok(String::new())
 }
 
-/// Get the remote version of a conflicting file (the version from the other side).
-///
-/// IMPORTANT: During `git rebase`, "ours" and "theirs" are SWAPPED:
-///   - Stage 2 (ours)  = upstream/remote (the branch being rebased onto)
-///   - Stage 3 (theirs) = local (the commits being rebased)
-///   - HEAD:           = upstream/remote
-///   - REBASE_HEAD:    = local
-///
-/// So during rebase, we use stage 2 / HEAD for remote content.
-/// During merge, we use stage 3 / MERGE_HEAD for remote content.
+// 获取冲突文件的远程版本。rebase 用 stage 2/HEAD，merge 用 stage 3/MERGE_HEAD。
 #[tauri::command]
 pub async fn git_get_conflict_remote_content(repo_path: String, file_path: String) -> Result<String, String> {
     eprintln!("[INFO] git_get_conflict_remote_content: repo_path={}, file_path={}", repo_path, file_path);
@@ -1981,7 +1948,7 @@ async fn do_git_clone(
     }));
 
     // If credentials provided, set up GIT_ASKPASS
-    let askpass_script_path = if username.is_some() && password.is_some() {
+    let askpass_script_path = if let (Some(username), Some(password)) = (username, password) {
         let temp_dir = std::env::temp_dir();
         let unique_id = uuid::Uuid::new_v4().to_string();
         let askpass_script = temp_dir.join(format!("swallownote_clone_askpass_{}.sh", unique_id));
@@ -1989,15 +1956,15 @@ async fn do_git_clone(
         #[cfg(not(target_os = "windows"))]
         let script_content = format!(
             "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
-            username.unwrap().replace('\'', "'\\''"),
-            password.unwrap().replace('\'', "'\\''")
+            username.replace('\'', "'\\''"),
+            password.replace('\'', "'\\''")
         );
 
         #[cfg(target_os = "windows")]
         let script_content = format!(
             "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
-            username.unwrap().replace('"', "\"\""),
-            password.unwrap().replace('"', "\"\"")
+            username.replace('"', "\"\""),
+            password.replace('"', "\"\"")
         );
 
         std::fs::write(&askpass_script, &script_content)
@@ -2036,14 +2003,12 @@ async fn do_git_clone(
     // Read stderr for progress (git clone outputs progress to stderr)
     if let Some(stderr) = child.stderr.take() {
         let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                // Send progress update
-                let _ = app.emit("git-clone-progress", serde_json::json!({
-                    "status": "progress",
-                    "message": line
-                }));
-            }
+        for line in reader.lines().map_while(Result::ok) {
+            // Send progress update
+            let _ = app.emit("git-clone-progress", serde_json::json!({
+                "status": "progress",
+                "message": line
+            }));
         }
     }
 

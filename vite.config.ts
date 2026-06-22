@@ -9,6 +9,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Host talks to the SDK source directly (no build step) so the
+      // types in the host and the types seen by external plugin
+      // bundles always match. The SDK is a self-contained single
+      // file; aliasing to `src/index.ts` is safe because Vite uses
+      // esbuild's transform pipeline and ignores the SDK's own
+      // `tsc` build output during dev.
+      '@swallow-note/plugin-sdk': path.resolve(__dirname, './docs/plugin-sdk/src/index.ts'),
     },
   },
   clearScreen: false,

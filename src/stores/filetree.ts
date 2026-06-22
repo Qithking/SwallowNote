@@ -4,6 +4,8 @@
 import { create } from 'zustand'
 import { loadDirectory, loadDirectoriesBatch } from '@/lib/api'
 import { useUIStore } from './ui'
+import { pathExists } from '@/lib/tauri'
+import { updateNodesWithChildren, findNodeByPath } from '@/lib/utils/treeUtils'
 
 export interface FileNode {
   id: string
@@ -41,36 +43,8 @@ export interface FileTreeState {
   collapseAllExceptPath: (filePath: string, rootPath?: string) => void
 }
 
-function findNodeInList(list: FileNode[], path: string): FileNode | null {
-  for (const n of list) {
-    if (n.path === path) return n
-    if (n.children) {
-      const found = findNodeInList(n.children, path)
-      if (found) return found
-    }
-  }
-  return null
-}
-
-function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return list.map((n) => {
-    if (n.path === path) {
-      // Skip creating a new object if children reference is already the same
-      if (n.children === children && !n.isLoading) return n
-      return { ...n, children, isLoading: false }
-    }
-    if (n.children) {
-      const updatedChildren = updateNodesWithChildren(n.children, path, children)
-      // Skip creating a new object if no child was actually updated
-      if (updatedChildren === n.children) return n
-      return { ...n, children: updatedChildren }
-    }
-    return n
-  })
-}
-
 /** Mark a specific node as loading (or not loading) without touching children */
-function setNodeLoading(list: FileNode[], path: string, loading: boolean): FileNode[] {
+export function setNodeLoading(list: FileNode[], path: string, loading: boolean): FileNode[] {
   return list.map((n) => {
     if (n.path === path) return { ...n, isLoading: loading }
     if (n.children) return { ...n, children: setNodeLoading(n.children, path, loading) }
@@ -109,7 +83,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       newExpanded.delete(path)
       // Release children of collapsed directories to save memory
       // Children will be reloaded on next expand
-      const node = findNodeInList(currentNodes, path)
+      const node = findNodeByPath(path, currentNodes)
       if (node && node.isDirectory && node.children && node.children.length > 0) {
         set({
           expanded: newExpanded,
@@ -127,7 +101,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
     // Load children if not loaded yet (use latest state after setting expanded)
     const { nodes } = get()
-    const node = findNodeInList(nodes, path)
+    const node = findNodeByPath(path, nodes)
     if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
       // Mark this node as loading for UI feedback
       set({ nodes: setNodeLoading(nodes, path, true) })
@@ -192,7 +166,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   addRoot: async (rootPath) => {
     if (!rootPath) return
     const { nodes, expanded } = get()
-    const existingNode = findNodeInList(nodes, rootPath)
+    const existingNode = findNodeByPath(rootPath, nodes)
     if (existingNode) return
 
     try {
@@ -218,7 +192,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const { nodes, expanded } = get()
     
     // Filter out already-existing roots
-    const pathsToLoad = rootPaths.filter(p => !findNodeInList(nodes, p))
+    const pathsToLoad = rootPaths.filter(p => !findNodeByPath(p, nodes))
     if (pathsToLoad.length === 0) return true
 
     const filterParams = getFilterParams()
@@ -279,7 +253,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const { nodes, expanded } = get()
     if (!expanded.has(path)) return
 
-    const node = findNodeInList(nodes, path)
+    const node = findNodeByPath(path, nodes)
     if (!node || !node.isDirectory) return
 
     try {
@@ -298,8 +272,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     // Collect paths of expanded directories that actually exist in the tree
     const pathsToRefresh: string[] = []
     for (const path of expanded) {
-      const node = findNodeInList(nodes, path)
-      if (node && node.isDirectory) {
+      const node = findNodeByPath(path, nodes)
+    if (node && node.isDirectory) {
         pathsToRefresh.push(path)
       }
     }
@@ -346,6 +320,14 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   revealPath: async (filePath, rootPath) => {
     if (!filePath || !rootPath) return
 
+    // 容错：若文件已不存在（外部删除等），不设置 selectedPath 到无效路径
+    try {
+      const exists = await pathExists(filePath)
+      if (!exists) return
+    } catch {
+      // pathExists 失败时不阻塞，继续尝试 reveal
+    }
+
     const { nodes, expanded } = get()
 
     const newExpanded = new Set(expanded)
@@ -363,7 +345,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const dirsToLoad: string[] = []
 
     // Check if root directory needs loading
-    const rootNode = findNodeInList(currentNodes, rootPath)
+    const rootNode = findNodeByPath(rootPath, currentNodes)
     if (rootNode && rootNode.isDirectory && (!rootNode.children || rootNode.children.length === 0)) {
       dirsToLoad.push(rootPath)
     }
@@ -374,7 +356,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         newExpanded.add(currentPath)
       }
       // Check if directory needs loading
-      const node = findNodeInList(currentNodes, currentPath)
+      const node = findNodeByPath(currentPath, currentNodes)
       if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
         dirsToLoad.push(currentPath)
       }
@@ -392,7 +374,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         console.error('Batch load in revealPath failed, falling back:', e)
         // Fallback to sequential loading
         for (const dirPath of dirsToLoad) {
-          const node = findNodeInList(currentNodes, dirPath)
+          const node = findNodeByPath(dirPath, currentNodes)
           if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
             try {
               const children = await loadDirectory(dirPath, filterParams.showAllFiles, filterParams.markdownOnly)
@@ -449,7 +431,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       // for the next level will be discoverable.
       const dirsToLoad: string[] = []
       for (const dirPath of dirPaths) {
-        const node = findNodeInList(currentNodes, dirPath)
+        const node = findNodeByPath(dirPath, currentNodes)
         if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
           dirsToLoad.push(dirPath)
         }
@@ -469,7 +451,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       } catch (e) {
         console.error('Batch load in restoreTreeState failed, falling back:', e)
         for (const dirPath of dirsToLoad) {
-          const node = findNodeInList(currentNodes, dirPath)
+          const node = findNodeByPath(dirPath, currentNodes)
           if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
             try {
               const children = await loadDirectory(
@@ -516,7 +498,10 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 }))
 
 function scrollToFileElement(path: string) {
-  const container = document.querySelector('.overflow-auto')
+  // Use data attribute to locate the file tree scroll container.
+  // Previously used `.overflow-auto` which matched the Sidebar's outer
+  // container (wrong rect) instead of FileTreeView's virtual list parent.
+  const container = document.querySelector('[data-file-tree-scroll]')
   if (!container) return
 
   const tryScroll = () => {

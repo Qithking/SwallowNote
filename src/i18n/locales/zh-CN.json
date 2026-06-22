@@ -60,8 +60,18 @@
     "ai": "AI",
     "shortcuts": "快捷键",
     "about": "关于",
+    "plugins": "插件",
+    "plugins.configs": "插件配置",
+    "plugins.configs.desc": "将所有已安装插件的 storage 打包成一个压缩包进行导出/导入。可用于在重装前备份配置，或在多台机器之间迁移设置。",
+    "plugins.configs.export": "导出插件配置",
+    "plugins.configs.import": "导入插件配置",
+    "plugins.configs.exportSuccess": "已导出 {{count}} 个插件配置",
+    "plugins.configs.importSuccess": "已导入 {{imported}}/{{total}} 个插件配置；跳过 {{skipped}} 个",
+    "plugins.configs.importNone": "压缩包中没有可导入的条目",
+    "plugins.configs.versionMismatch": "压缩包来自 SwallowNote v{{bundleVersion}}（schema v{{bundleSchema}}），当前构建期望 schema v{{expected}}",
 "general.autoStart": "开启自动启动",
 "general.autoStart.desc": "应用启动时自动运行，无需手动打开",
+"general.autoStart.failed": "无法更新开机自启设置，请检查系统权限后重试",
 "general.autoCheckUpdate": "自动检查更新",
 "general.autoCheckUpdate.desc": "启动时和每1小时静默检查是否有新版本，发现新版本时在状态栏提示",
     "general.closeWithoutExit": "关闭不退出",
@@ -115,6 +125,7 @@
     "ai.test": "测试连接",
     "ai.testSuccess": "连接成功",
     "ai.testFailed": "连接失败",
+    "ai.restartFailed": "无法重启本地 AI 代理",
     "ai.modelName": "模型名称",
     "ai.modelName.desc": "为此模型配置设置一个显示名称",
     "ai.modelName.placeholder": "输入显示名称，留空使用模型 ID",
@@ -217,6 +228,13 @@
     "shortcuts.renameFile.desc": "重命名文件树中选中的文件或文件夹",
     "shortcuts.deleteFile": "删除",
     "shortcuts.deleteFile.desc": "删除文件树中选中的文件或文件夹",
+    "pluginCommands.title": "插件命令快捷键",
+    "pluginCommands.desc": "为插件命令设置键盘绑定。绑定冲突时会给出提示，但内置快捷键的优先级高于插件命令。",
+    "pluginCommands.resetAll": "重置所有插件快捷键",
+    "pluginCommands.unbound": "未绑定",
+    "pluginCommands.empty": "当前没有已安装插件注册命令面板条目。",
+    "pluginCommandShadowed": "插件「{{id}}」的快捷键被内置命令占用，该快捷键无法触发插件命令，请在设置中修改绑定",
+    "pluginCommandShadowedDesc": "已执行内置动作「{{action}}」，请在设置中解绑插件命令后由插件接管此快捷键。",
     "about.projectName": "项目名称",
     "about.projectVersion": "项目版本",
     "about.projectRepo": "项目仓库",
@@ -259,7 +277,10 @@
       "correct": "纠错",
       "outline": "提纲",
       "summary": "摘要",
-      "format": "格式整理"
+      "format": "格式整理",
+      "complete": "补全",
+      "rewrite": "改写",
+      "explain": "解释"
     }
   },
   "common": {
@@ -281,7 +302,8 @@
     "search": "搜索",
     "git": "源代码管理",
     "ai": "AI 助手",
-    "settings": "设置"
+    "settings": "设置",
+    "plugins": "插件管理"
   },
   "titleBar": {
     "folder": "文件夹",
@@ -313,7 +335,8 @@
     "closeRightTabs": "关闭右侧标签页",
     "copyPath": "复制路径",
     "copyRelativePath": "复制相对路径",
-    "showInExplorer": "在文件资源管理器中显示"
+    "showInExplorer": "在文件资源管理器中显示",
+    "revealInTree": "在文件树中定位"
   },
   "fileTree": {
     "newFile": "新建文件",
@@ -382,6 +405,9 @@
     "binaryFile": "二进制文件无法在编辑器中显示",
     "unsupportedType": "不支持的文件类型",
     "cannotOpen": "无法打开此文件类型",
+    "mindmapPluginMissingTitle": "思维导图插件未安装",
+    "mindmapPluginMissingBody": "请在插件管理中安装「思维导图」插件以打开 {{filename}}",
+    "mindmapPluginInstall": "打开插件管理",
     "welcome": "欢迎使用 SwallowNote",
     "welcomeHint": "打开文件或文件夹开始编辑"
   },
@@ -396,73 +422,6 @@
     "newFile": "新建文件",
     "save": "保存文件",
     "settings": "设置"
-  },
-  "mindMap": {
-    "insertSibling": "插入同级节点",
-    "insertChild": "插入子节点",
-    "insertParent": "插入父节点",
-    "addSummary": "插入概要",
-    "moveUp": "上移节点",
-    "moveDown": "下移节点",
-    "collapseAll": "收起所有下级节点",
-    "expandAll": "展开所有下级节点",
-    "deleteNode": "删除节点",
-    "deleteOnlyCurrent": "仅删除当前节点",
-    "copyNode": "复制节点",
-    "cutNode": "剪切节点",
-    "pasteNode": "粘贴节点",
-    "toolbar": {
-      "formatBrush": "格式刷",
-      "icon": "图标",
-      "hyperlink": "超链接",
-      "remark": "备注",
-      "tag": "标签",
-      "summary": "概要",
-      "outline": "外框",
-      "layout": "布局",
-      "theme": "主题",
-      "basic": "基础",
-      "node": "节点",
-      "watermark": "水印",
-      "zoomIn": "放大",
-      "zoomOut": "缩小",
-      "fitCanvas": "适应画布"
-    },
-    "dialog": {
-      "setHyperlink": "设置超链接",
-      "linkUrl": "链接地址",
-      "linkTitle": "链接标题",
-      "setRemark": "设置备注",
-      "setIcon": "设置图标",
-      "setTag": "设置标签",
-      "tagPlaceholder": "输入标签后按回车添加",
-      "delete": "删除"
-    },
-    "watermark": {
-      "title": "水印设置",
-      "text": "文字",
-      "textPlaceholder": "水印文字",
-      "color": "颜色",
-      "opacity": "透明度",
-      "fontSize": "字号",
-      "rotation": "旋转",
-      "lineSpacing": "行间距",
-      "letterSpacing": "字间距",
-      "layer": "层级",
-      "export": "导出"
-    },
-    "style": {
-      "background": "背景",
-      "connection": "基础连线",
-      "connectionColor": "颜色"
-    },
-    "colorPicker": {
-      "moreColors": "更多颜色"
-    },
-    "loadFailed": "思维导图加载失败",
-    "loading": "加载思维导图...",
-    "defaultRootText": "中心主题",
-    "invalidContainer": "容器尺寸无效，无法初始化思维导图"
   },
   "editorSettings": {
     "title": "排版设置",
@@ -732,5 +691,363 @@
   "tray": {
     "showWindow": "显示窗口",
     "quit": "退出"
+  },
+  "plugin": {
+    "manager": "插件管理",
+    "installed": "已安装插件",
+    "noPlugins": "暂无已安装的插件",
+    "uploadHint": "点击上传插件包",
+    "uploadFormat": "支持 .zip 格式的插件包",
+    "installSuccess": "插件 {{name}} 安装成功",
+    "installFailed": "插件安装失败",
+    "uninstallSuccess": "插件 {{name}} 已卸载",
+    "uninstallFailed": "插件卸载失败",
+    "enabled": "插件 {{name}} 已启用",
+    "disabled": "插件 {{name}} 已禁用",
+    "toggleFailed": "切换插件状态失败",
+    "refresh": "刷新",
+    "installing": "安装中...",
+    "settings": "插件设置",
+    "permissions": "插件权限",
+    "iconPosition": {
+      "sidebar": "侧边栏",
+      "editorToolbar": "编辑器工具栏",
+      "titleBar": "标题栏"
+    },
+    "contentPosition": {
+      "leftPanel": "左面板",
+      "rightPanel": "右面板",
+      "fullPanel": "全面板",
+      "editorArea": "编辑区"
+    },
+    "diagnostics": {
+      "title": "可观测性",
+      "description": "实时查看已安装插件的运行指标",
+      "exportBundle": "导出诊断包",
+      "copyBundle": "复制到剪贴板",
+      "copied": "已复制！",
+      "clearMetrics": "清空指标",
+      "clearConfirm": "确定要清空所有已收集的指标吗？此操作不可撤销。",
+      "tabOverview": "概览",
+      "tabEvents": "事件",
+      "tabStorage": "存储",
+      "tabHooks": "钩子",
+      "tabBackend": "后端",
+      "empty": "暂无指标数据",
+      "emptyHint": "与插件交互即可开始收集数据",
+      "tableEmpty": "暂无{{type}}记录",
+      "statEvents": "事件数",
+      "statStorageOps": "存储操作",
+      "statHookCalls": "钩子调用",
+      "statBackendCalls": "后端 IPC",
+      "statErrors": "错误数",
+      "statStorageSize": "存储大小",
+      "statAvgEventDuration": "平均事件耗时",
+      "statAvgStorageDuration": "平均存储耗时",
+      "colTime": "时间",
+      "colPlugin": "插件",
+      "colName": "名称",
+      "colDuration": "耗时",
+      "colStatus": "状态"
+    },
+    "error": {
+      "title": "插件错误",
+      "description": "插件 {{id}} 发生错误，无法正常显示。",
+      "viewDetails": "查看错误详情",
+      "retry": "重试",
+      "disable": "禁用插件"
+    },
+    "permission": {
+      "title": "插件权限",
+      "warning": "这些权限将允许插件访问相应功能，你可以稍后在插件管理中修改。",
+      "revoking": "将被撤销",
+      "cancel": "取消",
+      "save": "保存更改",
+      "saving": "保存中…",
+      "noDescription": "暂无描述",
+      "saveFailed": "保存权限失败",
+      "selectAll": "全选",
+      "selectNone": "全不选",
+      "noPermissionWarning": "未授权任何权限，插件可能无法正常工作",
+      "items": {
+        "editor": { "name": "编辑器", "description": "注册自定义文件编辑器以扩展支持的文件类型" },
+        "storage": { "name": "存储", "description": "访问持久化存储以保存插件数据" },
+        "events": { "name": "事件", "description": "订阅宿主事件（笔记打开/保存、主题切换等）" },
+        "context-menu": { "name": "右键菜单", "description": "在右键菜单中添加项目" },
+        "backend": { "name": "后端", "description": "与原生 Rust 后端通信" },
+        "filesystem-read": { "name": "文件系统读取", "description": "读取系统中的文件" },
+        "filesystem-write": { "name": "文件系统写入", "description": "写入系统中的文件" },
+        "network": { "name": "网络", "description": "发起网络请求" },
+        "clipboard": { "name": "剪贴板", "description": "读取和写入剪贴板" },
+        "notifications": { "name": "通知", "description": "显示桌面通知" }
+      }
+    },
+    "market": {
+      "tabManage": "已安装",
+      "tabMarket": "插件市场",
+      "repoPlaceholder": "https://…/repo.json",
+      "apply": "应用",
+      "refresh": "刷新",
+      "searchPlaceholder": "搜索插件名 / 描述 / 标签",
+      "emptyTitle": "尚未配置仓库",
+      "emptyHint": "在顶部粘贴一个 repo.json 的 URL，SwallowNote 会拉取并展示所有可用插件。",
+      "loading": "正在加载仓库…",
+      "noResults": "没有匹配的插件",
+      "noResultsHint": "尝试调整搜索词或清空标签过滤。",
+      "local": "本地",
+      "installed": "已安装 {{name}} v{{version}}",
+      "rolledBack": "已回滚到 {{version}}",
+      "unknownAuthor": "未知作者",
+      "unknownName": "未命名插件",
+      "noDescription": "暂无描述",
+      "dependencies": "依赖",
+      "versionHistory": "版本历史",
+      "localVersions": "已安装版本",
+      "active": "当前",
+      "latest": "最新",
+      "installThisVersion": "安装此版本",
+      "installedVersion": "已安装 {{name}} v{{version}}",
+      "noVersionHistory": "该插件在仓库中未提供历史版本。",
+      "rollback": "回滚",
+      "install": "安装",
+      "updateTo": "更新到 v{{version}}",
+      "upToDate": "已是最新",
+      "badgeUpdate": "更新",
+      "badgeInstalled": "已安装",
+      "badgeInstall": "安装",
+      "viewDetails": "查看详情",
+      "installNow": "立即安装",
+      "tabOverview": "基本信息",
+      "tabHistory": "历史版本",
+      "tabChangelog": "更新日志",
+      "tabPermissions": "权限",
+      "tabDependencies": "依赖",
+      "tabReviews": "评价",
+      "noChangelog": "该插件暂未提供更新日志。",
+      "noReviews": "暂无评价",
+      "noReviewsHint": "社区评价系统即将上线。",
+      "permissionsEmpty": "市场清单未声明该插件的权限项。",
+      "permissionsEmptyHint": "安装后将展示实际请求的权限。",
+      "permissionsGranted": "已授予",
+      "permissionsPending": "未授予",
+      "permissionsRequested": "已请求",
+      "permissionsNotRequested": "未声明"
+    },
+    "pa": {
+      "title": "插件管理",
+      "searchPlaceholder": "搜索…",
+      "loadFailures": {
+        "banner": "{{count}} 个插件加载失败",
+        "banner_plural": "{{count}} 个插件加载失败",
+        "dialogTitle": "插件加载失败列表",
+        "empty": "所有插件均已成功加载。",
+        "id": "ID",
+        "name": "名称",
+        "reason": "原因",
+        "time": "时间",
+        "viewLogs": "查看日志",
+        "uninstall": "卸载",
+        "dismiss": "忽略",
+        "dismissed": "已忽略。重新打开插件管理或点击刷新可重新检测。",
+        "uninstallConfirm": {
+          "title": "确认卸载 {{name}}?",
+          "description": "这将移除该损坏的插件包及其本地文件。你可以稍后通过 .zip 重新安装。"
+        }
+      },
+      "card": {
+        "statusOn": "已启用",
+        "statusOff": "已停用",
+        "healthHealthy": "健康",
+        "healthUnhealthy": "异常",
+        "healthUnknown": "未知",
+        "conflict": "冲突",
+        "tagBackend": "后端",
+        "tagPerms": "{{count}} 项权限",
+        "switchOn": "开",
+        "switchOff": "关"
+      },
+      "uninstall": {
+        "confirmTitle": "确认卸载",
+        "confirmDesc": "确定要卸载 {{name}} 吗？此操作不可撤销。",
+        "cancel": "取消",
+        "confirm": "卸载"
+      },
+      "autoUpdate": {
+        "label": "自动更新",
+        "labelTitle": "允许 SwallowNote 在启动时自动安装新版本",
+        "installedTitle": "{{name}} 已更新到 v{{version}}",
+        "installedDesc": "从 v{{version}} 自动更新",
+        "undo": "撤销",
+        "undone": "已撤销 {{name}} 的更新",
+        "undoneDesc": "已恢复到 v{{version}}",
+        "undoFailed": "撤销 {{name}} 的更新失败",
+        "failedTitle": "自动更新失败 ({{count}} 个插件)"
+      },
+      "stats": {
+        "installed": "已安装",
+        "active": "已启用",
+        "disabled": "已禁用",
+        "updates": "可更新",
+        "errors": "错误数"
+      },
+      "filter": {
+        "all": "全部",
+        "active": "已启用",
+        "disabled": "已禁用",
+        "updates": "可更新"
+      },
+      "view": {
+        "installed": "已安装",
+        "marketplace": "插件市场"
+      },
+      "tabs": {
+        "aria": "切换插件管理视图"
+      },
+      "tab": {
+        "sync": "最近同步",
+        "badge": {
+          "new": "{{count}} 个新"
+        }
+      },
+      "viewMeta": {
+        "installed": "共 <b>{{total}}</b> · 启用 <b>{{active}}</b> · 更新 <b>{{updates}}</b> · 上次扫描 <b>{{scan}}</b>",
+        "marketplace": "<b>{{count}}</b> 项"
+      },
+      "btn": {
+        "search": "搜索",
+        "activity": "活动",
+        "diagnostics": "诊断",
+        "logs": "日志",
+        "console": "管理控制台",
+        "consoleMeta": "{{events}} 事件 · {{errors}} 错误",
+        "storage": "存储",
+        "install": "安装插件",
+        "refresh": "刷新",
+        "upload": "上传 .zip",
+        "themeLight": "浅色",
+        "themeDark": "深色"
+      },
+      "rail": {
+        "stats": "安装统计",
+        "storage": "插件存储",
+        "open": "打开",
+        "storageMeter": {
+          "usedPct": "{{pct}}% 已用",
+          "available": "剩余空间",
+          "capUnknown": "容量未知",
+          "capUnknownPct": "—"
+        }
+      },
+      "manifestPath": "清单位置 <b>{{path}}</b>",
+      "update": {
+        "available": "{{count}} 个更新"
+      },
+      "empty": {
+        "title": "暂无已安装的插件",
+        "hint": "上传一个 .zip 插件包以开始。"
+      },
+      "dialog": {
+        "console": {
+          "eyebrow": "任务管理器 · 24h 窗口",
+          "title": "插件管理控制台"
+        },
+        "activity": {
+          "eyebrow": "最近 24 小时",
+          "title": "活动",
+          "count": "{{count}} 条事件 · 24h",
+          "clear": "清空",
+          "export": "导出",
+          "emptyHint": "暂无活动",
+          "rescan": "扫描完成：共加载 <b>{{count}}</b> 个插件。",
+          "perPlugin": "<b>{{name}}</b> · {{events}} 个事件 · {{storage}} 次存储 · {{hooks}} 个钩子 · {{ipc}} 次 IPC"
+        },
+        "diagnostics": {
+          "eyebrow": "插件运行时 · 24h",
+          "title": "诊断",
+          "footer": "上次扫描 <b>{{time}}</b> · 24h 窗口",
+          "rescan": "重新扫描",
+          "exportBundle": "导出诊断包",
+          "cell": {
+            "events": "事件数",
+            "avgDuration": "平均耗时",
+            "hookCalls": "钩子调用",
+            "storageOps": "存储操作",
+            "backendIpc": "后端 IPC",
+            "errorRate": "错误率"
+          },
+          "perPluginLoad": "按插件负载",
+          "eventUnit": "事件"
+        },
+        "logs": {
+          "eyebrow": "tail -f · 实时",
+          "title": "日志",
+          "footer": "跟踪 <b>host</b> · {{count}} 行",
+          "filter": "过滤",
+          "filterAll": "全部插件",
+          "copy": "复制",
+          "export": "导出",
+          "exportTitle": "导出为 JSON Lines (.jsonl)",
+          "conflictGroup": "⚠️ 冲突",
+          "normalGroup": "活动",
+          "emptyHint": "暂无日志",
+          "emptyFilteredHint": "当前过滤条件下没有日志",
+          "toast": {
+            "copyEmpty": "没有可复制的日志",
+            "copySuccess": "日志已复制到剪贴板",
+            "copyFailed": "复制日志失败",
+            "exportEmpty": "没有可导出的日志",
+            "exportOpenFailed": "打开保存对话框失败",
+            "exportWriteFailed": "写入日志文件失败",
+            "exportSuccess": "已导出 {{count}} 条日志（最新在前）"
+          }
+        },
+        "storageInspector": {
+          "eyebrow": "持久化键值",
+          "title": "存储",
+          "colKey": "键",
+          "colSize": "大小",
+          "empty": "此插件尚未写入任何存储",
+          "footer": "<b>{{count}}</b> 个键 · 合计 <b>{{bytes}}</b>",
+          "refresh": "刷新",
+          "clearAll": "清空全部",
+          "deleteKey": "删除键 {{key}}",
+          "keyDeleted": "已删除键 {{key}}",
+          "allCleared": "{{name}} 的存储已清空",
+          "loadFailed": "加载存储失败",
+          "deleteFailed": "删除键失败",
+          "clearFailed": "清空存储失败",
+          "confirmDeleteKeyTitle": "删除键 \"{{key}}\"？",
+          "confirmDeleteKeyHint": "该操作不可撤销，删除后插件需要重新写入此键才能恢复。",
+          "confirmClearAllTitle": "清空 {{name}} 的所有存储？",
+          "confirmClearAllHint": "该操作不可撤销，会清空此插件命名空间下的全部键。",
+          "confirmCancel": "取消",
+          "confirmProceed": "确认清空"
+        }
+      },
+      "market": {
+        "repoLabel": "仓库",
+        "apply": "应用",
+        "keyVerified": "密钥已验证 · ed25519:7f4a…b21c",
+        "search": "搜索…",
+        "heroTitle": "浏览插件目录",
+        "heroHint": "粘贴一个 repo.json URL 来加载插件目录。"
+      },
+      "batch": {
+        "selectAll": "全选",
+        "selectAllTitle": "选择所有可见插件",
+        "selectOne": "选择 {{name}}",
+        "selected": "已选 {{count}}",
+        "barAria": "批量操作",
+        "selectedCount": "已选 {{count}} 项",
+        "enable": "启用",
+        "enableTitle": "启用所选插件",
+        "disable": "禁用",
+        "disableTitle": "禁用所选插件",
+        "uninstall": "卸载",
+        "uninstallTitle": "卸载所选插件",
+        "clear": "清除选择",
+        "summary": "成功 {{success}} 项，失败 {{failure}} 项"
+      }
+    }
   }
 }

@@ -31,41 +31,10 @@ import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
 import { removeFolderHistory } from '@/lib/tauri'
 import { useTranslation } from 'react-i18next'
-
-/**
- * Count words in content, properly handling CJK characters.
- */
-function countWords(content: string): number {
-  let count = 0
-  const cjkRegex = /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g
-  const cjkMatches = content.match(cjkRegex)
-  if (cjkMatches) {
-    count += cjkMatches.length
-  }
-  const withoutCjk = content.replace(cjkRegex, ' ')
-  const latinWords = withoutCjk.split(/\s+/).filter(Boolean)
-  count += latinWords.length
-  return count
-}
-
-function updateNodesWithChildren(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return list.map((n) => {
-    if (n.path === path) return { ...n, children }
-    if (n.children) return { ...n, children: updateNodesWithChildren(n.children, path, children) }
-    return n
-  })
-}
-
-function findNodeParent(node: FileNode, list: FileNode[]): FileNode | null {
-  for (const n of list) {
-    if (n.children) {
-      if (n.children.some(c => c.path === node.path)) return n
-      const found = findNodeParent(node, n.children)
-      if (found) return found
-    }
-  }
-  return null
-}
+import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
+import { updateNodesWithChildren, findParentNode } from '@/lib/utils/treeUtils'
+import { usePluginEditors } from '@/stores/pluginEditor'
+import { countWords } from '@/lib/utils/wordCount'
 
 function getRelativePath(rootPath: string, fullPath: string): string {
   if (!rootPath) return fullPath
@@ -99,6 +68,8 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   const addTab = useEditorStore((s) => s.addTab)
   const nodes = useFileTreeStore((s) => s.nodes)
   const setSelectedPath = useFileTreeStore((s) => s.setSelectedPath)
+  const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
+  const setLastClickedPath = useFileTreeStore((s) => s.setLastClickedPath)
   const toggleNode = useFileTreeStore((s) => s.toggleNode)
   const setNodes = useFileTreeStore((s) => s.setNodes)
   const removeRoot = useFileTreeStore((s) => s.removeRoot)
@@ -109,6 +80,19 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   const addAiAttachedFile = useUIStore((s) => s.addAiAttachedFile)
   const repositories = useGitStore((s) => s.repositories)
   const { t } = useTranslation()
+
+  // Re-render when the plugin editor registry changes so the
+  // "new mind map" entry disappears the moment the user disables
+  // / uninstalls the plugin that owns the `.smm` extension. The
+  // hook wraps the host-bus subscription, self-grants the
+  // `events` permission in memory only, and exposes a fresh
+  // `extensions` Set on every mutation so the conditional render
+  // below picks up the new value synchronously — no manual reload
+  // required. We pass the returned `revision` through to the
+  // `<ContextMenuItem key>` so a fresh DOM node is mounted for
+  // the menu entry the moment the underlying state flips.
+  const { extensions: pluginExtensions } = usePluginEditors()
+  const hasMindMapEditor = pluginExtensions.has('.smm')
 
   const isRootFolder = workspaceMode === 'workspace' && workspaceFolders.includes(node.path)
 
@@ -128,7 +112,10 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
     if (node.isDirectory) {
       toggleNode(node.path)
     } else {
+      // 清理多选状态，与 FileTreeView.handleSelect 行为一致
+      clearMultiSelection()
       setSelectedPath(node.path)
+      setLastClickedPath(node.path)
       try {
         const content = await loadFileContent(node.path)
         addTab({
@@ -265,9 +252,14 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       for (const tab of tabsToClose) {
         editorStore.removeTab(tab.id)
       }
+
+      // 清理文件树选中状态，与 useFileTreeActions.handleDeleteSelected 行为一致
+      clearMultiSelection()
+      setSelectedPath(null)
+      setLastClickedPath(null)
       
       // Refresh parent
-      const parent = findNodeParent(node, nodes)
+      const parent = findParentNode(node, nodes)
       if (parent) {
         const children = await loadDirectory(parent.path, showAllFiles, markdownOnly)
         const updatedNodes = updateNodesWithChildren(nodes, parent.path, children)
@@ -329,14 +321,23 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
               <FolderPlus size={12} />
               <span>{t('contextMenu.newFolder')}</span>
             </ContextMenuItem>
-            <ContextMenuItem
-              onClick={onNewMindMap}
-              style={{ color: 'var(--text-secondary)' }}
-              className="cursor-pointer"
-            >
-              <GitFork size={12} />
-              <span>{t('contextMenu.newMindMap')}</span>
-            </ContextMenuItem>
+            {/* 新建思维导图：仅当某个插件声明拥有 .smm 文件编辑器
+                时才显示此菜单项。原来的 host 在 mind map 仍是内置
+                编辑器时硬编码显示；现在 mind map 已迁出 host，
+                没有插件就根本没有能渲染 .smm 文件的入口，菜单项
+                也就失去意义。判断走 pluginEditorRegistry 而不是
+                写死插件 id：以后任何插件声明 editorFileExtensions
+                含 .smm 都会让该项出现，便于第三方扩展。 */}
+            {hasMindMapEditor && (
+              <ContextMenuItem
+                onClick={onNewMindMap}
+                style={{ color: 'var(--text-secondary)' }}
+                className="cursor-pointer"
+              >
+                <GitFork size={12} />
+                <span>{t('contextMenu.newMindMap')}</span>
+              </ContextMenuItem>
+            )}
             <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
           </>
         )}
@@ -441,6 +442,17 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           <Trash2 size={12} />
           <span style={{ color: 'var(--danger-color, #f44336)' }}>{t('contextMenu.hardDelete')}</span>
         </ContextMenuItem>
+
+        {/* Plugin-contributed items. They appear after the host's own
+            items so the standard order is preserved and plugins
+            extend rather than compete. The helper renders a
+            separator + items only when at least one contribution
+            is applicable, so it's a no-op when no plugin is
+            registered. */}
+        <PluginContextMenuItems
+          location="fileTree"
+          ctx={{ path: node.path, isDirectory: node.isDirectory }}
+        />
       </ContextMenuContent>
     </ContextMenu>
   )

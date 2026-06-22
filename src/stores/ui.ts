@@ -3,15 +3,23 @@
  */
 import { create } from 'zustand'
 import { toast } from 'sonner'
+import i18n from '@/i18n'
 import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
 import { AiModelConfig, generateModelId } from '@/lib/ai'
 import { useFileTreeStore } from './filetree'
+import { emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
 
 export type Theme = 'light' | 'dark' | 'system'
-export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings'
+export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings' | `plugin:${string}`
 export type EditorViewMode = 'edit' | 'preview' | 'split'
-export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | null
+export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | `plugin:${string}` | null
+/**
+ * Section IDs inside the Settings panel. Mirrors the
+ * `SettingsSection` type in `Settings/SettingsView.tsx`.
+ * `null` means "no specific section requested" (default first paint).
+ */
+export type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | null
 
 /** Request from editor context menu to trigger an AI action */
 export interface AiContextMenuRequest {
@@ -392,6 +400,13 @@ export interface UIState {
   commandPaletteVisible: boolean
   searchPanelVisible: boolean
   settingsPanelVisible: boolean
+  /**
+   * Section to focus when the Settings panel opens.
+   * Set by callers (e.g. AIView's settings button) so the panel
+   * jumps directly to the requested section. Cleared after the
+   * SettingsView consumes it.
+   */
+  settingsSection: SettingsSection
   aiPanelVisible: boolean
   rightPanelType: RightPanelType
   clipboardFiles: string[]
@@ -404,6 +419,14 @@ export interface UIState {
   showAllFiles: boolean
   markdownOnly: boolean
   customShortcuts: Record<string, string>
+  /**
+   * User-bound keyboard shortcuts for plugin commands. Keyed by
+   * `<pluginId>:<commandId>` so two plugins can contribute
+   * commands with the same id without colliding. Persisted to
+   * localStorage via `saveAppSettings({ pluginCommandShortcuts })`
+   * so the bindings survive an app restart.
+   */
+  pluginCommandShortcuts: Record<string, string>
   syncInterval: number
   autoSyncPush: boolean
   uploadPath: string
@@ -433,6 +456,7 @@ export interface UIState {
   toggleCommandPalette: () => void
   toggleSearchPanel: () => void
   setSettingsPanelVisible: (visible: boolean) => void
+  setSettingsSection: (section: SettingsSection) => void
   toggleSettingsPanel: () => void
   toggleAIPanel: () => void
   setRightPanelType: (type: RightPanelType) => void
@@ -469,6 +493,16 @@ export interface UIState {
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
   resetAllShortcuts: () => void
+  setPluginCommandShortcut: (bindingKey: string, value: string) => void
+  resetPluginCommandShortcut: (bindingKey: string) => void
+  resetAllPluginCommandShortcuts: () => void
+  /**
+   * Drop every plugin-command shortcut that points at a plugin id
+   * the user no longer has installed. Called by the plugin store
+   * on unregister / setPlugins diff to keep the persisted map from
+   * accumulating stale bindings.
+   */
+  prunePluginCommandShortcuts: (validPluginIds: Set<string>) => void
   setActiveCustomThemeId: (themeType: 'light' | 'dark', id: string) => void
   addCustomTheme: (name: string, themeType: 'light' | 'dark') => void
   deleteCustomTheme: (id: string) => void
@@ -477,7 +511,7 @@ export interface UIState {
   loadSettings: () => Promise<void>
 }
 
-export const useUIStore = create<UIState>((set) => ({
+export const useUIStore = create<UIState>((set, get) => ({
   theme: 'light',
   themeColor: '#005fb8',
   sidebarView: 'explorer',
@@ -489,6 +523,7 @@ export const useUIStore = create<UIState>((set) => ({
   commandPaletteVisible: false,
   searchPanelVisible: false,
   settingsPanelVisible: false,
+  settingsSection: null,
   aiPanelVisible: false,
   rightPanelType: null,
   clipboardFiles: [],
@@ -501,6 +536,7 @@ export const useUIStore = create<UIState>((set) => ({
   showAllFiles: false,
   markdownOnly: false,
   customShortcuts: {},
+  pluginCommandShortcuts: {},
   syncInterval: 10,
   autoSyncPush: false,
   uploadPath: '',
@@ -522,10 +558,20 @@ export const useUIStore = create<UIState>((set) => ({
   setTheme: (theme) => {
     set({ theme })
     saveAppSettings({ theme })
+    // Plugins only need to know the resolved theme identifier; they
+    // shouldn't need to read the raw `theme` (which can be 'system')
+    // to compute the actual dark/light state. We emit only the
+    // persisted identifier so consumers can mirror localStorage if
+    // they want to.
+    queueMicrotask(() => emitThemeChanged(theme))
   },
   setThemeColor: (color) => {
     set({ themeColor: color })
     saveAppSettings({ themeColor: color })
+    // Colour change goes through `settings:change` rather than
+    // `theme:change` because plugins tracking `theme:change` care
+    // about the light/dark mode, not the accent colour.
+    queueMicrotask(() => emitSettingChanged('themeColor', color))
   },
   setSidebarView: (view) => set({ sidebarView: view }),
   setSidebarWidth: (width) => set({ sidebarWidth: Math.max(150, Math.min(500, width)) }),
@@ -533,12 +579,16 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
   toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
-  setEditorViewMode: (mode) => set({ editorViewMode: mode }),
+  setEditorViewMode: (mode) => {
+    set({ editorViewMode: mode })
+    queueMicrotask(() => emitSettingChanged('editorViewMode', mode))
+  },
   toggleCommandPalette: () =>
     set((state) => ({ commandPaletteVisible: !state.commandPaletteVisible })),
   toggleSearchPanel: () =>
     set((state) => ({ searchPanelVisible: !state.searchPanelVisible })),
   setSettingsPanelVisible: (visible) => set({ settingsPanelVisible: visible }),
+  setSettingsSection: (section: SettingsSection) => set({ settingsSection: section }),
   toggleSettingsPanel: () =>
     set((state) => ({ settingsPanelVisible: !state.settingsPanelVisible })),
   toggleAIPanel: () =>
@@ -575,19 +625,30 @@ export const useUIStore = create<UIState>((set) => ({
   setAutoStart: (value) => {
     set({ autoStart: value })
     saveAppSettings({ autoStart: String(value) })
-    setAutoStartEnabled(value).catch(() => {})
+    setAutoStartEnabled(value).catch((err) => {
+      // OS-level registration (LaunchAgent / registry) failed — the
+      // UI is now ahead of reality. Roll back the optimistic state
+      // and surface the error so the user isn't silently misled.
+      console.error('[ui] setAutoStartEnabled failed', err)
+      toast.error(i18n.t('settings.general.autoStart.failed'), { description: String(err) })
+      get().setAutoStart(!value)
+    })
+    queueMicrotask(() => emitSettingChanged('autoStart', value))
   },
   setAutoCheckUpdate: (value) => {
     set({ autoCheckUpdate: value })
     saveAppSettings({ autoCheckUpdate: String(value) })
+    queueMicrotask(() => emitSettingChanged('autoCheckUpdate', value))
   },
   setCloseWithoutExit: (value) => {
     set({ closeWithoutExit: value })
     saveAppSettings({ closeWithoutExit: String(value) })
+    queueMicrotask(() => emitSettingChanged('closeWithoutExit', value))
   },
   setNoteWidth: (width) => {
     set({ noteWidth: width })
     saveAppSettings({ noteWidth: width })
+    queueMicrotask(() => emitSettingChanged('noteWidth', width))
   },
   setShowAllFiles: (value) => {
     // If enabling showAllFiles, disable markdownOnly since they are mutually exclusive
@@ -614,18 +675,22 @@ export const useUIStore = create<UIState>((set) => ({
   setSyncInterval: (interval: number) => {
     set({ syncInterval: interval })
     saveAppSettings({ syncInterval: String(interval) })
+    queueMicrotask(() => emitSettingChanged('syncInterval', interval))
   },
   setAutoSyncPush: (value: boolean) => {
     set({ autoSyncPush: value })
     saveAppSettings({ autoSyncPush: String(value) })
+    queueMicrotask(() => emitSettingChanged('autoSyncPush', value))
   },
   setUploadPath: (path: string) => {
     set({ uploadPath: path })
     saveAppSettings({ uploadPath: path })
+    queueMicrotask(() => emitSettingChanged('uploadPath', path))
   },
   setShowConflictBadge: (value: boolean) => {
     set({ showConflictBadge: value })
     saveAppSettings({ showConflictBadge: String(value) })
+    queueMicrotask(() => emitSettingChanged('showConflictBadge', value))
   },
   setAiProvider: (provider: string) => {
     set({ aiProvider: provider })
@@ -638,7 +703,13 @@ export const useUIStore = create<UIState>((set) => ({
       saveAppSettings({ aiApiKey: encrypted })
       const { aiProvider, aiBaseUrl, aiModel, aiPort } = useUIStore.getState()
       if (aiProvider) {
-        restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch(() => {})
+        // Restart failure means the new key is persisted but chat
+        // still proxies through the old config — surface this so
+        // the user knows the change hasn't taken effect yet.
+        restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch((err) => {
+          console.error('[ui] restartAiProxy failed', err)
+          toast.error(i18n.t('settings.ai.restartFailed'), { description: String(err) })
+        })
       }
     } catch {
       set({ aiApiKeyDecrypted: key })
@@ -740,6 +811,63 @@ export const useUIStore = create<UIState>((set) => ({
     set({ customShortcuts: {} })
     saveAppSettings({ customShortcuts: '{}' })
   },
+  setPluginCommandShortcut: (bindingKey, value) => {
+    set((state) => {
+      // If the user re-binds an already-bound command, the new
+      // value simply overwrites the old. We don't attempt to
+      // resolve conflicts at the store level – the settings panel
+      // runs the conflict check first and only calls us on accept.
+      const next = { ...state.pluginCommandShortcuts, [bindingKey]: value }
+      saveAppSettings({ pluginCommandShortcuts: JSON.stringify(next) })
+      return { pluginCommandShortcuts: next }
+    })
+  },
+  resetPluginCommandShortcut: (bindingKey) => {
+    set((state) => {
+      if (!(bindingKey in state.pluginCommandShortcuts)) return state
+      const next = { ...state.pluginCommandShortcuts }
+      delete next[bindingKey]
+      saveAppSettings({ pluginCommandShortcuts: JSON.stringify(next) })
+      return { pluginCommandShortcuts: next }
+    })
+  },
+  resetAllPluginCommandShortcuts: () => {
+    set({ pluginCommandShortcuts: {} })
+    saveAppSettings({ pluginCommandShortcuts: '{}' })
+  },
+  prunePluginCommandShortcuts: (validPluginIds) => {
+    set((state) => {
+      const next: Record<string, string> = {}
+      let changed = false
+      for (const [bindingKey, value] of Object.entries(state.pluginCommandShortcuts)) {
+        // bindingKey format: "<pluginId>:<commandId>". The plugin
+        // id may itself contain colons (e.g. reverse-DNS style
+        // "com.foo.bar:baz"), so we use the *last* colon as the
+        // separator. That's the same convention the settings
+        // panel uses to render the row.
+        const lastColon = bindingKey.lastIndexOf(':')
+        if (lastColon <= 0) continue
+        const pluginId = bindingKey.slice(0, lastColon)
+        if (validPluginIds.has(pluginId)) {
+          // `value` is typed `unknown` from `Object.entries`;
+          // the map's `string` value type is enforced by the
+          // surrounding Record. A non-string here would mean
+          // someone wrote garbage to the persisted map, which
+          // we silently drop to keep this prune idempotent.
+          if (typeof value === 'string') {
+            next[bindingKey] = value
+          } else {
+            changed = true
+          }
+        } else {
+          changed = true
+        }
+      }
+      if (!changed) return state
+      saveAppSettings({ pluginCommandShortcuts: JSON.stringify(next) })
+      return { pluginCommandShortcuts: next }
+    })
+  },
   setActiveCustomThemeId: (themeType, id) => {
     if (themeType === 'light') {
       set({ activeLightCustomThemeId: id })
@@ -814,6 +942,20 @@ export const useUIStore = create<UIState>((set) => ({
           customShortcuts = {}
         }
       }
+      // Plugin-command shortcuts live in the same Tauri session
+      // store as `customShortcuts` but with a separate key so a
+      // bad payload from one doesn't nuke the other. We parse
+      // defensively (a malformed entry would otherwise crash
+      // app startup on the `pluginCommandShortcuts[key]` reads
+      // scattered through the keyboard handler).
+      let pluginCommandShortcuts: Record<string, string> = {}
+      if (s.pluginCommandShortcuts) {
+        try {
+          pluginCommandShortcuts = JSON.parse(s.pluginCommandShortcuts)
+        } catch {
+          pluginCommandShortcuts = {}
+        }
+      }
       let customThemes: CustomTheme[] = [...BUILT_IN_THEMES]
       if (s.customThemes) {
         try {
@@ -849,6 +991,11 @@ export const useUIStore = create<UIState>((set) => ({
       }
       try {
         const builtinModels = await getBuiltinAiModels()
+        const builtinIds = new Set(builtinModels.map((bm) => bm.id))
+        // Prune stale `builtin-*` entries that no longer exist in the
+        // current built-in list (e.g. GLM-Z1-9B removed in 2026-06-17).
+        // User-added custom models are untouched.
+        aiModels = aiModels.filter((m) => !(m.isBuiltIn && !builtinIds.has(m.id)))
         const existingIds = new Set(aiModels.map((m) => m.id))
         const missing = builtinModels
           .filter((bm) => !existingIds.has(bm.id))
@@ -863,6 +1010,8 @@ export const useUIStore = create<UIState>((set) => ({
             isBuiltIn: bm.is_built_in,
           }))
         aiModels = [...missing, ...aiModels]
+        // Persist the pruned list so the change survives restarts.
+        saveAppSettings({ aiModels: JSON.stringify(aiModels) })
       } catch { /* ignore */ }
       // Batch decrypt all API keys concurrently BEFORE setting state,
       // so that models are available with decrypted keys in a single set() call.
@@ -902,6 +1051,7 @@ export const useUIStore = create<UIState>((set) => ({
         showAllFiles: s.showAllFiles === 'true',
         markdownOnly: s.markdownOnly === 'true',
         customShortcuts,
+        pluginCommandShortcuts,
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
         autoSyncPush: s.autoSyncPush === 'true',
         uploadPath: s.uploadPath || '',

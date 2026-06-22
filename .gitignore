@@ -5,6 +5,11 @@ node_modules/
 build/
 dist/
 
+# Plugin build artifacts
+plugins/*/dist/
+plugins/*/node_modules/
+plugins/*/src-tauri/target/
+
 # Tauri
 src-tauri/target/
 
@@ -32,3 +37,18 @@ npm-debug.log*
 .work/
 .catpaw/
 .workbuddy/
+.trae/
+target/
+.dbg/
+
+# 插件构建产物
+plugins/*/*.zip
+
+# 测试覆盖率
+coverage/
+
+# Vite 缓存
+.vite/
+*.tsbuildinfo
+vite.config.ts.timestamp-*
+vite.config.js.timestamp-*

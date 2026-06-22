@@ -4,8 +4,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, X, FileText } from 'lucide-react'
-import { useUIStore } from '@/stores'
+import { useUIStore, useWorkspaceStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  searchInFiles,
+  type SearchResult as TSearchResult,
+} from '@/lib/tauri'
 
 interface SearchResult {
   path: string
@@ -15,27 +19,91 @@ interface SearchResult {
   preview: string
 }
 
+/**
+ * Flatten the Tauri hierarchical `SearchResult[]` (one entry per
+ * file with nested `line_matches`) into the flat `SearchResult[]`
+ * shape the panel renders (one row per match). Exported so unit
+ * tests can exercise the mapping without standing up a Tauri
+ * command surface.
+ */
+export function flattenSearchResults(
+  tauriResults: TSearchResult[],
+  previewMaxLen = 200,
+): SearchResult[] {
+  const flat: SearchResult[] = []
+  for (const file of tauriResults) {
+    for (const match of file.line_matches) {
+      const content = match.content ?? ''
+      const preview =
+        content.length > previewMaxLen
+          ? content.slice(0, previewMaxLen) + '…'
+          : content
+      flat.push({
+        path: file.file_path,
+        line: match.line_number,
+        column: match.start_col,
+        content,
+        preview,
+      })
+    }
+  }
+  return flat
+}
+
 function SearchPanel() {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const { toggleSearchPanel } = useUIStore()
+  const { toggleSearchPanel, workspaceMode } = useUIStore()
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
 
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
   const handleSearch = async () => {
-    if (!query.trim()) return
-    setIsSearching(true)
-    // TODO: Implement actual search using Tauri commands
-    // For now, simulate search results
-    setTimeout(() => {
+    const trimmed = query.trim()
+    if (!trimmed) {
       setResults([])
+      return
+    }
+
+    const searchPaths =
+      workspaceMode === 'workspace'
+        ? workspaceFolders
+        : rootPath
+          ? [rootPath]
+          : []
+
+    if (searchPaths.length === 0) {
+      setResults([])
+      return
+    }
+
+    setIsSearching(true)
+    try {
+      const responses = await Promise.all(
+        searchPaths.map((path) =>
+          searchInFiles({
+            query: trimmed,
+            root_path: path,
+            case_sensitive: false,
+            whole_word: false,
+            use_regex: false,
+            include_files: null,
+            exclude_files: null,
+          }).catch(() => [] as TSearchResult[]),
+        ),
+      )
+      setResults(flattenSearchResults(responses.flat()))
+    } catch {
+      setResults([])
+    } finally {
       setIsSearching(false)
-    }, 500)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

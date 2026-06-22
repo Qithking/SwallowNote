@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-06-18T07:46:39Z",
+  "plugins": [
+    {
+      "id": "com.swallownote.mindmap",
+      "name": "思维导图",
+      "version": "0.2.2",
+      "description": "基于 simple-mind-map 的独立 .smm 文件编辑器，提供逻辑结构图/思维导图/组织结构/时间轴/鱼骨图等多种布局",
+      "author": "SwallowNote",
+      "tags": [
+        "mindmap",
+        "editor",
+        "smm",
+        "brainstorm"
+      ],
+      "download_url": "./mindmap/com.swallownote.mindmap.zip",
+      "sha256": "4dd66c860042aa35779bb55df4b002094f36d8b96560df35186be29573f99052",
+      "changelog": "初版发布：从 host 抽出为独立插件，支持 .smm 文件编辑、5 大布局组（逻辑结构/思维导图/组织结构/时间轴/鱼骨图）、多种主题、外框/水印/节点样式",
+      "published_at": "2026-06-18T07:45:35Z",
+      "dependencies": []
+    },
+    {
+      "id": "com.swallownote.export",
+      "name": "文档导出",
+      "version": "0.2.3",
+      "description": "将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式",
+      "author": "SwallowNote",
+      "tags": [
+        "export",
+        "document",
+        "pdf",
+        "docx",
+        "html"
+      ],
+      "download_url": "./export/com.swallownote.export.zip",
+      "sha256": "2843bee3b0637745f3f09d27e648ae8ee8369879e2c07a9689bda0ab0e7288ba",
+      "changelog": "v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
+      "published_at": "2026-06-18T07:45:06Z",
+      "dependencies": []
+    },
+    {
+      "id": "com.swallownote.wenyan",
+      "name": "文颜排版",
+      "version": "0.1.2",
+      "description": "使用文颜引擎将 Markdown 排版为微信公众号样式的富文本",
+      "author": "SwallowNote",
+      "tags": [
+        "wenyan",
+        "wechat",
+        "typesetting",
+        "markdown",
+        "theme"
+      ],
+      "download_url": "./wenyan/com.swallownote.wenyan.zip",
+      "sha256": "0cc413594d6f4db38f075006fbde9d0317c457c46f1599b4d00f736e0d68a398",
+      "changelog": "初版发布：集成 @wenyan-md/core 排版引擎，支持多主题、代码高亮、实时预览、一键复制",
+      "published_at": "2026-06-18T07:46:22Z",
+      "dependencies": []
+    },
+    {
+      "id": "com.swallownote.picgo",
+      "name": "图床",
+      "version": "0.1.2",
+      "description": "基于 PicGo 的图床插件，支持 SM.MS / Imgur / GitHub / 自定义 HTTP 端点，本地图片一键上传并插入到笔记",
+      "author": "SwallowNote",
+      "tags": [
+        "image-host",
+        "picgo",
+        "upload",
+        "smms",
+        "imgur",
+        "github",
+        "markdown"
+      ],
+      "download_url": "./picgo/com.swallownote.picgo.zip",
+      "sha256": "8802dc4974d91a4b32ab4e9a05d06760f12431aa3944345a656bee40e1f920a2",
+      "changelog": "初版发布：4 个 provider（SM.MS / Imgur / GitHub / Custom）、右侧面板 UI、上传历史、客户端转码、文件名策略、链接格式",
+      "published_at": "2026-06-18T07:45:57Z",
+      "dependencies": []
+    }
+  ]
+}

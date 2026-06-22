@@ -47,6 +47,7 @@ export function useFileTreeActions() {
   const [editingPath, setEditingPath] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   // _editingType 保留以备未来功能扩展使用
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_editingType, setEditingType] = useState<'file' | 'folder' | null>(null)
   const [isFirstEdit, setIsFirstEdit] = useState(true)
 

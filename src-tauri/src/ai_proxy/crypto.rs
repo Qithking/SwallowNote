@@ -22,21 +22,18 @@ fn derive_key() -> [u8; 32] {
 fn get_machine_id() -> String {
     #[cfg(target_os = "macos")]
     {
-        match std::process::Command::new("ioreg")
+        if let Ok(output) = std::process::Command::new("ioreg")
             .args(["-rd1", "-c", "IOPlatformExpertDevice"])
             .output()
         {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    if line.contains("IOPlatformUUID") {
-                        if let Some(uuid) = line.split('"').nth(3) {
-                            return uuid.to_string();
-                        }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("IOPlatformUUID") {
+                    if let Some(uuid) = line.split('"').nth(3) {
+                        return uuid.to_string();
                     }
                 }
             }
-            Err(_) => {}
         }
         "swallownote-mac-fallback".to_string()
     }

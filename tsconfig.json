@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@swallow-note/plugin-sdk": ["./docs/plugin-sdk/src/index.ts"]
     }
   },
   "include": ["src"],

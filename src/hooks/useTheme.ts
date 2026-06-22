@@ -8,9 +8,9 @@ function hexToHSL(hex: string): { h: number; s: number; l: number } {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
   if (!result) return { h: 221, s: 83, l: 53 }
 
-  let r = parseInt(result[1], 16) / 255
-  let g = parseInt(result[2], 16) / 255
-  let b = parseInt(result[3], 16) / 255
+  const r = parseInt(result[1], 16) / 255
+  const g = parseInt(result[2], 16) / 255
+  const b = parseInt(result[3], 16) / 255
 
   const max = Math.max(r, g, b)
   const min = Math.min(r, g, b)
@@ -100,7 +100,9 @@ function buildCssVars(
 function persistTheme(theme: string, darkCssVars: Record<string, string>, lightCssVars: Record<string, string>) {
   try {
     localStorage.setItem('sn-theme', JSON.stringify({ theme, darkCssVars, lightCssVars }))
-  } catch {}
+  } catch {
+    // localStorage may be unavailable (private mode, quota); ignore
+  }
 }
 
 /** Clear custom theme CSS variables so CSS defaults take over */

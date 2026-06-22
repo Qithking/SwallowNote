@@ -228,50 +228,47 @@ pub async fn chat_handler(
             }
 
             let parsed: Result<Value, _> = serde_json::from_str(data);
-            match parsed {
-                Ok(json_val) => {
-                    if !started {
-                        events.push(Ok(Event::default().data(json!({"type":"start","messageId":text_id}).to_string())));
-                        events.push(Ok(Event::default().data(json!({"type":"text-start","id":text_id}).to_string())));
-                        started = true;
-                    }
+            if let Ok(json_val) = parsed {
+                if !started {
+                    events.push(Ok(Event::default().data(json!({"type":"start","messageId":text_id}).to_string())));
+                    events.push(Ok(Event::default().data(json!({"type":"text-start","id":text_id}).to_string())));
+                    started = true;
+                }
 
-                    let delta_text = match provider.as_str() {
-                        "anthropic" => extract_anthropic_delta(&json_val),
-                        "google" => extract_google_delta(&json_val),
-                        _ => extract_openai_delta(&json_val),
-                    };
+                let delta_text = match provider.as_str() {
+                    "anthropic" => extract_anthropic_delta(&json_val),
+                    "google" => extract_google_delta(&json_val),
+                    _ => extract_openai_delta(&json_val),
+                };
 
-                    if let Some(delta) = delta_text {
-                        if !delta.is_empty() {
-                            events.push(Ok(Event::default().data(json!({"type":"text-delta","id":text_id,"delta":delta}).to_string())));
-                        }
-                    }
-
-                    let is_stop = match provider.as_str() {
-                        "anthropic" => json_val.get("type").and_then(|t| t.as_str()) == Some("message_stop"),
-                        "google" => json_val.pointer("/candidates/0/finishReason").is_some(),
-                        _ => json_val.get("choices")
-                            .and_then(|c| c.as_array())
-                            .and_then(|arr| arr.first())
-                            .and_then(|c| c.get("finish_reason"))
-                            .and_then(|r| r.as_str())
-                            .map(|r| r != "null" && !r.is_empty())
-                            .unwrap_or(false),
-                    };
-
-                    if is_stop && !finished {
-                        events.push(Ok(Event::default().data(json!({"type":"text-end","id":text_id}).to_string())));
-                        events.push(Ok(Event::default().data(json!({"type":"finish","finishReason":"stop"}).to_string())));
-                        finished = true;
+                if let Some(delta) = delta_text {
+                    if !delta.is_empty() {
+                        events.push(Ok(Event::default().data(json!({"type":"text-delta","id":text_id,"delta":delta}).to_string())));
                     }
                 }
-                Err(_) => {}
+
+                let is_stop = match provider.as_str() {
+                    "anthropic" => json_val.get("type").and_then(|t| t.as_str()) == Some("message_stop"),
+                    "google" => json_val.pointer("/candidates/0/finishReason").is_some(),
+                    _ => json_val.get("choices")
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|c| c.get("finish_reason"))
+                        .and_then(|r| r.as_str())
+                        .map(|r| r != "null" && !r.is_empty())
+                        .unwrap_or(false),
+                };
+
+                if is_stop && !finished {
+                    events.push(Ok(Event::default().data(json!({"type":"text-end","id":text_id}).to_string())));
+                    events.push(Ok(Event::default().data(json!({"type":"finish","finishReason":"stop"}).to_string())));
+                    finished = true;
+                }
             }
         }
 
         events
-    }).flat_map(|events| futures::stream::iter(events)).boxed();
+    }).flat_map(futures::stream::iter).boxed();
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }

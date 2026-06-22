@@ -1,40 +1,70 @@
 import { useEffect, useRef } from 'react'
-import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type FileNode, type Theme } from '@/stores'
+import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { openFolderDialog, openWorkspaceDialog, createFile } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
 import { invoke } from '@tauri-apps/api/core'
+import { emitLocaleChanged } from '@/lib/plugin-host'
+import { listPluginCommands } from '@/lib/plugin-commands'
+import { toast } from 'sonner'
 import i18n from 'i18next'
+import { findNodeByPath, generateUniqueName, updateNodesWithChildren } from '@/lib/utils/treeUtils'
 
 function getShortcut(key: ShortcutKey): string {
   return getShortcutKey(key, useUIStore.getState().customShortcuts)
 }
 
-function findNodeByPath(nodes: FileNode[], path: string): FileNode | null {
-  for (const n of nodes) {
-    if (n.path === path) return n
-    if (n.children) {
-      const found = findNodeByPath(n.children, path)
-      if (found) return found
-    }
+/** 返回与事件匹配的插件命令 binding key，用于检测冲突。 */
+export function findConflictingPluginCommandKey(e: KeyboardEvent): string | null {
+  const bindings = useUIStore.getState().pluginCommandShortcuts
+  for (const [bindingKey, value] of Object.entries(bindings)) {
+    if (!value) continue
+    if (matchShortcut(e, value)) return bindingKey
   }
   return null
 }
 
-function generateUniqueName(baseName: string, siblings: FileNode[]): string {
-  let name = baseName
-  let counter = 1
-  const existingNames = new Set(siblings.map((s) => s.name))
-  while (existingNames.has(name)) {
-    const dotIndex = baseName.lastIndexOf('.')
-    if (dotIndex > 0) {
-      name = baseName.slice(0, dotIndex) + ` ${counter}` + baseName.slice(dotIndex)
-    } else {
-      name = `${baseName} ${counter}`
+/**
+ * 匹配并派发内置快捷键；冲突时弹 3s toast（200ms 节流）。
+ * preventDefault 仅在匹配成功后调用。
+ */
+const PLUGIN_CONFLICT_THROTTLE_MS = 200
+const lastPluginConflictShownAt = new Map<string, number>()
+
+export function dispatchBuiltin(
+  e: KeyboardEvent,
+  key: ShortcutKey,
+  action: () => void | Promise<void>,
+): boolean {
+  if (!matchShortcut(e, getShortcut(key))) return false
+  e.preventDefault()
+  const pluginBinding = findConflictingPluginCommandKey(e)
+  if (pluginBinding) {
+    // strip 尾部 commandId（用 lastIndexOf）
+    const lastColon = pluginBinding.lastIndexOf(':')
+    const pluginId =
+      lastColon > 0 ? pluginBinding.slice(0, lastColon) : pluginBinding
+    // 200ms 节流避免连按刷屏
+    const now = Date.now()
+    const lastShown = lastPluginConflictShownAt.get(pluginBinding) ?? 0
+    if (now - lastShown >= PLUGIN_CONFLICT_THROTTLE_MS) {
+      lastPluginConflictShownAt.set(pluginBinding, now)
+      // toast 描述携带内置 action 名
+      toast(i18n.t('settings.pluginCommandShadowed', { id: pluginId }), {
+        // Wave A / C1: stable id so the same conflict
+        // doesn't stack a new toast on every keypress.
+        id: `plugin-conflict-${key}`,
+        description: i18n.t('settings.pluginCommandShadowedDesc', {
+          action: key,
+        }),
+        // Wave B / M1: 1.5s is too short to read both the
+        // title and the new description. Bump to 3s.
+        duration: 3000,
+      })
     }
-    counter++
   }
-  return name
+  void action()
+  return true
 }
 
 async function handleNewFile() {
@@ -44,7 +74,7 @@ async function handleNewFile() {
 
   let targetDir = rootPath
   if (selectedPath) {
-    const selected = findNodeByPath(nodes, selectedPath)
+    const selected = findNodeByPath(selectedPath, nodes)
     if (selected?.isDirectory) {
       targetDir = selected.path
     } else if (selectedPath.includes('/')) {
@@ -52,7 +82,7 @@ async function handleNewFile() {
     }
   }
 
-  const children = (findNodeByPath(nodes, targetDir)?.children) || []
+  const children = (findNodeByPath(targetDir, nodes)?.children) || []
   const defaultFileName = i18n.t('fileTree.defaultFileName')
   const name = generateUniqueName(defaultFileName, children)
   const fullPath = targetDir + '/' + name
@@ -62,7 +92,7 @@ async function handleNewFile() {
     const { showAllFiles, markdownOnly } = useUIStore.getState()
     const newChildren = await loadDirectory(targetDir, showAllFiles, markdownOnly)
     useFileTreeStore.getState().setNodes(
-      updateNodesWithChildrenInList(nodes, targetDir, newChildren)
+      updateNodesWithChildren(nodes, targetDir, newChildren)
     )
     useFileTreeStore.getState().setSelectedPath(fullPath)
   } catch (e) {
@@ -77,7 +107,7 @@ async function handleNewFolder() {
 
   let targetDir = rootPath
   if (selectedPath) {
-    const selected = findNodeByPath(nodes, selectedPath)
+    const selected = findNodeByPath(selectedPath, nodes)
     if (selected?.isDirectory) {
       targetDir = selected.path
     } else if (selectedPath.includes('/')) {
@@ -85,7 +115,7 @@ async function handleNewFolder() {
     }
   }
 
-  const children = (findNodeByPath(nodes, targetDir)?.children) || []
+  const children = (findNodeByPath(targetDir, nodes)?.children) || []
   const defaultFolderName = i18n.t('fileTree.defaultFolderName')
   const name = generateUniqueName(defaultFolderName, children)
   const fullPath = targetDir + '/' + name
@@ -95,19 +125,11 @@ async function handleNewFolder() {
     const { showAllFiles, markdownOnly } = useUIStore.getState()
     const newChildren = await loadDirectory(targetDir, showAllFiles, markdownOnly)
     useFileTreeStore.getState().setNodes(
-      updateNodesWithChildrenInList(nodes, targetDir, newChildren)
+      updateNodesWithChildren(nodes, targetDir, newChildren)
     )
   } catch (e) {
     console.error('Failed to create folder:', e)
   }
-}
-
-function updateNodesWithChildrenInList(list: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return list.map((n) => {
-    if (n.path === path) return { ...n, children }
-    if (n.children) return { ...n, children: updateNodesWithChildrenInList(n.children, path, children) }
-    return n
-  })
 }
 
 async function handleOpenFile() {
@@ -151,7 +173,9 @@ async function handleSaveFile() {
     const { gitAutoCommit } = await import('@/lib/tauri')
     try {
       await gitAutoCommit(activeTab.path)
-    } catch {}
+    } catch {
+      // git auto-commit is best-effort; failures (no git repo, no identity) are non-fatal
+    }
     window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
   } catch (e) {
     console.error('Failed to save file:', e)
@@ -239,87 +263,61 @@ export function useKeyboardShortcuts() {
       // or browser/editor built-in shortcuts. This ensures BlockNote, CodeMirror,
       // and the system clipboard all work normally.
 
-      if (matchShortcut(e, getShortcut('newFile'))) {
-        e.preventDefault()
-        handleNewFile()
+      if (dispatchBuiltin(e, 'newFile', handleNewFile)) return
+      if (dispatchBuiltin(e, 'newFolder', handleNewFolder)) return
+      if (dispatchBuiltin(e, 'openFile', handleOpenFile)) return
+      if (dispatchBuiltin(e, 'saveFile', handleSaveFile)) return
+      if (dispatchBuiltin(e, 'saveAll', handleSaveAll)) return
+      if (dispatchBuiltin(e, 'saveWorkspace', handleSaveWorkspace)) return
+      if (dispatchBuiltin(e, 'closeFile', handleCloseFile)) return
+      if (dispatchBuiltin(e, 'closeAll', handleCloseAll)) return
+      if (dispatchBuiltin(e, 'toggleTheme', handleToggleTheme)) return
+      if (
+        dispatchBuiltin(e, 'toggleLanguage', () => {
+          const currentLang = i18n.language
+          const newLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN'
+          i18n.changeLanguage(newLang)
+          queueMicrotask(() => emitLocaleChanged(newLang))
+        })
+      )
         return
-      }
-      if (matchShortcut(e, getShortcut('newFolder'))) {
-        e.preventDefault()
-        handleNewFolder()
-        return
-      }
-      if (matchShortcut(e, getShortcut('openFile'))) {
-        e.preventDefault()
-        handleOpenFile()
-        return
-      }
-      if (matchShortcut(e, getShortcut('saveFile'))) {
-        e.preventDefault()
-        handleSaveFile()
-        return
-      }
-      if (matchShortcut(e, getShortcut('saveAll'))) {
-        e.preventDefault()
-        handleSaveAll()
-        return
-      }
-      if (matchShortcut(e, getShortcut('saveWorkspace'))) {
-        e.preventDefault()
-        handleSaveWorkspace()
-        return
-      }
-      if (matchShortcut(e, getShortcut('closeFile'))) {
-        e.preventDefault()
-        handleCloseFile()
-        return
-      }
-      if (matchShortcut(e, getShortcut('closeAll'))) {
-        e.preventDefault()
-        handleCloseAll()
-        return
-      }
-      if (matchShortcut(e, getShortcut('toggleTheme'))) {
-        e.preventDefault()
-        handleToggleTheme()
-        return
-      }
-      if (matchShortcut(e, getShortcut('toggleLanguage'))) {
-        e.preventDefault()
-        const currentLang = i18n.language
-        const newLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN'
-        i18n.changeLanguage(newLang)
-        return
-      }
-      if (matchShortcut(e, getShortcut('openExplorer'))) {
-        e.preventDefault()
-        handleOpenExplorer()
-        return
-      }
+      if (dispatchBuiltin(e, 'openExplorer', handleOpenExplorer)) return
 
       // Customizable global shortcuts (user can rebind in Settings)
 
-      if (matchShortcut(e, getShortcut('commandPalette'))) {
-        e.preventDefault()
-        toggleCommandPalette()
+      if (dispatchBuiltin(e, 'commandPalette', toggleCommandPalette)) return
+      if (dispatchBuiltin(e, 'searchPanel', toggleSearchPanel)) return
+      if (dispatchBuiltin(e, 'toggleSidebar', toggleSidebar)) return
+      if (
+        dispatchBuiltin(e, 'settings', () => setSidebarView('settings'))
+      )
         return
-      }
 
-      if (matchShortcut(e, getShortcut('searchPanel'))) {
+      // 派发插件命令快捷键；每次 keypress 查最新绑定
+      const bindings = useUIStore.getState().pluginCommandShortcuts
+      for (const [bindingKey, value] of Object.entries(bindings)) {
+        if (!value) continue
+        if (!matchShortcut(e, value)) continue
+        // bindingKey 格式 pluginId:commandId
+        const firstColon = bindingKey.indexOf(':')
+        if (firstColon <= 0) continue
+        const pluginId = bindingKey.slice(0, firstColon)
+        const commandId = bindingKey.slice(firstColon + 1)
+        const registered = listPluginCommands().find(
+          (cmd) =>
+            cmd.id === commandId &&
+            // 校验 __pluginId stamp 匹配
+            (cmd as { __pluginId?: string }).__pluginId === pluginId
+        )
+        if (!registered) continue
         e.preventDefault()
-        toggleSearchPanel()
-        return
-      }
-
-      if (matchShortcut(e, getShortcut('toggleSidebar'))) {
-        e.preventDefault()
-        toggleSidebar()
-        return
-      }
-
-      if (matchShortcut(e, getShortcut('settings'))) {
-        e.preventDefault()
-        setSidebarView('settings')
+        try {
+          void registered.onTrigger()
+        } catch (err) {
+          // buggy 插件不能破坏全局 listener
+          // eslint-disable-next-line no-console
+          console.error('[useKeyboardShortcuts] plugin onTrigger threw:', err)
+        }
         return
       }
 

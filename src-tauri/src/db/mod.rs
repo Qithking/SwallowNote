@@ -3,6 +3,8 @@ pub mod ai_chat;
 pub mod ai_role_prompts;
 pub mod conflict_repo;
 pub mod folder_history;
+pub mod market_sources;
+pub mod plugin_settings;
 pub mod session_state;
 
 use rusqlite::{Connection, OpenFlags, Result};
@@ -84,6 +86,29 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     // conflict_repos table
     conflict_repo::create_table(&conn)?;
 
+    // plugin_market_sources table
+    market_sources::create_table(&conn)?;
+
+    // plugin_settings 单表设计：每插件一行，JSON blob 存值。
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS plugin_settings (
+            plugin_id TEXT PRIMARY KEY,
+            values_json TEXT NOT NULL DEFAULT '{}',
+            schema_version INTEGER NOT NULL DEFAULT 0,
+            updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+        )",
+        [],
+    )?;
+
+    // 清理历史遗留表（硬编码 allowlist 避免误匹配）；DROP IF EXISTS 容错。
+    const LEGACY_TABLES: &[&str] = &[
+        "plugin_settings_meta",
+        // 动态生成的 plugin_settings_<id> 表无法静态枚举，故未列出。
+    ];
+    for table in LEGACY_TABLES {
+        let _ = conn.execute(&format!("DROP TABLE IF EXISTS \"{}\"", table), []);
+    }
+
     // Insert built-in role prompts if they don't exist
     let builtin_roles = [
         ("chat", "智能问答", "你是一个全能型的AI助手，擅长回答各种问题，并提供准确且有深度的解答。在回答问题时，请确保内容条理清晰、语言简洁。当需要时，请使用列表和结构化格式来组织信息，以提高可读性和可操作性。"),
@@ -93,6 +118,9 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
         ("outline", "提纲", "你是一位专业的AI助手，擅长帮助用户梳理思路。你的任务是根据用户提供的主题或内容，生成一篇层次分明、逻辑清晰的文章提纲。请使用多级标题结构，并在每个部分标注核心要点。提纲应具备清晰、结构化和可操作的内容。"),
         ("summary", "摘要", "你是一位专业的AI助手，擅长提炼文本精华。你的任务是对用户提供的文本进行摘要，保留核心观点和关键信息。摘要应语言精炼，篇幅为原文的20%-30%。请确保摘要内容清晰、结构化，并且具有可操作性。"),
         ("format", "格式整理", "# 任务\n\n你是一个文本排版助手。将用户输入的杂乱文本整理为规范的 Markdown 格式。\n\n仅执行以下操作：统一标题层级、规范标点、对齐缩进、整理列表、修正代码块语言标识、清理行尾的 \\\n\n\n\n# 强制规则（违反任何一条即为失败）\n\n1. 【绝不允许全局包裹】禁止在最外层使用 ```markdown 或 ``` 包裹输出！你的回复必须以纯文本字符（如 # 或文字）开始，以纯文本字符结束。\n\n2. 【绝不改变原结构】原文是列表就是列表，严禁自作主张将列表转换为表格！\n\n3. 【绝不增删改写】严禁添加原文没有的内容（补充解释说明），严禁润色修改原词，保留原始措辞。\n\n\n\n# 格式对比示例\n\n❌ 错误（包含外层包裹）：\n\n```markdown\n\n## 标题\n\n- 内容\n\n```\n\n\n\n✅ 正确（无外层包裹）：\n\n## 标题\n\n- 内容\n\n\n\n请直接输出整理后的结果，不要包含任何问候或解释。"),
+        ("complete", "补全", "你是一位专业的文本补全助手。请根据用户提供的文本片段进行补全，确保补全内容与原文语境一致、逻辑连贯。直接输出补全后的完整内容，无需解释。"),
+        ("rewrite", "改写", "你是一位专业的文本改写助手。请根据用户提供的文本进行改写，可以调整句式、替换词汇、重组结构，但必须保持原文核心意思不变。直接输出改写后的文本，无需解释修改内容。"),
+        ("explain", "解释", "你是一位专业的文本解释助手。请对用户提供的文本进行解释说明，包括术语含义、背景知识、逻辑关系等。解释应清晰易懂，结构化呈现，必要时使用列表和示例。"),
     ];
 
     // Insert built-in role prompts if they don't exist.

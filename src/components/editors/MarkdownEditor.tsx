@@ -37,11 +37,7 @@ interface MarkdownEditorProps {
   onChange?: (content: string) => void
 }
 
-/**
- * Inner editor that only mounts after blocks are parsed.
- * This ensures useCreateBlockNote receives initialContent on its first call,
- * avoiding the empty-editor problem.
- */
+/** Inner editor — mounts only after blocks are parsed. */
 function BlockNoteInner({
   blocks,
   onChange,
@@ -282,10 +278,7 @@ function BlockNoteInner({
       return defaultPasteHandler()
     }
 
-    // No text or Files in WebView clipboard — try reading system clipboard file paths asynchronously.
-    // This handles the case where user copies a file in Finder (Cmd+C) and pastes here (Cmd+V).
-    // The WebView clipboard won't contain Files type for cross-app file copy on macOS,
-    // so we need to ask the Tauri backend to read the system clipboard directly.
+    // No Files in WebView clipboard — read system clipboard via Tauri.
     readClipboardFilePaths()
       .then((filePaths) => {
         if (filePaths.length > 0) {

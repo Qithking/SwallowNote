@@ -22,7 +22,10 @@ import {
   List,
   FileText,
   AlignLeft,
+  FilePlus,
+  HelpCircle,
 } from 'lucide-react'
+import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 
 /** AI action items excluding "chat" which is only for the AI panel */
 const AI_ACTION_ROLES = [
@@ -32,6 +35,9 @@ const AI_ACTION_ROLES = [
   { key: 'outline', icon: List },
   { key: 'summary', icon: FileText },
   { key: 'format', icon: AlignLeft },
+  { key: 'complete', icon: FilePlus },
+  { key: 'rewrite', icon: PenLine },
+  { key: 'explain', icon: HelpCircle },
 ] as const
 
 interface EditorContextMenuProps {
@@ -106,6 +112,20 @@ export function EditorContextMenu({
             <span>{t(`ai.role.${key}`)}</span>
           </ContextMenuItem>
         ))}
+
+        {/* Plugin-contributed items (editor surface). The host owns
+            the selection state, so we resolve the current selection
+            and active tab path on each render and pass them in. The
+            helper re-evaluates `when` predicates whenever the
+            relevant context fields change. */}
+        <PluginContextMenuItems
+          location="editor"
+          ctx={{
+            path: activeTab?.path,
+            activePath: activeTab?.path,
+            selection: getSelectedText() || undefined,
+          }}
+        />
       </ContextMenuContent>
     </ContextMenu>
   )

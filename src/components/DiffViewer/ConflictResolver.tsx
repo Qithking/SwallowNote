@@ -1,20 +1,4 @@
-/**
- * ConflictResolver Component — Conflict file diff viewer
- *
- * Layout:
- * ┌────────────────────────────────────────────────────────┐
- * │ Toolbar: [filename]  [Accept Incoming] [Accept Current] [Abort] │
- * ├──────────┬─────────────────────────────────────────────┤
- * │ Conflict │  Incoming          │  Current               │
- * │ file     │  (read-only)       │  (read-only)           │
- * │ tree     │                    │                        │
- * └──────────┴─────────────────────────────────────────────┘
- *
- * Workflow:
- * 1. Left side shows conflict files in a tree structure
- * 2. Click a conflict file to view the Incoming vs Current diff
- * 3. Use "Accept Incoming" or "Accept Current" to resolve the conflict
- */
+/** ConflictResolver — conflict file tree (left) + Incoming/Current diff viewer (right). */
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { SplitDiffViewerHandle } from './SplitDiffViewer'
 import { useTranslation } from 'react-i18next'
@@ -323,10 +307,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     }
   }, [initialSelectedFile, conflictRepos, autoHideTree])
 
-  // Sync selected file and cursor line to the editor store for session persistence
-  // NOTE: We skip syncing when selectedFile is null to avoid overwriting the initial
-  // conflictSelectedFile prop that was passed from the toolbar (e.g. autoSelectFile).
-  // The initial null state is just "nothing selected yet", not a meaningful user action.
+  // Skip sync when selectedFile is null.
   useEffect(() => {
     if (!selectedFile) return
     const tabId = `conflict-${repoPath}`

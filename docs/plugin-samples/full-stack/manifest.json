@@ -1,0 +1,11 @@
+{
+  "id": "com.example.full-stack",
+  "name": "Recent Notes (Full Stack)",
+  "description": "A full-featured plugin using all 5 host APIs: storage, events, settings, context menu, and lifecycle hooks.",
+  "version": "1.0.0",
+  "author": "SwallowNote",
+  "iconPosition": "sidebar",
+  "contentPosition": "leftPanel",
+  "hasBackend": false,
+  "entry": "index.tsx"
+}

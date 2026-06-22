@@ -102,25 +102,64 @@ pub async fn test_ai_model_cmd(
     api_key: String,
     base_url: String,
     model: String,
-    port: u16,
+    _port: u16,
 ) -> Result<String, String> {
+    use crate::ai_proxy::get_provider_base_url;
     use reqwest::Client;
     use serde_json::json;
 
     let client = Client::new();
-    let url = format!("http://127.0.0.1:{}/api/chat", port);
+    let resolved_base = get_provider_base_url(&provider, &base_url);
+    let test_message = "hi";
 
-    let body = json!({
-        "messages": [{"role": "user", "content": "Hi"}],
-        "provider": provider,
-        "apiKey": api_key,
-        "baseUrl": base_url,
-        "model": model,
-    });
+    // 根据不同 Provider 直接调用对应端点进行连通性测试，
+    // 避免经过本地代理（代理仅持有当前激活的 settings，无法反映传入参数）。
+    let (_url, request) = match provider.as_str() {
+        "anthropic" => {
+            let url = format!("{}/messages", resolved_base);
+            let body = json!({
+                "model": model,
+                "max_tokens": 1,
+                "messages": [{"role": "user", "content": test_message}],
+            });
+            (url.clone(), client.post(&url).header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .json(&body))
+        }
+        "google" => {
+            let url = format!(
+                "{}/models/{}:generateContent",
+                resolved_base, model
+            );
+            let body = json!({
+                "contents": [{"parts": [{"text": test_message}]}],
+            });
+            (url.clone(), client.post(&url)
+                .header("x-goog-api-key", &api_key)
+                .header("content-type", "application/json")
+                .json(&body))
+        }
+        _ => {
+            // OpenAI 兼容协议（openai/deepseek/ollama/siliconflow/custom）
+            let url = format!("{}/chat/completions", resolved_base);
+            let body = json!({
+                "model": model,
+                "messages": [{"role": "user", "content": test_message}],
+                "max_tokens": 1,
+                "stream": false,
+            });
+            let mut builder = client.post(&url)
+                .header("content-type", "application/json")
+                .json(&body);
+            if !api_key.is_empty() {
+                builder = builder.header("Authorization", format!("Bearer {}", api_key));
+            }
+            (url, builder)
+        }
+    };
 
-    let resp = client
-        .post(&url)
-        .json(&body)
+    let resp = request
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
