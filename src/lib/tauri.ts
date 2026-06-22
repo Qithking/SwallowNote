@@ -934,6 +934,8 @@ export interface PluginMetadataRust {
   has_backend: boolean
   // 是否随附 settings.json schema
   has_settings_schema: boolean
+  /** The repo URL this plugin was installed from. Empty for local zip uploads. */
+  source: string
 }
 
 /** Scan the plugins directory and return metadata for each plugin */
@@ -941,12 +943,13 @@ export async function scanPlugins(): Promise<PluginMetadataRust[]> {
   return await invoke('scan_plugins')
 }
 
-// 安装 .zip 插件。expectedSha256 可选完整性校验
+// 安装 .zip 插件。expectedSha256 可选完整性校验，source 可选来源仓库 URL
 export async function installPlugin(
   zipPath: string,
-  expectedSha256?: string
+  expectedSha256?: string,
+  source?: string
 ): Promise<PluginMetadataRust> {
-  return await invoke('install_plugin', { zipPath, expectedSha256 })
+  return await invoke('install_plugin', { zipPath, expectedSha256, source })
 }
 
 /** Uninstall a plugin by id */

@@ -918,7 +918,7 @@ body, #root {
 }
 .pa-switch-track {
   position: relative;
-  width: 40px; height: 22px;
+  width: 32px; height: 18px;
   background: var(--pa-paper-3);
   border: 1px solid var(--pa-line-2);
   border-radius: 999px;
@@ -927,17 +927,17 @@ body, #root {
 .pa-switch-thumb {
   position: absolute;
   top: 2px; left: 2px;
-  width: 16px; height: 16px;
+  width: 12px; height: 12px;
   background: var(--pa-paper);
   border-radius: 50%;
   box-shadow: 0 1px 2px rgba(0,0,0,0.15);
   transition: left 0.22s cubic-bezier(0.4, 1.3, 0.6, 1), background 0.2s;
 }
 .pa-switch.is-on .pa-switch-track { background: var(--pa-positive); border-color: var(--pa-positive); }
-.pa-switch.is-on .pa-switch-thumb { left: 21px; background: var(--pa-paper); }
+.pa-switch.is-on .pa-switch-thumb { left: 17px; background: var(--pa-paper); }
 .pa-switch-label {
   font-family: var(--pa-font-mono);
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 500;
   color: var(--pa-mute);
   letter-spacing: 0.06em;
@@ -945,7 +945,7 @@ body, #root {
 }
 .pa-switch.is-on .pa-switch-label { color: var(--pa-positive); }
 .pa-icon-row {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; 
 }
 .pa-icon-btn {
   width: 28px; height: 28px;
@@ -1859,6 +1859,39 @@ body, #root {
   border-radius: 2px;
   background: var(--pa-accent);
   color: #fff;
+}
+.pa-source-label {
+  font-family: var(--pa-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+  border: 1px solid var(--pa-line);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.pa-source-label.is-official {
+  background: var(--pa-accent);
+  color: #fff;
+  border-color: var(--pa-accent);
+}
+.pa-source-label.is-custom {
+  background: var(--pa-accent-soft);
+  color: var(--pa-accent);
+  border-color: var(--pa-accent-soft);
+}
+.pa-source-label.is-unknown {
+  background: var(--pa-paper-3);
+  color: var(--pa-mute);
+  border-color: var(--pa-line);
+}
+.pa-source-label.is-local {
+  background: var(--pa-paper-3);
+  color: var(--pa-ink-2);
+  border-color: var(--pa-line);
 }
 
 /* ── Installed-card sparkline (Task 12 / G12) ─────────────

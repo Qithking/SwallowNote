@@ -319,6 +319,7 @@ const manifest: PluginDefinition = {
   // We use the event bus (read-only) and plugin-scoped storage.
   // No context-menu, no backend IPC, no filesystem or network.
   permissions: ['events', 'storage'],
+  source: '',
   hooks: {
     onLoad,
     onUnload,

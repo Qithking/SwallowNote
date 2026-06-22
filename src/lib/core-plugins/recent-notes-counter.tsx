@@ -324,6 +324,7 @@ const manifest: PluginDefinition = {
   // `PluginPermissionDeniedError` if any of these are missing, so
   // the manifest MUST stay in sync with the code below.
   permissions: ['storage', 'events', 'context-menu'],
+  source: '',
   hooks: {
     onLoad,
     onUnload,

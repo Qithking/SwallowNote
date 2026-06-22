@@ -6,11 +6,10 @@ import {
   List,
   LineChart,
   Search,
-  ChevronUp,
   ChevronRight,
   AlertTriangle,
 } from 'lucide-react'
-import { useTranslation, Trans } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 import { usePluginStore, useUIStore, usePluginMarketStore } from '@/stores'
 import { useShallow } from 'zustand/react/shallow'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
@@ -181,22 +180,63 @@ function PluginManagerView() {
   // badge in the hero and to drive the "Updates" sub-filter.
   const marketUpdates = usePluginMarketStore((s) => s.updates)
   const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
+  const marketIndex = usePluginMarketStore((s) => s.index)
+  const refreshIndex = usePluginMarketStore((s) => s.refreshIndex)
+  const repoUrl = usePluginMarketStore((s) => s.repoUrl)
 
-  // Stable Set of plugin ids that have an update available, so the
-  // ManageTab's per-card `hasUpdate(id)` check is O(1) and the
-  // callback identity is stable across renders.
+  // Stable Set of plugin ids that have an update available.
+  // Logic matches the marketplace cards: compare installed version
+  // against the marketplace index version (string comparison, same
+  // as market card). Also includes marketUpdates (semver comparison
+  // from Rust backend) as a supplement.
   const updateIdSet = useMemo(() => {
     const set = new Set<string>()
+    // Primary: compare installed version vs marketplace index version
+    // (same logic as PluginMarketCard's isUpdateAvailable)
+    const indexMap = new Map<string, string>()
+    if (marketIndex) {
+      for (const entry of marketIndex.plugins) {
+        indexMap.set(entry.id, entry.version)
+      }
+    }
+    for (const plugin of plugins) {
+      const remoteVersion = indexMap.get(plugin.id)
+      if (remoteVersion && plugin.version !== remoteVersion) {
+        set.add(plugin.id)
+      }
+    }
+    // Supplement: also include any plugins from checkPluginUpdates
+    // (uses semver comparison, catches cases where string comparison
+    // might miss due to formatting differences)
     for (const u of marketUpdates) {
-      if (u.localVersion !== u.remoteVersion) set.add(u.id)
+      if (u.localVersion !== u.remoteVersion) {
+        set.add(u.id)
+      }
     }
     return set
-  }, [marketUpdates])
+  }, [plugins, marketIndex, marketUpdates])
   // Stable callback reference — the function body only closes over
   // `updateIdSet`, but the Set reference is stable across renders
   // unless `marketUpdates` actually changes. This prevents every
   // PluginInstalledCard from re-rendering when the parent renders.
   const hasUpdate = useCallback((id: string) => updateIdSet.has(id), [updateIdSet])
+
+  // Map of plugin id → remote version string (from market index or updates).
+  // Used by installed cards to show "更新到 vX.X.X" tooltip.
+  const remoteVersionMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (marketIndex) {
+      for (const entry of marketIndex.plugins) {
+        map.set(entry.id, entry.version)
+      }
+    }
+    for (const u of marketUpdates) {
+      if (!map.has(u.id)) {
+        map.set(u.id, u.remoteVersion)
+      }
+    }
+    return map
+  }, [marketIndex, marketUpdates])
   
   // Delay the initial update check to avoid blocking the initial render.
   // Use a longer delay (500ms) to ensure the UI is fully rendered first.
@@ -208,6 +248,15 @@ function PluginManagerView() {
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plugins.length])
+
+  // Load marketplace index on mount so updateIdSet can compare
+  // installed versions against the index. Without this, marketIndex
+  // is null until the user visits the marketplace tab.
+  useEffect(() => {
+    if (!marketIndex && repoUrl) {
+      void refreshIndex({ background: true })
+    }
+  }, [marketIndex, repoUrl, refreshIndex])
 
   // 通过 usePluginTelemetryVersion 订阅指标版本。
   const metricsVersion = usePluginTelemetryVersion()
@@ -288,12 +337,7 @@ function PluginManagerView() {
     return plugins.filter((p) => {
       if (listFilter === 'active' && !p.enabled) return false
       if (listFilter === 'disabled' && p.enabled) return false
-      if (listFilter === 'updates') {
-        const hasUpdate = marketUpdates.some(
-          (u) => u.id === p.id && u.localVersion !== u.remoteVersion,
-        )
-        if (!hasUpdate) return false
-      }
+      if (listFilter === 'updates' && !updateIdSet.has(p.id)) return false
       if (!q) return true
       return (
         p.name.toLowerCase().includes(q) ||
@@ -301,7 +345,7 @@ function PluginManagerView() {
         p.description.toLowerCase().includes(q)
       )
     })
-  }, [plugins, debouncedSearch, listFilter, marketUpdates])
+  }, [plugins, debouncedSearch, listFilter, updateIdSet])
 
   // "Select all (visible)" — toggles the membership of every
   // currently-visible plugin in the selection set. The
@@ -367,7 +411,7 @@ function PluginManagerView() {
       }
 
       const zipPath = selected as string
-      const meta = await installPlugin(zipPath)
+      const meta = await installPlugin(zipPath, undefined, 'local')
       toast.success(t('plugin.installSuccess', { name: meta.name }))
 
       // Reload all plugins so the new one is registered in the
@@ -637,6 +681,7 @@ function PluginManagerView() {
               onRescan={handleRescan}
               onUpload={handleUpload}
               hasUpdate={hasUpdate}
+              remoteVersionMap={remoteVersionMap}
               onToggle={handleToggleEnabled}
               onUninstall={setUninstallConfirmPlugin}
               onUpdate={handleUpdatePlugin}
@@ -866,6 +911,7 @@ interface ManageTabProps {
   onRescan: () => void
   onUpload: () => void
   hasUpdate: (id: string) => boolean
+  remoteVersionMap: Map<string, string>
   onToggle: (plugin: PluginDefinition, enabled: boolean) => void
   onUninstall: (plugin: PluginDefinition) => void
   onUpdate?: (plugin: PluginDefinition) => void
@@ -900,6 +946,7 @@ function ManageTab({
   onRescan,
   onUpload,
   hasUpdate,
+  remoteVersionMap,
   onToggle,
   onUninstall,
   onUpdate,
@@ -996,6 +1043,7 @@ function ManageTab({
                 plugin={plugin}
                 index={idx + 1}
                 hasUpdate={hasUpdate(plugin.id)}
+                remoteVersion={remoteVersionMap.get(plugin.id)}
                 onToggle={(enabled: boolean) => onToggle(plugin, enabled)}
                 onUninstall={() => onUninstall(plugin)}
                 onUpdate={onUpdate ? () => onUpdate(plugin) : undefined}

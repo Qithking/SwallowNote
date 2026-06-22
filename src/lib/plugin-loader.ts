@@ -38,6 +38,7 @@ export function rustMetaToPluginMeta(meta: PluginMetadataRust): PluginMetadata {
     enabled: meta.enabled,
     pluginPath: meta.plugin_path,
     hasBackend: meta.has_backend,
+    source: meta.source,
   }
 }
 
@@ -555,6 +556,7 @@ export async function loadAllPlugins(
           // Pass-through verbatim from the manifest; omitted
           // when the plugin author didn't declare any entries.
           commandPalette: manifest.commandPalette,
+          source: meta.source,
         } satisfies PluginDefinition
         attachPluginModule(def, module)
         return { definition: def, failure: null }
@@ -615,6 +617,7 @@ export async function loadAllPlugins(
         pluginPath: meta.plugin_path,
         hasBackend: meta.has_backend,
         permissions: [],
+        source: meta.source,
       } satisfies PluginDefinition
       // The placeholder def is returned so the user can see and
       // uninstall the broken package from the main grid. The

@@ -310,6 +310,7 @@ const manifest: PluginDefinition = {
   // or the backend, so we don't need to declare those permissions.
   // The host's permission guard verifies this set on every API call.
   permissions: ['events', 'storage'],
+  source: '',
   hooks: {
     onMount,
     onUnmount,

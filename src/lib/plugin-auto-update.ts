@@ -281,6 +281,7 @@ async function installOnePlugin(
     version: entry.version,
     bytes,
     sha256: entry.sha256,
+    source: repoUrl,
   })
 
   return {
