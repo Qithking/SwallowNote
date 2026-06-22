@@ -11,7 +11,6 @@ import {
   AlertCircle,
   HeartPulse,
   CheckCircle2,
-  HelpCircle,
   Database,
   RefreshCw,
 } from 'lucide-react'
@@ -120,11 +119,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
         Icon: CheckCircle2,
       }
     }
-    return {
-      cls: 'pa-market-badge is-unknown inline-flex items-center',
-      label: t('plugin.pa.card.healthUnknown', { defaultValue: 'Unknown' }),
-      Icon: HelpCircle,
-    }
+    return null
   }, [health, t])
 
   return (
@@ -141,15 +136,17 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
             <div className="pa-market-card-id">{plugin.id}</div>
           </div>
           {/* Health badge — data-plugin-health is a stable CSS/test hook. */}
-          <span
-            className={healthBadge.cls}
-            title={healthBadge.label}
-            aria-label={healthBadge.label}
-            data-plugin-health={health}
-          >
-            <healthBadge.Icon size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
-            {healthBadge.label}
-          </span>
+          {healthBadge && (
+            <span
+              className={healthBadge.cls}
+              title={healthBadge.label}
+              aria-label={healthBadge.label}
+              data-plugin-health={health}
+            >
+              <healthBadge.Icon size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
+              {healthBadge.label}
+            </span>
+          )}
           {/* Conflict badge — renders when plugin has collisions. */}
           {hasConflicts && (
             <span

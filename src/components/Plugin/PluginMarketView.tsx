@@ -478,14 +478,14 @@ const PluginMarketCard = memo(function PluginMarketCard({
 
         <div className="pa-installed-byline">
           {entry.author && (
-            <span>
+            <span className="inline-flex items-center">
               <User size={9} style={ICON_STYLE} />
               <b>{entry.author}</b>
             </span>
           )}
           {entry.author && dateText && <span className="pa-sep">·</span>}
           {dateText && (
-            <span>
+            <span className="inline-flex items-center">
               <Calendar size={9} style={ICON_STYLE} />
               {dateText}
             </span>
