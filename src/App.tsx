@@ -357,6 +357,8 @@ function App() {
         // Skip repos that are in conflict state (detected in pull step)
         let pushSucceeded = 0
         let pushFailed = 0
+        const pushErrorPaths: string[] = []
+        const pushConflictPaths: string[] = []
         if (autoSyncPushRef.current) {
           const conflictedPaths = new Set(results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.path))
           const reposWithChanges = repos.filter((r: GitRepository) => r.hasUncommittedChanges && r.remoteUrl && !conflictedPaths.has(r.path))
@@ -368,8 +370,9 @@ function App() {
                 pushSucceeded++
               } catch (e) {
                 const errorMessage = String(e).trim()
-                // Skip repos that have conflict errors - they need manual resolution
+                // Track conflict repos from push phase
                 if (errorMessage.startsWith('REBASE_CONFLICT:') || errorMessage.includes('rebase/merge is in progress')) {
+                  pushConflictPaths.push(repo.path)
                   continue
                 }
                 // Try saved credentials on auth error
@@ -395,6 +398,7 @@ function App() {
                     !errorMessage.includes('no changes added to commit') &&
                     !errorMessage.startsWith('AUTH_REQUIRED:')) {
                   pushFailed++
+                  pushErrorPaths.push(repo.path)
                   console.error('Auto sync push failed:', repo.path, errorMessage)
                 }
               }
@@ -402,8 +406,44 @@ function App() {
           }
         }
 
-        // Update repository statuses based on pull results
-        gitStore.updateRepositoryStatuses(results)
+        // Update repository statuses based on pull + push results
+        const allResults: PullResult[] = [
+          ...results,
+          ...pushConflictPaths.map(p => ({ path: p, name: repos.find(r => r.path === p)?.name || '', success: false, isConflict: true })),
+          ...pushErrorPaths.map(p => ({ path: p, name: repos.find(r => r.path === p)?.name || '', success: false, isConflict: false })),
+        ]
+        gitStore.updateRepositoryStatuses(allResults)
+
+        // Refresh repository list to update hasUncommittedChanges etc.
+        try {
+          const { scanGitRepos } = await import('@/lib/tauri')
+          const { mapRepoInfosToRepositories } = await import('@/stores/git')
+          const uiState = useUIStore.getState()
+          const wsState = useWorkspaceStore.getState()
+          const scanPaths = uiState.workspaceMode === 'workspace'
+            ? (wsState.workspaceFolders || [])
+            : (wsState.rootPath ? [wsState.rootPath] : [])
+          const scanPromises = scanPaths.map(async (path) => {
+            try { return await scanGitRepos(path) } catch { return [] }
+          })
+          const scanResults = await Promise.all(scanPromises)
+          const freshRepos = mapRepoInfosToRepositories(scanResults.flat())
+          // Preserve non-normal statuses from the sync results
+          const statusMap = new Map<string, 'conflict' | 'error'>()
+          for (const r of allResults) {
+            if (r.isConflict) statusMap.set(r.path, 'conflict')
+            else if (!r.success) statusMap.set(r.path, 'error')
+          }
+          const mergedRepos = freshRepos.map((repo: GitRepository) => {
+            const status = statusMap.get(repo.path)
+            if (status) return { ...repo, status }
+            return repo
+          })
+          gitStore.setRepositories(mergedRepos)
+          gitStore.setCachedRepositories(mergedRepos)
+        } catch {
+          // Ignore scan errors after sync
+        }
 
         gitStore.setSyncStatus({
           isSyncing: false,
@@ -421,10 +461,10 @@ function App() {
         if (conflicted > 0) {
           const repoNames = results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.name).join(', ')
           toast.warning(t('git.pullConflict', { repos: repoNames }))
-          
+
           // Do NOT auto-open conflict tabs — user must click conflict icon or repo to open
           // Sync conflict repos to database for persistence
-          await gitStore.syncConflictReposFromPullResults(results)
+          await gitStore.syncConflictReposFromPullResults(allResults)
         }
       } catch (e) {
         console.error('Auto sync failed:', e)
