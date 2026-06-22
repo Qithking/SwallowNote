@@ -975,7 +975,7 @@ fn available_bytes(path: &Path) -> Result<u64, PluginError> {
     // string, and the three `*mut u64` out-params are
     // stack-allocated aligned to the API's expectation.
     let ok = unsafe {
-        windows::Win32_System_Storage::FileSystem::GetDiskFreeSpaceExW(
+        windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
             windows::core::PCWSTR(wide.as_ptr()),
             Some(&mut free_bytes_available_to_caller),
             Some(&mut _total),
