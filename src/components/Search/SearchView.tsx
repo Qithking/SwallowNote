@@ -190,7 +190,7 @@ const SearchView = memo(function SearchView() {
     try {
       const searchPromises = searchPaths.map(path =>
         searchInFiles({
-          query: query,
+          query,
           root_path: path,
           case_sensitive: caseSensitive,
           whole_word: wholeWord,
@@ -201,7 +201,7 @@ const SearchView = memo(function SearchView() {
       )
 
       const allResults = await Promise.all(searchPromises)
-      
+
       const mergedMap = new Map<string, SearchResult>()
       for (const results of allResults) {
         for (const result of results) {
@@ -219,8 +219,8 @@ const SearchView = memo(function SearchView() {
           }
         }
       }
-
       const mergedResults = Array.from(mergedMap.values())
+
       setResults(mergedResults)
       setExpandedFiles(new Set(mergedResults.map(r => r.file_path)))
     } catch {

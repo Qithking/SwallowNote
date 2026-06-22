@@ -2,12 +2,13 @@
  * Editor Component - Main editor area
  * Shows the content of the active tab with appropriate editor
  */
-import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore } from '@/stores'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { usePluginEditors, pluginEditorRegistry, getEditorForExtension } from '@/stores/pluginEditor'
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
+import { serializeFrontmatter, parseFrontmatter } from '@/lib/utils/frontmatter'
 const MindMapEditor = lazy(() => import('./editors/MindMapEditor').then(m => ({ default: m.MindMapEditor })))
 const DiffViewer = lazy(() => import('./DiffViewer/DiffViewer'))
 const ConflictResolver = lazy(() => import('./DiffViewer/ConflictResolver'))
@@ -323,11 +324,11 @@ export function EditorView() {
   useEffect(() => {
     if (!activeTab) return
     if (activeTab.type === 'diff' || activeTab.type === 'conflict') return
-    
+
     // Check if content needs to be loaded
     // content === undefined means not loaded yet (empty string is valid content)
     const needsLoad = activeTab.content === undefined && !activeTab.isLoading
-    
+
     if (needsLoad) {
       // Small delay to ensure UI is ready
       const timer = setTimeout(() => {
@@ -336,6 +337,40 @@ export function EditorView() {
       return () => clearTimeout(timer)
     }
   }, [activeTab?.id, activeTab?.content, activeTab?.isLoading, activeTab?.type, loadTabContent])
+
+  // For source mode: compose full file content (frontmatter + body) for display.
+  // Must be called before any conditional returns (Rules of Hooks).
+  const sourceContent = useMemo(() => {
+    if (!activeTab || !activeTab.frontmatter || Object.keys(activeTab.frontmatter).length === 0) {
+      return activeTab?.content ?? ''
+    }
+    return serializeFrontmatter(activeTab.frontmatter, activeTab.content ?? '')
+  }, [activeTab?.frontmatter, activeTab?.content])
+
+  // Guard against infinite loops in source mode:
+  // handleSourceContentChange → store update → sourceContent change →
+  // CodeEditor content update → onChange → handleSourceContentChange → ...
+  const isUpdatingFromEditor = useRef(false)
+
+  const handleSourceContentChange = useCallback((content: string) => {
+    if (!activeTab) return
+    if (isUpdatingFromEditor.current) return
+    isUpdatingFromEditor.current = true
+    const isMarkdown = activeTab.name.toLowerCase().endsWith('.md')
+    if (isMarkdown) {
+      const { data, body } = parseFrontmatter(content)
+      useEditorStore.setState((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === activeTab.id ? { ...t, frontmatter: data, frontmatterDirty: false } : t
+        ),
+      }))
+      updateTabContent(activeTab.id, body)
+    } else {
+      updateTabContent(activeTab.id, content)
+    }
+    // Reset flag after React has processed the state update
+    queueMicrotask(() => { isUpdatingFromEditor.current = false })
+  }, [activeTab?.id, activeTab?.name, updateTabContent])
 
   if (!activeTab) {
     return <WelcomeScreen />
@@ -388,9 +423,9 @@ export function EditorView() {
         <div className="flex-1 overflow-hidden">
           {viewMode === 'source' ? (
             <CodeEditor
-              content={activeTab.content}
+              content={sourceContent ?? ''}
               filename={activeTab.name}
-              onChange={handleContentChange}
+              onChange={handleSourceContentChange}
               className="flex-1"
             />
           ) : (

@@ -4,6 +4,7 @@
 import { type ComponentType, type ReactNode } from 'react'
 import type { SidebarView, RightPanelType } from '@/stores'
 import type { ContentPosition, PluginPanelProps, ToolbarButtonProps } from '@/types/plugin'
+import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { getPluginStorage, createPluginEventBus } from './plugin-host'
 import { assertPermission } from './plugin-permission-guard'
 import { loadSettings, readSetting } from './plugin-settings'
@@ -12,6 +13,7 @@ import {
   emitPluginSettingsChanged,
   onSettingsChange as sdkOnSettingsChange,
 } from '@swallow-note/plugin-sdk'
+import { useEditorStore } from '@/stores/editor'
 
 /**
  * Detect whether `value` is a React component-like (function/class component,
@@ -227,6 +229,27 @@ export function createPluginPanelProps(
       return { ...view.values }
     },
     onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
+    // Frontmatter API – reads from / writes to the editor store.
+    getActiveNoteFrontmatter: (): Record<string, unknown> | null => {
+      const tab = useEditorStore.getState().getActiveTab()
+      return tab?.frontmatter ?? null
+    },
+    setActiveNoteFrontmatter: (data: Partial<NoteFrontmatter>): void => {
+      const tab = useEditorStore.getState().getActiveTab()
+      if (!tab) return
+      useEditorStore.getState().updateTabFrontmatter(tab.id, data)
+    },
+    onNoteFrontmatterChanged: (callback: (data: Record<string, unknown>) => void): () => void => {
+      let prevFmJson = JSON.stringify(useEditorStore.getState().getActiveTab()?.frontmatter ?? null)
+      return useEditorStore.subscribe((state) => {
+        const activeTab = state.tabs.find((t) => t.id === state.activeTabId)
+        const nextFmJson = JSON.stringify(activeTab?.frontmatter ?? null)
+        if (prevFmJson !== nextFmJson) {
+          prevFmJson = nextFmJson
+          callback(activeTab?.frontmatter ?? {})
+        }
+      })
+    },
   }
 }
 
@@ -328,6 +351,27 @@ export function createToolbarButtonProps(
       return { ...view.values }
     },
     onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
+    // Frontmatter API – same implementation as the panel version.
+    getActiveNoteFrontmatter: (): Record<string, unknown> | null => {
+      const tab = useEditorStore.getState().getActiveTab()
+      return tab?.frontmatter ?? null
+    },
+    setActiveNoteFrontmatter: (data: Partial<NoteFrontmatter>): void => {
+      const tab = useEditorStore.getState().getActiveTab()
+      if (!tab) return
+      useEditorStore.getState().updateTabFrontmatter(tab.id, data)
+    },
+    onNoteFrontmatterChanged: (callback: (data: Record<string, unknown>) => void): () => void => {
+      let prevFmJson = JSON.stringify(useEditorStore.getState().getActiveTab()?.frontmatter ?? null)
+      return useEditorStore.subscribe((state) => {
+        const activeTab = state.tabs.find((t) => t.id === state.activeTabId)
+        const nextFmJson = JSON.stringify(activeTab?.frontmatter ?? null)
+        if (prevFmJson !== nextFmJson) {
+          prevFmJson = nextFmJson
+          callback(activeTab?.frontmatter ?? {})
+        }
+      })
+    },
   }
 }
 

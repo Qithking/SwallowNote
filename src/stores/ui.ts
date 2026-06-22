@@ -13,7 +13,7 @@ import { emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings' | `plugin:${string}`
 export type EditorViewMode = 'edit' | 'preview' | 'split'
-export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | `plugin:${string}` | null
+export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | 'noteProperties' | `plugin:${string}` | null
 /**
  * Section IDs inside the Settings panel. Mirrors the
  * `SettingsSection` type in `Settings/SettingsView.tsx`.

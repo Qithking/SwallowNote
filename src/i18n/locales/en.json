@@ -356,7 +356,11 @@
     "defaultFileName": "Untitled.md",
     "defaultFolderName": "New Folder",
     "defaultMindMapName": "Untitled.smm",
-    "newMindMap": "New Mind Map"
+    "newMindMap": "New Mind Map",
+    "sort": "Sort By",
+    "sortDefault": "Default",
+    "sortUpdatedDesc": "By Updated (Newest First)",
+    "sortTitleAsc": "By Title (A-Z)"
   },
   "contextMenu": {
     "newFile": "New File",
@@ -393,7 +397,8 @@
     "toggleWidth": "Toggle Editor Width",
     "contentLayout": "Content Layout Settings",
     "externalChange": "File modified externally, click to reload",
-    "conflictResolve": "File has conflicts, click to resolve"
+    "conflictResolve": "File has conflicts, click to resolve",
+    "noteProperties": "Note Properties"
   },
   "editor": {
     "untitled": "Untitled",
@@ -691,6 +696,31 @@
   "tray": {
     "showWindow": "Show Window",
     "quit": "Quit"
+  },
+  "noteProperties": {
+    "title": "Properties",
+    "title_field": "Title",
+    "created": "Created",
+    "updated": "Updated",
+    "tags": "Tags",
+    "categories": "Categories",
+    "author": "Author",
+    "status": "Status",
+    "pinned": "Pinned",
+    "status_draft": "Draft",
+    "status_published": "Published",
+    "status_archived": "Archived",
+    "customProperties": "Custom Properties",
+    "addProperty": "Add Property",
+    "key": "Key",
+    "value": "Value",
+    "add": "Add",
+    "remove": "Remove",
+    "tagPlaceholder": "Type and press Enter",
+    "noProperties": "No properties",
+    "group_basic": "Basic",
+    "group_classification": "Classification",
+    "group_details": "Details"
   },
   "plugin": {
     "manager": "Plugin Manager",

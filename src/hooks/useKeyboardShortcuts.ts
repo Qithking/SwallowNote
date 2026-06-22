@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
-import { openFolderDialog, openWorkspaceDialog, createFile } from '@/lib/tauri'
+import { openFolderDialog, openWorkspaceDialog, createFile, writeFile } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
+import { injectDefaultFrontmatter } from '@/lib/utils/frontmatter'
 import { invoke } from '@tauri-apps/api/core'
 import { emitLocaleChanged } from '@/lib/plugin-host'
 import { listPluginCommands } from '@/lib/plugin-commands'
@@ -89,6 +90,9 @@ async function handleNewFile() {
 
   try {
     await createFile(fullPath, false)
+    if (fullPath.endsWith('.md')) {
+      await writeFile(fullPath, injectDefaultFrontmatter(name))
+    }
     const { showAllFiles, markdownOnly } = useUIStore.getState()
     const newChildren = await loadDirectory(targetDir, showAllFiles, markdownOnly)
     useFileTreeStore.getState().setNodes(
@@ -154,7 +158,7 @@ async function handleOpenFile() {
 async function handleSaveFile() {
   const { tabs, activeTabId } = useEditorStore.getState()
   const activeTab = tabs.find((t) => t.id === activeTabId)
-  if (!activeTab || !activeTab.isDirty) return
+  if (!activeTab || (!activeTab.isDirty && !activeTab.frontmatterDirty)) return
 
   try {
     // Mark path as saving to prevent file-watcher from closing the tab
@@ -164,12 +168,28 @@ async function handleSaveFile() {
       return { savingPaths: newSet }
     })
     const { writeFile } = await import('@/lib/tauri')
-    await writeFile(activeTab.path, activeTab.content)
+    // For .md files, merge frontmatter with body before writing
+    const isMarkdown = activeTab.path.toLowerCase().endsWith('.md')
+    let writeContent = activeTab.content
+    if (isMarkdown) {
+      const { serializeFrontmatter, stripFrontmatter } = await import('@/lib/utils/frontmatter')
+      const fm = { ...(activeTab.frontmatter || {}), updated: new Date().toISOString() }
+      // stripFrontmatter is defensive: tab.content normally holds only
+      // the body, but source mode edits may store the full file content.
+      const body = stripFrontmatter(activeTab.content ?? '')
+      writeContent = serializeFrontmatter(fm, body)
+    }
+    await writeFile(activeTab.path, writeContent)
     useEditorStore.setState((state) => ({
       tabs: state.tabs.map((t) =>
-        t.id === activeTab.id ? { ...t, isDirty: false, isEdited: false } : t
+        t.id === activeTab.id ? { ...t, isDirty: false, isEdited: false, frontmatterDirty: false } : t
       ),
     }))
+    // Invalidate frontmatter cache so search/file-tree use fresh data
+    if (isMarkdown) {
+      const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
+      invalidateFrontmatterCache(activeTab.path)
+    }
     const { gitAutoCommit } = await import('@/lib/tauri')
     try {
       await gitAutoCommit(activeTab.path)

@@ -6,7 +6,7 @@
  * 工具函数来自 @/lib/utils/treeUtils
  */
 import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
-import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2 } from 'lucide-react'
+import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, Pin, ArrowUpDown } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
@@ -28,12 +28,60 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
 import { ContextMenuContent } from '@/components/ui/context-menu'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { getFileFrontmatter } from '@/lib/utils/searchQuery'
+import type { NoteFrontmatter } from '@/lib/types/frontmatter'
+
+export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
 
 // 扁平化的树节点，用于虚拟化
 interface FlattenedNode {
   node: FileNode
   depth: number
   isLastInParent?: boolean
+  isPinned?: boolean
+  isPinnedSeparator?: boolean
+}
+
+// Sort file nodes within a directory based on sort mode and frontmatter cache
+function sortFileNodes(
+  nodes: FileNode[],
+  sortMode: FileTreeSortMode,
+  frontmatterCache: Map<string, NoteFrontmatter>,
+): FileNode[] {
+  if (sortMode === 'default') return nodes
+
+  // Separate directories and files
+  const dirs = nodes.filter(n => n.isDirectory)
+  const files = nodes.filter(n => !n.isDirectory)
+
+  const sortedFiles = [...files].sort((a, b) => {
+    const fmA = frontmatterCache.get(a.path)
+    const fmB = frontmatterCache.get(b.path)
+
+    if (sortMode === 'updated-desc') {
+      const dateA = fmA?.updated ? new Date(fmA.updated).getTime() : 0
+      const dateB = fmB?.updated ? new Date(fmB.updated).getTime() : 0
+      return dateB - dateA
+    }
+
+    if (sortMode === 'title-asc') {
+      const titleA = fmA?.title || a.name.replace(/\.md$/i, '')
+      const titleB = fmB?.title || b.name.replace(/\.md$/i, '')
+      return titleA.localeCompare(titleB)
+    }
+
+    return 0
+  })
+
+  // Directories always come first, then sorted files
+  return [...dirs, ...sortedFiles]
 }
 
 // 将嵌套的文件树扁平化为列表
@@ -41,14 +89,71 @@ function flattenNodes(
   nodes: FileNode[],
   expanded: Set<string>,
   newItem: { parentPath: string; type: string; name: string } | null,
+  sortMode: FileTreeSortMode,
+  frontmatterCache: Map<string, NoteFrontmatter>,
   depth = 0
 ): FlattenedNode[] {
   const result: FlattenedNode[] = []
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i]
-    result.push({ node, depth, isLastInParent: i === nodes.length - 1 })
+
+  // Sort nodes at this level
+  const sortedNodes = sortFileNodes(nodes, sortMode, frontmatterCache)
+
+  // When sort mode is not default, group pinned files at the top within files
+  const pinnedNodes: FileNode[] = []
+  const unpinnedNodes: FileNode[] = []
+
+  if (sortMode !== 'default') {
+    for (const node of sortedNodes) {
+      if (node.isDirectory) {
+        unpinnedNodes.push(node)
+      } else {
+        const fm = frontmatterCache.get(node.path)
+        if (fm?.pinned === true) {
+          pinnedNodes.push(node)
+        } else {
+          unpinnedNodes.push(node)
+        }
+      }
+    }
+  } else {
+    // In default mode, still check for pinned files
+    for (const node of sortedNodes) {
+      if (node.isDirectory) {
+        unpinnedNodes.push(node)
+      } else {
+        const fm = frontmatterCache.get(node.path)
+        if (fm?.pinned === true) {
+          pinnedNodes.push(node)
+        } else {
+          unpinnedNodes.push(node)
+        }
+      }
+    }
+  }
+
+  // Render pinned nodes first with pinned flag
+  for (const node of pinnedNodes) {
+    result.push({ node, depth, isPinned: true })
     if (node.isDirectory && expanded.has(node.path) && node.children) {
-      result.push(...flattenNodes(node.children, expanded, newItem, depth + 1))
+      result.push(...flattenNodes(node.children, expanded, newItem, sortMode, frontmatterCache, depth + 1))
+    }
+  }
+
+  // Add separator if there are both pinned and unpinned files
+  if (pinnedNodes.length > 0 && unpinnedNodes.length > 0) {
+    result.push({
+      node: { id: 'pinned-separator', name: '', path: 'pinned-separator', isDirectory: false },
+      depth,
+      isPinnedSeparator: true,
+    })
+  }
+
+  // Render unpinned nodes
+  for (let i = 0; i < unpinnedNodes.length; i++) {
+    const node = unpinnedNodes[i]
+    result.push({ node, depth, isLastInParent: i === unpinnedNodes.length - 1 })
+    if (node.isDirectory && expanded.has(node.path) && node.children) {
+      result.push(...flattenNodes(node.children, expanded, newItem, sortMode, frontmatterCache, depth + 1))
       // 在子节点末尾添加新增输入框虚拟节点
       if (newItem && newItem.parentPath === node.path) {
         result.push({
@@ -59,6 +164,7 @@ function flattenNodes(
       }
     }
   }
+
   // 根目录未展开或子节点为空时，新增输入框作为根节点的虚拟子节点
   if (depth === 0 && newItem) {
     const rootNode = nodes.find(n => n.path === newItem.parentPath)
@@ -82,6 +188,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
   isMultiSelected,
   isDragOver,
   isDragging,
+  isPinned,
   expanded,
   editingName,
   newItem,
@@ -109,6 +216,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
   isMultiSelected: boolean
   isDragOver: boolean
   isDragging: boolean
+  isPinned?: boolean
   expanded: Set<string>
   editingName: string
   newItem: { type: 'file' | 'folder' | 'mindmap'; parentPath: string; name: string } | null
@@ -169,6 +277,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
         : isDragOver ? 'bg-primary/15 text-[var(--text-primary)] border-t border-primary/30'
         : isMultiSelected ? 'bg-primary/5 text-[var(--text-primary)]'
         : isDragging ? 'opacity-50 text-[var(--text-secondary)]'
+        : isPinned ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border-l-2 border-l-[var(--theme-color)]'
         : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
       }`}
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
@@ -191,6 +300,9 @@ const TreeNodeItem = memo(function TreeNodeItem({
         <Folder size={12} className="text-[#666666] shrink-0" />
       ) : (
         <span className="shrink-0 flex items-center justify-center w-3 h-3">{getFileIcon(node.name)}</span>
+      )}
+      {isPinned && !node.isDirectory && (
+        <Pin size={10} className="shrink-0" style={{ color: 'var(--theme-color)' }} />
       )}
       {isEditing ? (
         <input
@@ -261,6 +373,69 @@ export const FileTreeView = memo(function FileTreeView() {
   const { t } = useTranslation()
 
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [sortMode, setSortMode] = useState<FileTreeSortMode>('default')
+  const [frontmatterCache, setFrontmatterCache] = useState<Map<string, NoteFrontmatter>>(new Map())
+  const frontmatterCacheRef = useRef(frontmatterCache)
+  frontmatterCacheRef.current = frontmatterCache
+
+  // Load frontmatter for all visible .md files when sort mode changes or tree refreshes
+  useEffect(() => {
+    if (nodes.length === 0) return
+
+    const loadFrontmatter = async () => {
+      const cache = new Map(frontmatterCacheRef.current)
+      let changed = false
+
+      // Collect all .md file paths from the tree
+      const collectMdPaths = (fileNodes: FileNode[]): string[] => {
+        const paths: string[] = []
+        for (const node of fileNodes) {
+          if (!node.isDirectory && node.name.toLowerCase().endsWith('.md')) {
+            paths.push(node.path)
+          }
+          if (node.children) {
+            paths.push(...collectMdPaths(node.children))
+          }
+        }
+        return paths
+      }
+
+      const mdPaths = collectMdPaths(nodes)
+      for (const path of mdPaths) {
+        if (!cache.has(path)) {
+          try {
+            const fm = await getFileFrontmatter(path)
+            cache.set(path, fm)
+            changed = true
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      if (changed) {
+        setFrontmatterCache(cache)
+      }
+    }
+
+    loadFrontmatter()
+  }, [nodes])
+
+  // Refresh frontmatter cache when a file is saved
+  useEffect(() => {
+    const handleFileSaved = (e: CustomEvent) => {
+      const savedPath = e.detail?.path
+      if (savedPath && savedPath.toLowerCase().endsWith('.md')) {
+        setFrontmatterCache(prev => {
+          const next = new Map(prev)
+          next.delete(savedPath)
+          return next
+        })
+      }
+    }
+    window.addEventListener('file-saved', handleFileSaved as EventListener)
+    return () => window.removeEventListener('file-saved', handleFileSaved as EventListener)
+  }, [])
 
   // ── 操作逻辑（重命名/新建/删除）──
   const {
@@ -392,7 +567,7 @@ export const FileTreeView = memo(function FileTreeView() {
   const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath, nodes)?.isDirectory ?? false) : false
 
   // 扁平化节点用于虚拟化
-  const flattenedNodes = useMemo(() => flattenNodes(nodes, expanded, newItem), [nodes, expanded, newItem])
+  const flattenedNodes = useMemo(() => flattenNodes(nodes, expanded, newItem, sortMode, frontmatterCache), [nodes, expanded, newItem, sortMode, frontmatterCache])
 
   // 虚拟化配置
   const parentRef = useRef<HTMLDivElement>(null)
@@ -410,6 +585,31 @@ export const FileTreeView = memo(function FileTreeView() {
       <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none">
         <span className="text-sm font-medium">{t('fileTree.explorerTitle')}</span>
         <div className="flex items-center">
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                    <ArrowUpDown size={12} />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t('fileTree.sort')}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent
+              style={{
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+              }}
+            >
+              <DropdownMenuRadioGroup value={sortMode} onValueChange={(v) => setSortMode(v as FileTreeSortMode)}>
+                <DropdownMenuRadioItem value="default">{t('fileTree.sortDefault')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="updated-desc">{t('fileTree.sortUpdatedDesc')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="title-asc">{t('fileTree.sortTitleAsc')}</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleOpenFolder}>
@@ -471,7 +671,32 @@ export const FileTreeView = memo(function FileTreeView() {
                   }}
                 >
                   {virtualItems.map((virtualItem) => {
-                    const { node, depth } = flattenedNodes[virtualItem.index]
+                    const { node, depth, isPinned, isPinnedSeparator } = flattenedNodes[virtualItem.index]
+
+                    // Pinned separator
+                    if (isPinnedSeparator) {
+                      return (
+                        <div
+                          key="pinned-separator"
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: `${virtualItem.size}px`,
+                            transform: `translateY(${virtualItem.start}px)`,
+                          }}
+                        >
+                          <div
+                            className="flex items-center h-[22px] px-2"
+                            style={{ paddingLeft: `${depth * 12 + 8}px` }}
+                          >
+                            <div className="flex-1 border-b" style={{ borderColor: 'var(--border-color)' }} />
+                          </div>
+                        </div>
+                      )
+                    }
+
                     return (
                       <div
                         key={node.path}
@@ -492,6 +717,7 @@ export const FileTreeView = memo(function FileTreeView() {
                           isMultiSelected={multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1}
                           isDragOver={dragOverPath === node.path}
                           isDragging={dragSourcePaths.includes(node.path)}
+                          isPinned={isPinned}
                           expanded={expanded}
                           editingName={editingName}
                           newItem={newItem}

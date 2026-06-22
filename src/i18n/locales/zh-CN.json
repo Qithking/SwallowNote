@@ -356,7 +356,11 @@
     "defaultFileName": "新文件.md",
     "defaultFolderName": "新文件夹",
     "defaultMindMapName": "新思维导图.smm",
-    "newMindMap": "新建思维导图"
+    "newMindMap": "新建思维导图",
+    "sort": "排序方式",
+    "sortDefault": "默认排序",
+    "sortUpdatedDesc": "按更新时间 (新到旧)",
+    "sortTitleAsc": "按标题 (A-Z)"
   },
   "contextMenu": {
     "newFile": "新建文件",
@@ -393,7 +397,8 @@
     "toggleWidth": "切换编辑器视图宽度",
     "contentLayout": "内容排版设置",
     "externalChange": "文件已被外部修改，点击重新加载",
-    "conflictResolve": "文件存在冲突，点击处理"
+    "conflictResolve": "文件存在冲突，点击处理",
+    "noteProperties": "笔记属性"
   },
   "editor": {
     "untitled": "未命名",
@@ -691,6 +696,31 @@
   "tray": {
     "showWindow": "显示窗口",
     "quit": "退出"
+  },
+  "noteProperties": {
+    "title": "属性",
+    "title_field": "标题",
+    "created": "创建时间",
+    "updated": "更新时间",
+    "tags": "标签",
+    "categories": "分类",
+    "author": "作者",
+    "status": "状态",
+    "pinned": "置顶",
+    "status_draft": "草稿",
+    "status_published": "已发布",
+    "status_archived": "已归档",
+    "customProperties": "自定义属性",
+    "addProperty": "添加属性",
+    "key": "键",
+    "value": "值",
+    "add": "添加",
+    "remove": "删除",
+    "tagPlaceholder": "输入标签后回车",
+    "noProperties": "暂无属性",
+    "group_basic": "基础",
+    "group_classification": "分类",
+    "group_details": "详情"
   },
   "plugin": {
     "manager": "插件管理",

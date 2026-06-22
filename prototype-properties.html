@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Note Properties Panel — Design Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --pa-paper: #faf9f7;
+    --pa-paper-2: #ffffff;
+    --pa-paper-3: #f0eeeb;
+    --pa-ink: #1a1918;
+    --pa-ink-2: #5c5955;
+    --pa-mute: #9e9a94;
+    --pa-accent: #c0563a;
+    --pa-accent-soft: rgba(192, 86, 58, 0.10);
+    --pa-accent-glow: rgba(192, 86, 58, 0.18);
+    --pa-positive: #2d6a4f;
+    --pa-positive-soft: rgba(45, 106, 79, 0.10);
+    --pa-warn: #b97a1f;
+    --pa-warn-soft: rgba(185, 122, 31, 0.12);
+    --pa-negative: #b83a2a;
+    --pa-negative-soft: rgba(184, 58, 42, 0.10);
+    --pa-line: #e5e2dd;
+    --pa-line-2: #d0cdc7;
+    --pa-line-3: #bfbab3;
+    --pa-font-display: 'Instrument Serif', 'Times New Roman', serif;
+    --pa-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --pa-font-ui: 'Manrope', system-ui, sans-serif;
+    --pa-radius: 6px;
+    --pa-radius-lg: 10px;
+    --pa-shadow-1: 0 1px 2px rgba(0,0,0,0.06);
+    --pa-shadow-2: 0 4px 14px rgba(0,0,0,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--pa-font-ui);
+    background: #e8e5e0;
+    color: var(--pa-ink);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+
+  .preview-wrapper {
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .panel-container {
+    width: 280px;
+    background: var(--pa-paper);
+    border: 1px solid var(--pa-line);
+    border-radius: var(--pa-radius-lg);
+    box-shadow: var(--pa-shadow-2);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 580px;
+  }
+
+  .panel-label {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--pa-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* ===== NEW DESIGN ===== */
+  .np-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    font-family: var(--pa-font-ui);
+    color: var(--pa-ink);
+    font-size: 12px;
+  }
+
+  /* Header — minimal accent bar */
+  .np-header {
+    display: flex;
+    align-items: center;
+    height: 40px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--pa-line);
+    flex-shrink: 0;
+    gap: 8px;
+  }
+
+  .np-header-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    background: var(--pa-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .np-header-icon svg {
+    width: 10px;
+    height: 10px;
+    stroke: white;
+    fill: none;
+    stroke-width: 2;
+  }
+
+  .np-header-title {
+    font-family: var(--pa-font-display);
+    font-style: italic;
+    font-size: 15px;
+    color: var(--pa-ink);
+    letter-spacing: -0.01em;
+  }
+
+  .np-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .np-scroll::-webkit-scrollbar { width: 4px; }
+  .np-scroll::-webkit-scrollbar-track { background: transparent; }
+  .np-scroll::-webkit-scrollbar-thumb { background: var(--pa-line-2); border-radius: 4px; }
+
+  .np-body {
+    padding: 12px 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* Title field — hero input */
+  .np-title-field {
+    margin-bottom: 10px;
+  }
+
+  .np-title-input {
+    width: 100%;
+    border: none;
+    border-bottom: 1.5px solid var(--pa-line);
+    border-radius: 0;
+    background: transparent;
+    color: var(--pa-ink);
+    font-family: var(--pa-font-display);
+    font-style: italic;
+    font-size: 16px;
+    padding: 4px 0 6px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .np-title-input:focus {
+    border-bottom-color: var(--pa-accent);
+  }
+
+  .np-title-input::placeholder {
+    color: var(--pa-line-2);
+    font-style: normal;
+    font-family: var(--pa-font-ui);
+    font-size: 12px;
+  }
+
+  /* Meta row — compact inline */
+  .np-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    margin-bottom: 2px;
+  }
+
+  .np-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--pa-font-mono);
+    font-size: 10px;
+    color: var(--pa-mute);
+    letter-spacing: 0;
+  }
+
+  .np-meta-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--pa-line-2);
+    flex-shrink: 0;
+  }
+
+  /* Compact field group */
+  .np-field-group {
+    padding: 8px 0;
+    border-top: 1px solid var(--pa-line-3);
+  }
+
+  .np-field-group:first-of-type {
+    border-top: none;
+  }
+
+  .np-group-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--pa-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+
+  /* Inline field: label + control on same row */
+  .np-inline-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 28px;
+  }
+
+  .np-inline-label {
+    font-size: 11.5px;
+    color: var(--pa-ink-2);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .np-inline-control {
+    flex: 1;
+    max-width: 160px;
+    text-align: right;
+  }
+
+  /* Compact input */
+  .np-input {
+    width: 100%;
+    height: 26px;
+    padding: 0 7px;
+    border: 1px solid var(--pa-line);
+    border-radius: 4px;
+    background: var(--pa-paper-2);
+    color: var(--pa-ink);
+    font-family: var(--pa-font-ui);
+    font-size: 11.5px;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .np-input:focus {
+    border-color: var(--pa-accent);
+    box-shadow: 0 0 0 2px var(--pa-accent-soft);
+  }
+
+  .np-input::placeholder {
+    color: var(--pa-mute);
+  }
+
+  /* Select */
+  .np-select {
+    height: 26px;
+    padding: 0 24px 0 7px;
+    border: 1px solid var(--pa-line);
+    border-radius: 4px;
+    background: var(--pa-paper-2);
+    color: var(--pa-ink);
+    font-family: var(--pa-font-ui);
+    font-size: 11.5px;
+    outline: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%239e9a94' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .np-select:focus {
+    border-color: var(--pa-accent);
+  }
+
+  /* Switch */
+  .np-switch {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .np-switch input { display: none; }
+
+  .np-switch-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 9px;
+    background: var(--pa-line-2);
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .np-switch-track::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: white;
+    top: 3px;
+    left: 3px;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  }
+
+  .np-switch input:checked + .np-switch-track {
+    background: var(--pa-accent);
+  }
+
+  .np-switch input:checked + .np-switch-track::after {
+    transform: translateX(14px);
+  }
+
+  /* Chips */
+  .np-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    min-height: 26px;
+  }
+
+  .np-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--pa-accent-soft);
+    color: var(--pa-accent);
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 16px;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+
+  .np-chip:hover {
+    background: var(--pa-accent-glow);
+  }
+
+  .np-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--pa-accent);
+    cursor: pointer;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+    width: 12px;
+    height: 12px;
+  }
+
+  .np-chip:hover .np-chip-x { opacity: 0.7; }
+  .np-chip-x:hover { opacity: 1 !important; }
+
+  .np-chip-add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: 1px dashed var(--pa-line-2);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--pa-mute);
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+
+  .np-chip-add:hover {
+    border-color: var(--pa-accent);
+    color: var(--pa-accent);
+    background: var(--pa-accent-soft);
+  }
+
+  .np-chip-add svg {
+    width: 10px;
+    height: 10px;
+  }
+
+  /* Chip input (inline) */
+  .np-chip-input {
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--pa-ink);
+    font-family: var(--pa-font-ui);
+    font-size: 10.5px;
+    height: 20px;
+    padding: 0 2px;
+    width: 60px;
+    min-width: 40px;
+  }
+
+  .np-chip-input::placeholder {
+    color: var(--pa-mute);
+  }
+
+  /* Custom properties */
+  .np-divider {
+    height: 1px;
+    background: var(--pa-line);
+    margin: 6px 0 2px;
+  }
+
+  .np-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0 4px;
+  }
+
+  .np-section-title {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: var(--pa-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .np-section-add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: 1px solid var(--pa-line);
+    border-radius: 4px;
+    background: var(--pa-paper-2);
+    color: var(--pa-mute);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .np-section-add:hover {
+    color: var(--pa-accent);
+    border-color: var(--pa-accent);
+    background: var(--pa-accent-soft);
+  }
+
+  .np-section-add svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  /* Custom field row */
+  .np-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+  }
+
+  .np-custom-key {
+    font-family: var(--pa-font-mono);
+    font-size: 10.5px;
+    color: var(--pa-mute);
+    width: 72px;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .np-custom-val {
+    flex: 1;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--pa-ink);
+    font-family: var(--pa-font-ui);
+    font-size: 11px;
+    outline: none;
+    transition: all 0.15s;
+  }
+
+  .np-custom-val:hover {
+    background: var(--pa-paper-2);
+    border-color: var(--pa-line);
+  }
+
+  .np-custom-val:focus {
+    background: var(--pa-paper-2);
+    border-color: var(--pa-accent);
+    box-shadow: 0 0 0 2px var(--pa-accent-soft);
+  }
+
+  .np-custom-del {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--pa-mute);
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+
+  .np-custom-row:hover .np-custom-del { opacity: 1; }
+  .np-custom-del:hover { color: var(--pa-negative); background: var(--pa-negative-soft); }
+  .np-custom-del svg { width: 11px; height: 11px; }
+
+  /* Add form */
+  .np-add-form {
+    display: flex;
+    gap: 4px;
+    padding: 4px 0;
+    animation: npSlideIn 0.15s ease-out;
+  }
+
+  @keyframes npSlideIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .np-add-form .np-input {
+    height: 22px;
+    font-size: 10.5px;
+    flex: 1;
+  }
+
+  .np-add-confirm {
+    height: 22px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 4px;
+    background: var(--pa-accent);
+    color: white;
+    font-family: var(--pa-font-ui);
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+  }
+
+  .np-add-confirm:hover { opacity: 0.85; }
+
+  /* Empty state */
+  .np-empty {
+    font-size: 10.5px;
+    color: var(--pa-line-2);
+    text-align: center;
+    padding: 10px 0;
+    font-style: italic;
+  }
+
+  /* ===== OLD DESIGN (for comparison) ===== */
+  .old-np-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    font-family: var(--pa-font-ui);
+    color: var(--pa-ink);
+    font-size: 12px;
+  }
+
+  .old-np-header {
+    display: flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--pa-line);
+    flex-shrink: 0;
+  }
+
+  .old-np-header-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--pa-ink-2);
+  }
+
+  .old-np-body {
+    padding: 8px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .old-np-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .old-np-field-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .old-np-label {
+    font-size: 11px;
+    color: var(--pa-ink-2);
+    font-weight: 500;
+  }
+
+  .old-np-input {
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--pa-line);
+    border-radius: var(--pa-radius);
+    background: var(--pa-paper);
+    color: var(--pa-ink);
+    font-family: var(--pa-font-ui);
+    font-size: 12px;
+    outline: none;
+  }
+
+  .old-np-readonly {
+    font-size: 12px;
+    color: var(--pa-mute);
+    line-height: 28px;
+    padding: 0 8px;
+  }
+
+  .old-np-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--pa-line);
+    border-radius: var(--pa-radius);
+    background: var(--pa-paper);
+    min-height: 28px;
+    align-items: center;
+  }
+
+  .old-np-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: var(--pa-accent-soft);
+    color: var(--pa-accent);
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+  .old-np-divider {
+    height: 1px;
+    background: var(--pa-line);
+    margin: 4px 0;
+  }
+
+  .old-np-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--pa-ink-2);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+</style>
+</head>
+<body>
+
+<div class="preview-wrapper">
+
+  <!-- ===== NEW DESIGN ===== -->
+  <div>
+    <div class="panel-container">
+      <div class="np-root">
+        <!-- Header -->
+        <div class="np-header">
+          <div class="np-header-icon">
+            <svg viewBox="0 0 16 16"><path d="M3 3h10v10H3z M5 6h6M5 8h6M5 10h4" stroke-linecap="round"/></svg>
+          </div>
+          <span class="np-header-title">Properties</span>
+        </div>
+
+        <div class="np-scroll">
+          <div class="np-body">
+            <!-- Group: 基础 -->
+            <div class="np-field-group" style="border-top:none">
+              <div class="np-group-label">基础</div>
+
+              <!-- Title -->
+              <div class="np-inline-field" style="margin-bottom:4px">
+                <span class="np-inline-label">标题</span>
+                <div class="np-inline-control">
+                  <input class="np-input" value="关于 YAML 属性面板的设计思考" style="text-align:right" />
+                </div>
+              </div>
+
+              <!-- Created time -->
+              <div class="np-inline-field" style="margin-bottom:2px">
+                <span class="np-inline-label">创建时间</span>
+                <div class="np-inline-control">
+                  <span class="np-meta-item" style="justify-content:flex-end">
+                    <span class="np-meta-dot" style="background:var(--pa-positive)"></span>
+                    2025-06-20 14:32
+                  </span>
+                </div>
+              </div>
+
+              <!-- Modified time -->
+              <div class="np-inline-field">
+                <span class="np-inline-label">修改时间</span>
+                <div class="np-inline-control">
+                  <span class="np-meta-item" style="justify-content:flex-end">
+                    <span class="np-meta-dot"></span>
+                    2025-06-22 09:15
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Group: 分类 -->
+            <div class="np-field-group">
+              <div class="np-group-label">分类</div>
+
+              <!-- Tags -->
+              <div class="np-inline-field" style="margin-bottom:6px">
+                <span class="np-inline-label">标签</span>
+                <div class="np-inline-control">
+                  <div class="np-chips">
+                    <span class="np-chip">设计 <button class="np-chip-x"><svg viewBox="0 0 10 10"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></span>
+                    <span class="np-chip">前端 <button class="np-chip-x"><svg viewBox="0 0 10 10"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></span>
+                    <button class="np-chip-add"><svg viewBox="0 0 10 10" fill="none"><path d="M5 2v6M2 5h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Categories -->
+              <div class="np-inline-field" style="margin-bottom:4px">
+                <span class="np-inline-label">分类</span>
+                <div class="np-inline-control">
+                  <div class="np-chips">
+                    <span class="np-chip">笔记 <button class="np-chip-x"><svg viewBox="0 0 10 10"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></span>
+                    <button class="np-chip-add"><svg viewBox="0 0 10 10" fill="none"><path d="M5 2v6M2 5h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Group: 详情 -->
+            <div class="np-field-group">
+              <div class="np-group-label">详情</div>
+
+              <!-- Author -->
+              <div class="np-inline-field" style="margin-bottom:4px">
+                <span class="np-inline-label">作者</span>
+                <div class="np-inline-control">
+                  <input class="np-input" value="SwallowNote" style="text-align:right" />
+                </div>
+              </div>
+
+              <!-- Status -->
+              <div class="np-inline-field" style="margin-bottom:4px">
+                <span class="np-inline-label">状态</span>
+                <div class="np-inline-control" style="display:flex;justify-content:flex-end">
+                  <select class="np-select">
+                    <option>草稿</option>
+                    <option selected>已发布</option>
+                    <option>已归档</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Pinned -->
+              <div class="np-inline-field">
+                <span class="np-inline-label">置顶</span>
+                <label class="np-switch">
+                  <input type="checkbox" checked />
+                  <span class="np-switch-track"></span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Custom properties -->
+            <div class="np-divider"></div>
+            <div class="np-section-header">
+              <span class="np-section-title">自定义属性</span>
+              <button class="np-section-add"><svg viewBox="0 0 10 10" fill="none"><path d="M5 2v6M2 5h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+            </div>
+
+            <div class="np-custom-row">
+              <span class="np-custom-key">priority</span>
+              <input class="np-custom-val" value="high" />
+              <button class="np-custom-del"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+            </div>
+            <div class="np-custom-row">
+              <span class="np-custom-key">project</span>
+              <input class="np-custom-val" value="SwallowNote" />
+              <button class="np-custom-del"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+            </div>
+            <div class="np-custom-row">
+              <span class="np-custom-key">difficulty</span>
+              <input class="np-custom-val" value="★★★☆☆" />
+              <button class="np-custom-del"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+            </div>
+
+            <!-- Add form (shown) -->
+            <div class="np-add-form">
+              <input class="np-input" placeholder="键名" style="width:72px;flex:none" />
+              <input class="np-input" placeholder="值" />
+              <button class="np-add-confirm">添加</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel-label">新设计</div>
+  </div>
+
+  <!-- ===== OLD DESIGN (for comparison) ===== -->
+  <div>
+    <div class="panel-container">
+      <div class="old-np-root">
+        <div class="old-np-header">
+          <span class="old-np-header-title">属性</span>
+        </div>
+        <div class="old-np-body">
+          <div class="old-np-field">
+            <label class="old-np-label">标题</label>
+            <input class="old-np-input" value="关于 YAML 属性面板的设计思考" />
+          </div>
+          <div class="old-np-field">
+            <label class="old-np-label">创建时间</label>
+            <span class="old-np-readonly">2025-06-20 14:32:00</span>
+          </div>
+          <div class="old-np-field">
+            <label class="old-np-label">更新时间</label>
+            <span class="old-np-readonly">2025-06-22 09:15:33</span>
+          </div>
+          <div class="old-np-field">
+            <label class="old-np-label">标签</label>
+            <div class="old-np-chips">
+              <span class="old-np-chip">设计 ×</span>
+              <span class="old-np-chip">前端 ×</span>
+            </div>
+          </div>
+          <div class="old-np-field">
+            <label class="old-np-label">分类</label>
+            <div class="old-np-chips">
+              <span class="old-np-chip">笔记 ×</span>
+            </div>
+          </div>
+          <div class="old-np-field">
+            <label class="old-np-label">作者</label>
+            <input class="old-np-input" value="SwallowNote" />
+          </div>
+          <div class="old-np-field">
+            <label class="old-np-label">状态</label>
+            <input class="old-np-input" value="已发布" />
+          </div>
+          <div class="old-np-field old-np-field-row">
+            <label class="old-np-label">置顶</label>
+            <label class="np-switch"><input type="checkbox" checked /><span class="np-switch-track"></span></label>
+          </div>
+          <div class="old-np-divider"></div>
+          <div class="old-np-section-header">
+            <span>自定义属性</span>
+          </div>
+          <div style="font-size:11px;color:var(--pa-mute);text-align:center;padding:8px 0">暂无自定义属性</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel-label">旧设计</div>
+  </div>
+
+</div>
+
+</body>
+</html>

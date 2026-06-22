@@ -6,6 +6,8 @@ import { loadFileContent } from '@/lib/api'
 import { writeFile, gitAutoCommit } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
 import { countWords } from '@/lib/utils/wordCount'
+import { parseFrontmatter, serializeFrontmatter, stripFrontmatter } from '@/lib/utils/frontmatter'
+import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 
 export interface EditorTab {
   id: string
@@ -39,6 +41,10 @@ export interface EditorTab {
   conflictSelectedFile?: string
   // For conflict tabs: cursor line number in the local editor
   conflictCursorLine?: number
+  /** 缓存的 frontmatter 数据（仅 .md 文件） */
+  frontmatter?: NoteFrontmatter
+  /** 属性面板编辑导致的脏状态，与编辑器内容脏状态独立 */
+  frontmatterDirty?: boolean
 }
 
 export interface EditorState {
@@ -72,6 +78,9 @@ export interface EditorState {
   resetDirtyTabs: () => Promise<void>
   getDirtyTabsCount: () => number
   isPathSaving: (path: string) => boolean
+  updateTabFrontmatter: (tabId: string, data: Partial<NoteFrontmatter>) => void
+  /** Replace the entire frontmatter object (used for deleting keys) */
+  replaceTabFrontmatter: (tabId: string, data: NoteFrontmatter) => void
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -86,12 +95,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         // Only update content when existing tab hasn't been loaded yet (undefined).
         // Using === undefined instead of !content to avoid overwriting empty files ('').
         if (existing.content === undefined && tab.content !== undefined) {
+          // For .md files, parse frontmatter from the content
+          const isMarkdown = tab.path.toLowerCase().endsWith('.md')
+          let content = tab.content
+          let frontmatter = existing.frontmatter
+          if (isMarkdown) {
+            const result = parseFrontmatter(tab.content)
+            frontmatter = result.data
+            content = result.body
+          }
           return {
             tabs: state.tabs.map((t) =>
               t.path === tab.path
                 ? {
                     ...t,
-                    content: tab.content,
+                    content,
+                    frontmatter,
                     fileSize: tab.fileSize,
                     modifiedTime: tab.modifiedTime,
                     wordCount: tab.wordCount,
@@ -103,7 +122,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
         return { activeTabId: existing.id }
       }
-      const newTabs = [...state.tabs, { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }]
+      // For new .md tabs, parse frontmatter from content if present
+      const isMarkdown = tab.path.toLowerCase().endsWith('.md')
+      let newTab = { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }
+      if (isMarkdown && tab.content !== undefined) {
+        const result = parseFrontmatter(tab.content)
+        newTab.content = result.body
+        newTab.frontmatter = result.data
+      }
+      const newTabs = [...state.tabs, newTab]
       // Notify plugins: a fresh tab was opened. We emit after set so the
       // store update is committed before subscribers (which may read
       // `state.tabs` from a parent store snapshot) observe the event.
@@ -224,12 +251,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // Release content of non-active, non-dirty file tabs to save memory
       const tabs = state.tabs.map((t) => {
         if (t.id === prevActiveId && t.id !== id && !t.isDirty && t.type !== 'diff' && t.type !== 'conflict' && t.content !== undefined) {
-          return { ...t, content: undefined as unknown as string, isLoading: false }
+          return { ...t, content: undefined as unknown as string, frontmatter: undefined, isLoading: false }
         }
         return t
       })
       return { tabs, activeTabId: id }
     })
+    // Auto-close noteProperties panel when switching to a non-.md file
+    const newTab = get().tabs.find((t) => t.id === id)
+    if (newTab && !newTab.path.toLowerCase().endsWith('.md')) {
+      queueMicrotask(async () => {
+        const { useUIStore } = await import('@/stores/ui')
+        if (useUIStore.getState().rightPanelType === 'noteProperties') {
+          useUIStore.getState().setRightPanelType(null)
+        }
+      })
+    }
   },
   loadTabContent: async (id, retryCount = 0, force = false) => {
     const tab = get().tabs.find((t) => t.id === id)
@@ -265,7 +302,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     try {
-      const content = await tryLoadContent()
+      const rawContent = await tryLoadContent()
       const cursorPosition = tab.cursorPosition || { line: 1, column: 1 }
       // Get actual file modification time from backend
       let modifiedTime = new Date().toLocaleString()
@@ -276,15 +313,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           modifiedTime = metadata.modified_time
         }
       } catch { /* ignore */ }
+
+      // For .md files, parse frontmatter and store body as content
+      const isMarkdown = tab.path.toLowerCase().endsWith('.md')
+      let content: string
+      let frontmatter: NoteFrontmatter | undefined
+      if (isMarkdown) {
+        const result = parseFrontmatter(rawContent)
+        frontmatter = result.data
+        content = result.body
+      } else {
+        content = rawContent
+      }
+
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === id
             ? {
                 ...t,
                 content,
+                frontmatter,
                 isLoading: false,
                 hasExternalChange: false,
-                fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
+                fileSize: rawContent.length > 1024 ? `${(rawContent.length / 1024).toFixed(1)}Kb` : `${rawContent.length}B`,
                 modifiedTime,
                 wordCount: countWords(content),
                 cursorPosition,
@@ -425,7 +476,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { tabs: keptTabs, activeTabId: newActiveId }
     }),
   saveAllDirtyTabs: async () => {
-    const dirtyTabs = get().tabs.filter((t) => t.isDirty)
+    const dirtyTabs = get().tabs.filter((t) => t.isDirty || t.frontmatterDirty)
     for (const tab of dirtyTabs) {
       try {
         // Mark path as saving to prevent file-watcher from closing the tab
@@ -434,10 +485,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           newSet.add(tab.path)
           return { savingPaths: newSet }
         })
-        await writeFile(tab.path, tab.content)
+
+        // For .md files, merge frontmatter with body before writing
+        const isMarkdown = tab.path.toLowerCase().endsWith('.md')
+        let writeContent = tab.content
+        if (isMarkdown) {
+          const fm = { ...(tab.frontmatter || {}), updated: new Date().toISOString() }
+          // stripFrontmatter is defensive: tab.content normally holds only
+          // the body (loadTabContent strips frontmatter on load), but source
+          // mode edits may store the full file content including frontmatter.
+          // Calling stripFrontmatter on an already-stripped body is a no-op.
+          const body = stripFrontmatter(tab.content ?? '')
+          writeContent = serializeFrontmatter(fm, body)
+          // Update store frontmatter to match what was written
+          set((state) => ({
+            tabs: state.tabs.map((t) =>
+              t.id === tab.id ? { ...t, frontmatter: fm } : t
+            ),
+          }))
+        }
+
+        await writeFile(tab.path, writeContent)
+        // Invalidate frontmatter cache so search/file-tree use fresh data
+        if (isMarkdown) {
+          const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
+          invalidateFrontmatterCache(tab.path)
+        }
         set((state) => ({
           tabs: state.tabs.map((t) =>
-            t.id === tab.id ? { ...t, isDirty: false, isEdited: false } : t
+            t.id === tab.id ? { ...t, isDirty: false, isEdited: false, frontmatterDirty: false } : t
           ),
         }))
         // Notify plugins: a dirty tab has been successfully persisted.
@@ -466,30 +542,59 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
   resetDirtyTabs: async () => {
-    const dirtyTabs = get().tabs.filter((t) => t.isDirty && t.type !== 'diff')
+    const dirtyTabs = get().tabs.filter((t) => (t.isDirty || t.frontmatterDirty) && t.type !== 'diff')
     for (const tab of dirtyTabs) {
       try {
-        const content = await loadFileContent(tab.path)
+        const rawContent = await loadFileContent(tab.path)
+        const isMarkdown = tab.path.toLowerCase().endsWith('.md')
+        let content: string
+        let frontmatter: NoteFrontmatter | undefined
+        if (isMarkdown) {
+          const result = parseFrontmatter(rawContent)
+          frontmatter = result.data
+          content = result.body
+        } else {
+          content = rawContent
+        }
         set((state) => ({
           tabs: state.tabs.map((t) =>
-            t.id === tab.id ? { ...t, content, isDirty: false, isEdited: false } : t
+            t.id === tab.id
+              ? { ...t, content, frontmatter, isDirty: false, isEdited: false, frontmatterDirty: false }
+              : t
           ),
         }))
       } catch (e) {
         console.error('Failed to reset dirty tab:', tab.path, e)
-        // Fallback: just mark as not dirty even though content couldn't be reloaded
         set((state) => ({
           tabs: state.tabs.map((t) =>
-            t.id === tab.id ? { ...t, isDirty: false, isEdited: false } : t
+            t.id === tab.id ? { ...t, isDirty: false, isEdited: false, frontmatterDirty: false } : t
           ),
         }))
       }
     }
   },
   getDirtyTabsCount: () => {
-    return get().tabs.filter((t) => t.isDirty).length
+    return get().tabs.filter((t) => t.isDirty || t.frontmatterDirty).length
   },
   isPathSaving: (path: string) => {
     return get().savingPaths.has(path)
+  },
+  updateTabFrontmatter: (tabId: string, data: Partial<NoteFrontmatter>) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === tabId
+          ? { ...t, frontmatter: { ...t.frontmatter, ...data }, frontmatterDirty: true, isDirty: true, isEdited: true }
+          : t
+      ),
+    }))
+  },
+  replaceTabFrontmatter: (tabId: string, data: NoteFrontmatter) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === tabId
+          ? { ...t, frontmatter: data, frontmatterDirty: true, isDirty: true, isEdited: true }
+          : t
+      ),
+    }))
   },
 }))

@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { TabBar } from '@/components/TabBar'
 import { EditorToolbar } from '@/components/EditorToolbar'
 import { EditorView } from '@/components/Editor'
+import { NotePropertiesPanel } from '@/components/NoteProperties/NotePropertiesPanel'
 import { SettingsView } from '@/components/Settings/SettingsView'
 const AIView = lazy(() => import('@/components/AI/AIView').then(m => ({ default: m.AIView })))
 const DirectoryView = lazy(() => import('@/components/Directory/DirectoryView').then(m => ({ default: m.DirectoryView })))
@@ -193,7 +194,7 @@ function App() {
       const { closeWithoutExit } = useUIStore.getState()
       const dirtyCount = useEditorStore.getState().getDirtyTabsCount()
       if (dirtyCount > 0) {
-        const dirtyTabs = useEditorStore.getState().tabs.filter((t) => t.isDirty)
+        const dirtyTabs = useEditorStore.getState().tabs.filter((t) => t.isDirty || t.frontmatterDirty)
         const names = dirtyTabs.slice(0, 5).map((t) => t.name)
         if (dirtyTabs.length > 5) names.push('...')
         setDirtyFileNames(names)
@@ -679,6 +680,10 @@ function App() {
       case 'directory': return <Suspense fallback={null}><DirectoryView /></Suspense>
       case 'history': return <Suspense fallback={null}><HistoryView visible={true} /></Suspense>
       case 'editorSettings': return <Suspense fallback={null}><EditorSettings /></Suspense>
+      case 'noteProperties': {
+        const fm = activeTab?.frontmatter
+        return <NotePropertiesPanel tabId={activeTab!.id} frontmatter={fm || {}} />
+      }
       default: return null
     }
   }
