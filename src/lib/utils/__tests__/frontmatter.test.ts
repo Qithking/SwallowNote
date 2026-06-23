@@ -96,6 +96,54 @@ Content`
 
     expect(data.pinned).toBe(true)
   })
+
+  it('应剥离 UTF-8 BOM 并解析 frontmatter', () => {
+    const content = '\uFEFF---\ntitle: Test\n---\nbody'
+    const result = parseFrontmatter(content)
+    expect(result.data.title).toBe('Test')
+    expect(result.body).toBe('body')
+  })
+
+  it('应处理 CRLF 换行符', () => {
+    const content = '---\r\ntitle: Test\r\n---\r\nbody'
+    const result = parseFrontmatter(content)
+    expect(result.data.title).toBe('Test')
+    expect(result.body).toBe('body')
+  })
+
+  it('不应将 YAML 值中的 --- 视为闭合分隔符', () => {
+    const content = '---\ndescription: "see https://example.com/a---b"\n---\nbody'
+    const result = parseFrontmatter(content)
+    expect(result.data.description).toBe('see https://example.com/a---b')
+    expect(result.body).toBe('body')
+  })
+
+  it('应解析 frontmatter 中的嵌套对象', () => {
+    const content = '---\nmetadata:\n  key: value\n  num: 42\n---\nbody'
+    const result = parseFrontmatter(content)
+    expect(result.data.metadata).toEqual({ key: 'value', num: 42 })
+  })
+
+  it('应处理 frontmatter 中的 null 值', () => {
+    const content = '---\ntitle: Test\nauthor: null\n---\nbody'
+    const result = parseFrontmatter(content)
+    expect(result.data.title).toBe('Test')
+    expect(result.data.author).toBeNull()
+  })
+
+  it('缺少闭合分隔符时应返回空数据', () => {
+    const content = '---\ntitle: Test\nbody without closing'
+    const result = parseFrontmatter(content)
+    expect(result.data).toEqual({})
+    expect(result.body).toBe(content)
+  })
+
+  it('当 --- 不在开头时不应解析 frontmatter', () => {
+    const content = '\n---\ntitle: Test\n---\nbody'
+    const result = parseFrontmatter(content)
+    expect(result.data).toEqual({})
+    expect(result.body).toBe(content)
+  })
 })
 
 describe('serializeFrontmatter', () => {

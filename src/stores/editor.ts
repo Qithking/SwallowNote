@@ -233,6 +233,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
+    // Auto-close noteProperties panel when all tabs are closed
+    if (get().activeTabId === null) {
+      queueMicrotask(async () => {
+        try {
+          const { useUIStore } = await import('@/stores/ui')
+          if (useUIStore.getState().rightPanelType === 'noteProperties') {
+            useUIStore.getState().setRightPanelType(null)
+          }
+        } catch { /* ignore — may fail in test environment */ }
+      })
+    }
   },
   removeTabs: (ids) => {
     const idSet = new Set(ids)

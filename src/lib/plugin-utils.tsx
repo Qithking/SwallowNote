@@ -240,13 +240,20 @@ export function createPluginPanelProps(
       useEditorStore.getState().updateTabFrontmatter(tab.id, data)
     },
     onNoteFrontmatterChanged: (callback: (data: Record<string, unknown>) => void): () => void => {
-      let prevFmJson = JSON.stringify(useEditorStore.getState().getActiveTab()?.frontmatter ?? null)
+      let prevFm = useEditorStore.getState().getActiveTab()?.frontmatter ?? null
+      let prevFmJson = prevFm ? JSON.stringify(prevFm) : null
       return useEditorStore.subscribe((state) => {
         const activeTab = state.tabs.find((t) => t.id === state.activeTabId)
-        const nextFmJson = JSON.stringify(activeTab?.frontmatter ?? null)
+        const nextFm = activeTab?.frontmatter ?? null
+        // Fast path: when the frontmatter reference is unchanged
+        // (e.g. content-only updates from typing), skip the
+        // JSON.stringify cost entirely.
+        if (nextFm === prevFm) return
+        const nextFmJson = nextFm ? JSON.stringify(nextFm) : null
+        prevFm = nextFm
         if (prevFmJson !== nextFmJson) {
           prevFmJson = nextFmJson
-          callback(activeTab?.frontmatter ?? {})
+          callback(nextFm ?? {})
         }
       })
     },
@@ -362,13 +369,20 @@ export function createToolbarButtonProps(
       useEditorStore.getState().updateTabFrontmatter(tab.id, data)
     },
     onNoteFrontmatterChanged: (callback: (data: Record<string, unknown>) => void): () => void => {
-      let prevFmJson = JSON.stringify(useEditorStore.getState().getActiveTab()?.frontmatter ?? null)
+      let prevFm = useEditorStore.getState().getActiveTab()?.frontmatter ?? null
+      let prevFmJson = prevFm ? JSON.stringify(prevFm) : null
       return useEditorStore.subscribe((state) => {
         const activeTab = state.tabs.find((t) => t.id === state.activeTabId)
-        const nextFmJson = JSON.stringify(activeTab?.frontmatter ?? null)
+        const nextFm = activeTab?.frontmatter ?? null
+        // Fast path: when the frontmatter reference is unchanged
+        // (e.g. content-only updates from typing), skip the
+        // JSON.stringify cost entirely.
+        if (nextFm === prevFm) return
+        const nextFmJson = nextFm ? JSON.stringify(nextFm) : null
+        prevFm = nextFm
         if (prevFmJson !== nextFmJson) {
           prevFmJson = nextFmJson
-          callback(activeTab?.frontmatter ?? {})
+          callback(nextFm ?? {})
         }
       })
     },

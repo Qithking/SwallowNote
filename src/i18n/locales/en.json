@@ -644,7 +644,11 @@
     "installAndRestart": "Install & Restart",
     "syncing": "Syncing...",
     "syncResult": "Synced: {{succeeded}} ok, {{failed}} failed",
-    "syncConflicted": "{{count}} conflict(s)"
+    "syncConflicted": "{{count}} conflict(s)",
+    "yamlIndexProgress": "YAML Index: {{current}}/{{total}}",
+    "yamlIndexDone": "YAML Index: Done",
+    "yamlIndexProgressTooltip": "Indexing YAML metadata {{current}}/{{total}}",
+    "yamlIndexDoneTooltip": "YAML metadata indexing complete"
   },
   "recent": {
     "workspaceName": "Workspace",

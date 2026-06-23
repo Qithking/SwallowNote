@@ -204,6 +204,10 @@ pub fn run() {
             commands::market_sources::remove_market_source,
             commands::market_sources::set_active_market_source,
             commands::market_sources::get_active_market_source,
+            commands::frontmatter::query_frontmatter,
+            commands::frontmatter::query_frontmatter_by_tag,
+            commands::frontmatter::query_frontmatter_by_prefix,
+            commands::frontmatter::trigger_frontmatter_scan,
         ])
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
@@ -215,6 +219,9 @@ pub fn run() {
             match db::init_db(app_data_dir.clone()) {
                 Ok(db) => {
                     app.handle().manage(db);
+                    // 启动 frontmatter 索引子线程（使用独立数据库连接）
+                    let index_db_path = app_data_dir.join("swallownote.db");
+                    services::frontmatter_index::start_index_thread(index_db_path, app.handle().clone());
                 }
                 Err(e) => {
                     eprintln!("Failed to initialize database: {}", e);

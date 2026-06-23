@@ -382,6 +382,8 @@ export const FileTreeView = memo(function FileTreeView() {
   useEffect(() => {
     if (nodes.length === 0) return
 
+    let cancelled = false
+
     const loadFrontmatter = async () => {
       const cache = new Map(frontmatterCacheRef.current)
       let changed = false
@@ -402,39 +404,55 @@ export const FileTreeView = memo(function FileTreeView() {
 
       const mdPaths = collectMdPaths(nodes)
       for (const path of mdPaths) {
+        if (cancelled) return
         if (!cache.has(path)) {
           try {
             const fm = await getFileFrontmatter(path)
-            cache.set(path, fm)
-            changed = true
+            if (!cancelled) {
+              cache.set(path, fm)
+              changed = true
+            }
           } catch {
             // ignore
           }
         }
       }
 
-      if (changed) {
+      if (changed && !cancelled) {
         setFrontmatterCache(cache)
       }
     }
 
     loadFrontmatter()
+    return () => { cancelled = true }
   }, [nodes])
 
   // Refresh frontmatter cache when a file is saved
   useEffect(() => {
-    const handleFileSaved = (e: CustomEvent) => {
+    const handleFileSaved = async (e: CustomEvent) => {
       const savedPath = e.detail?.path
       if (savedPath && savedPath.toLowerCase().endsWith('.md')) {
+        // Remove from cache
         setFrontmatterCache(prev => {
           const next = new Map(prev)
           next.delete(savedPath)
           return next
         })
+        // Re-fetch immediately so sort order stays correct
+        try {
+          const fm = await getFileFrontmatter(savedPath)
+          setFrontmatterCache(prev => {
+            const next = new Map(prev)
+            next.set(savedPath, fm)
+            return next
+          })
+        } catch {
+          // ignore
+        }
       }
     }
-    window.addEventListener('file-saved', handleFileSaved as EventListener)
-    return () => window.removeEventListener('file-saved', handleFileSaved as EventListener)
+    window.addEventListener('file-saved', handleFileSaved as unknown as EventListener)
+    return () => window.removeEventListener('file-saved', handleFileSaved as unknown as EventListener)
   }, [])
 
   // ── 操作逻辑（重命名/新建/删除）──

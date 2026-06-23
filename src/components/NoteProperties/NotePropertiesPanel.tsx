@@ -227,6 +227,7 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
       const trimmed = newKey.trim()
       if (!trimmed || trimmed === oldKey) return
       if (trimmed in frontmatter) return // avoid duplicate key
+      if (isStandardKey(trimmed)) return // prevent renaming to a standard key
       const entries = Object.entries(frontmatter)
       const next: Record<string, unknown> = {}
       for (const [k, v] of entries) {

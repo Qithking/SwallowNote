@@ -8,6 +8,14 @@ const FRONTMATTER_DELIMITER = '---'
  * Expects the frontmatter block to start at the very first character.
  */
 export function parseFrontmatter(content: string): FrontmatterParseResult {
+  // Strip UTF-8 BOM if present
+  if (content.charCodeAt(0) === 0xFEFF) {
+    content = content.slice(1)
+  }
+
+  // Normalize CRLF to LF
+  content = content.replace(/\r\n/g, '\n')
+
   if (!content.startsWith(FRONTMATTER_DELIMITER)) {
     return { data: {}, body: content, raw: '' }
   }
@@ -17,13 +25,20 @@ export function parseFrontmatter(content: string): FrontmatterParseResult {
     return { data: {}, body: content, raw: '' }
   }
 
-  const closingIndex = content.indexOf(FRONTMATTER_DELIMITER, firstDelimiterEnd + 1)
-  if (closingIndex === -1) {
-    return { data: {}, body: content, raw: '' }
+  // Search for the closing delimiter that sits at the start of a line.
+  // A `---` appearing inside a YAML value must not be treated as the closer.
+  let searchFrom = firstDelimiterEnd + 1
+  let closingIndex = -1
+  while (true) {
+    const idx = content.indexOf(FRONTMATTER_DELIMITER, searchFrom)
+    if (idx === -1) break
+    if (content[idx - 1] === '\n') {
+      closingIndex = idx
+      break
+    }
+    searchFrom = idx + 1
   }
-
-  // Ensure the closing delimiter is at the start of a line
-  if (content[closingIndex - 1] !== '\n') {
+  if (closingIndex === -1) {
     return { data: {}, body: content, raw: '' }
   }
 

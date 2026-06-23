@@ -644,7 +644,11 @@
     "installAndRestart": "安装并重启",
     "syncing": "同步中...",
     "syncResult": "同步：成功 {{succeeded}} 个，失败 {{failed}} 个",
-    "syncConflicted": "{{count}} 个冲突"
+    "syncConflicted": "{{count}} 个冲突",
+    "yamlIndexProgress": "YAML索引：{{current}}/{{total}}",
+    "yamlIndexDone": "YAML索引：完成",
+    "yamlIndexProgressTooltip": "正在索引YAML元数据 {{current}}/{{total}}",
+    "yamlIndexDoneTooltip": "YAML元数据索引已完成"
   },
   "recent": {
     "workspaceName": "工作区",

@@ -2,7 +2,7 @@
  * StatusBar Component - Bottom status bar
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
+import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Database } from 'lucide-react'
 import { useUIStore, useGitStore } from '@/stores'
 import { checkLatestVersion, downloadLatestRelease, openInstaller, installAndRestart, DownloadProgress } from '@/lib/tauri'
 import { open } from '@tauri-apps/plugin-shell'
@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import packageJson from '../../package.json'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 
 type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-failed' | 'downloading' | 'download-ready' | 'download-failed'
@@ -48,10 +49,33 @@ function StatusBar() {
   // Keep the ref in sync with the state
   versionStatusRef.current = versionStatus
 
+  // Frontmatter 索引进度状态
+  const [fmIndexCurrent, setFmIndexCurrent] = useState<number>(0)
+  const [fmIndexTotal, setFmIndexTotal] = useState<number>(0)
+  const [fmIndexDone, setFmIndexDone] = useState<boolean>(false)
+
   useEffect(() => {
     checkDownloadedInstaller()
+
+    // 监听 frontmatter 索引进度事件
+    const unlisten = listen<{ current: number; total: number; done?: boolean }>(
+      'frontmatter-index-progress',
+      (event) => {
+        if (event.payload.done) {
+          setFmIndexDone(true)
+          setFmIndexCurrent(0)
+          setFmIndexTotal(0)
+        } else {
+          setFmIndexCurrent(event.payload.current)
+          setFmIndexTotal(event.payload.total)
+          setFmIndexDone(false)
+        }
+      },
+    )
+
     return () => {
       cancelDownloadRef.current?.()
+      unlisten.then((fn) => fn())
     }
   }, [])
 
@@ -360,6 +384,29 @@ function StatusBar() {
       >
         {/* Left Section */}
         <div className="flex items-center gap-2">
+          {/* Frontmatter 索引进度 */}
+          {(fmIndexTotal > 0 || fmIndexDone) && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="flex items-center gap-1 opacity-60 hover:opacity-100">
+                  <Database size={12} />
+                  <span className="text-[11px]">
+                    {fmIndexDone
+                      ? t('statusBar.yamlIndexDone')
+                      : t('statusBar.yamlIndexProgress', { current: fmIndexCurrent, total: fmIndexTotal })}
+                  </span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {fmIndexDone
+                  ? t('statusBar.yamlIndexDoneTooltip')
+                  : t('statusBar.yamlIndexProgressTooltip', { current: fmIndexCurrent, total: fmIndexTotal })}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {(fmIndexTotal > 0 || fmIndexDone) && syncStatus.lastSyncTime != null && (
+            <span className="opacity-30">|</span>
+          )}
           {syncStatus.lastSyncTime != null && (
             <Tooltip>
               <TooltipTrigger asChild>

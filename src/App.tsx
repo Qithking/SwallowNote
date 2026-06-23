@@ -681,8 +681,9 @@ function App() {
       case 'history': return <Suspense fallback={null}><HistoryView visible={true} /></Suspense>
       case 'editorSettings': return <Suspense fallback={null}><EditorSettings /></Suspense>
       case 'noteProperties': {
-        const fm = activeTab?.frontmatter
-        return <NotePropertiesPanel tabId={activeTab!.id} frontmatter={fm || {}} />
+        if (!activeTab) return null
+        const fm = activeTab.frontmatter
+        return <NotePropertiesPanel tabId={activeTab.id} frontmatter={fm || {}} />
       }
       default: return null
     }

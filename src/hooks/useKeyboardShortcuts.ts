@@ -4,8 +4,9 @@ import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { openFolderDialog, openWorkspaceDialog, createFile, writeFile } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
 import { injectDefaultFrontmatter } from '@/lib/utils/frontmatter'
+import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { invoke } from '@tauri-apps/api/core'
-import { emitLocaleChanged } from '@/lib/plugin-host'
+import { emitLocaleChanged, emitNoteSaved } from '@/lib/plugin-host'
 import { listPluginCommands } from '@/lib/plugin-commands'
 import { toast } from 'sonner'
 import i18n from 'i18next'
@@ -171,9 +172,10 @@ async function handleSaveFile() {
     // For .md files, merge frontmatter with body before writing
     const isMarkdown = activeTab.path.toLowerCase().endsWith('.md')
     let writeContent = activeTab.content
+    let fm: NoteFrontmatter | undefined
     if (isMarkdown) {
       const { serializeFrontmatter, stripFrontmatter } = await import('@/lib/utils/frontmatter')
-      const fm = { ...(activeTab.frontmatter || {}), updated: new Date().toISOString() }
+      fm = { ...(activeTab.frontmatter || {}), updated: new Date().toISOString() }
       // stripFrontmatter is defensive: tab.content normally holds only
       // the body, but source mode edits may store the full file content.
       const body = stripFrontmatter(activeTab.content ?? '')
@@ -182,9 +184,13 @@ async function handleSaveFile() {
     await writeFile(activeTab.path, writeContent)
     useEditorStore.setState((state) => ({
       tabs: state.tabs.map((t) =>
-        t.id === activeTab.id ? { ...t, isDirty: false, isEdited: false, frontmatterDirty: false } : t
+        t.id === activeTab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
       ),
     }))
+    // Notify plugins: the note has been successfully persisted.
+    // We emit after the store commit so the `isDirty=false` state
+    // is observable by subscribers reading from the store.
+    queueMicrotask(() => emitNoteSaved(activeTab.id, activeTab.path))
     // Invalidate frontmatter cache so search/file-tree use fresh data
     if (isMarkdown) {
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
