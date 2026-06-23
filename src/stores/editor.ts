@@ -504,20 +504,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         // For .md files, merge frontmatter with body before writing
         const isMarkdown = tab.path.toLowerCase().endsWith('.md')
         let writeContent = tab.content
+        let fm: NoteFrontmatter | undefined
         if (isMarkdown) {
-          const fm = { ...(tab.frontmatter || {}), updated: new Date().toISOString() }
+          fm = { ...(tab.frontmatter || {}), updated: new Date().toISOString() }
           // stripFrontmatter is defensive: tab.content normally holds only
           // the body (loadTabContent strips frontmatter on load), but source
           // mode edits may store the full file content including frontmatter.
           // Calling stripFrontmatter on an already-stripped body is a no-op.
           const body = stripFrontmatter(tab.content ?? '')
           writeContent = serializeFrontmatter(fm, body)
-          // Update store frontmatter to match what was written
-          set((state) => ({
-            tabs: state.tabs.map((t) =>
-              t.id === tab.id ? { ...t, frontmatter: fm } : t
-            ),
-          }))
         }
 
         await writeFile(tab.path, writeContent)
@@ -528,25 +523,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             await invoke('index_saved_file', { path: tab.path })
           } catch { /* 静默失败，索引线程会异步补偿 */ }
         }
-        // Invalidate frontmatter cache so search/file-tree use fresh data
-        if (isMarkdown) {
-          const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          invalidateFrontmatterCache(tab.path)
-        }
         set((state) => ({
           tabs: state.tabs.map((t) =>
-            t.id === tab.id ? { ...t, isDirty: false, isEdited: false, frontmatterDirty: false } : t
+            t.id === tab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
           ),
         }))
         // Notify plugins: a dirty tab has been successfully persisted.
         // We emit after the store commit so the `isDirty=false` state
         // is observable by subscribers reading from the store.
         queueMicrotask(() => emitNoteSaved(tab.id, tab.path))
+        // Invalidate frontmatter cache so search/file-tree use fresh data
+        if (isMarkdown) {
+          const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
+          invalidateFrontmatterCache(tab.path)
+        }
+        window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: tab.path } }))
         // Auto commit if file is in a git repo (async, non-blocking)
         try {
           await gitAutoCommit(tab.path)
         } catch { /* ignore */ }
-        window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: tab.path } }))
       } catch (e) {
         console.error('Failed to save tab:', tab.path, e)
         window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))

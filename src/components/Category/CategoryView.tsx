@@ -111,7 +111,6 @@ export function CategoryView() {
         await invoke('rename_category', { oldPath: editingPath, newPath })
         // 同步更新已打开 tab 的 frontmatter.categories
         useEditorStore.getState().renameCategoryInTabs(editingPath, newPath)
-        // 等待后端完成后再刷新分类树
         await useCategoryStore.getState().loadTree()
       } catch {
         // 静默失败
@@ -131,7 +130,6 @@ export function CategoryView() {
       await invoke('delete_category', { path })
       // 同步更新已打开 tab 的 frontmatter.categories
       useEditorStore.getState().removeCategoryFromTabs(path)
-      // 等待后端完成后再刷新分类树
       await useCategoryStore.getState().loadTree()
     } catch {
       // 静默失败

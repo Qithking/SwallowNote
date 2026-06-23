@@ -848,4 +848,73 @@ categories:
         assert!(!categories.is_empty(), "categories should not be empty, got empty string");
         assert!(categories.contains("ssddd"), "categories should contain 'ssddd', got: {}", categories);
     }
+
+    #[test]
+    fn test_get_category_tree_normal_hierarchy() {
+        // 验证正常层级分类树构建正确
+        let db = create_test_db();
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO categories (path) VALUES (?1), (?2), (?3), (?4)",
+            params!["技术", "技术/前端", "技术/前端/React", "技术/后端"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO md_frontmatter (file_path, categories, modified_at) VALUES (?1, ?2, ?3), (?4, ?5, ?6), (?7, ?8, ?9)",
+            params![
+                "/test/react.md", "[\"技术/前端/React\"]", "2026-06-23T00:00:00Z",
+                "/test/frontend.md", "[\"技术/前端\"]", "2026-06-23T00:00:00Z",
+                "/test/backend.md", "[\"技术/后端\"]", "2026-06-23T00:00:00Z",
+            ],
+        ).unwrap();
+        drop(conn);
+
+        let tree = get_category_tree(&db).unwrap();
+        assert_eq!(tree.len(), 1, "应只有一个根节点");
+        assert_eq!(tree[0].path, "技术");
+        assert_eq!(tree[0].children.len(), 2, "技术下应有 前端 和 后端");
+
+        // 子节点按名称排序（前 < 后）
+        assert_eq!(tree[0].children[0].path, "技术/前端");
+        assert_eq!(tree[0].children[0].count, 1);
+        assert_eq!(tree[0].children[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].children[0].path, "技术/前端/React");
+        assert_eq!(tree[0].children[0].children[0].count, 1);
+        assert_eq!(tree[0].children[1].path, "技术/后端");
+        assert_eq!(tree[0].children[1].count, 1);
+    }
+
+    #[test]
+    fn test_get_category_tree_orphan_nodes_not_lost() {
+        // 验证父路径缺失时，子分类作为孤立根节点保留，不会丢失
+        let db = create_test_db();
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO categories (path) VALUES (?1), (?2), (?3)",
+            params!["技术/前端/React", "笔记", "其他/A/B"],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO md_frontmatter (file_path, categories, modified_at) VALUES (?1, ?2, ?3), (?4, ?5, ?6), (?7, ?8, ?9)",
+            params![
+                "/test/react.md", "[\"技术/前端/React\"]", "2026-06-23T00:00:00Z",
+                "/test/note.md", "[\"笔记\"]", "2026-06-23T00:00:00Z",
+                "/test/ab.md", "[\"其他/A/B\"]", "2026-06-23T00:00:00Z",
+            ],
+        ).unwrap();
+        drop(conn);
+
+        let tree = get_category_tree(&db).unwrap();
+        // 所有分类都缺少父路径，应全部作为根节点保留
+        assert_eq!(tree.len(), 3, "孤立节点应作为根节点保留，不应丢失");
+
+        let paths: Vec<String> = tree.iter().map(|n| n.path.clone()).collect();
+        assert!(paths.contains(&"技术/前端/React".to_string()));
+        assert!(paths.contains(&"笔记".to_string()));
+        assert!(paths.contains(&"其他/A/B".to_string()));
+
+        // 验证文件关联未丢失
+        let react = tree.iter().find(|n| n.path == "技术/前端/React").unwrap();
+        assert_eq!(react.count, 1);
+        assert_eq!(react.files.len(), 1);
+        assert_eq!(react.files[0].file_path, "/test/react.md");
+    }
 }

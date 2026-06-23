@@ -266,7 +266,12 @@ fn handle_file_changed(db: &db::Database, file_path: &str) {
 }
 
 /// 处理单文件删除
+/// 注意：原子保存（先写 .tmp 再 rename）会触发 rename 事件，新路径对应的文件仍然存在。
+/// 如果文件依旧存在，说明是 rename target，不应删除 frontmatter，避免覆盖同步保存结果。
 fn handle_file_removed(db: &db::Database, file_path: &str) {
+    if Path::new(file_path).exists() {
+        return;
+    }
     let _ = crate::db::md_frontmatter::delete_frontmatter(db, file_path);
 }
 
