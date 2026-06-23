@@ -1116,7 +1116,7 @@ const manifest: PluginManifest = {
   id: 'com.swallownote.export',
   name: '文档导出',
   description: '将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式',
-  version: '0.2.3',
+  version: '0.2.4',
   author: 'SwallowNote',
   publishedAt: '2026-06-13',
   iconPosition: 'editorToolbar',
