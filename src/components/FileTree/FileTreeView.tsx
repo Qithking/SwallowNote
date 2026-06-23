@@ -388,7 +388,7 @@ export const FileTreeView = memo(function FileTreeView() {
       const cache = new Map(frontmatterCacheRef.current)
       let changed = false
 
-      // Collect all .md file paths from the tree
+      // 收集所有 .md 文件路径
       const collectMdPaths = (fileNodes: FileNode[]): string[] => {
         const paths: string[] = []
         for (const node of fileNodes) {
@@ -403,17 +403,32 @@ export const FileTreeView = memo(function FileTreeView() {
       }
 
       const mdPaths = collectMdPaths(nodes)
-      for (const path of mdPaths) {
+      // 清理不在当前树中的过期缓存条目
+      const mdPathSet = new Set(mdPaths)
+      for (const key of cache.keys()) {
+        if (!mdPathSet.has(key)) {
+          cache.delete(key)
+          changed = true
+        }
+      }
+      // 过滤出未缓存的路径
+      const uncachedPaths = mdPaths.filter((p) => !cache.has(p))
+      if (uncachedPaths.length === 0) return
+
+      // 分批并发加载，每批 5 个，避免 IPC 过载
+      const BATCH_SIZE = 5
+      for (let i = 0; i < uncachedPaths.length; i += BATCH_SIZE) {
         if (cancelled) return
-        if (!cache.has(path)) {
-          try {
-            const fm = await getFileFrontmatter(path)
-            if (!cancelled) {
-              cache.set(path, fm)
-              changed = true
-            }
-          } catch {
-            // ignore
+        const batch = uncachedPaths.slice(i, i + BATCH_SIZE)
+        const results = await Promise.allSettled(
+          batch.map((path) => getFileFrontmatter(path))
+        )
+        if (cancelled) return
+        for (let j = 0; j < results.length; j++) {
+          const result = results[j]
+          if (result.status === 'fulfilled') {
+            cache.set(batch[j], result.value)
+            changed = true
           }
         }
       }

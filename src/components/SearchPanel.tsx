@@ -147,9 +147,9 @@ function SearchPanel() {
             {query ? t('search.noResults') : t('search.placeholder')}
           </div>
         ) : (
-          results.map((result, index) => (
+          results.map((result) => (
             <div
-              key={index}
+              key={`${result.path}:${result.line}`}
               className="p-3 hover:bg-accent cursor-pointer border-b border-border last:border-b-0"
             >
               <div className="flex items-center gap-2 text-sm">

@@ -89,6 +89,12 @@ pub fn create_table(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // 为 categories 非空行建部分索引，加速 json_each 查询的 WHERE 过滤
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_md_frontmatter_categories_not_null ON md_frontmatter(categories) WHERE categories IS NOT NULL AND categories != '[]'",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -507,42 +513,46 @@ pub fn search_frontmatter(
 
 /// 获取分类树：以 categories 表为主数据源构建树形结构，从 md_frontmatter 获取文件关联
 pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
-    let conn = db.conn.lock().unwrap();
+    // Phase 1: 在锁内查询原始数据，锁外构建树
+    let (all_paths_set, file_associations) = {
+        let conn = db.conn.lock().unwrap();
 
-    // 1. 从 categories 表获取所有分类路径（主数据源）
-    //    严格只使用表中实际存在的路径，不再人为补全父路径
-    //    父路径由 sync_categories_from_frontmatter 启动时/索引时写入
-    let mut cat_stmt = conn.prepare("SELECT path FROM categories ORDER BY path")?;
-    let cat_rows = cat_stmt.query_map([], |row| row.get::<_, String>(0))?;
+        // 从 categories 表获取所有分类路径
+        let mut cat_stmt = conn.prepare("SELECT path FROM categories ORDER BY path")?;
+        let cat_rows = cat_stmt.query_map([], |row| row.get::<_, String>(0))?;
 
-    let mut all_paths_set: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for cat_path in cat_rows.flatten() {
-        all_paths_set.insert(cat_path);
-    }
+        let mut all_paths_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for cat_path in cat_rows.flatten() {
+            all_paths_set.insert(cat_path);
+        }
 
-    if all_paths_set.is_empty() {
-        return Ok(Vec::new());
-    }
+        if all_paths_set.is_empty() {
+            return Ok(Vec::new());
+        }
 
-    // 2. 从 md_frontmatter 获取文件关联
-    let mut stmt = conn.prepare("SELECT categories, file_path, title FROM md_frontmatter WHERE categories IS NOT NULL AND categories != '[]'")?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-        ))
-    })?;
+        // 从 md_frontmatter 获取文件关联
+        let mut stmt = conn.prepare("SELECT categories, file_path, title FROM md_frontmatter WHERE categories IS NOT NULL AND categories != '[]'")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
 
+        let mut file_associations: Vec<(String, String, Option<String>)> = Vec::new();
+        for v in rows.flatten() {
+            file_associations.push(v);
+        }
+
+        (all_paths_set, file_associations)
+    }; // ← 锁在这里释放
+
+    // Phase 2: 在锁外构建树（纯内存操作，无需数据库访问）
     let mut category_counts: HashMap<String, usize> = HashMap::new();
     let mut category_files: HashMap<String, Vec<CategoryFile>> = HashMap::new();
 
-    for row in rows {
-        let (categories_str, file_path, title) = match row {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
+    for (categories_str, file_path, title) in file_associations {
         let categories: Vec<String> = match serde_json::from_str(&categories_str) {
             Ok(v) => v,
             Err(_) => continue,
@@ -557,7 +567,7 @@ pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
         }
     }
 
-    // 3. 构建树
+    // 构建树
     let mut all_paths: Vec<String> = all_paths_set.into_iter().collect();
     all_paths.sort();
 
@@ -587,22 +597,19 @@ pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
             let parent_path = &path[..last_slash];
             if let Some(child) = node_map.remove(path) {
                 if let Some(parent) = node_map.get_mut(parent_path) {
-                    // 父节点存在，直接挂载
                     parent.children.push(child);
                 } else {
-                    // 父路径不在 categories 表中，作为根节点
                     root_nodes.push(child);
                 }
             }
         } else {
-            // 根级节点（没有 '/'），直接加入根节点列表
             if let Some(node) = node_map.remove(path) {
                 root_nodes.push(node);
             }
         }
     }
 
-    // 处理剩余的节点（理论上不应该有，但做防御性处理）
+    // 处理剩余的节点
     for (_, node) in node_map {
         root_nodes.push(node);
     }

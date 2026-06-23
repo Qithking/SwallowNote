@@ -86,6 +86,8 @@ function App() {
   const pendingCloseRef = useRef(false)
   // 防止 Radix AlertDialog 的 onOpenChange 在 Save/Discard 点击后干扰关闭流程
   const actionTakenRef = useRef(false)
+  // rAF 节流：拖拽面板宽度时每帧最多更新一次
+  const rafRef = useRef<number | null>(null)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
   const { saveSessionStateNow, restoreSessionState } = useSessionPersistence()
@@ -572,11 +574,16 @@ function App() {
 
   const handleMouseMoveLeft = useCallback((e: MouseEvent) => {
     if (!isDraggingLeft) return
-    const newWidth = e.clientX - 48
-    const maxWidth = window.innerWidth * 0.5
-    if (newWidth >= 200 && newWidth <= maxWidth) {
-      setSidebarWidth(newWidth)
-    }
+    if (rafRef.current) return
+    const clientX = e.clientX
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      const newWidth = clientX - 48
+      const maxWidth = window.innerWidth * 0.5
+      if (newWidth >= 200 && newWidth <= maxWidth) {
+        setSidebarWidth(newWidth)
+      }
+    })
   }, [isDraggingLeft])
 
   const handleMouseDownRight = useCallback(() => {
@@ -585,14 +592,23 @@ function App() {
 
   const handleMouseMoveRight = useCallback((e: MouseEvent) => {
     if (!isDraggingRight) return
-    const newWidth = window.innerWidth - e.clientX
-    const maxWidth = window.innerWidth * 0.5
-    if (newWidth >= 250 && newWidth <= maxWidth) {
-      setRightPanelWidth(newWidth)
-    }
+    if (rafRef.current) return
+    const clientX = e.clientX
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      const newWidth = window.innerWidth - clientX
+      const maxWidth = window.innerWidth * 0.5
+      if (newWidth >= 250 && newWidth <= maxWidth) {
+        setRightPanelWidth(newWidth)
+      }
+    })
   }, [isDraggingRight])
 
   const handleMouseUp = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
     setIsDraggingLeft(false)
     setIsDraggingRight(false)
   }, [])

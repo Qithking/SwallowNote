@@ -142,10 +142,10 @@ const HighlightMatches = memo(function HighlightMatches({ content, query }: { co
   
   return (
     <>
-      {parts.map((part, i) => 
-        part.highlighted 
-          ? <span key={i} style={{ backgroundColor: 'rgba(255, 200, 0, 0.4)' }}>{part.text}</span>
-          : <span key={i}>{part.text}</span>
+      {parts.map((part, i) =>
+        part.highlighted
+          ? <span key={`h-${i}`} style={{ backgroundColor: 'rgba(255, 200, 0, 0.4)' }}>{part.text}</span>
+          : <span key={`p-${i}`}>{part.text}</span>
       )}
     </>
   )
