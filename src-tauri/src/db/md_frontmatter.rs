@@ -402,8 +402,7 @@ pub fn search_frontmatter(
     db: &Database,
     filters: HashMap<String, String>,
 ) -> Result<Vec<FrontmatterRecord>> {
-    let conn = db.conn.lock().unwrap();
-
+    // Phase 1: 锁外构建 SQL（纯字符串操作，无需持锁）
     let mut conditions: Vec<String> = Vec::new();
     let mut param_values: Vec<String> = Vec::new();
     let mut param_idx = 1;
@@ -420,7 +419,6 @@ pub fn search_frontmatter(
                 param_idx += 1;
             }
             "tags" => {
-                // 逗号分隔的多个 tag，任一匹配（使用 json_each 精确匹配）
                 let tag_list: Vec<&str> = val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
                 let mut tag_conds = Vec::new();
                 for tag in tag_list {
@@ -433,7 +431,6 @@ pub fn search_frontmatter(
                 }
             }
             "categories" => {
-                // 前缀匹配（使用 json_each 精确匹配后判断前缀）
                 let cat_list: Vec<&str> = val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
                 let mut cat_conds = Vec::new();
                 for cat in cat_list {
@@ -456,13 +453,9 @@ pub fn search_frontmatter(
                 param_idx += 1;
             }
             _ => {
-                // 自定义字段：从 extra_yaml JSON 中提取
-                // key 安全校验：允许 Unicode 字母数字、下划线、连字符、斜杠
-                // is_alphanumeric() 已包含中文等所有 Unicode 字母
                 if !key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '/') {
                     continue;
                 }
-                // 使用 CAST 将 json_extract 结果转为 TEXT，确保 LIKE 可匹配
                 conditions.push(format!("CAST(json_extract(extra_yaml, '$.{}') AS TEXT) LIKE ?{}", key, param_idx));
                 param_values.push(format!("%{}%", val));
                 param_idx += 1;
@@ -481,33 +474,52 @@ pub fn search_frontmatter(
         )
     };
 
-    let mut stmt = conn.prepare(&sql)?;
+    // Phase 2: 锁内执行查询并收集原始数据
+    let raw_rows = {
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, i32>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, String>(13)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    }; // ← 锁释放
 
-    let params: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    // Phase 3: 锁外构建 FrontmatterRecord 对象
+    let records = raw_rows.into_iter().map(|(id, file_path, title, created, updated, tags, categories, author, status, pinned, extra_yaml, raw_yaml, modified_at, indexed_at)| {
+        FrontmatterRecord {
+            id,
+            file_path,
+            title,
+            created,
+            updated,
+            tags,
+            categories,
+            author,
+            status,
+            pinned: pinned != 0,
+            extra_yaml,
+            raw_yaml,
+            modified_at,
+            indexed_at,
+        }
+    }).collect();
 
-    let rows = stmt.query_map(params.as_slice(), |row| {
-        Ok(FrontmatterRecord {
-            id: row.get(0)?,
-            file_path: row.get(1)?,
-            title: row.get(2)?,
-            created: row.get(3)?,
-            updated: row.get(4)?,
-            tags: row.get(5)?,
-            categories: row.get(6)?,
-            author: row.get(7)?,
-            status: row.get(8)?,
-            pinned: row.get::<_, i32>(9)? != 0,
-            extra_yaml: row.get(10)?,
-            raw_yaml: row.get(11)?,
-            modified_at: row.get(12)?,
-            indexed_at: row.get(13)?,
-        })
-    })?;
-
-    let mut records = Vec::new();
-    for record in rows {
-        records.push(record?);
-    }
     Ok(records)
 }
 
@@ -628,20 +640,22 @@ pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
 
 /// 重命名分类：将所有记录中包含 old_path 的 categories 更新为 new_path
 pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<usize> {
-    let conn = db.conn.lock().unwrap();
+    // Phase 1: 锁内查询匹配行
+    let rows_data = {
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
+        )?;
+        let prefix_pattern = format!("{}/%", old_path);
+        let rows = stmt.query_map(params![old_path, prefix_pattern], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    }; // ← 锁释放
 
-    // 查询所有包含 old_path 的记录（使用 json_each 精确匹配）
-    let mut stmt = conn.prepare(
-        "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
-    )?;
-    let prefix_pattern = format!("{}/%", old_path);
-    let rows = stmt.query_map(params![old_path, prefix_pattern], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-    })?;
-
-    let mut updated = 0;
-    for row in rows {
-        let (id, categories_str) = row?;
+    // Phase 2: 锁外解析 JSON + 修改分类路径
+    let mut updates: Vec<(String, i64)> = Vec::new();
+    for (id, categories_str) in rows_data {
         let mut categories: Vec<String> = match serde_json::from_str(&categories_str) {
             Ok(v) => v,
             Err(_) => continue,
@@ -660,63 +674,77 @@ pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<
 
         if changed {
             let new_categories_str = serde_json::to_string(&categories).unwrap_or_default();
-            conn.execute(
-                "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
-                params![new_categories_str, id],
-            )?;
-            updated += 1;
+            updates.push((new_categories_str, id));
         }
     }
 
-    Ok(updated)
+    // Phase 3: 锁内批量 UPDATE
+    if updates.is_empty() { return Ok(0); }
+    let conn = db.conn.lock().unwrap();
+    for (new_categories_str, id) in &updates {
+        conn.execute(
+            "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
+            params![new_categories_str, id],
+        )?;
+    }
+    Ok(updates.len())
 }
 
 /// 删除分类：从所有记录的 categories 中移除该分类路径，并从 categories 表中删除
 pub fn delete_category(db: &Database, path: &str) -> Result<usize> {
-    let conn = db.conn.lock().unwrap();
+    // Phase 1: 锁内查询匹配行
+    let rows_data = {
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
+        )?;
+        let prefix_pattern = format!("{}/%", path);
+        let rows = stmt.query_map(params![path, prefix_pattern], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    }; // ← 锁释放
 
-    // 查询所有包含 path 的记录（使用 json_each 精确匹配）
-    let mut stmt = conn.prepare(
-        "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
-    )?;
-    let prefix_pattern = format!("{}/%", path);
-    let rows = stmt.query_map(params![path, prefix_pattern], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-    })?;
-
-    let mut updated = 0;
-    for row in rows {
-        let (id, categories_str) = row?;
+    // Phase 2: 锁外解析 JSON + 移除分类
+    let mut updates: Vec<(Option<String>, i64)> = Vec::new();
+    for (id, categories_str) in rows_data {
         let mut categories: Vec<String> = match serde_json::from_str(&categories_str) {
             Ok(v) => v,
             Err(_) => continue,
         };
 
-        // 移除该分类及其子分类
         let original_len = categories.len();
         categories.retain(|cat| cat != path && !cat.starts_with(&format!("{}/", path)));
 
         if categories.len() != original_len {
             if categories.is_empty() {
-                conn.execute(
-                    "UPDATE md_frontmatter SET categories = NULL WHERE id = ?1",
-                    params![id],
-                )?;
+                updates.push((None, id));
             } else {
                 let new_categories_str = serde_json::to_string(&categories).unwrap_or_default();
-                conn.execute(
-                    "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
-                    params![new_categories_str, id],
-                )?;
+                updates.push((Some(new_categories_str), id));
             }
-            updated += 1;
         }
     }
 
-    // 同时从 categories 表中删除该分类及其子分类
+    // Phase 3: 锁内批量 UPDATE + DELETE
+    let conn = db.conn.lock().unwrap();
+    for (new_categories_opt, id) in &updates {
+        if let Some(ref new_categories_str) = new_categories_opt {
+            conn.execute(
+                "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
+                params![new_categories_str, id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE md_frontmatter SET categories = NULL WHERE id = ?1",
+                params![id],
+            )?;
+        }
+    }
+    // 从 categories 表中删除该分类及其子分类
     conn.execute("DELETE FROM categories WHERE path = ?1 OR path LIKE ?2", params![path, format!("{}/%", path)])?;
 
-    Ok(updated)
+    Ok(updates.len())
 }
 
 /// 将 serde_yaml::Value 转换为 serde_json::Value

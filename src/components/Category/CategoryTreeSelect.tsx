@@ -57,7 +57,7 @@ export function CategoryTreeSelect({ value, onChange }: CategoryTreeSelectProps)
         return false
       }
       if (!categoryExists(tree, trimmed)) {
-        invoke('create_category', { path: trimmed }).catch(() => {})
+        invoke('create_category', { path: trimmed }).catch((e) => console.error('Failed to create category:', trimmed, e))
       }
       setNewCategory('')
       setShowNewInput(false)

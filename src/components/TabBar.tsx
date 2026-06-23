@@ -111,12 +111,18 @@ function TabBar() {
     }
   }
 
+  const rafRef = useRef<number | null>(null)
+
   const checkScroll = useCallback(() => {
-    if (!scrollRef.current) return
-    const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current
-    setCanScrollLeft(scrollLeft > 0)
-    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 1)
-    setIsOverflowing(scrollWidth > clientWidth)
+    if (rafRef.current) return
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      if (!scrollRef.current) return
+      const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current
+      setCanScrollLeft(scrollLeft > 0)
+      setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 1)
+      setIsOverflowing(scrollWidth > clientWidth)
+    })
   }, [])
 
   useEffect(() => {
@@ -127,6 +133,10 @@ function TabBar() {
       window.addEventListener('resize', checkScroll)
     }
     return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
       if (el) {
         el.removeEventListener('scroll', checkScroll)
       }

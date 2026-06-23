@@ -31,6 +31,7 @@ export function findConflictingPluginCommandKey(e: KeyboardEvent): string | null
  * preventDefault 仅在匹配成功后调用。
  */
 const PLUGIN_CONFLICT_THROTTLE_MS = 200
+const MAX_CONFLICT_ENTRIES = 100
 const lastPluginConflictShownAt = new Map<string, number>()
 
 export function dispatchBuiltin(
@@ -51,6 +52,11 @@ export function dispatchBuiltin(
     const lastShown = lastPluginConflictShownAt.get(pluginBinding) ?? 0
     if (now - lastShown >= PLUGIN_CONFLICT_THROTTLE_MS) {
       lastPluginConflictShownAt.set(pluginBinding, now)
+      // 淘汰最旧条目，防止 Map 无限增长
+      if (lastPluginConflictShownAt.size > MAX_CONFLICT_ENTRIES) {
+        const oldest = lastPluginConflictShownAt.keys().next().value!
+        lastPluginConflictShownAt.delete(oldest)
+      }
       // toast 描述携带内置 action 名
       toast(i18n.t('settings.pluginCommandShadowed', { id: pluginId }), {
         // Wave A / C1: stable id so the same conflict
