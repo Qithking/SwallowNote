@@ -27,12 +27,14 @@ export function parseFrontmatter(content: string): FrontmatterParseResult {
 
   // Search for the closing delimiter that sits at the start of a line.
   // A `---` appearing inside a YAML value must not be treated as the closer.
+  // Note: CRLF has been normalized to LF at line 17, so we only check for \n
   let searchFrom = firstDelimiterEnd + 1
   let closingIndex = -1
   while (true) {
     const idx = content.indexOf(FRONTMATTER_DELIMITER, searchFrom)
     if (idx === -1) break
-    if (content[idx - 1] === '\n') {
+    // Check if at line start (preceded by \n)
+    if (idx > 0 && content[idx - 1] === '\n') {
       closingIndex = idx
       break
     }
@@ -53,9 +55,13 @@ export function parseFrontmatter(content: string): FrontmatterParseResult {
 
   let data: NoteFrontmatter = {}
   if (yamlStr.trim().length > 0) {
-    const parsed = yaml.load(yamlStr)
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      data = parsed as NoteFrontmatter
+    try {
+      const parsed = yaml.load(yamlStr)
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        data = parsed as NoteFrontmatter
+      }
+    } catch (error) {
+      console.warn('Failed to parse frontmatter YAML:', error)
     }
   }
 
@@ -65,6 +71,10 @@ export function parseFrontmatter(content: string): FrontmatterParseResult {
 /**
  * Serialize frontmatter data and body into a complete Markdown string.
  * If data is empty, returns body directly without a frontmatter block.
+ * 
+ * Note: js-yaml's dump() handles special character escaping automatically,
+ * including quotes, newlines, Unicode characters, and control characters.
+ * The quoteStyle: 'double' option ensures consistent quoting.
  */
 export function serializeFrontmatter(data: NoteFrontmatter, body: string): string {
   if (Object.keys(data).length === 0) {

@@ -182,6 +182,16 @@ async function handleSaveFile() {
       writeContent = serializeFrontmatter(fm, body)
     }
     await writeFile(activeTab.path, writeContent)
+    // 保存 .md 文件后，同步更新 md_frontmatter 表
+    // 确保分类面板刷新时能立即查到最新的文件关联
+    if (isMarkdown) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('index_saved_file', { path: activeTab.path })
+      } catch {
+        // 静默失败，索引线程会异步补偿
+      }
+    }
     useEditorStore.setState((state) => ({
       tabs: state.tabs.map((t) =>
         t.id === activeTab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
@@ -196,13 +206,13 @@ async function handleSaveFile() {
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
       invalidateFrontmatterCache(activeTab.path)
     }
+    window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
     const { gitAutoCommit } = await import('@/lib/tauri')
     try {
       await gitAutoCommit(activeTab.path)
     } catch {
       // git auto-commit is best-effort; failures (no git repo, no identity) are non-fatal
     }
-    window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
   } catch (e) {
     console.error('Failed to save file:', e)
   } finally {

@@ -8,6 +8,27 @@ const STANDARD_KEYS: &[&str] = &[
     "title", "created", "updated", "tags", "categories", "author", "status", "pinned",
 ];
 
+/// 分类树节点
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CategoryFile {
+    pub file_path: String,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CategoryNode {
+    /// 节点名称（如 "React"）
+    pub name: String,
+    /// 完整路径（如 "技术/前端/React"）
+    pub path: String,
+    /// 直接属于此分类的文件数
+    pub count: usize,
+    /// 子分类
+    pub children: Vec<CategoryNode>,
+    /// 直接属于此分类的文件列表
+    pub files: Vec<CategoryFile>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FrontmatterRecord {
     pub id: i64,
@@ -26,6 +47,17 @@ pub struct FrontmatterRecord {
     pub indexed_at: String,
 }
 
+pub fn create_categories_table(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS categories (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            path  TEXT UNIQUE NOT NULL
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
 pub fn create_table(conn: &Connection) -> Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS md_frontmatter (
@@ -34,12 +66,12 @@ pub fn create_table(conn: &Connection) -> Result<()> {
             title       TEXT,
             created     TEXT,
             updated     TEXT,
-            tags        TEXT,
-            categories  TEXT,
+            tags        TEXT CHECK(json_valid(tags) OR tags IS NULL),
+            categories  TEXT CHECK(json_valid(categories) OR categories IS NULL),
             author      TEXT,
             status      TEXT,
             pinned      INTEGER DEFAULT 0,
-            extra_yaml  TEXT,
+            extra_yaml  TEXT CHECK(json_valid(extra_yaml) OR extra_yaml IS NULL),
             raw_yaml    TEXT,
             modified_at TEXT NOT NULL,
             indexed_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -77,9 +109,27 @@ pub fn upsert_frontmatter(
     let status = yaml_value.get("status").and_then(|v| v.as_str()).map(|s| s.to_string());
     let pinned = yaml_value.get("pinned").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    // tags 和 categories 序列化为 JSON 数组字符串
-    let tags = yaml_value.get("tags").map(|v| serde_json::to_string(v).unwrap_or_default());
-    let categories = yaml_value.get("categories").map(|v| serde_json::to_string(v).unwrap_or_default());
+    // tags 和 categories 序列化为 JSON 数组字符串（确保始终为数组格式）
+    let tags = yaml_value.get("tags").and_then(|v| {
+        if v.is_sequence() {
+            serde_json::to_string(v).ok()
+        } else if v.is_string() {
+            // 将单个字符串包装为数组
+            serde_json::to_string(&vec![v.as_str().unwrap_or("")]).ok()
+        } else {
+            None
+        }
+    });
+    let categories = yaml_value.get("categories").and_then(|v| {
+        if v.is_sequence() {
+            serde_json::to_string(v).ok()
+        } else if v.is_string() {
+            // 将单个字符串包装为数组
+            serde_json::to_string(&vec![v.as_str().unwrap_or("")]).ok()
+        } else {
+            None
+        }
+    });
 
     // 提取非标准字段为 extra_yaml JSON 对象
     let extra_yaml = {
@@ -135,6 +185,11 @@ pub fn upsert_frontmatter(
         ],
     )?;
 
+    // 同步分类到 categories 表，确保分类表始终是最新数据源
+    if let Some(ref cats) = categories {
+        let _ = sync_categories_from_frontmatter(&conn, cats);
+    }
+
     Ok(())
 }
 
@@ -145,6 +200,64 @@ pub fn delete_frontmatter(db: &Database, file_path: &str) -> Result<()> {
         "DELETE FROM md_frontmatter WHERE file_path = ?1",
         [file_path],
     )?;
+    Ok(())
+}
+
+/// 创建空分类（无文件关联的分类），持久化到 categories 表
+pub fn create_category(db: &Database, path: &str) -> Result<()> {
+    let conn = db.conn.lock().unwrap();
+    conn.execute(
+        "INSERT OR IGNORE INTO categories (path) VALUES (?1)",
+        params![path],
+    )?;
+    Ok(())
+}
+
+/// 删除空分类（从 categories 表中移除）
+pub fn delete_empty_category(db: &Database, path: &str) -> Result<()> {
+    let conn = db.conn.lock().unwrap();
+    conn.execute("DELETE FROM categories WHERE path = ?1", params![path])?;
+    Ok(())
+}
+
+/// 将 frontmatter 中的分类路径同步到 categories 表
+/// 在文件索引时调用，确保文件关联的分类也存在于 categories 表中
+pub fn sync_categories_from_frontmatter(conn: &Connection, categories: &str) -> Result<()> {
+    let cat_list: Vec<String> = match serde_json::from_str(categories) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[sync_categories] Failed to parse categories JSON: {}", e);
+            return Ok(());
+        }
+    };
+    for cat in &cat_list {
+        // 插入分类路径及其所有中间路径
+        let parts: Vec<&str> = cat.split('/').collect();
+        for i in 1..=parts.len() {
+            let sub_path = parts[..i].join("/");
+            conn.execute(
+                "INSERT OR IGNORE INTO categories (path) VALUES (?1)",
+                params![sub_path],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// 启动时全量同步：遍历 md_frontmatter 中所有已有记录，
+/// 将其分类路径及父路径补全到 categories 表中。
+/// 用于修复历史数据不完整的情况。
+pub fn sync_all_categories_from_frontmatter(db: &Database) -> Result<()> {
+    let conn = db.conn.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT categories FROM md_frontmatter WHERE categories IS NOT NULL AND categories != '[]'",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    for row in rows {
+        if let Ok(cats) = row {
+            let _ = sync_categories_from_frontmatter(&conn, &cats);
+        }
+    }
     Ok(())
 }
 
@@ -184,11 +297,10 @@ pub fn query_by_tag(db: &Database, tag: &str) -> Result<Vec<FrontmatterRecord>> 
     let conn = db.conn.lock().unwrap();
     let mut stmt = conn.prepare(
         "SELECT id, file_path, title, created, updated, tags, categories, author, status, pinned, extra_yaml, raw_yaml, modified_at, indexed_at
-         FROM md_frontmatter WHERE tags LIKE ?1",
+         FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?1)",
     )?;
 
-    let pattern = format!("%\"{}\"%", tag);
-    let rows = stmt.query_map([&pattern], |row| {
+    let rows = stmt.query_map([tag], |row| {
         Ok(FrontmatterRecord {
             id: row.get(0)?,
             file_path: row.get(1)?,
@@ -279,6 +391,338 @@ pub fn get_all_modified_at(db: &Database) -> Result<HashMap<String, String>> {
     Ok(map)
 }
 
+/// 通用 YAML 属性搜索 frontmatter 记录
+/// filters: key-value 对，key 为 YAML 属性名，value 为匹配值
+/// - 标准字段（title/tags/categories/status/author）：走列匹配
+/// - 自定义字段：使用 json_extract(extra_yaml, '$.key') 匹配
+/// 匹配规则：
+/// - title: LIKE 模糊匹配
+/// - tags: 逗号分隔，任一匹配
+/// - categories: 前缀匹配
+/// - status/author: 精确匹配
+/// - 其他字段: LIKE 模糊匹配
+pub fn search_frontmatter(
+    db: &Database,
+    filters: HashMap<String, String>,
+) -> Result<Vec<FrontmatterRecord>> {
+    let conn = db.conn.lock().unwrap();
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut param_values: Vec<String> = Vec::new();
+    let mut param_idx = 1;
+
+    for (key, val) in &filters {
+        if val.is_empty() {
+            continue;
+        }
+
+        match key.as_str() {
+            "title" => {
+                conditions.push(format!("title LIKE ?{}", param_idx));
+                param_values.push(format!("%{}%", val));
+                param_idx += 1;
+            }
+            "tags" => {
+                // 逗号分隔的多个 tag，任一匹配（使用 json_each 精确匹配）
+                let tag_list: Vec<&str> = val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                let mut tag_conds = Vec::new();
+                for tag in tag_list {
+                    tag_conds.push(format!("EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?{})", param_idx));
+                    param_values.push(tag.to_string());
+                    param_idx += 1;
+                }
+                if !tag_conds.is_empty() {
+                    conditions.push(format!("({})", tag_conds.join(" OR ")));
+                }
+            }
+            "categories" => {
+                // 前缀匹配（使用 json_each 精确匹配后判断前缀）
+                let cat_list: Vec<&str> = val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                let mut cat_conds = Vec::new();
+                for cat in cat_list {
+                    cat_conds.push(format!("EXISTS (SELECT 1 FROM json_each(categories) WHERE value LIKE ?{})", param_idx));
+                    param_values.push(format!("{}%", cat));
+                    param_idx += 1;
+                }
+                if !cat_conds.is_empty() {
+                    conditions.push(format!("({})", cat_conds.join(" OR ")));
+                }
+            }
+            "status" => {
+                conditions.push(format!("status = ?{}", param_idx));
+                param_values.push(val.to_string());
+                param_idx += 1;
+            }
+            "author" => {
+                conditions.push(format!("author = ?{}", param_idx));
+                param_values.push(val.to_string());
+                param_idx += 1;
+            }
+            _ => {
+                // 自定义字段：从 extra_yaml JSON 中提取
+                // key 安全校验：允许 Unicode 字母数字、下划线、连字符、斜杠
+                // is_alphanumeric() 已包含中文等所有 Unicode 字母
+                if !key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '/') {
+                    continue;
+                }
+                // 使用 CAST 将 json_extract 结果转为 TEXT，确保 LIKE 可匹配
+                conditions.push(format!("CAST(json_extract(extra_yaml, '$.{}') AS TEXT) LIKE ?{}", key, param_idx));
+                param_values.push(format!("%{}%", val));
+                param_idx += 1;
+            }
+        }
+    }
+
+    let sql = if conditions.is_empty() {
+        "SELECT id, file_path, title, created, updated, tags, categories, author, status, pinned, extra_yaml, raw_yaml, modified_at, indexed_at
+         FROM md_frontmatter".to_string()
+    } else {
+        format!(
+            "SELECT id, file_path, title, created, updated, tags, categories, author, status, pinned, extra_yaml, raw_yaml, modified_at, indexed_at
+         FROM md_frontmatter WHERE {}",
+            conditions.join(" AND ")
+        )
+    };
+
+    let mut stmt = conn.prepare(&sql)?;
+
+    let params: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok(FrontmatterRecord {
+            id: row.get(0)?,
+            file_path: row.get(1)?,
+            title: row.get(2)?,
+            created: row.get(3)?,
+            updated: row.get(4)?,
+            tags: row.get(5)?,
+            categories: row.get(6)?,
+            author: row.get(7)?,
+            status: row.get(8)?,
+            pinned: row.get::<_, i32>(9)? != 0,
+            extra_yaml: row.get(10)?,
+            raw_yaml: row.get(11)?,
+            modified_at: row.get(12)?,
+            indexed_at: row.get(13)?,
+        })
+    })?;
+
+    let mut records = Vec::new();
+    for record in rows {
+        records.push(record?);
+    }
+    Ok(records)
+}
+
+/// 获取分类树：以 categories 表为主数据源构建树形结构，从 md_frontmatter 获取文件关联
+pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
+    let conn = db.conn.lock().unwrap();
+
+    // 1. 从 categories 表获取所有分类路径（主数据源）
+    //    严格只使用表中实际存在的路径，不再人为补全父路径
+    //    父路径由 sync_categories_from_frontmatter 启动时/索引时写入
+    let mut cat_stmt = conn.prepare("SELECT path FROM categories ORDER BY path")?;
+    let cat_rows = cat_stmt.query_map([], |row| row.get::<_, String>(0))?;
+
+    let mut all_paths_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for row in cat_rows {
+        if let Ok(cat_path) = row {
+            all_paths_set.insert(cat_path);
+        }
+    }
+
+    if all_paths_set.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 2. 从 md_frontmatter 获取文件关联
+    let mut stmt = conn.prepare("SELECT categories, file_path, title FROM md_frontmatter WHERE categories IS NOT NULL AND categories != '[]'")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+
+    let mut category_counts: HashMap<String, usize> = HashMap::new();
+    let mut category_files: HashMap<String, Vec<CategoryFile>> = HashMap::new();
+
+    for row in rows {
+        let (categories_str, file_path, title) = match row {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let categories: Vec<String> = match serde_json::from_str(&categories_str) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        for cat in &categories {
+            *category_counts.entry(cat.clone()).or_insert(0) += 1;
+            category_files.entry(cat.clone()).or_insert_with(Vec::new).push(CategoryFile {
+                file_path: file_path.clone(),
+                title: title.clone(),
+            });
+        }
+    }
+
+    // 3. 构建树
+    let mut all_paths: Vec<String> = all_paths_set.into_iter().collect();
+    all_paths.sort();
+
+    let mut node_map: HashMap<String, CategoryNode> = HashMap::new();
+    for path in &all_paths {
+        let name = path.rsplit('/').next().unwrap_or(path).to_string();
+        let count = category_counts.get(path).copied().unwrap_or(0);
+        let files = category_files.remove(path).unwrap_or_default();
+        node_map.insert(
+            path.clone(),
+            CategoryNode {
+                name,
+                path: path.clone(),
+                count,
+                children: Vec::new(),
+                files,
+            },
+        );
+    }
+
+    // 构建父子关系：从最深层开始，将子节点挂到父节点上
+    all_paths.sort_by(|a, b| b.matches('/').count().cmp(&a.matches('/').count()));
+
+    let mut root_nodes: Vec<CategoryNode> = Vec::new();
+    for path in &all_paths {
+        if let Some(last_slash) = path.rfind('/') {
+            let parent_path = &path[..last_slash];
+            if let Some(child) = node_map.remove(path) {
+                if let Some(parent) = node_map.get_mut(parent_path) {
+                    // 父节点存在，直接挂载
+                    parent.children.push(child);
+                } else {
+                    // 父路径不在 categories 表中，作为根节点
+                    root_nodes.push(child);
+                }
+            }
+        } else {
+            // 根级节点（没有 '/'），直接加入根节点列表
+            if let Some(node) = node_map.remove(path) {
+                root_nodes.push(node);
+            }
+        }
+    }
+
+    // 处理剩余的节点（理论上不应该有，但做防御性处理）
+    for (_, node) in node_map {
+        root_nodes.push(node);
+    }
+
+    // 对子节点排序
+    fn sort_children(nodes: &mut Vec<CategoryNode>) {
+        nodes.sort_by(|a, b| a.name.cmp(&b.name));
+        for node in nodes {
+            sort_children(&mut node.children);
+        }
+    }
+    sort_children(&mut root_nodes);
+
+    Ok(root_nodes)
+}
+
+/// 重命名分类：将所有记录中包含 old_path 的 categories 更新为 new_path
+pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<usize> {
+    let conn = db.conn.lock().unwrap();
+
+    // 查询所有包含 old_path 的记录（使用 json_each 精确匹配）
+    let mut stmt = conn.prepare(
+        "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
+    )?;
+    let prefix_pattern = format!("{}/%", old_path);
+    let rows = stmt.query_map(params![old_path, prefix_pattern], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    let mut updated = 0;
+    for row in rows {
+        let (id, categories_str) = row?;
+        let mut categories: Vec<String> = match serde_json::from_str(&categories_str) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let mut changed = false;
+        for cat in &mut categories {
+            if cat == old_path {
+                *cat = new_path.to_string();
+                changed = true;
+            } else if let Some(stripped) = cat.strip_prefix(&format!("{}/", old_path)) {
+                *cat = format!("{}/{}", new_path, stripped);
+                changed = true;
+            }
+        }
+
+        if changed {
+            let new_categories_str = serde_json::to_string(&categories).unwrap_or_default();
+            conn.execute(
+                "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
+                params![new_categories_str, id],
+            )?;
+            updated += 1;
+        }
+    }
+
+    Ok(updated)
+}
+
+/// 删除分类：从所有记录的 categories 中移除该分类路径，并从 categories 表中删除
+pub fn delete_category(db: &Database, path: &str) -> Result<usize> {
+    let conn = db.conn.lock().unwrap();
+
+    // 查询所有包含 path 的记录（使用 json_each 精确匹配）
+    let mut stmt = conn.prepare(
+        "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
+    )?;
+    let prefix_pattern = format!("{}/%", path);
+    let rows = stmt.query_map(params![path, prefix_pattern], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    let mut updated = 0;
+    for row in rows {
+        let (id, categories_str) = row?;
+        let mut categories: Vec<String> = match serde_json::from_str(&categories_str) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // 移除该分类及其子分类
+        let original_len = categories.len();
+        categories.retain(|cat| cat != path && !cat.starts_with(&format!("{}/", path)));
+
+        if categories.len() != original_len {
+            if categories.is_empty() {
+                conn.execute(
+                    "UPDATE md_frontmatter SET categories = NULL WHERE id = ?1",
+                    params![id],
+                )?;
+            } else {
+                let new_categories_str = serde_json::to_string(&categories).unwrap_or_default();
+                conn.execute(
+                    "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
+                    params![new_categories_str, id],
+                )?;
+            }
+            updated += 1;
+        }
+    }
+
+    // 同时从 categories 表中删除该分类及其子分类
+    conn.execute("DELETE FROM categories WHERE path = ?1 OR path LIKE ?2", params![path, format!("{}/%", path)])?;
+
+    Ok(updated)
+}
+
 /// 将 serde_yaml::Value 转换为 serde_json::Value
 fn yaml_value_to_json(val: &serde_yaml::Value) -> serde_json::Value {
     match val {
@@ -307,5 +751,101 @@ fn yaml_value_to_json(val: &serde_yaml::Value) -> serde_json::Value {
             serde_json::Value::Object(obj)
         }
         serde_yaml::Value::Tagged(t) => yaml_value_to_json(&t.value),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn create_test_db() -> Database {
+        let conn = Connection::open_in_memory().unwrap();
+        create_table(&conn).unwrap();
+        create_categories_table(&conn).unwrap();
+        Database {
+            conn: std::sync::Mutex::new(conn),
+        }
+    }
+
+    #[test]
+    fn test_upsert_frontmatter_stores_categories() {
+        let db = create_test_db();
+
+        // 模拟索引线程解析出的 YAML 值
+        let yaml_str = r#"
+title: "测试文件"
+categories:
+  - "ssddd"
+  - "测试/技术"
+tags:
+  - "tag1"
+"#;
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
+
+        let result = upsert_frontmatter(&db, "/test/file.md", &yaml_value, "", "12345");
+        assert!(result.is_ok());
+
+        // 验证 categories 被正确存储
+        let conn = db.conn.lock().unwrap();
+        let categories: String = conn.query_row(
+            "SELECT categories FROM md_frontmatter WHERE file_path = ?1",
+            ["/test/file.md"],
+            |row| row.get(0),
+        ).unwrap();
+        drop(conn);
+
+        // categories 应该是 JSON 数组格式
+        assert!(!categories.is_empty(), "categories should not be empty");
+        assert!(categories.contains("ssddd"), "categories should contain 'ssddd', got: {}", categories);
+    }
+
+    #[test]
+    fn test_serde_yaml_to_json_categories() {
+        // 验证 serde_json::to_string 对 serde_yaml::Value 的序列化
+        let yaml_str = r#"
+categories:
+  - "ssddd"
+  - "测试/技术"
+"#;
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
+        let categories = yaml_value.get("categories").unwrap();
+
+        let json_str = serde_json::to_string(categories).unwrap();
+        assert!(json_str.starts_with('['), "Expected JSON array, got: {}", json_str);
+        assert!(json_str.contains("ssddd"), "Should contain 'ssddd', got: {}", json_str);
+    }
+
+    #[test]
+    fn test_upsert_with_real_frontmatter_content() {
+        // 模拟实际文件的 frontmatter 格式（带引号的键名）
+        let db = create_test_db();
+
+        let yaml_str = r#""title": "0000000111"
+"updated": "2026-06-23T06:47:46.608Z"
+"pinned": true
+"tags":
+  - "666"
+"categories":
+  - "ssddd"
+  - "测试/技术"
+"55": "45"
+"#;
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
+
+        let result = upsert_frontmatter(&db, "/test/file.md", &yaml_value, "", "12345");
+        assert!(result.is_ok());
+
+        // 验证 categories 被正确存储
+        let conn = db.conn.lock().unwrap();
+        let categories: String = conn.query_row(
+            "SELECT categories FROM md_frontmatter WHERE file_path = ?1",
+            ["/test/file.md"],
+            |row| row.get(0),
+        ).unwrap();
+        drop(conn);
+
+        assert!(!categories.is_empty(), "categories should not be empty, got empty string");
+        assert!(categories.contains("ssddd"), "categories should contain 'ssddd', got: {}", categories);
     }
 }

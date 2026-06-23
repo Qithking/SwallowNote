@@ -5,7 +5,9 @@
 import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X, Plus, Trash2 } from 'lucide-react'
-import { useEditorStore } from '@/stores'
+import { useEditorStore, useCategoryStore } from '@/stores'
+import type { CategoryNode } from '@/stores/category'
+import { invoke } from '@tauri-apps/api/core'
 import { isStandardKey } from '@/lib/types/frontmatter'
 import type { NoteFrontmatter, NoteStatus } from '@/lib/types/frontmatter'
 import { Switch } from '@/components/ui/switch'
@@ -17,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { CategoryTreeSelect } from '@/components/Category/CategoryTreeSelect'
 
 interface NotePropertiesPanelProps {
   tabId: string
@@ -120,7 +123,6 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
   const replaceTabFrontmatter = useEditorStore((s) => s.replaceTabFrontmatter)
 
   const tagInputRef = useRef<HTMLInputElement>(null)
-  const catInputRef = useRef<HTMLInputElement>(null)
 
   const update = useCallback(
     (data: Partial<NoteFrontmatter>) => {
@@ -157,30 +159,35 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
     [tags, update]
   )
 
-  // --- Categories chip input ---
-  const [catInput, setCatInput] = useState('')
-  const [showCatInput, setShowCatInput] = useState(false)
+  // --- Categories tree select ---
   const categories = frontmatter.categories ?? []
 
-  const handleCatKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        const val = catInput.trim()
-        if (val && !categories.includes(val)) {
-          update({ categories: [...categories, val] })
-        }
-        setCatInput('')
-      } else if (e.key === 'Backspace' && !catInput && categories.length > 0) {
-        update({ categories: categories.slice(0, -1) })
-      }
-    },
-    [catInput, categories, update]
-  )
+  const handleCategoriesChange = useCallback(
+    (newCategories: string[]) => {
+      // 找出新增的分类路径
+      const added = newCategories.filter((c) => !categories.includes(c))
 
-  const removeCategory = useCallback(
-    (cat: string) => {
-      update({ categories: categories.filter((c) => c !== cat) })
+      update({ categories: newCategories })
+
+      // 对新增的分类路径，持久化到 Rust categories 表（不刷新树，等保存后由 file-saved 事件驱动）
+      if (added.length > 0) {
+        const tree = useCategoryStore.getState().tree
+
+        // 递归检查分类是否已存在于 tree 中
+        const categoryExists = (nodes: CategoryNode[], path: string): boolean => {
+          for (const node of nodes) {
+            if (node.path === path) return true
+            if (node.children.length > 0 && categoryExists(node.children, path)) return true
+          }
+          return false
+        }
+
+        for (const cat of added) {
+          if (!categoryExists(tree, cat)) {
+            invoke('create_category', { path: cat }).catch(() => {})
+          }
+        }
+      }
     },
     [categories, update]
   )
@@ -343,48 +350,11 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
               </div>
             </div>
 
-            {/* Categories */}
+            {/* Categories - 树形下拉多选 */}
             <div className="np-inline-field" style={{ marginBottom: 4 }}>
               <span className="np-inline-label">{t('noteProperties.categories')}</span>
-              <div className="np-inline-control">
-                <div className="np-chips">
-                  {categories.map((cat) => (
-                    <span key={cat} className="np-chip">
-                      {cat}
-                      <button
-                        className="np-chip-x"
-                        onClick={() => removeCategory(cat)}
-                        aria-label={t('noteProperties.remove')}
-                      >
-                        <X size={10} />
-                      </button>
-                    </span>
-                  ))}
-                  <button
-                    className="np-chip-add"
-                    onClick={() => {
-                      setShowCatInput(true)
-                      setTimeout(() => catInputRef.current?.focus(), 0)
-                    }}
-                    aria-label={t('noteProperties.addProperty')}
-                  >
-                    <Plus size={10} />
-                  </button>
-                  {showCatInput && (
-                    <input
-                      ref={catInputRef}
-                      className="np-chip-input"
-                      value={catInput}
-                      onChange={(e) => setCatInput(e.target.value)}
-                      onKeyDown={handleCatKeyDown}
-                      onBlur={() => {
-                        if (!catInput.trim()) setShowCatInput(false)
-                      }}
-                      placeholder={t('noteProperties.tagPlaceholder')}
-                      style={{ border: 'none' }}
-                    />
-                  )}
-                </div>
+              <div className="np-inline-control" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <CategoryTreeSelect value={categories} onChange={handleCategoriesChange} />
               </div>
             </div>
           </div>

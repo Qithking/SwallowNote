@@ -11,7 +11,7 @@ import { useFileTreeStore } from './filetree'
 import { emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
 
 export type Theme = 'light' | 'dark' | 'system'
-export type SidebarView = 'explorer' | 'search' | 'git' | 'ai' | 'settings' | `plugin:${string}`
+export type SidebarView = 'explorer' | 'search' | 'categories' | 'git' | 'ai' | 'settings' | `plugin:${string}`
 export type EditorViewMode = 'edit' | 'preview' | 'split'
 export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | 'noteProperties' | `plugin:${string}` | null
 /**

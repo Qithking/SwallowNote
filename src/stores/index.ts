@@ -21,3 +21,6 @@ export type { PluginState, PluginHealth } from './plugin'
 
 export { usePluginMarketStore } from './plugin-market'
 export type { PluginMarketState, RepoSource } from './plugin-market'
+
+export { useCategoryStore } from './category'
+export type { CategoryNode } from './category'

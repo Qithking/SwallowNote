@@ -300,6 +300,7 @@
   "activityBar": {
     "explorer": "资源管理器",
     "search": "搜索",
+    "categories": "分类",
     "git": "源代码管理",
     "ai": "AI 助手",
     "settings": "设置",
@@ -463,7 +464,22 @@
     "inputPlaceholder": "输入搜索内容",
     "searching": "搜索中...",
     "notFound": "未找到匹配项",
-    "hint": "回车搜索，Esc 关闭"
+    "hint": "回车搜索，Esc 关闭",
+    "yamlFilter": "YAML 筛选",
+    "yamlSearch": "YAML 搜索",
+    "filterKey": "属性名",
+    "filterValue": "匹配值",
+    "addFilter": "添加筛选条件"
+  },
+  "category": {
+    "title": "分类管理",
+    "empty": "暂无分类",
+    "searchPlaceholder": "搜索分类...",
+    "newCategory": "新建分类",
+    "newCategoryPlaceholder": "输入分类名称",
+    "newSubCategory": "新建子分类",
+    "rename": "重命名",
+    "delete": "删除"
   },
   "git": {
     "title":"同步管理",

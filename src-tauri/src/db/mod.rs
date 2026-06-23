@@ -90,6 +90,9 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     // md_frontmatter table
     md_frontmatter::create_table(&conn)?;
 
+    // categories table (空分类持久化)
+    md_frontmatter::create_categories_table(&conn)?;
+
     // plugin_market_sources table
     market_sources::create_table(&conn)?;
 

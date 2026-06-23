@@ -274,30 +274,31 @@ fn handle_file_removed(db: &db::Database, file_path: &str) {
 fn parse_and_upsert(db: &db::Database, file_path: &str, modified_at: &str) {
     let content = match std::fs::read_to_string(file_path) {
         Ok(c) => c,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!("[frontmatter-index] Failed to read {}: {}", file_path, e);
+            return;
+        }
     };
 
     let (yaml_value, raw_yaml) = parse_frontmatter_from_content(&content);
 
-    let _ = crate::db::md_frontmatter::upsert_frontmatter(
+    if let Err(e) = crate::db::md_frontmatter::upsert_frontmatter(
         db,
         file_path,
         &yaml_value,
         &raw_yaml,
         modified_at,
-    );
+    ) {
+        eprintln!("[frontmatter-index] Failed to upsert {}: {}", file_path, e);
+    }
 }
 
 /// 从 Markdown 内容中提取 YAML frontmatter
 /// 返回 (serde_yaml::Value, 原始YAML文本)
 /// 优化：不做全文 CRLF 替换，仅在 frontmatter 区域内逐行处理
-fn parse_frontmatter_from_content(content: &str) -> (serde_yaml::Value, String) {
+pub fn parse_frontmatter_from_content(content: &str) -> (serde_yaml::Value, String) {
     // Strip UTF-8 BOM
-    let content = if content.starts_with('\u{FEFF}') {
-        &content[3..]
-    } else {
-        content
-    };
+    let content = content.strip_prefix('\u{FEFF}').unwrap_or(content);
 
     if !content.starts_with("---") {
         return (serde_yaml::Value::Null, String::new());
@@ -322,10 +323,17 @@ fn parse_frontmatter_from_content(content: &str) -> (serde_yaml::Value, String) 
     while pos < bytes.len() {
         // 检查是否在行首且以 --- 开头
         if bytes[pos] == b'-' && pos + 2 < bytes.len() && bytes[pos + 1] == b'-' && bytes[pos + 2] == b'-' {
-            // 确认是行首（pos == yaml_start 或前一个字符是换行）
-            let at_line_start = pos == yaml_start
-                || bytes[pos - 1] == b'\n'
-                || (pos >= 1 && bytes[pos - 1] == b'\r' && pos >= 2 && bytes[pos - 2] == b'\n');
+            // 确认是行首（按优先级顺序检查，避免边界访问错误）
+            let at_line_start = if pos == yaml_start {
+                true
+            } else if pos >= 1 && bytes[pos - 1] == b'\n' {
+                true
+            } else if pos >= 2 && bytes[pos - 2] == b'\n' && bytes[pos - 1] == b'\r' {
+                true
+            } else {
+                false
+            };
+
             if at_line_start {
                 // 确认 --- 后是换行或文件结束
                 let after = pos + 3;
@@ -363,7 +371,10 @@ fn parse_frontmatter_from_content(content: &str) -> (serde_yaml::Value, String) 
 
     match serde_yaml::from_str(yaml_str) {
         Ok(value) => (value, raw_yaml),
-        Err(_) => (serde_yaml::Value::Null, raw_yaml),
+        Err(e) => {
+            eprintln!("[frontmatter-index] YAML parse error: {}", e);
+            (serde_yaml::Value::Null, raw_yaml)
+        }
     }
 }
 

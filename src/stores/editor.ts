@@ -81,6 +81,10 @@ export interface EditorState {
   updateTabFrontmatter: (tabId: string, data: Partial<NoteFrontmatter>) => void
   /** Replace the entire frontmatter object (used for deleting keys) */
   replaceTabFrontmatter: (tabId: string, data: NoteFrontmatter) => void
+  /** 将所有已打开 .md tab 的 frontmatter.categories 中旧路径替换为新路径 */
+  renameCategoryInTabs: (oldPath: string, newPath: string) => void
+  /** 从所有已打开 .md tab 的 frontmatter.categories 中移除指定路径 */
+  removeCategoryFromTabs: (path: string) => void
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -517,6 +521,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
 
         await writeFile(tab.path, writeContent)
+        // 保存 .md 文件后，同步更新 md_frontmatter 表
+        if (isMarkdown) {
+          try {
+            const { invoke } = await import('@tauri-apps/api/core')
+            await invoke('index_saved_file', { path: tab.path })
+          } catch { /* 静默失败，索引线程会异步补偿 */ }
+        }
         // Invalidate frontmatter cache so search/file-tree use fresh data
         if (isMarkdown) {
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
@@ -606,6 +617,44 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           ? { ...t, frontmatter: data, frontmatterDirty: true, isDirty: true, isEdited: true }
           : t
       ),
+    }))
+  },
+  renameCategoryInTabs: (oldPath: string, newPath: string) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) => {
+        if (!t.path.toLowerCase().endsWith('.md') || !t.frontmatter?.categories) return t
+        const cats = t.frontmatter.categories as string[]
+        if (!cats.includes(oldPath)) return t
+        return {
+          ...t,
+          frontmatter: {
+            ...t.frontmatter,
+            categories: cats.map((c) => (c === oldPath ? newPath : c)),
+          },
+          frontmatterDirty: true,
+          isDirty: true,
+          isEdited: true,
+        }
+      }),
+    }))
+  },
+  removeCategoryFromTabs: (path: string) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) => {
+        if (!t.path.toLowerCase().endsWith('.md') || !t.frontmatter?.categories) return t
+        const cats = t.frontmatter.categories as string[]
+        if (!cats.includes(path)) return t
+        return {
+          ...t,
+          frontmatter: {
+            ...t.frontmatter,
+            categories: cats.filter((c) => c !== path),
+          },
+          frontmatterDirty: true,
+          isDirty: true,
+          isEdited: true,
+        }
+      }),
     }))
   },
 }))

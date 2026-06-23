@@ -300,6 +300,7 @@
   "activityBar": {
     "explorer": "Explorer",
     "search": "Search",
+    "categories": "Categories",
     "git": "Source Control",
     "ai": "AI Assistant",
     "settings": "Settings",
@@ -463,7 +464,22 @@
     "inputPlaceholder": "Type to search",
     "searching": "Searching...",
     "notFound": "No matches found",
-    "hint": "Enter to search, Esc to close"
+    "hint": "Enter to search, Esc to close",
+    "yamlFilter": "YAML Filter",
+    "yamlSearch": "YAML Search",
+    "filterKey": "Property",
+    "filterValue": "Value",
+    "addFilter": "Add filter"
+  },
+  "category": {
+    "title": "Category Manager",
+    "empty": "No categories",
+    "searchPlaceholder": "Search categories...",
+    "newCategory": "New category",
+    "newCategoryPlaceholder": "Enter category name",
+    "newSubCategory": "New subcategory",
+    "rename": "Rename",
+    "delete": "Delete"
   },
   "git": {
     "title":"Sync Management",
