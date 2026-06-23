@@ -2,7 +2,7 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore, usePluginStore } from '@/stores'
 import type { ConflictRepoRecord } from '@/lib/tauri'
@@ -225,6 +225,18 @@ function EditorToolbar() {
           ) : null
         })()}
         {isMarkdown && (<>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setRightPanelType(rightPanelType === 'noteProperties' ? null : 'noteProperties')}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: rightPanelType === 'noteProperties' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                <Settings2 size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.noteProperties')}</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <button

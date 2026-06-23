@@ -289,7 +289,7 @@ function MetricsTable({ records, tabKey }: { records: readonly MetricRecord[]; t
       </thead>
       <tbody>
         {recent.map((r, i) => (
-          <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
+          <tr key={`${r.timestamp}-${i}`} style={{ borderBottom: '1px solid var(--border-color)' }}>
             <td style={td}>{new Date(r.timestamp).toLocaleTimeString()}</td>
             <td style={td}>{r.pluginId}</td>
             <td style={td}>

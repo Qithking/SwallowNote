@@ -7,6 +7,7 @@ import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
 import { useEditorStore, EditorTab } from './editor'
 import { useGitStore, mapRepoInfosToRepositories } from './git'
+import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import i18n from '@/i18n'
 
 export interface WorkspaceState {
@@ -59,6 +60,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       
       // Watch directory after successful load
       await watchDirectory(path)
+      
+      // 触发 frontmatter 索引扫描（异步，不阻塞 UI）
+      triggerFrontmatterScan(path)
     } catch (err) {
       console.error('Failed to open folder:', err)
       set({ error: `Failed to open folder: ${err}`, isLoading: false, rootPath: null })
@@ -129,6 +133,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     
     await watchDirectory(path)
     
+    // 触发 frontmatter 索引扫描
+    triggerFrontmatterScan(path)
+    
     await get().saveWorkspaceFile(true)
   },
   removeWorkspaceFolder: async (path: string) => {
@@ -192,6 +199,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         // Watch directories after successful load
         for (const folder of workspace.folders) {
           await watchDirectory(folder)
+        }
+        
+        // 触发 frontmatter 索引扫描（异步，不阻塞 UI）
+        for (const folder of workspace.folders) {
+          triggerFrontmatterScan(folder)
         }
       }
     } catch (err) {

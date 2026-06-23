@@ -6,7 +6,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
 import { loadDirectory } from '@/lib/api'
-import { createFile, deleteFile as deleteFileTauri, renameFile } from '@/lib/tauri'
+import { createFile, deleteFile as deleteFileTauri, renameFile, writeFile } from '@/lib/tauri'
+import { injectDefaultFrontmatter } from '@/lib/utils/frontmatter'
 import type { FileNode } from '@/stores/filetree'
 import { useTranslation } from 'react-i18next'
 import {
@@ -115,6 +116,9 @@ export function useFileTreeActions() {
       const newName = editingName.trim()
       const newPath = parentPath + '/' + newName
       await renameFile(editingPath, newPath)
+      // 旧路径已失效，使其 frontmatter 缓存失效
+      const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
+      invalidateFrontmatterCache(editingPath)
       updateTabPath(editingPath, newPath, newName)
 
       if (parent) {
@@ -186,8 +190,13 @@ export function useFileTreeActions() {
         await createFile(fullPath, false)
         const { writeFile } = await import('@/lib/tauri')
         await writeFile(fullPath, JSON.stringify(defaultMindMapData, null, 2))
+      } else if (newItem.type === 'folder') {
+        await createFile(fullPath, true)
       } else {
-        await createFile(fullPath, newItem.type === 'folder')
+        await createFile(fullPath, false)
+        if (fullPath.endsWith('.md')) {
+          await writeFile(fullPath, injectDefaultFrontmatter(newItem.name.trim()))
+        }
       }
       const children = await loadDirectory(newItem.parentPath, showAllFiles, markdownOnly)
       setNodes(updateNodesWithChildren(nodes, newItem.parentPath, children))
@@ -220,12 +229,15 @@ export function useFileTreeActions() {
 
     if (!confirm(confirmMsg)) return
 
+    const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
+
     let successCount = 0
     let failCount = 0
 
     for (const path of pathsToDelete) {
       try {
         await deleteFileTauri(path)
+        invalidateFrontmatterCache(path)
         const editorStore = useEditorStore.getState()
         const node = findNodeByPath(path, nodes)
         const tabsToClose = editorStore.tabs.filter(tab =>

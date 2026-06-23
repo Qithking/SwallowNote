@@ -1251,6 +1251,7 @@ fn hash_dir_sha256_hex(dir: &Path) -> Result<String, PluginError> {
 
 // Marketplace 安装入口：接收 zip bytes，校验 SHA-256 后安装到 .versions/<version>/。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn install_plugin_from_bytes(
     app_handle: tauri::AppHandle,
     plugin_id: String,
@@ -1518,6 +1519,7 @@ pub async fn check_plugin_updates(
  * `storage.json` is preserved across the swap.
  */
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn update_plugin(
     app_handle: tauri::AppHandle,
     plugin_id: String,

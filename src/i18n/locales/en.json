@@ -300,6 +300,7 @@
   "activityBar": {
     "explorer": "Explorer",
     "search": "Search",
+    "categories": "Categories",
     "git": "Source Control",
     "ai": "AI Assistant",
     "settings": "Settings",
@@ -356,7 +357,11 @@
     "defaultFileName": "Untitled.md",
     "defaultFolderName": "New Folder",
     "defaultMindMapName": "Untitled.smm",
-    "newMindMap": "New Mind Map"
+    "newMindMap": "New Mind Map",
+    "sort": "Sort By",
+    "sortDefault": "Default",
+    "sortUpdatedDesc": "By Updated (Newest First)",
+    "sortTitleAsc": "By Title (A-Z)"
   },
   "contextMenu": {
     "newFile": "New File",
@@ -393,7 +398,8 @@
     "toggleWidth": "Toggle Editor Width",
     "contentLayout": "Content Layout Settings",
     "externalChange": "File modified externally, click to reload",
-    "conflictResolve": "File has conflicts, click to resolve"
+    "conflictResolve": "File has conflicts, click to resolve",
+    "noteProperties": "Note Properties"
   },
   "editor": {
     "untitled": "Untitled",
@@ -458,7 +464,24 @@
     "inputPlaceholder": "Type to search",
     "searching": "Searching...",
     "notFound": "No matches found",
-    "hint": "Enter to search, Esc to close"
+    "hint": "Enter to search, Esc to close",
+    "yamlFilter": "YAML Filter",
+    "yamlSearch": "YAML Search",
+    "filterKey": "Property",
+    "filterValue": "Value",
+    "addFilter": "Add filter"
+  },
+  "category": {
+    "title": "Category Manager",
+    "empty": "No categories",
+    "searchPlaceholder": "Search categories...",
+    "newCategory": "New category",
+    "newCategoryPlaceholder": "Enter category name",
+    "newSubCategory": "New subcategory",
+    "rename": "Rename",
+    "delete": "Delete",
+    "deleteCategory": "Delete Category",
+    "confirmDelete": "Are you sure you want to delete category \"{{name}}\"? Files in this category will not be deleted but will be removed from it."
   },
   "git": {
     "title":"Sync Management",
@@ -639,7 +662,11 @@
     "installAndRestart": "Install & Restart",
     "syncing": "Syncing...",
     "syncResult": "Synced: {{succeeded}} ok, {{failed}} failed",
-    "syncConflicted": "{{count}} conflict(s)"
+    "syncConflicted": "{{count}} conflict(s)",
+    "yamlIndexProgress": "YAML Index: {{current}}/{{total}}",
+    "yamlIndexDone": "YAML Index: Done",
+    "yamlIndexProgressTooltip": "Indexing YAML metadata {{current}}/{{total}}",
+    "yamlIndexDoneTooltip": "YAML metadata indexing complete"
   },
   "recent": {
     "workspaceName": "Workspace",
@@ -691,6 +718,31 @@
   "tray": {
     "showWindow": "Show Window",
     "quit": "Quit"
+  },
+  "noteProperties": {
+    "title": "Properties",
+    "title_field": "Title",
+    "created": "Created",
+    "updated": "Updated",
+    "tags": "Tags",
+    "categories": "Categories",
+    "author": "Author",
+    "status": "Status",
+    "pinned": "Pinned",
+    "status_draft": "Draft",
+    "status_published": "Published",
+    "status_archived": "Archived",
+    "customProperties": "Custom Properties",
+    "addProperty": "Add Property",
+    "key": "Key",
+    "value": "Value",
+    "add": "Add",
+    "remove": "Remove",
+    "tagPlaceholder": "Type and press Enter",
+    "noProperties": "No properties",
+    "group_basic": "Basic",
+    "group_classification": "Classification",
+    "group_details": "Details"
   },
   "plugin": {
     "manager": "Plugin Manager",

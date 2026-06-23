@@ -433,21 +433,32 @@ function AIView() {
     if (historyReadyRef.current) {
       doSend()
     } else {
-      // Poll until history is ready (simple approach; the load is fast)
-      const checkReady = setInterval(() => {
+      // 轮询等待 history 加载完成，带 cleanup 防止组件卸载或依赖变化时泄漏
+      let checkInterval: ReturnType<typeof setInterval> | null = null
+      let safetyTimeout: ReturnType<typeof setTimeout> | null = null
+
+      checkInterval = setInterval(() => {
         if (historyReadyRef.current) {
-          clearInterval(checkReady)
+          if (checkInterval) clearInterval(checkInterval)
+          if (safetyTimeout) clearTimeout(safetyTimeout)
           doSend()
         }
       }, 50)
-      // Safety timeout: don't wait more than 3 seconds
-      setTimeout(() => {
-        clearInterval(checkReady)
+
+      // 安全超时：最多等待 3 秒
+      safetyTimeout = setTimeout(() => {
+        if (checkInterval) clearInterval(checkInterval)
         if (!historyReadyRef.current) {
           historyReadyRef.current = true
           doSend()
         }
       }, 3000)
+
+      // cleanup: 组件卸载或依赖变化时清理定时器
+      return () => {
+        if (checkInterval) clearInterval(checkInterval)
+        if (safetyTimeout) clearTimeout(safetyTimeout)
+      }
     }
   }, [aiContextMenuRequest]) // eslint-disable-line react-hooks/exhaustive-deps
 

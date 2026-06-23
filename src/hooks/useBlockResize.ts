@@ -70,36 +70,49 @@ export function useBlockResize({
     const getMaxWidth = () =>
       editor?.domElement?.firstElementChild?.clientWidth || RESIZE_CONSTRAINTS.MAX_WIDTH_FALLBACK
 
+    // rAF 节流：每帧最多更新一次尺寸，避免 mousemove 高频触发 React 重渲染
+    let rafId: number | null = null
+
     const handleMouseMove = (e: MouseEvent | TouchEvent) => {
-      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-      const maxWidth = getMaxWidth()
+      // 在 rAF 外捕获坐标，避免 TouchEvent 在 rAF 回调时已失效
+      const clientX = 'touches' in e ? e.touches[0]?.clientX : e.clientX
+      const clientY = 'touches' in e ? e.touches[0]?.clientY : e.clientY
+      if (clientX === undefined || clientY === undefined) return
+      if (rafId) return
+      rafId = requestAnimationFrame(() => {
+        rafId = null
+        const maxWidth = getMaxWidth()
 
-      if (
-        resizeState.handleUsed === 'left' ||
-        resizeState.handleUsed === 'right' ||
-        resizeState.handleUsed === 'corner'
-      ) {
-        let newWidth: number
-        if (resizeState.handleUsed === 'left') {
-          newWidth = resizeState.initialWidth + (resizeState.initialClientX - clientX)
-        } else {
-          newWidth = resizeState.initialWidth + (clientX - resizeState.initialClientX)
+        if (
+          resizeState.handleUsed === 'left' ||
+          resizeState.handleUsed === 'right' ||
+          resizeState.handleUsed === 'corner'
+        ) {
+          let newWidth: number
+          if (resizeState.handleUsed === 'left') {
+            newWidth = resizeState.initialWidth + (resizeState.initialClientX - clientX)
+          } else {
+            newWidth = resizeState.initialWidth + (clientX - resizeState.initialClientX)
+          }
+          setCurrentWidth(
+            Math.min(Math.max(newWidth, RESIZE_CONSTRAINTS.MIN_WIDTH), maxWidth)
+          )
         }
-        setCurrentWidth(
-          Math.min(Math.max(newWidth, RESIZE_CONSTRAINTS.MIN_WIDTH), maxWidth)
-        )
-      }
 
-      if (resizeState.handleUsed === 'bottom' || resizeState.handleUsed === 'corner') {
-        const newHeight = resizeState.initialHeight + (clientY - resizeState.initialClientY)
-        setCurrentHeight(
-          Math.min(Math.max(newHeight, RESIZE_CONSTRAINTS.MIN_HEIGHT), RESIZE_CONSTRAINTS.MAX_HEIGHT)
-        )
-      }
+        if (resizeState.handleUsed === 'bottom' || resizeState.handleUsed === 'corner') {
+          const newHeight = resizeState.initialHeight + (clientY - resizeState.initialClientY)
+          setCurrentHeight(
+            Math.min(Math.max(newHeight, RESIZE_CONSTRAINTS.MIN_HEIGHT), RESIZE_CONSTRAINTS.MAX_HEIGHT)
+          )
+        }
+      })
     }
 
     const handleMouseUp = () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId)
+        rafId = null
+      }
       setResizeState(undefined)
       editor?.updateBlock(block, {
         props: { width: currentWidthRef.current, height: currentHeightRef.current },
@@ -112,6 +125,7 @@ export function useBlockResize({
     window.addEventListener('touchend', handleMouseUp)
 
     return () => {
+      if (rafId) cancelAnimationFrame(rafId)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('touchmove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)

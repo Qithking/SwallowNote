@@ -4,6 +4,7 @@
 import { type ComponentType, type ReactNode } from 'react'
 import type { SidebarView, RightPanelType } from '@/stores'
 import type { ContentPosition, PluginPanelProps, ToolbarButtonProps } from '@/types/plugin'
+import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { getPluginStorage, createPluginEventBus } from './plugin-host'
 import { assertPermission } from './plugin-permission-guard'
 import { loadSettings, readSetting } from './plugin-settings'
@@ -12,6 +13,7 @@ import {
   emitPluginSettingsChanged,
   onSettingsChange as sdkOnSettingsChange,
 } from '@swallow-note/plugin-sdk'
+import { useEditorStore } from '@/stores/editor'
 
 /**
  * Detect whether `value` is a React component-like (function/class component,
@@ -227,6 +229,34 @@ export function createPluginPanelProps(
       return { ...view.values }
     },
     onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
+    // Frontmatter API – reads from / writes to the editor store.
+    getActiveNoteFrontmatter: (): Record<string, unknown> | null => {
+      const tab = useEditorStore.getState().getActiveTab()
+      return tab?.frontmatter ?? null
+    },
+    setActiveNoteFrontmatter: (data: Partial<NoteFrontmatter>): void => {
+      const tab = useEditorStore.getState().getActiveTab()
+      if (!tab) return
+      useEditorStore.getState().updateTabFrontmatter(tab.id, data)
+    },
+    onNoteFrontmatterChanged: (callback: (data: Record<string, unknown>) => void): () => void => {
+      let prevFm = useEditorStore.getState().getActiveTab()?.frontmatter ?? null
+      let prevFmJson = prevFm ? JSON.stringify(prevFm) : null
+      return useEditorStore.subscribe((state) => {
+        const activeTab = state.tabs.find((t) => t.id === state.activeTabId)
+        const nextFm = activeTab?.frontmatter ?? null
+        // Fast path: when the frontmatter reference is unchanged
+        // (e.g. content-only updates from typing), skip the
+        // JSON.stringify cost entirely.
+        if (nextFm === prevFm) return
+        const nextFmJson = nextFm ? JSON.stringify(nextFm) : null
+        prevFm = nextFm
+        if (prevFmJson !== nextFmJson) {
+          prevFmJson = nextFmJson
+          callback(nextFm ?? {})
+        }
+      })
+    },
   }
 }
 
@@ -328,6 +358,34 @@ export function createToolbarButtonProps(
       return { ...view.values }
     },
     onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
+    // Frontmatter API – same implementation as the panel version.
+    getActiveNoteFrontmatter: (): Record<string, unknown> | null => {
+      const tab = useEditorStore.getState().getActiveTab()
+      return tab?.frontmatter ?? null
+    },
+    setActiveNoteFrontmatter: (data: Partial<NoteFrontmatter>): void => {
+      const tab = useEditorStore.getState().getActiveTab()
+      if (!tab) return
+      useEditorStore.getState().updateTabFrontmatter(tab.id, data)
+    },
+    onNoteFrontmatterChanged: (callback: (data: Record<string, unknown>) => void): () => void => {
+      let prevFm = useEditorStore.getState().getActiveTab()?.frontmatter ?? null
+      let prevFmJson = prevFm ? JSON.stringify(prevFm) : null
+      return useEditorStore.subscribe((state) => {
+        const activeTab = state.tabs.find((t) => t.id === state.activeTabId)
+        const nextFm = activeTab?.frontmatter ?? null
+        // Fast path: when the frontmatter reference is unchanged
+        // (e.g. content-only updates from typing), skip the
+        // JSON.stringify cost entirely.
+        if (nextFm === prevFm) return
+        const nextFmJson = nextFm ? JSON.stringify(nextFm) : null
+        prevFm = nextFm
+        if (prevFmJson !== nextFmJson) {
+          prevFmJson = nextFmJson
+          callback(nextFm ?? {})
+        }
+      })
+    },
   }
 }
 

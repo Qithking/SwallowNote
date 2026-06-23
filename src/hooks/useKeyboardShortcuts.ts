@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
-import { openFolderDialog, openWorkspaceDialog, createFile } from '@/lib/tauri'
+import { openFolderDialog, openWorkspaceDialog, createFile, writeFile } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
+import { injectDefaultFrontmatter } from '@/lib/utils/frontmatter'
+import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { invoke } from '@tauri-apps/api/core'
-import { emitLocaleChanged } from '@/lib/plugin-host'
+import { emitLocaleChanged, emitNoteSaved } from '@/lib/plugin-host'
 import { listPluginCommands } from '@/lib/plugin-commands'
 import { toast } from 'sonner'
 import i18n from 'i18next'
@@ -29,6 +31,7 @@ export function findConflictingPluginCommandKey(e: KeyboardEvent): string | null
  * preventDefault 仅在匹配成功后调用。
  */
 const PLUGIN_CONFLICT_THROTTLE_MS = 200
+const MAX_CONFLICT_ENTRIES = 100
 const lastPluginConflictShownAt = new Map<string, number>()
 
 export function dispatchBuiltin(
@@ -49,6 +52,11 @@ export function dispatchBuiltin(
     const lastShown = lastPluginConflictShownAt.get(pluginBinding) ?? 0
     if (now - lastShown >= PLUGIN_CONFLICT_THROTTLE_MS) {
       lastPluginConflictShownAt.set(pluginBinding, now)
+      // 淘汰最旧条目，防止 Map 无限增长
+      if (lastPluginConflictShownAt.size > MAX_CONFLICT_ENTRIES) {
+        const oldest = lastPluginConflictShownAt.keys().next().value!
+        lastPluginConflictShownAt.delete(oldest)
+      }
       // toast 描述携带内置 action 名
       toast(i18n.t('settings.pluginCommandShadowed', { id: pluginId }), {
         // Wave A / C1: stable id so the same conflict
@@ -89,6 +97,9 @@ async function handleNewFile() {
 
   try {
     await createFile(fullPath, false)
+    if (fullPath.endsWith('.md')) {
+      await writeFile(fullPath, injectDefaultFrontmatter(name))
+    }
     const { showAllFiles, markdownOnly } = useUIStore.getState()
     const newChildren = await loadDirectory(targetDir, showAllFiles, markdownOnly)
     useFileTreeStore.getState().setNodes(
@@ -154,7 +165,7 @@ async function handleOpenFile() {
 async function handleSaveFile() {
   const { tabs, activeTabId } = useEditorStore.getState()
   const activeTab = tabs.find((t) => t.id === activeTabId)
-  if (!activeTab || !activeTab.isDirty) return
+  if (!activeTab || (!activeTab.isDirty && !activeTab.frontmatterDirty)) return
 
   try {
     // Mark path as saving to prevent file-watcher from closing the tab
@@ -164,19 +175,51 @@ async function handleSaveFile() {
       return { savingPaths: newSet }
     })
     const { writeFile } = await import('@/lib/tauri')
-    await writeFile(activeTab.path, activeTab.content)
+    // For .md files, merge frontmatter with body before writing
+    const isMarkdown = activeTab.path.toLowerCase().endsWith('.md')
+    let writeContent = activeTab.content
+    let fm: NoteFrontmatter | undefined
+    if (isMarkdown) {
+      const { serializeFrontmatter, stripFrontmatter } = await import('@/lib/utils/frontmatter')
+      fm = { ...(activeTab.frontmatter || {}), updated: new Date().toISOString() }
+      // stripFrontmatter is defensive: tab.content normally holds only
+      // the body, but source mode edits may store the full file content.
+      const body = stripFrontmatter(activeTab.content ?? '')
+      writeContent = serializeFrontmatter(fm, body)
+    }
+    await writeFile(activeTab.path, writeContent)
+    // 保存 .md 文件后，同步更新 md_frontmatter 表
+    // 确保分类面板刷新时能立即查到最新的文件关联
+    if (isMarkdown) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('index_saved_file', { path: activeTab.path })
+      } catch (e) {
+        // 索引线程会异步补偿，但记录日志便于排查
+        console.error('Failed to index saved file:', activeTab.path, e)
+      }
+    }
     useEditorStore.setState((state) => ({
       tabs: state.tabs.map((t) =>
-        t.id === activeTab.id ? { ...t, isDirty: false, isEdited: false } : t
+        t.id === activeTab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
       ),
     }))
+    // Notify plugins: the note has been successfully persisted.
+    // We emit after the store commit so the `isDirty=false` state
+    // is observable by subscribers reading from the store.
+    queueMicrotask(() => emitNoteSaved(activeTab.id, activeTab.path))
+    // Invalidate frontmatter cache so search/file-tree use fresh data
+    if (isMarkdown) {
+      const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
+      invalidateFrontmatterCache(activeTab.path)
+    }
+    window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
     const { gitAutoCommit } = await import('@/lib/tauri')
     try {
       await gitAutoCommit(activeTab.path)
     } catch {
       // git auto-commit is best-effort; failures (no git repo, no identity) are non-fatal
     }
-    window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
   } catch (e) {
     console.error('Failed to save file:', e)
   } finally {
@@ -315,7 +358,6 @@ export function useKeyboardShortcuts() {
           void registered.onTrigger()
         } catch (err) {
           // buggy 插件不能破坏全局 listener
-          // eslint-disable-next-line no-console
           console.error('[useKeyboardShortcuts] plugin onTrigger threw:', err)
         }
         return

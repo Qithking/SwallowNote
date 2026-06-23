@@ -107,7 +107,7 @@ function DirectoryView() {
       setTreeData([])
       setExpandedKeys([])
     }
-  }, [activeTab])
+  }, [activeTab?.content, activeTab?.name])
 
   const scrollToPosition = useCallback((item: TocItem) => {
     const blockId = item.blockId || item.id

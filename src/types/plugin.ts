@@ -1,6 +1,7 @@
 /** 插件系统类型定义：清单、生命周期 hook、运行时定义、市场索引等。 */
 
 import type { ReactNode, ComponentType } from 'react'
+import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 
 // ─── Enum-like types ───────────────────────────────────────────────────────────
 
@@ -552,6 +553,12 @@ export interface PluginPanelProps {
   getAllSettings(): Promise<Record<string, unknown>>
   /** 订阅设置变化。 */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
+  /** 获取当前笔记的 frontmatter 对象。无活动笔记时返回 null。 */
+  getActiveNoteFrontmatter(): Record<string, unknown> | null
+  /** 更新当前笔记的 frontmatter，合并传入的数据。无活动笔记时为空操作。 */
+  setActiveNoteFrontmatter(data: Partial<NoteFrontmatter>): void
+  /** 监听 frontmatter 变更事件。返回取消订阅函数。 */
+  onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
 }
 
 /** 自定义工具栏按钮 props。size 为推荐 icon 尺寸。 */
@@ -606,6 +613,12 @@ export interface ToolbarButtonProps {
   getAllSettings(): Promise<Record<string, unknown>>
   /** Subscribe to settings changes. See {@link PluginPanelProps.onSettingsChange}. */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
+  /** 获取当前笔记的 frontmatter 对象。参见 {@link PluginPanelProps.getActiveNoteFrontmatter}。 */
+  getActiveNoteFrontmatter(): Record<string, unknown> | null
+  /** 更新当前笔记的 frontmatter。参见 {@link PluginPanelProps.setActiveNoteFrontmatter}。 */
+  setActiveNoteFrontmatter(data: Partial<NoteFrontmatter>): void
+  /** 监听 frontmatter 变更事件。参见 {@link PluginPanelProps.onNoteFrontmatterChanged}。 */
+  onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
 }
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────

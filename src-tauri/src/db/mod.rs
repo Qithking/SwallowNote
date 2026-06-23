@@ -4,6 +4,7 @@ pub mod ai_role_prompts;
 pub mod conflict_repo;
 pub mod folder_history;
 pub mod market_sources;
+pub mod md_frontmatter;
 pub mod plugin_settings;
 pub mod session_state;
 
@@ -85,6 +86,12 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
 
     // conflict_repos table
     conflict_repo::create_table(&conn)?;
+
+    // md_frontmatter table
+    md_frontmatter::create_table(&conn)?;
+
+    // categories table (空分类持久化)
+    md_frontmatter::create_categories_table(&conn)?;
 
     // plugin_market_sources table
     market_sources::create_table(&conn)?;

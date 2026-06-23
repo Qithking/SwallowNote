@@ -205,6 +205,17 @@ export interface PluginPanelProps {
    *  plugin's own code, other plugin instances of the same id,
    *  and the host's settings dialog. */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
+  /** Get the frontmatter object of the active note. Returns null
+   *  if no note is active or the note has no frontmatter. */
+  getActiveNoteFrontmatter(): Record<string, unknown> | null
+  /** Update the frontmatter of the active note. Merges the
+   *  provided data into the existing frontmatter. No-op if no
+   *  note is active. */
+  setActiveNoteFrontmatter(data: Record<string, unknown>): void
+  /** Subscribe to frontmatter changes of the active note. The
+   *  callback fires whenever the active note's frontmatter
+   *  object changes. Returns an unsubscribe function. */
+  onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
 }
 
 /**
@@ -271,6 +282,15 @@ export interface ToolbarButtonProps {
   /** Subscribe to settings changes. See
    *  {@link PluginPanelProps.onSettingsChange}. */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
+  /** Get the frontmatter object of the active note. See
+   *  {@link PluginPanelProps.getActiveNoteFrontmatter}. */
+  getActiveNoteFrontmatter(): Record<string, unknown> | null
+  /** Update the frontmatter of the active note. See
+   *  {@link PluginPanelProps.setActiveNoteFrontmatter}. */
+  setActiveNoteFrontmatter(data: Record<string, unknown>): void
+  /** Subscribe to frontmatter changes of the active note. See
+   *  {@link PluginPanelProps.onNoteFrontmatterChanged}. */
+  onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
 }
 
 /**

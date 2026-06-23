@@ -2,7 +2,7 @@
  * ActivityBar Component - Narrow left icon bar for view switching
  * Supports built-in views, sidebar plugins, plugin manager, and settings
  */
-import { FolderTree, Search, GitBranch, Settings, Puzzle } from 'lucide-react'
+import { FolderTree, Search, GitBranch, Settings, Puzzle, Folders } from 'lucide-react'
 import { useUIStore, useGitStore, usePluginStore, useEditorStore, SidebarView } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
@@ -14,12 +14,14 @@ import { preloadPluginManager } from '@/App'
 const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'explorer', icon: FolderTree },
   { id: 'search', icon: Search },
+  { id: 'categories', icon: Folders },
   { id: 'git', icon: GitBranch },
 ]
 
 const activityKeyMap: Record<string, string> = {
   explorer: 'activityBar.explorer',
   search: 'activityBar.search',
+  categories: 'activityBar.categories',
   git: 'activityBar.git',
   ai: 'activityBar.ai',
   plugins: 'activityBar.plugins',
@@ -227,6 +229,7 @@ function ActivityBar() {
               } else {
                 setSettingsPanelVisible(true)
                 setSidebarView('settings')
+                setRightPanelType(null)
               }
             }}
             className={`w-[36px] h-[36px] flex items-center justify-center relative cursor-pointer rounded-lg ${settingsPanelVisible && sidebarView === 'settings' ? 'bg-primary/10' : ''}`}

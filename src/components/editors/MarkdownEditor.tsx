@@ -13,6 +13,7 @@ import { TextSelection } from 'prosemirror-state'
 import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
+import { stripFrontmatter } from '@/lib/utils/frontmatter'
 import { buildTableOfContents } from '@/utils/tableOfContents'
 import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile } from '@/lib/tauri'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -1110,11 +1111,18 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
           return
         }
 
+        // Strip frontmatter defensively: loadTabContent normally stores
+        // only the body in tab.content, but some code paths (e.g.
+        // resetDirtyTabs, HistoryView) may store the raw file content
+        // which includes frontmatter.  Calling stripFrontmatter on an
+        // already-stripped body is a no-op, so this is always safe.
+        const body = stripFrontmatter(content)
+
         const tempEditor = BlockNoteEditor.create()
         let blocks: PartialBlock[] = []
-        
+
         try {
-          blocks = await tempEditor.tryParseMarkdownToBlocks(content)
+          blocks = await tempEditor.tryParseMarkdownToBlocks(body)
           // Transform mermaid code blocks to mermaid blocks
           blocks = transformMermaidBlocks(blocks) as PartialBlock[]
           // Transform math code blocks to katex blocks
@@ -1125,7 +1133,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
           console.warn('[MarkdownEditor] Markdown parsing failed, treating as plain text:', parseError)
           // If markdown parsing fails, treat content as plain text
           // Split by newlines and create paragraph blocks
-          const lines = content.split('\n')
+          const lines = body.split('\n')
           blocks = lines.map(line => ({
             type: 'paragraph' as const,
             content: line || undefined
@@ -1147,7 +1155,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
         if (cancelled) return
         console.error('[MarkdownEditor] Failed to parse markdown:', e)
         // Don't show error UI, instead show content as plain text
-        const lines = content.split('\n')
+        const lines = stripFrontmatter(content).split('\n')
         setInitialBlocks(lines.map(line => ({
           type: 'paragraph' as const,
           content: line || undefined

@@ -6,6 +6,7 @@
 import { useShallow } from 'zustand/react/shallow'
 import { FileTreeView } from './FileTree/FileTreeView'
 import { SearchView } from './Search/SearchView'
+import { CategoryView } from './Category/CategoryView'
 import { GitView } from './Git/GitView'
 import { SettingsView } from './Settings/SettingsView'
 import { PluginPanelHost } from './Plugin/PluginPanelHost'
@@ -38,6 +39,9 @@ function Sidebar() {
         </div>
         <div className={`absolute inset-0 ${sidebarView === 'search' ? '' : 'hidden'}`}>
           <SearchView />
+        </div>
+        <div className={`absolute inset-0 ${sidebarView === 'categories' ? '' : 'hidden'}`}>
+          <CategoryView />
         </div>
         <div className={`absolute inset-0 ${sidebarView === 'git' ? '' : 'hidden'}`}>
           <GitView />

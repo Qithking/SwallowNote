@@ -30,7 +30,7 @@
  * the explicit `version` string to the host so the on-disk
  * `.versions/<v>/` directory is created with the right name.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Download,
@@ -54,10 +54,7 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   downloadPluginZip,
-  downloadPluginVersion,
   installPluginFromBytes,
-  listPluginVersions,
-  rollbackPlugin,
 } from '@/lib/plugin-market'
 import { usePluginMarketStore, usePluginStore } from '@/stores'
 import { loadAllPlugins } from '@/lib/plugin-loader'
@@ -72,8 +69,6 @@ import {
 import type {
   PluginIndex,
   PluginIndexEntry,
-  PluginIndexEntryVersion,
-  PluginVersionInfo,
   PluginPermission,
 } from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
@@ -170,36 +165,7 @@ export function PluginMarketDetail({
 
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
   const [isInstalling, setIsInstalling] = useState(false)
-  // @ts-ignore — kept for future changelog/rollback UI
-  const [versions, setVersions] = useState<PluginVersionInfo[]>([])
-  // Tracks which specific version the user is installing from the
-  // changelog tab — keyed by the version string so two version rows
-  // can be in-flight independently (and the per-row spinner lights
-  // up only on the row that was clicked, not the whole tab).
-  const [installingVersion, setInstallingVersion] = useState<string | null>(null)
-  const [isRolling, setIsRolling] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  // Load the list of locally-installed versions so the rollback UI
-  // is populated before the user clicks anything.
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      if (localVersion == null) {
-        setVersions([])
-        return
-      }
-      try {
-        const v = await listPluginVersions(entry.id)
-        if (!cancelled) setVersions(v)
-      } catch {
-        if (!cancelled) setVersions([])
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [entry.id, localVersion])
 
   // ── Dependency resolution (G4) ─────────────────────────────────────────────
   // The marketplace wire format carries dependencies as a
@@ -283,7 +249,7 @@ export function PluginMarketDetail({
 
   const onInstall = async () => {
     // 防止双击重复安装。
-    if (isInstalling || installingVersion !== null) return
+    if (isInstalling) return
     setError(null)
     // 点击时重新检查依赖。
     if (hasBlockingDependencyIssue) {
@@ -399,88 +365,6 @@ export function PluginMarketDetail({
       setError(friendlyInstallError(e, t))
     } finally {
       setIsAutoResolving(false)
-    }
-  }
-
-  /**
-   * Install a specific historical version (Task 5 / G5). The
-   * version comes from the `versions` array on the index entry —
-   * the host receives the explicit `version` string so the on-disk
-   * `.versions/<v>/` directory is named correctly. The SHA-256 we
-   * pass is the per-version digest (G1 reuse), not the latest
-   * entry-level digest, and the signature is the entry-level one
-   * (the index protocol attaches one signature per `PluginIndexEntry`,
-   * not per version).
-   */
-  // @ts-ignore — kept for future per-version install UI
-  const onInstallVersion = async (version: PluginIndexEntryVersion) => {
-    // Same early guard as `onInstall`: don't queue a second per-version
-    // install while the first one is still in flight, and don't
-    // race against a top-level install. `version.version` is the
-    // natural idempotency key for the per-version entry point.
-    if (isInstalling || installingVersion !== null || isRolling !== null) {
-      return
-    }
-    setError(null)
-    setInstallingVersion(version.version)
-    let installedMeta: PluginMetadataRust | null = null
-    try {
-      const bytes = await downloadPluginVersion(entry.id, version, repoUrl)
-      installedMeta = await installPluginFromBytes({
-        pluginId: entry.id,
-        version: version.version,
-        bytes,
-        sha256: version.sha256,
-        source: repoUrl,
-      })
-      await reloadAfterInstall()
-      await refreshUpdates()
-      toast.success(
-        t('plugin.market.installedVersion', {
-          defaultValue: '已安装 {{name}} v{{version}}',
-          name: entry.name,
-          version: version.version,
-        })
-      )
-      if (onInstalled && installedMeta) {
-        onInstalled(installedMeta)
-      } else {
-        onClose()
-      }
-    } catch (e: any) {
-      setError(friendlyInstallError(e, t))
-    } finally {
-      setInstallingVersion(null)
-    }
-  }
-
-  // @ts-ignore — kept for future rollback UI
-  const onRollback = async (version: string) => {
-    // 防止回滚并发。
-    if (isInstalling || installingVersion !== null || isRolling !== null) {
-      return
-    }
-    setError(null)
-    setIsRolling(version)
-    try {
-      await rollbackPlugin(entry.id, version)
-      // Same full-reload path as install. Rolling back to a previous
-      // version is conceptually a fresh plugin load, so we want
-      // onLoad/onUnload to fire cleanly.
-      await reloadAfterInstall()
-      await refreshUpdates()
-      toast.success(
-        t('plugin.market.rolledBack', {
-          defaultValue: '已回滚到 {{version}}',
-          version,
-        })
-      )
-      // 回滚不重新弹权限对话框。
-      onClose()
-    } catch (e: any) {
-      setError(friendlyInstallError(e, t))
-    } finally {
-      setIsRolling(null)
     }
   }
 
@@ -623,7 +507,7 @@ export function PluginMarketDetail({
         </div>
 
         <div className="pmd-footer">
-          <Button variant="outline" onClick={onClose} disabled={isInstalling || installingVersion !== null || isRolling !== null || isAutoResolving}>
+          <Button variant="outline" onClick={onClose} disabled={isInstalling || isAutoResolving}>
             <X size={14} />
             {t('common.close', { defaultValue: '关闭' })}
           </Button>
@@ -654,7 +538,7 @@ export function PluginMarketDetail({
           {!isInstalled && (
             <Button
               onClick={onInstall}
-              disabled={isInstalling || installingVersion !== null || hasBlockingDependencyIssue}
+              disabled={isInstalling || hasBlockingDependencyIssue}
               data-testid="plugin-install"
             >
               {isInstalling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
@@ -664,7 +548,7 @@ export function PluginMarketDetail({
           {isUpdateAvailable && (
             <Button
               onClick={onInstall}
-              disabled={isInstalling || installingVersion !== null || hasBlockingDependencyIssue}
+              disabled={isInstalling || hasBlockingDependencyIssue}
             >
               {isInstalling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
               {t('plugin.market.updateTo', {
@@ -725,27 +609,7 @@ function DetailTabButton({
   )
 }
 
-/**
- * `YYYY-MM-DD` for an ISO-8601 timestamp. Falls back to the input
- * string if parsing fails so a malformed `publishedAt` never
- * crashes the row. (Mirrors `formatDate` in `PluginMarketView` —
- * kept duplicated here so the detail dialog stays a self-contained
- * component without a cross-component helper import.)
- */
-// @ts-ignore — kept for future use in the detail dialog.
-function formatDate(dateStr: string): string {
-  if (!dateStr) return ''
-  try {
-    const d = new Date(dateStr)
-    if (Number.isNaN(d.getTime())) return dateStr
-    const y = d.getFullYear()
-    const m = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    return `${y}-${m}-${day}`
-  } catch {
-    return dateStr
-  }
-}
+
 
 /**
  * "基本信息" tab — name + id + author + tags + description.

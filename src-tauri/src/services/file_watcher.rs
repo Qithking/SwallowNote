@@ -55,6 +55,19 @@ pub fn init_watcher(app_handle: AppHandle) {
                                     "path": path_str,
                                 }),
                             );
+
+                            // 对 .md 文件事件提交 frontmatter 索引任务
+                            if path_str.ends_with(".md") || path_str.ends_with(".markdown") {
+                                match event_type {
+                                    "created" | "modified" => {
+                                        crate::services::frontmatter_index::submit_file_changed(path_str);
+                                    }
+                                    "removed" | "renamed" => {
+                                        crate::services::frontmatter_index::submit_file_removed(path_str);
+                                    }
+                                    _ => {}
+                                }
+                            }
                         }
                     }
                 }
