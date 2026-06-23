@@ -128,7 +128,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       // For new .md tabs, parse frontmatter from content if present
       const isMarkdown = tab.path.toLowerCase().endsWith('.md')
-      let newTab = { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }
+      const newTab = { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }
       if (isMarkdown && tab.content !== undefined) {
         const result = parseFrontmatter(tab.content)
         newTab.content = result.body
@@ -521,7 +521,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           try {
             const { invoke } = await import('@tauri-apps/api/core')
             await invoke('index_saved_file', { path: tab.path })
-          } catch { /* 静默失败，索引线程会异步补偿 */ }
+          } catch (e) {
+            // 索引线程会异步补偿，但记录日志便于排查
+            console.error('Failed to index saved file:', tab.path, e)
+          }
         }
         set((state) => ({
           tabs: state.tabs.map((t) =>

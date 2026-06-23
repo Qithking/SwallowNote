@@ -213,13 +213,6 @@ pub fn create_category(db: &Database, path: &str) -> Result<()> {
     Ok(())
 }
 
-/// 删除空分类（从 categories 表中移除）
-pub fn delete_empty_category(db: &Database, path: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
-    conn.execute("DELETE FROM categories WHERE path = ?1", params![path])?;
-    Ok(())
-}
-
 /// 将 frontmatter 中的分类路径同步到 categories 表
 /// 在文件索引时调用，确保文件关联的分类也存在于 categories 表中
 pub fn sync_categories_from_frontmatter(conn: &Connection, categories: &str) -> Result<()> {
@@ -253,10 +246,8 @@ pub fn sync_all_categories_from_frontmatter(db: &Database) -> Result<()> {
         "SELECT categories FROM md_frontmatter WHERE categories IS NOT NULL AND categories != '[]'",
     )?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-    for row in rows {
-        if let Ok(cats) = row {
-            let _ = sync_categories_from_frontmatter(&conn, &cats);
-        }
+    for cats in rows.flatten() {
+        let _ = sync_categories_from_frontmatter(&conn, &cats);
     }
     Ok(())
 }
@@ -395,7 +386,7 @@ pub fn get_all_modified_at(db: &Database) -> Result<HashMap<String, String>> {
 /// filters: key-value 对，key 为 YAML 属性名，value 为匹配值
 /// - 标准字段（title/tags/categories/status/author）：走列匹配
 /// - 自定义字段：使用 json_extract(extra_yaml, '$.key') 匹配
-/// 匹配规则：
+///   匹配规则：
 /// - title: LIKE 模糊匹配
 /// - tags: 逗号分隔，任一匹配
 /// - categories: 前缀匹配
@@ -525,10 +516,8 @@ pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
     let cat_rows = cat_stmt.query_map([], |row| row.get::<_, String>(0))?;
 
     let mut all_paths_set: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for row in cat_rows {
-        if let Ok(cat_path) = row {
-            all_paths_set.insert(cat_path);
-        }
+    for cat_path in cat_rows.flatten() {
+        all_paths_set.insert(cat_path);
     }
 
     if all_paths_set.is_empty() {
@@ -561,7 +550,7 @@ pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
 
         for cat in &categories {
             *category_counts.entry(cat.clone()).or_insert(0) += 1;
-            category_files.entry(cat.clone()).or_insert_with(Vec::new).push(CategoryFile {
+            category_files.entry(cat.clone()).or_default().push(CategoryFile {
                 file_path: file_path.clone(),
                 title: title.clone(),
             });
@@ -590,7 +579,7 @@ pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
     }
 
     // 构建父子关系：从最深层开始，将子节点挂到父节点上
-    all_paths.sort_by(|a, b| b.matches('/').count().cmp(&a.matches('/').count()));
+    all_paths.sort_by_key(|b| std::cmp::Reverse(b.matches('/').count()));
 
     let mut root_nodes: Vec<CategoryNode> = Vec::new();
     for path in &all_paths {

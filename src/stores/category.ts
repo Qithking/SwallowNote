@@ -28,7 +28,8 @@ export const useCategoryStore = create<CategoryState>((set) => ({
     try {
       const result = await invoke<CategoryNode[]>('get_category_tree')
       set({ tree: result, loading: false })
-    } catch {
+    } catch (e) {
+      console.error('Failed to load category tree:', e)
       set({ loading: false })
     }
   },

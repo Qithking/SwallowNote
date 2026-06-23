@@ -15,8 +15,6 @@ enum IndexTask {
     FileChanged { path: String },
     /// 单文件删除：移除记录
     FileRemoved { path: String },
-    /// 停止子线程
-    Shutdown,
 }
 
 /// 全局发送端，供外部提交任务（有界通道，容量 256，防止内存膨胀）
@@ -62,25 +60,16 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
             // 启动后延迟，避免与 UI 初始化竞争
             std::thread::sleep(Duration::from_millis(STARTUP_DELAY_MS));
 
-            loop {
-                match rx.recv() {
-                    Ok(task) => match task {
-                        IndexTask::ScanDirectory { path } => {
-                            handle_scan_directory(&db_instance, &path, &app_handle);
-                        }
-                        IndexTask::FileChanged { path } => {
-                            handle_file_changed(&db_instance, &path);
-                        }
-                        IndexTask::FileRemoved { path } => {
-                            handle_file_removed(&db_instance, &path);
-                        }
-                        IndexTask::Shutdown => {
-                            break;
-                        }
-                    },
-                    Err(_) => {
-                        // 通道关闭，退出线程
-                        break;
+            while let Ok(task) = rx.recv() {
+                match task {
+                    IndexTask::ScanDirectory { path } => {
+                        handle_scan_directory(&db_instance, &path, &app_handle);
+                    }
+                    IndexTask::FileChanged { path } => {
+                        handle_file_changed(&db_instance, &path);
+                    }
+                    IndexTask::FileRemoved { path } => {
+                        handle_file_removed(&db_instance, &path);
                     }
                 }
             }
@@ -186,7 +175,7 @@ fn handle_scan_directory(db: &db::Database, dir_path: &str, app_handle: &AppHand
         if let Some(db_modified) = modified_map.get(&path_str) {
             if *db_modified == modified_at {
                 processed += 1;
-                if processed % BATCH_SIZE == 0 || processed == total {
+                if processed.is_multiple_of(BATCH_SIZE) || processed == total {
                     emit_progress(app_handle, processed, total);
                 }
                 continue;
@@ -199,7 +188,7 @@ fn handle_scan_directory(db: &db::Database, dir_path: &str, app_handle: &AppHand
         processed += 1;
 
         // 每 20 个文件发射一次进度
-        if processed % BATCH_SIZE == 0 || processed == total {
+        if processed.is_multiple_of(BATCH_SIZE) || processed == total {
             emit_progress(app_handle, processed, total);
         }
 
@@ -329,15 +318,9 @@ pub fn parse_frontmatter_from_content(content: &str) -> (serde_yaml::Value, Stri
         // 检查是否在行首且以 --- 开头
         if bytes[pos] == b'-' && pos + 2 < bytes.len() && bytes[pos + 1] == b'-' && bytes[pos + 2] == b'-' {
             // 确认是行首（按优先级顺序检查，避免边界访问错误）
-            let at_line_start = if pos == yaml_start {
-                true
-            } else if pos >= 1 && bytes[pos - 1] == b'\n' {
-                true
-            } else if pos >= 2 && bytes[pos - 2] == b'\n' && bytes[pos - 1] == b'\r' {
-                true
-            } else {
-                false
-            };
+            let at_line_start = pos == yaml_start
+                || (pos >= 1 && bytes[pos - 1] == b'\n')
+                || (pos >= 2 && bytes[pos - 2] == b'\n' && bytes[pos - 1] == b'\r');
 
             if at_line_start {
                 // 确认 --- 后是换行或文件结束

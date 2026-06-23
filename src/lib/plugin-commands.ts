@@ -113,7 +113,6 @@ class PluginCommandRegistryImpl implements PluginCommandRegistry {
         // Listener errors must not break the registry's mutation
         // path. Log and keep going — the next mutation will give
         // them another chance.
-        // eslint-disable-next-line no-console
         console.error('[plugin-commands] listener threw:', err)
       }
     }

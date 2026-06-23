@@ -86,7 +86,6 @@ function CommandPalette() {
             // palette. Log and swallow so the host keeps
             // working. The plugin author sees the error in the
             // diagnostics popup via plugin-telemetry.
-            // eslint-disable-next-line no-console
             console.error('[command-palette] plugin command threw:', err)
           }
         },

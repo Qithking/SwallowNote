@@ -184,7 +184,9 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
 
         for (const cat of added) {
           if (!categoryExists(tree, cat)) {
-            invoke('create_category', { path: cat }).catch(() => {})
+            invoke('create_category', { path: cat }).catch((e) => {
+              console.error('Failed to create category from properties:', cat, e)
+            })
           }
         }
       }

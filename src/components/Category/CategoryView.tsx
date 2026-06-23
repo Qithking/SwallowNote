@@ -112,8 +112,8 @@ export function CategoryView() {
         // 同步更新已打开 tab 的 frontmatter.categories
         useEditorStore.getState().renameCategoryInTabs(editingPath, newPath)
         await useCategoryStore.getState().loadTree()
-      } catch {
-        // 静默失败
+      } catch (e) {
+        console.error('Failed to rename category:', editingPath, '->', newPath, e)
       }
     }
     setEditingPath(null)
@@ -131,8 +131,8 @@ export function CategoryView() {
       // 同步更新已打开 tab 的 frontmatter.categories
       useEditorStore.getState().removeCategoryFromTabs(path)
       await useCategoryStore.getState().loadTree()
-    } catch {
-      // 静默失败
+    } catch (e) {
+      console.error('Failed to delete category:', path, e)
     }
   }, [])
 
@@ -156,7 +156,9 @@ export function CategoryView() {
     const fullPath = newItem.parentPath ? `${newItem.parentPath}/${trimmed}` : trimmed
 
     // 持久化空分类到 categories 表，等待完成后再刷新
-    await invoke('create_category', { path: fullPath }).catch(() => {})
+    await invoke('create_category', { path: fullPath }).catch((e) => {
+      console.error('Failed to create category:', fullPath, e)
+    })
 
     await useCategoryStore.getState().loadTree()
     setNewItem(null)

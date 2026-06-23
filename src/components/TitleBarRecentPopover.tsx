@@ -96,7 +96,6 @@ export function TitleBarRecentPopover() {
     const handler = () => handleOpenCloneDialog()
     window.addEventListener('open-clone-dialog', handler)
     return () => window.removeEventListener('open-clone-dialog', handler)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

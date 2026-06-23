@@ -188,8 +188,9 @@ async function handleSaveFile() {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
         await invoke('index_saved_file', { path: activeTab.path })
-      } catch {
-        // 静默失败，索引线程会异步补偿
+      } catch (e) {
+        // 索引线程会异步补偿，但记录日志便于排查
+        console.error('Failed to index saved file:', activeTab.path, e)
       }
     }
     useEditorStore.setState((state) => ({
@@ -351,7 +352,6 @@ export function useKeyboardShortcuts() {
           void registered.onTrigger()
         } catch (err) {
           // buggy 插件不能破坏全局 listener
-          // eslint-disable-next-line no-console
           console.error('[useKeyboardShortcuts] plugin onTrigger threw:', err)
         }
         return
