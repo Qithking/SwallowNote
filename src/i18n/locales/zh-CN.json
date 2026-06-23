@@ -479,7 +479,9 @@
     "newCategoryPlaceholder": "输入分类名称",
     "newSubCategory": "新建子分类",
     "rename": "重命名",
-    "delete": "删除"
+    "delete": "删除",
+    "deleteCategory": "删除分类",
+    "confirmDelete": "确定要删除分类「{{name}}」吗？该分类下的文件不会被删除，但会从该分类中移除。"
   },
   "git": {
     "title":"同步管理",

@@ -8,6 +8,23 @@ import { cn } from '@/lib/utils'
 import { getFileIcon } from '@/lib/utils/fileIcon'
 import { loadFileContent } from '@/lib/api'
 import { countWords } from '@/lib/utils/wordCount'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
 
 export function CategoryView() {
   const { t } = useTranslation()
@@ -15,7 +32,7 @@ export function CategoryView() {
   const loading = useCategoryStore((s) => s.loading)
   const loadTree = useCategoryStore((s) => s.loadTree)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; name: string } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [newItem, setNewItem] = useState<{ parentPath: string; name: string } | null>(null)
   const [editingPath, setEditingPath] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
@@ -33,15 +50,6 @@ export function CategoryView() {
       window.removeEventListener('file-saved', handleFileSaved)
     }
   }, [])
-
-  // 点击空白处关闭右键菜单
-  useEffect(() => {
-    const handleClick = () => setContextMenu(null)
-    if (contextMenu) {
-      document.addEventListener('click', handleClick)
-      return () => document.removeEventListener('click', handleClick)
-    }
-  }, [contextMenu])
 
   // 编辑输入框自动聚焦
   useEffect(() => {
@@ -80,18 +88,10 @@ export function CategoryView() {
     }
   }, [addTab])
 
-  // 右键菜单
-  const handleContextMenu = useCallback((e: React.MouseEvent, path: string, name: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setContextMenu({ x: e.clientX, y: e.clientY, path, name })
-  }, [])
-
   // 重命名分类
   const handleStartRename = useCallback((path: string, name: string) => {
     setEditingPath(path)
     setEditingName(name)
-    setContextMenu(null)
   }, [])
 
   const handleFinishRename = useCallback(async () => {
@@ -123,23 +123,31 @@ export function CategoryView() {
     setEditingPath(null)
   }, [])
 
-  // 删除分类
-  const handleDelete = useCallback(async (path: string) => {
-    setContextMenu(null)
+  // 删除分类：弹出确认对话框
+  const handleDelete = useCallback((path: string) => {
+    setDeleteTarget(path)
+  }, [])
+
+  // 确认删除分类
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return
+    const path = deleteTarget
+    setDeleteTarget(null)
     try {
       await invoke('delete_category', { path })
       // 同步更新已打开 tab 的 frontmatter.categories
       useEditorStore.getState().removeCategoryFromTabs(path)
+      // 自动保存所有受影响的 tab，确保磁盘 YAML 与数据库一致
+      await useEditorStore.getState().saveAllDirtyTabs()
       await useCategoryStore.getState().loadTree()
     } catch (e) {
       console.error('Failed to delete category:', path, e)
     }
-  }, [])
+  }, [deleteTarget])
 
   // 新建子分类
   const handleStartNew = useCallback((parentPath: string) => {
     setNewItem({ parentPath, name: '' })
-    setContextMenu(null)
   }, [])
 
   // 新建根级分类
@@ -169,7 +177,7 @@ export function CategoryView() {
   }, [])
 
   return (
-    <div className="flex flex-col h-full" onClick={() => setContextMenu(null)}>
+    <div className="flex flex-col h-full">
       {/* 标题栏 */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -209,7 +217,9 @@ export function CategoryView() {
                 selectedPath={selectedPath}
                 onSelect={setSelectedPath}
                 openFile={openFile}
-                onContextMenu={handleContextMenu}
+                onStartRename={handleStartRename}
+                onStartNew={handleStartNew}
+                onDelete={handleDelete}
                 editingPath={editingPath}
                 editingName={editingName}
                 editInputRef={editInputRef}
@@ -250,36 +260,21 @@ export function CategoryView() {
         )}
       </div>
 
-      {/* 右键菜单 */}
-      {contextMenu && (
-        <div
-          className="fixed z-50 border border-border rounded-md bg-popover shadow-lg py-1 min-w-[140px]"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          <button
-            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-accent text-left"
-            onClick={() => handleStartRename(contextMenu.path, contextMenu.name)}
-          >
-            <Pencil size={11} />
-            {t('category.rename')}
-          </button>
-          <button
-            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-accent text-left"
-            onClick={() => handleStartNew(contextMenu.path)}
-          >
-            <Plus size={11} />
-            {t('category.newSubCategory')}
-          </button>
-          <div className="border-t border-border/50 my-1" />
-          <button
-            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-accent text-destructive text-left"
-            onClick={() => handleDelete(contextMenu.path)}
-          >
-            <Trash2 size={11} />
-            {t('category.delete')}
-          </button>
-        </div>
-      )}
+      {/* 删除分类确认对话框 */}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('category.deleteCategory')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('category.confirmDelete', { name: deleteTarget?.split('/').pop() || deleteTarget })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>{t('category.delete')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -291,7 +286,9 @@ function CategoryTreeNode({
   selectedPath,
   onSelect,
   openFile,
-  onContextMenu,
+  onStartRename,
+  onStartNew,
+  onDelete,
   editingPath,
   editingName,
   editInputRef,
@@ -309,7 +306,9 @@ function CategoryTreeNode({
   selectedPath: string | null
   onSelect: (path: string | null) => void
   openFile: (filePath: string) => void
-  onContextMenu: (e: React.MouseEvent, path: string, name: string) => void
+  onStartRename: (path: string, name: string) => void
+  onStartNew: (parentPath: string) => void
+  onDelete: (path: string) => void
   editingPath: string | null
   editingName: string
   editInputRef: React.RefObject<HTMLInputElement | null>
@@ -331,20 +330,21 @@ function CategoryTreeNode({
 
   return (
     <div>
-      <div
-        className={cn(
-          'flex items-center gap-1 px-2 py-0.5 cursor-pointer text-xs select-none',
-          isSelected
-            ? 'bg-primary/10 text-[var(--text-primary)]'
-            : 'hover:bg-accent/50 text-[var(--text-secondary)]',
-        )}
-        style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        onClick={() => {
-          onSelect(node.path)
-          if (hasChildren || hasFiles) setExpanded(!expanded)
-        }}
-        onContextMenu={(e) => onContextMenu(e, node.path, node.name)}
-      >
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            className={cn(
+              'flex items-center gap-1 px-2 py-0.5 cursor-pointer text-xs select-none',
+              isSelected
+                ? 'bg-primary/10 text-[var(--text-primary)]'
+                : 'hover:bg-accent/50 text-[var(--text-secondary)]',
+            )}
+            style={{ paddingLeft: `${depth * 12 + 8}px` }}
+            onClick={() => {
+              onSelect(node.path)
+              if (hasChildren || hasFiles) setExpanded(!expanded)
+            }}
+          >
         {hasChildren || hasFiles ? (
           <ChevronRight
             size={12}
@@ -388,7 +388,27 @@ function CategoryTreeNode({
             {node.count}
           </span>
         )}
-      </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onClick={() => onStartRename(node.path, node.name)}>
+            <Pencil size={11} className="mr-2" />
+            {t('category.rename')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => onStartNew(node.path)}>
+            <Plus size={11} className="mr-2" />
+            {t('category.newSubCategory')}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            className="text-destructive"
+            onClick={() => onDelete(node.path)}
+          >
+            <Trash2 size={11} className="mr-2" />
+            {t('category.delete')}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       {/* 展开内容：文件列表 + 子分类 */}
       {expanded && (
@@ -426,7 +446,9 @@ function CategoryTreeNode({
               selectedPath={selectedPath}
               onSelect={onSelect}
               openFile={openFile}
-              onContextMenu={onContextMenu}
+              onStartRename={onStartRename}
+              onStartNew={onStartNew}
+              onDelete={onDelete}
               editingPath={editingPath}
               editingName={editingName}
               editInputRef={editInputRef}

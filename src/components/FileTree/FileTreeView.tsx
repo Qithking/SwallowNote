@@ -274,7 +274,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
       data-path={node.path}
       className={`flex items-center h-[22px] cursor-pointer select-none gap-1 text-xs ${
         isEditing || isSelected ? 'bg-primary/10 text-[var(--text-primary)]'
-        : isDragOver ? 'bg-primary/15 text-[var(--text-primary)] border-t border-primary/30'
+        : isDragOver ? 'bg-primary/20 text-[var(--text-primary)] border-l-2 border-l-primary'
         : isMultiSelected ? 'bg-primary/5 text-[var(--text-primary)]'
         : isDragging ? 'opacity-50 text-[var(--text-secondary)]'
         : isPinned ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border-l-2 border-l-[var(--theme-color)]'

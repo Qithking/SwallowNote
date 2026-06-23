@@ -479,7 +479,9 @@
     "newCategoryPlaceholder": "Enter category name",
     "newSubCategory": "New subcategory",
     "rename": "Rename",
-    "delete": "Delete"
+    "delete": "Delete",
+    "deleteCategory": "Delete Category",
+    "confirmDelete": "Are you sure you want to delete category \"{{name}}\"? Files in this category will not be deleted but will be removed from it."
   },
   "git": {
     "title":"Sync Management",
