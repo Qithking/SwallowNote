@@ -18,6 +18,8 @@
  * always correlate request and reply regardless of the id type.
  */
 mod convert;
+mod math;
+mod docx_postprocess;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -135,7 +137,20 @@ fn handle_request(req: &JsonRpcRequest) -> Value {
                 })
                 .unwrap_or_default();
 
-            match convert::markdown_to_docx(markdown.to_string(), image_assets) {
+            // `rendered_assets` 是前端预渲染的 mermaid/katex/markmap 图片，
+            // 格式为 `{ "__mermaid_0__": base64_png_no_prefix, ... }`
+            let rendered_assets: HashMap<String, String> = req
+                .params
+                .get("rendered_assets")
+                .and_then(|v| v.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            match convert::markdown_to_docx(markdown.to_string(), image_assets, rendered_assets) {
                 Ok(b64) => {
                     let resp = JsonRpcSuccess {
                         jsonrpc: "2.0",

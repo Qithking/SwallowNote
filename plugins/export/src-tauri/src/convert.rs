@@ -104,6 +104,7 @@ const MAX_MARKDOWN_BYTES: usize = 5 * 1024 * 1024;
 pub fn markdown_to_docx(
     markdown: String,
     image_assets: HashMap<String, String>,
+    rendered_assets: HashMap<String, String>,
 ) -> Result<String, ExportError> {
     if markdown.len() > MAX_MARKDOWN_BYTES {
         return Err(ExportError::MarkdownTooLarge {
@@ -119,12 +120,27 @@ pub fn markdown_to_docx(
             decoded_assets.insert(k, bytes);
         }
     }
-    let doc = build_docx(&markdown, &decoded_assets)?;
+    // 解码前端预渲染的 mermaid/katex/markmap 图片资源
+    let mut decoded_rendered: HashMap<String, Vec<u8>> = HashMap::new();
+    for (k, v) in rendered_assets {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&v) {
+            decoded_rendered.insert(k, bytes);
+        }
+    }
+    let (doc, math_blocks) = build_docx(&markdown, &decoded_assets, &decoded_rendered)?;
     let mut buf = Cursor::new(Vec::new());
     doc.build()
         .pack(&mut buf)
         .map_err(|e| ExportError::DocxGeneration(format!("docx-rs pack failed: {}", e)))?;
-    let bytes = buf.into_inner();
+
+    // 如果有数学块，进行 ZIP 后处理注入 OMML
+    let bytes = if math_blocks.is_empty() {
+        buf.into_inner()
+    } else {
+        crate::docx_postprocess::inject_omml(&buf.into_inner(), &math_blocks)
+            .map_err(|e| ExportError::DocxGeneration(format!("OMML injection failed: {}", e)))?
+    };
+
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(b64)
 }
@@ -341,7 +357,8 @@ fn cjk_run_fonts() -> RunFonts {
 fn build_docx(
     markdown: &str,
     image_assets: &HashMap<String, Vec<u8>>,
-) -> Result<Docx, ExportError> {
+    rendered_assets: &HashMap<String, Vec<u8>>,
+) -> Result<(Docx, Vec<(String, String)>), ExportError> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -351,10 +368,20 @@ fn build_docx(
     let blocks = parse_blocks(parser);
 
     let mut doc = Docx::new();
+    let mut rendered_block_index: usize = 0;
+    let mut math_blocks: Vec<(String, String)> = Vec::new();
     for block in &blocks {
-        doc = render_block(block, 0, image_assets, doc);
+        doc = render_block(
+            block,
+            0,
+            image_assets,
+            rendered_assets,
+            &mut rendered_block_index,
+            &mut math_blocks,
+            doc,
+        );
     }
-    Ok(doc)
+    Ok((doc, math_blocks))
 }
 
 /// Render a single block into the DOCX. `depth` is the current
@@ -368,6 +395,9 @@ fn render_block(
     block: &Block,
     depth: usize,
     image_assets: &HashMap<String, Vec<u8>>,
+    rendered_assets: &HashMap<String, Vec<u8>>,
+    rendered_block_index: &mut usize,
+    math_blocks: &mut Vec<(String, String)>,
     doc: Docx,
 ) -> Docx {
     match block {
@@ -380,17 +410,24 @@ fn render_block(
             let para = append_inlines(Paragraph::new(), inlines, image_assets);
             doc.add_paragraph(para)
         }
-        Block::CodeBlock { code, lang } => render_code_block(code, lang, doc),
-        Block::List(list) => render_list(list, depth, image_assets, doc),
+        Block::CodeBlock { code, lang } => render_code_block(
+            code,
+            lang,
+            rendered_assets,
+            rendered_block_index,
+            math_blocks,
+            doc,
+        ),
+        Block::List(list) => render_list(
+            list,
+            depth,
+            image_assets,
+            rendered_assets,
+            rendered_block_index,
+            math_blocks,
+            doc,
+        ),
         Block::BlockQuote(children) => {
-            // A block quote is a structural container in v3.1:
-            // the `Block::BlockQuote(Vec<Block>)` shape lets
-            // child lists, sub-quotes, code blocks and tables
-            // nest correctly. For visual fidelity, every
-            // paragraph child gets the `│ ` glyph prefix and a
-            // left indent (the v3.0 inline-quote behaviour).
-            // Other child types (lists, sub-quotes) get their
-            // own indentation from their own rendering pass.
             let mut doc = doc;
             for child in children {
                 if let Block::Paragraph(inlines) = child {
@@ -406,7 +443,15 @@ fn render_block(
                     para = append_inlines(para, inlines, image_assets);
                     doc = doc.add_paragraph(para);
                 } else {
-                    doc = render_block(&child, depth, image_assets, doc);
+                    doc = render_block(
+                        &child,
+                        depth,
+                        image_assets,
+                        rendered_assets,
+                        rendered_block_index,
+                        math_blocks,
+                        doc,
+                    );
                 }
             }
             doc
@@ -415,10 +460,116 @@ fn render_block(
     }
 }
 
-fn render_code_block(code: &str, lang: &Option<String>, doc: Docx) -> Docx {
+fn render_code_block(
+    code: &str,
+    lang: &Option<String>,
+    rendered_assets: &HashMap<String, Vec<u8>>,
+    rendered_block_index: &mut usize,
+    math_blocks: &mut Vec<(String, String)>,
+    doc: Docx,
+) -> Docx {
     if code.is_empty() {
         return doc;
     }
+
+    // 处理前端渲染类代码块（mermaid / katex / markmap）
+    if let Some(lang_str) = lang {
+        match lang_str.as_str() {
+            // ── 数学公式：优先 OMML，降级为图片，最终保留源码 ──
+            "katex" => {
+                let idx = *rendered_block_index;
+                *rendered_block_index += 1;
+
+                // 尝试 LaTeX → OMML（Word 原生可编辑公式）
+                if let Ok(omml) = crate::math::latex_to_omml(code) {
+                    let placeholder = format!("__MATH_BLOCK_{}__", idx);
+                    math_blocks.push((placeholder.clone(), omml));
+                    // 插入占位段落，ZIP 后处理时替换为 OMML
+                    return doc.add_paragraph(
+                        Paragraph::new().add_run(Run::new().add_text(&placeholder)),
+                    );
+                }
+
+                // OMML 失败 → 尝试前端渲染的图片
+                let asset_key = format!("__katex_{}__", idx);
+                if let Some(bytes) = rendered_assets.get(&asset_key) {
+                    let pic = Pic::new(bytes)
+                        .size(EMU_PER_INCH * DEFAULT_IMAGE_WIDTH_INCH, EMU_PER_INCH * 3)
+                        .id(asset_key);
+                    let para = Paragraph::new()
+                        .align(AlignmentType::Center)
+                        .add_run(Run::new().add_image(pic));
+                    return doc.add_paragraph(para);
+                }
+
+                // 最终降级：保留源码
+                return render_code_block_fallback(code, lang_str, doc);
+            }
+
+            // ── Mermaid / Markmap：前端渲染图片嵌入 ──
+            "mermaid" | "markmap" => {
+                let idx = *rendered_block_index;
+                *rendered_block_index += 1;
+
+                let asset_key = format!("__{}_{}__", lang_str, idx);
+                if let Some(bytes) = rendered_assets.get(&asset_key) {
+                    let pic = Pic::new(bytes)
+                        .size(EMU_PER_INCH * DEFAULT_IMAGE_WIDTH_INCH, EMU_PER_INCH * 4)
+                        .id(asset_key);
+                    let para = Paragraph::new()
+                        .align(AlignmentType::Center)
+                        .add_run(Run::new().add_image(pic));
+                    return doc.add_paragraph(para);
+                }
+
+                // 无渲染资源 → 保留源码
+                return render_code_block_fallback(code, lang_str, doc);
+            }
+
+            _ => {}
+        }
+    }
+
+    // 普通代码块：保持原有渲染逻辑
+    render_code_block_plain(code, lang, doc)
+}
+
+/// 前端渲染类代码块的降级渲染（保留源码 + 语言标签）
+fn render_code_block_fallback(code: &str, lang: &str, doc: Docx) -> Docx {
+    let mut para = Paragraph::new();
+    para = para.add_run(
+        Run::new()
+            .add_text(format!("[{}]", lang))
+            .size(14)
+            .color("888888"),
+    );
+    para = para.add_run(
+        Run::new()
+            .add_text(" (前端渲染)")
+            .size(14)
+            .color("999999"),
+    );
+    para = para.add_run(
+        Run::new()
+            .add_text("\n")
+            .size(14)
+            .color("888888"),
+    );
+    para = para.add_run(
+        Run::new()
+            .add_text(code)
+            .fonts(
+                RunFonts::new()
+                    .east_asia(MONO_FONT)
+                    .ascii(MONO_FONT),
+            )
+            .size(18),
+    );
+    doc.add_paragraph(para)
+}
+
+/// 普通代码块渲染（非前端渲染类语言）
+fn render_code_block_plain(code: &str, lang: &Option<String>, doc: Docx) -> Docx {
     let mut para = Paragraph::new();
     if let Some(lang) = lang {
         if !lang.is_empty() {
@@ -428,20 +579,6 @@ fn render_code_block(code: &str, lang: &Option<String>, doc: Docx) -> Docx {
                     .size(14)
                     .color("888888"),
             );
-            // For "rendered-client-side" languages, append a
-            // "(前端渲染)" marker so the reader knows the PDF /
-            // HTML pipeline produces a rendered figure for this
-            // block while the DOCX path keeps the source. The
-            // marker is the contract with the frontend's
-            // `renderCustomBlocksForPdf` helper.
-            if matches!(lang.as_str(), "mermaid" | "katex" | "markmap") {
-                para = para.add_run(
-                    Run::new()
-                        .add_text(" (前端渲染)")
-                        .size(14)
-                        .color("999999"),
-                );
-            }
             para = para.add_run(
                 Run::new()
                     .add_text("\n")
@@ -467,20 +604,14 @@ fn render_list(
     list: &List,
     depth: usize,
     image_assets: &HashMap<String, Vec<u8>>,
+    rendered_assets: &HashMap<String, Vec<u8>>,
+    rendered_block_index: &mut usize,
+    math_blocks: &mut Vec<(String, String)>,
     doc: Docx,
 ) -> Docx {
-    // `depth` is 0-indexed. The previous flat representation
-    // used a 1-indexed `list_depth` so top-level items indented
-    // at `1 * 360` twips; we add 1 here to preserve the same
-    // visual output.
     let indent_val: i32 = ((depth + 1) as i32).min(4) * 360;
     let mut doc = doc;
     for item in &list.items {
-        // docx-rs 0.4 does not expose a public Numbering /
-        // AbstractNum setter for the built-in numId, so we
-        // render the marker inline. The DOCX still preserves
-        // the underlying text, so the reader sees both the
-        // number and the content.
         let marker = if list.ordered {
             format!("{}. ", item.index)
         } else {
@@ -491,11 +622,16 @@ fn render_list(
             .indent(Some(indent_val), None, None, None);
         para = append_inlines(para, &item.inlines, image_assets);
         doc = doc.add_paragraph(para);
-        // Render the item's nested children (sub-lists,
-        // paragraphs, sub-quotes) at depth + 1 so a nested
-        // list indents further than its parent.
         for child in &item.children {
-            doc = render_block(child, depth + 1, image_assets, doc);
+            doc = render_block(
+                child,
+                depth + 1,
+                image_assets,
+                rendered_assets,
+                rendered_block_index,
+                math_blocks,
+                doc,
+            );
         }
     }
     doc
@@ -1276,7 +1412,7 @@ mod tests {
     }
 
     fn round_trip(md: &str) -> String {
-        let b64 = markdown_to_docx(md.to_string(), HashMap::new()).expect("markdown_to_docx");
+        let b64 = markdown_to_docx(md.to_string(), HashMap::new(), HashMap::new()).expect("markdown_to_docx");
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&b64)
             .expect("base64 decode");
@@ -1464,7 +1600,7 @@ mod tests {
         // the code stands out inside a sentence. The test
         // asserts the run-level font name is present in the
         // packed bytes.
-        let bytes = pack(build_docx("| a |\n| - |\n| `x` |\n", &HashMap::new()).expect("build"));
+        let bytes = pack(build_docx("| a |\n| - |\n| `x` |\n", &HashMap::new(), &HashMap::new()).expect("build").0);
         let text = docx_text(&bytes);
         assert!(
             text.contains("x"),
@@ -1483,7 +1619,7 @@ mod tests {
     #[test]
     fn oversized_markdown_is_rejected() {
         let md = "a".repeat(MAX_MARKDOWN_BYTES + 1);
-        let err = markdown_to_docx(md, HashMap::new()).unwrap_err();
+        let err = markdown_to_docx(md, HashMap::new(), HashMap::new()).unwrap_err();
         assert!(
             matches!(err, ExportError::MarkdownTooLarge { .. }),
             "expected MarkdownTooLarge, got {err:?}"
@@ -1504,7 +1640,7 @@ mod tests {
     fn no_lint_smoke() {
         // Just exercise the docx build for an empty input; the
         // produced file should be a valid zip (starts with PK).
-        let bytes = pack(build_docx("", &HashMap::new()).expect("build"));
+        let bytes = pack(build_docx("", &HashMap::new(), &HashMap::new()).expect("build").0);
         let mut head = [0u8; 2];
         let mut cur = std::io::Cursor::new(&bytes);
         cur.read_exact(&mut head).unwrap();
@@ -1661,6 +1797,7 @@ mod tests {
         let b64 = markdown_to_docx(
             format!("![alt]({})\n", url),
             assets,
+            HashMap::new(),
         )
         .expect("markdown_to_docx");
         let bytes = base64::engine::general_purpose::STANDARD
