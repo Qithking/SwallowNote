@@ -4,7 +4,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 /// Get the current running app bundle path on macOS
@@ -74,6 +74,44 @@ fn get_default_download_dir() -> PathBuf {
     }
 }
 
+/// Check the latest release version from GitHub API.
+/// Returns (latest_version, has_update) or an error string.
+/// Uses a 10-second timeout to avoid hanging when GitHub is unreachable.
+#[tauri::command]
+pub async fn check_latest_version(current_version: String) -> Result<(String, bool), String> {
+    let client = Client::builder()
+        .user_agent("SwallowNote/0.1.0")
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let release_url = "https://api.github.com/repos/Qithking/SwallowNote/releases/latest";
+
+    let response = client
+        .get(release_url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if response.status() == 403 {
+        return Err("GitHub API rate limited, please try again later".to_string());
+    }
+
+    if !response.status().is_success() {
+        return Err(format!("Request failed: {}", response.status()));
+    }
+
+    let release: GithubRelease = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let latest = release.tag_name.trim_start_matches('v').to_string();
+    let has_update = latest != current_version;
+    Ok((latest, has_update))
+}
+
 #[tauri::command]
 pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
     // Acquire the download lock – reject if a download is already in progress
@@ -92,6 +130,7 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
 async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
     let client = Client::builder()
         .user_agent("SwallowNote/0.1.0")
+        .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
 

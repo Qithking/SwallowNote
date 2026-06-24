@@ -712,13 +712,10 @@ export async function checkLatestVersion(): Promise<{ latest: string; current: s
   try {
     const packageJson = await import('../../package.json')
     const current = packageJson.default.version
-    const response = await fetch('https://api.github.com/repos/Qithking/SwallowNote/releases/latest')
-    if (!response.ok) {
-      return null
-    }
-    const data = await response.json()
-    const latest = data.tag_name?.replace(/^v/, '') || current
-    const hasUpdate = latest !== current
+    // Use the Rust backend to check the latest version.
+    // This avoids CORS errors and 504 gateway timeouts that occur when the
+    // browser directly fetches from api.github.com (especially behind a proxy).
+    const [latest, hasUpdate] = await invoke<[string, boolean]>('check_latest_version', { currentVersion: current })
     return { latest, current, hasUpdate }
   } catch (e) {
     console.error('Failed to check latest version:', e)
