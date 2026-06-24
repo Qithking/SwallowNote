@@ -288,6 +288,22 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
         let app_name = app_bundle.file_name();
         let app_name_str = app_name.to_string_lossy().to_string();
         let source_app = app_bundle.path();
+
+        // 从 Contents/MacOS/ 目录读取实际二进制文件名，
+        // 而非从 .app bundle 名推导（bundle 名 "SwallowNote.app" ≠ 二进制名 "swallownote"）
+        let macos_dir = source_app.join("Contents").join("MacOS");
+        let binary_name = std::fs::read_dir(&macos_dir)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .find(|e| e.path().is_file())
+            })
+            .and_then(|e| e.file_name().to_string_lossy().into_owned().into())
+            .unwrap_or_else(|| {
+                // 降级：从 .app 名去掉后缀作为二进制名
+                app_name_str.trim_end_matches(".app").to_string()
+            });
         
         // Determine the destination path for the app
         // Priority: 1. Current running app location (if it's an .app bundle)
@@ -378,7 +394,7 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
         let restart_script_path = tmp_dir.join(format!("swallownote_restart_{}.sh", current_pid));
         
         // Build the restart script content - using a more reliable approach
-        let script_content = build_restart_script(current_pid, &new_app_path, &app_name_str);
+        let script_content = build_restart_script(current_pid, &new_app_path, &binary_name);
         
         std::fs::write(&restart_script_path, script_content)
             .map_err(|e| format!("Failed to write restart script: {}", e))?;
@@ -423,6 +439,7 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
 }
 
 /// Build the restart helper script content
+/// `app_name` 是 Contents/MacOS/ 下的实际二进制文件名（如 "swallownote"）
 #[cfg(target_os = "macos")]
 fn build_restart_script(pid: u32, app_path: &str, app_name: &str) -> String {
     format!(r#"#!/bin/bash
