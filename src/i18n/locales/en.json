@@ -621,7 +621,8 @@
     "forceUploadConfirmDesc": "This will commit the current local file and force push it to the remote repository, overwriting the remote version. Are you sure?",
     "forceUploadSuccess": "File forcefully uploaded to remote repository",
     "forceUploadFailed": "Force upload failed: {{error}}",
-    "noRemote": "No remote repository configured"
+    "noRemote": "No remote repository configured",
+    "refresh": "Refresh"
   },
   "directory": {
     "title": "Directory",

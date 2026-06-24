@@ -621,7 +621,8 @@
     "forceUploadConfirmDesc": "这将提交当前本地文件并强制推送到远程仓库，远程文件内容将被覆盖，是否继续？",
     "forceUploadSuccess": "文件已强制上传到远程仓库",
     "forceUploadFailed": "强制上传失败：{{error}}",
-    "noRemote": "未配置远程仓库"
+    "noRemote": "未配置远程仓库",
+    "refresh": "刷新"
   },
   "directory": {
     "title": "目录",
