@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { invoke } from '@tauri-apps/api/core'
 import { cn } from '@/lib/utils'
+import { FullPathTooltip } from './FullPathTooltip'
 
 type SearchResult = TSearchResult
 
@@ -66,14 +67,14 @@ const SearchResultFile = memo(function SearchResultFile({
         <ChevronRight size={14} className="mr-1 shrink-0" style={{ color: 'var(--text-muted)' }} />
       )}
       {getFileIcon(result.file_name, 14)}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>
-            {result.file_name}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" align="start">{result.file_path}</TooltipContent>
-      </Tooltip>
+      <FullPathTooltip content={result.file_path}>
+        <span
+          className="text-xs truncate"
+          style={{ color: 'var(--text-primary)' }}
+        >
+          {result.file_name}
+        </span>
+      </FullPathTooltip>
       <span className="ml-auto text-xs px-1 rounded shrink-0" style={{ 
         color: 'var(--text-muted)',
         backgroundColor: 'var(--bg-tertiary)'

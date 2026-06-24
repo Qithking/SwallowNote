@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
-import { FileText, Loader2, RotateCcw, Download, Upload } from 'lucide-react'
+import { FileText, Loader2, RotateCcw, Download, Upload, RefreshCw } from 'lucide-react'
 import { useEditorStore } from '@/stores'
 import { gitFileLog, gitShowFileContent, gitPullFileLatest, gitForceUploadFile, GitFileLogEntry, writeFile } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -232,6 +232,16 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
     setShowForceUploadDialog(false)
   }, [])
 
+  // 手动刷新 git 记录
+  const handleRefresh = useCallback(() => {
+    if (!activeTab?.path || loading) return
+    setEntries([])
+    setHasMore(true)
+    setNotInRepo(false)
+    skipRef.current = 0
+    loadHistory(activeTab.path, 0)
+  }, [activeTab?.path, loading, loadHistory])
+
   const formatDate = (dateStr: string) => {
     try {
       // Handle unix timestamp (milliseconds) from backend
@@ -327,6 +337,19 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
         </div>
         {!notInRepo && (
           <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="shrink-0 p-1 rounded hover:bg-[var(--bg-active)] cursor-pointer"
+                  style={{ color: loading ? 'var(--text-muted)' : 'var(--text-secondary)' }}
+                  onClick={handleRefresh}
+                  disabled={loading}
+                >
+                  <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left">{t('history.refresh')}</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

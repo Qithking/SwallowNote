@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { getFileIcon } from '@/lib/utils/fileIcon'
 import { loadFileContent } from '@/lib/api'
 import { countWords } from '@/lib/utils/wordCount'
+import { FullPathTooltip } from '@/components/Search/FullPathTooltip'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -430,9 +431,11 @@ function CategoryTreeNode({
                 <span className="shrink-0 flex items-center justify-center w-3 h-3">
                   {getFileIcon(fileName)}
                 </span>
-                <span className="truncate text-muted-foreground">
-                  {fileName}
-                </span>
+                <FullPathTooltip content={file.file_path}>
+                  <span className="truncate text-muted-foreground">
+                    {fileName}
+                  </span>
+                </FullPathTooltip>
               </div>
             )
           })}
