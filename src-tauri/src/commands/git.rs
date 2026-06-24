@@ -6,12 +6,22 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 use crate::i18n;
 
-/// Shared state to track the currently running git clone process PID.
-/// This allows the frontend to cancel an in-progress clone by killing the process.
-pub type ClonePidState = Arc<Mutex<Option<u32>>>;
+/// Information about the currently running git clone process.
+/// Stored in Tauri managed state so it survives frontend page refreshes.
+#[derive(Default, Serialize, Clone)]
+pub struct CloneStateInfo {
+    pub pid: Option<u32>,
+    pub url: String,
+    pub local_path: String,
+}
+
+/// Shared state to track the currently running git clone process.
+/// This allows the frontend to cancel an in-progress clone and to query
+/// whether a clone is still running after a page refresh.
+pub type ClonePidState = Arc<Mutex<CloneStateInfo>>;
 
 pub fn new_clone_pid_state() -> ClonePidState {
-    Arc::new(Mutex::new(None))
+    Arc::new(Mutex::new(CloneStateInfo::default()))
 }
 
 /// Cancel an in-progress git clone by killing the child process.
@@ -19,7 +29,12 @@ pub fn new_clone_pid_state() -> ClonePidState {
 pub fn git_clone_cancel(pid_state: State<'_, ClonePidState>) -> Result<bool, String> {
     let pid = {
         let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
-        guard.take()
+        let pid = guard.pid.take();
+        // Clear url/local_path as well so a stale status query doesn't
+        // report a running clone after cancellation.
+        guard.url.clear();
+        guard.local_path.clear();
+        pid
     };
     if let Some(pid) = pid {
         #[cfg(unix)]
@@ -2044,6 +2059,15 @@ pub async fn git_clone_with_credentials(
     do_git_clone(&app, &pid_state, &url, &local_path, Some(&username), Some(&password)).await
 }
 
+/// Query the current git clone status.
+/// Returns the clone info (pid/url/local_path) so the frontend can
+/// recover state after a page refresh while a clone is still running.
+#[tauri::command]
+pub fn git_clone_status(pid_state: State<'_, ClonePidState>) -> Result<CloneStateInfo, String> {
+    let guard = pid_state.lock().map_err(|e| e.to_string())?;
+    Ok(guard.clone())
+}
+
 /// Extract the last percentage value (e.g. "14%") from a git progress line.
 /// Returns `None` if no percentage is found.
 fn extract_percent(s: &str) -> Option<u32> {
@@ -2088,10 +2112,22 @@ async fn do_git_clone(
         return Err(format!("{}: {}", i18n::t("backend.git.targetPathExists"), local_path));
     }
 
-    // Send start event
+    // Store the URL and local_path in shared state *before* emitting the
+    // started event, so a frontend page refresh can recover them via
+    // `git_clone_status`.
+    {
+        let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
+        guard.url = url.to_string();
+        guard.local_path = local_path.to_string();
+    }
+
+    // Send start event (include url + local_path so the frontend can
+    // restore form fields even after a page refresh).
     let _ = app.emit("git-clone-progress", serde_json::json!({
         "status": "started",
-        "message": i18n::t("backend.git.cloning")
+        "message": i18n::t("backend.git.cloning"),
+        "url": url,
+        "local_path": local_path
     }));
 
     // If credentials provided, set up GIT_ASKPASS
@@ -2156,7 +2192,7 @@ async fn do_git_clone(
     let pid = child.id();
     {
         let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
-        *guard = Some(pid);
+        guard.pid = Some(pid);
     }
 
     // Read stderr for progress in a separate thread to avoid blocking the async runtime.
@@ -2256,10 +2292,10 @@ async fn do_git_clone(
         .map_err(|e| format!("Clone task panicked: {}", e))?
     }?;
 
-    // Clear the PID from shared state — clone is no longer running.
+    // Clear the clone state — clone is no longer running.
     {
         let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
-        *guard = None;
+        *guard = CloneStateInfo::default();
     }
 
     // Clean up askpass script

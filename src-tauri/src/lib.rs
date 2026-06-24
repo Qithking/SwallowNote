@@ -132,6 +132,7 @@ pub fn run() {
             commands::git::git_clone,
             commands::git::git_clone_with_credentials,
             commands::git::git_clone_cancel,
+            commands::git::git_clone_status,
             commands::git::scan_git_repos,
             commands::git::git_get_conflict_files,
             commands::git::git_get_conflict_local_content,

@@ -667,7 +667,10 @@
     "yamlIndexProgress": "YAML索引：{{current}}/{{total}}",
     "yamlIndexDone": "YAML索引：完成",
     "yamlIndexProgressTooltip": "正在索引YAML元数据 {{current}}/{{total}}",
-    "yamlIndexDoneTooltip": "YAML元数据索引已完成"
+    "yamlIndexDoneTooltip": "YAML元数据索引已完成",
+    "cloneProgress": "克隆({{url}})进度{{percent}}%",
+    "cloneInProgress": "克隆({{url}})中...",
+    "cloneProgressTooltip": "正在克隆 {{url}}"
   },
   "recent": {
     "workspaceName": "工作区",

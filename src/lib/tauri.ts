@@ -515,6 +515,16 @@ export async function gitCloneCancel(): Promise<boolean> {
   return await invoke('git_clone_cancel')
 }
 
+export interface GitCloneStatus {
+  pid: number | null
+  url: string
+  local_path: string
+}
+
+export async function gitCloneStatus(): Promise<GitCloneStatus> {
+  return await invoke('git_clone_status')
+}
+
 export interface GitFileLogEntry {
   hash: string
   message: string
