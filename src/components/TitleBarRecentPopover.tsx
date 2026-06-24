@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useUIStore, useWorkspaceStore } from '@/stores'
-import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory, removeFolderHistory, gitClone, gitCloneWithCredentials } from '@/lib/tauri'
+import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory, removeFolderHistory, gitClone, gitCloneWithCredentials, gitCloneCancel } from '@/lib/tauri'
 import { useState, useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
@@ -45,6 +45,8 @@ export function TitleBarRecentPopover() {
   const [isCloning, setIsCloning] = useState(false)
   const [cloneProgress, setCloneProgress] = useState('')
   const [cloneError, setCloneError] = useState('')
+  const [clonePercent, setClonePercent] = useState<number | null>(null)
+  const cancelRef = useRef(false)
   const [isPrivateRepo, setIsPrivateRepo] = useState(false)
   const [cloneUsername, setCloneUsername] = useState('')
   const [clonePassword, setClonePassword] = useState('')
@@ -116,17 +118,21 @@ export function TitleBarRecentPopover() {
 
     const setupListener = async () => {
       unlisten = await listen('git-clone-progress', (event) => {
-        const payload = event.payload as { status: string; message: string }
+        const payload = event.payload as { status: string; message: string; percent?: number }
         if (payload.status === 'progress') {
           setCloneProgress(payload.message)
+          setClonePercent(payload.percent ?? null)
           setCloneError('')
         } else if (payload.status === 'completed') {
           setCloneProgress(t('recent.cloneComplete'))
+          setClonePercent(null)
         } else if (payload.status === 'error') {
           setCloneError(t('recent.cloneFailed', { error: payload.message }))
+          setClonePercent(null)
         } else if (payload.status === 'started') {
           setCloneProgress(t('recent.cloning'))
           setCloneError('')
+          setClonePercent(null)
         }
       })
     }
@@ -185,6 +191,7 @@ export function TitleBarRecentPopover() {
     setCloneLocalPath('')
     setCloneProgress('')
     setCloneError('')
+    setClonePercent(null)
     setIsPrivateRepo(false)
     setCloneUsername('')
     setClonePassword('')
@@ -196,6 +203,21 @@ export function TitleBarRecentPopover() {
     if (path) {
       setCloneLocalPath(path)
     }
+  }
+
+  const handleCancelClone = async () => {
+    if (isCloning) {
+      cancelRef.current = true
+      try {
+        await gitCloneCancel()
+      } catch {
+        // ignore cancel errors
+      }
+    }
+    setShowCloneDialog(false)
+    setCloneProgress('')
+    setCloneError('')
+    setClonePercent(null)
   }
 
   const handleClone = async () => {
@@ -216,6 +238,8 @@ export function TitleBarRecentPopover() {
     }
 
     setIsCloning(true)
+    cancelRef.current = false
+    setClonePercent(null)
     try {
       const clonedPath = isPrivateRepo
         ? await gitCloneWithCredentials(cloneUrl.trim(), cloneLocalPath.trim(), cloneUsername.trim(), clonePassword.trim())
@@ -233,11 +257,14 @@ export function TitleBarRecentPopover() {
         await openFolder(clonedPath)
       }
     } catch (e) {
-      const { showToast } = useUIStore.getState()
-      const message = e instanceof Error ? e.message : String(e)
-      showToast(t('recent.cloneFailed', { error: message }), 'error')
+      if (!cancelRef.current) {
+        const { showToast } = useUIStore.getState()
+        const message = e instanceof Error ? e.message : String(e)
+        showToast(t('recent.cloneFailed', { error: message }), 'error')
+      }
     } finally {
       setIsCloning(false)
+      setClonePercent(null)
     }
   }
 
@@ -496,17 +523,20 @@ export function TitleBarRecentPopover() {
                   {cloneError || cloneProgress}
                 </div>
               )}
+              {isCloning && clonePercent != null && (
+                <div className="mt-1 h-1 rounded-full overflow-hidden" style={{ background: 'var(--bg-tertiary)' }}>
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-300"
+                    style={{ width: `${clonePercent}%` }}
+                  />
+                </div>
+              )}
             </div>
             <div className="flex gap-2 justify-end mt-4">
               <button
-                onClick={() => {
-                  setShowCloneDialog(false)
-                  setCloneProgress('')
-                  setCloneError('')
-                }}
+                onClick={handleCancelClone}
                 className="px-3 py-1.5 text-xs rounded cursor-pointer hover:bg-[var(--bg-hover)]"
                 style={{ color: 'var(--text-primary)' }}
-                disabled={isCloning}
               >
                 {t('common.cancel')}
               </button>
@@ -516,7 +546,9 @@ export function TitleBarRecentPopover() {
                 disabled={isCloning || (isPrivateRepo && (!cloneUsername.trim() || !clonePassword.trim()))}
               >
                 {isCloning && <Loader2 size={12} className="animate-spin" />}
-                {isCloning ? t('recent.cloning') : t('recent.cloneAndOpen')}
+                {isCloning
+                  ? (clonePercent != null ? `${t('recent.cloning')} ${clonePercent}%` : t('recent.cloning'))
+                  : t('recent.cloneAndOpen')}
               </button>
             </div>
           </div>

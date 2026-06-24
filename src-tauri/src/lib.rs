@@ -131,6 +131,7 @@ pub fn run() {
             commands::git::git_force_upload_file,
             commands::git::git_clone,
             commands::git::git_clone_with_credentials,
+            commands::git::git_clone_cancel,
             commands::git::scan_git_repos,
             commands::git::git_get_conflict_files,
             commands::git::git_get_conflict_local_content,
@@ -245,6 +246,7 @@ commands::upgrade::download_latest_release,
             // 监听 plugins 树，外部 storage.json 变更时通知前端。幂等。
             services::file_watcher::watch_plugin_storage(app_handle.clone());
 
+            app.handle().manage(commands::git::new_clone_pid_state());
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
             // 每插件后端子进程状态；启动为空，首次 invoke_plugin 时懒加载。
             app.handle().manage(commands::plugin_invoke::new_shared_plugin_process_state());

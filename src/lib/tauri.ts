@@ -511,6 +511,10 @@ export async function gitCloneWithCredentials(url: string, localPath: string, us
   return await invoke('git_clone_with_credentials', { url, localPath, username, password })
 }
 
+export async function gitCloneCancel(): Promise<boolean> {
+  return await invoke('git_clone_cancel')
+}
+
 export interface GitFileLogEntry {
   hash: string
   message: string
