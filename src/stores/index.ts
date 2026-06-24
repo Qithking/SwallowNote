@@ -24,3 +24,6 @@ export type { PluginMarketState, RepoSource } from './plugin-market'
 
 export { useCategoryStore } from './category'
 export type { CategoryNode } from './category'
+
+export { useCloneStore } from './clone'
+export type { CloneState } from './clone'

@@ -667,7 +667,10 @@
     "yamlIndexProgress": "YAML Index: {{current}}/{{total}}",
     "yamlIndexDone": "YAML Index: Done",
     "yamlIndexProgressTooltip": "Indexing YAML metadata {{current}}/{{total}}",
-    "yamlIndexDoneTooltip": "YAML metadata indexing complete"
+    "yamlIndexDoneTooltip": "YAML metadata indexing complete",
+    "cloneProgress": "Clone({{url}}) {{percent}}%",
+    "cloneInProgress": "Cloning({{url}})...",
+    "cloneProgressTooltip": "Cloning {{url}}"
   },
   "recent": {
     "workspaceName": "Workspace",

@@ -2,8 +2,8 @@
  * StatusBar Component - Bottom status bar
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Database } from 'lucide-react'
-import { useUIStore, useGitStore } from '@/stores'
+import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Database, GitBranch } from 'lucide-react'
+import { useUIStore, useGitStore, useCloneStore } from '@/stores'
 import { checkLatestVersion, downloadLatestRelease, openInstaller, installAndRestart, DownloadProgress } from '@/lib/tauri'
 import { open } from '@tauri-apps/plugin-shell'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -31,6 +31,47 @@ function StatusBar() {
   const showToast = useUIStore((s) => s.showToast)
   const autoCheckUpdate = useUIStore((s) => s.autoCheckUpdate)
   const syncStatus = useGitStore((s) => s.syncStatus)
+  const cloneIsRunning = useCloneStore((s) => s.isCloning)
+  const statusCloneUrl = useCloneStore((s) => s.cloneUrl)
+  const statusClonePercent = useCloneStore((s) => s.clonePercent)
+  // Also listen to git-clone-progress events directly as a local mirror,
+  // so the status bar updates in real-time even if the store subscription
+  // has rendering timing issues.
+  const [localCloneRunning, setLocalCloneRunning] = useState(false)
+  const [localCloneUrl, setLocalCloneUrl] = useState('')
+  const [localClonePercent, setLocalClonePercent] = useState<number | null>(null)
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    const setup = async () => {
+      unlisten = await listen<{ status: string; message: string; percent?: number; url?: string; local_path?: string }>(
+        'git-clone-progress',
+        (event) => {
+          const payload = event.payload
+          if (payload.status === 'started') {
+            setLocalCloneRunning(true)
+            setLocalCloneUrl(payload.url ?? '')
+            setLocalClonePercent(null)
+          } else if (payload.status === 'progress') {
+            setLocalCloneRunning(true)
+            setLocalClonePercent(payload.percent ?? null)
+          } else if (payload.status === 'completed') {
+            setLocalCloneRunning(false)
+            setLocalClonePercent(null)
+          } else if (payload.status === 'error') {
+            setLocalCloneRunning(false)
+            setLocalClonePercent(null)
+          }
+        },
+      )
+    }
+    setup()
+    return () => { unlisten?.() }
+  }, [])
+
+  const showCloneProgress = cloneIsRunning || localCloneRunning
+  const displayCloneUrl = statusCloneUrl || localCloneUrl
+  const displayClonePercent = statusClonePercent ?? localClonePercent;
   const { t } = useTranslation()
   const [currentVersion] = useState(packageJson.version)
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
@@ -384,6 +425,31 @@ function StatusBar() {
       >
         {/* Left Section */}
         <div className="flex items-center gap-2">
+          {/* Git 克隆进度 */}
+          {showCloneProgress && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className="flex items-center gap-1 opacity-60 hover:opacity-100 cursor-pointer"
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-clone-dialog'))}
+                >
+                  <GitBranch size={12} className="animate-pulse" />
+                  <span className="text-[11px] max-w-[160px] truncate">
+                    {`克隆(${displayCloneUrl})`}
+                  </span>
+                  <span className="text-[11px] tabular-nums min-w-[3ch] text-right">
+                    {`${displayClonePercent ?? 0}%`}
+                  </span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {t('statusBar.cloneProgressTooltip', { url: displayCloneUrl })}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {showCloneProgress && (fmIndexTotal > 0 || fmIndexDone) && (
+            <span className="opacity-30">|</span>
+          )}
           {/* Frontmatter 索引进度 */}
           {(fmIndexTotal > 0 || fmIndexDone) && (
             <Tooltip>

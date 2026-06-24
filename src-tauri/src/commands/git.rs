@@ -1,9 +1,67 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Stdio;
-use std::io::{BufRead, BufReader};
-use tauri::{AppHandle, Emitter};
+use std::io::{BufReader, Read};
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter, State};
 use crate::i18n;
+
+/// Information about the currently running git clone process.
+/// Stored in Tauri managed state so it survives frontend page refreshes.
+#[derive(Default, Serialize, Clone)]
+pub struct CloneStateInfo {
+    pub pid: Option<u32>,
+    pub url: String,
+    pub local_path: String,
+}
+
+/// Shared state to track the currently running git clone process.
+/// This allows the frontend to cancel an in-progress clone and to query
+/// whether a clone is still running after a page refresh.
+pub type ClonePidState = Arc<Mutex<CloneStateInfo>>;
+
+pub fn new_clone_pid_state() -> ClonePidState {
+    Arc::new(Mutex::new(CloneStateInfo::default()))
+}
+
+/// Cancel an in-progress git clone by killing the child process.
+#[tauri::command]
+pub fn git_clone_cancel(pid_state: State<'_, ClonePidState>) -> Result<bool, String> {
+    let pid = {
+        let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
+        let pid = guard.pid.take();
+        // Clear url/local_path as well so a stale status query doesn't
+        // report a running clone after cancellation.
+        guard.url.clear();
+        guard.local_path.clear();
+        pid
+    };
+    if let Some(pid) = pid {
+        #[cfg(unix)]
+        {
+            // Send SIGTERM to the git process group. Use negative PID to signal
+            // the entire process group, which also kills any child processes
+            // (e.g. git-remote-https, pack-objects) that git may have spawned.
+            let result = unsafe { libc::kill(-(pid as i32), libc::SIGTERM) };
+            if result != 0 {
+                // Fallback: try killing just the process itself
+                let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            // On Windows, use taskkill to terminate the process tree
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct GitRepositoryInfo {
@@ -1979,24 +2037,63 @@ fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Res
 
 /// Clone a git repository to a local path
 #[tauri::command]
-pub async fn git_clone(app: AppHandle, url: String, local_path: String) -> Result<String, String> {
-    do_git_clone(&app, &url, &local_path, None, None).await
+pub async fn git_clone(
+    app: AppHandle,
+    pid_state: State<'_, ClonePidState>,
+    url: String,
+    local_path: String,
+) -> Result<String, String> {
+    do_git_clone(&app, &pid_state, &url, &local_path, None, None).await
 }
 
 /// Clone a private git repository with credentials
 #[tauri::command]
 pub async fn git_clone_with_credentials(
     app: AppHandle,
+    pid_state: State<'_, ClonePidState>,
     url: String,
     local_path: String,
     username: String,
     password: String,
 ) -> Result<String, String> {
-    do_git_clone(&app, &url, &local_path, Some(&username), Some(&password)).await
+    do_git_clone(&app, &pid_state, &url, &local_path, Some(&username), Some(&password)).await
+}
+
+/// Query the current git clone status.
+/// Returns the clone info (pid/url/local_path) so the frontend can
+/// recover state after a page refresh while a clone is still running.
+#[tauri::command]
+pub fn git_clone_status(pid_state: State<'_, ClonePidState>) -> Result<CloneStateInfo, String> {
+    let guard = pid_state.lock().map_err(|e| e.to_string())?;
+    Ok(guard.clone())
+}
+
+/// Extract the last percentage value (e.g. "14%") from a git progress line.
+/// Returns `None` if no percentage is found.
+fn extract_percent(s: &str) -> Option<u32> {
+    let bytes = s.as_bytes();
+    let mut result = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i > 0 {
+            let mut start = i;
+            while start > 0 && bytes[start - 1].is_ascii_digit() {
+                start -= 1;
+            }
+            if start < i {
+                if let Ok(n) = s[start..i].parse::<u32>() {
+                    result = Some(n);
+                }
+            }
+        }
+        i += 1;
+    }
+    result
 }
 
 async fn do_git_clone(
     app: &AppHandle,
+    pid_state: &ClonePidState,
     url: &str,
     local_path: &str,
     username: Option<&str>,
@@ -2015,10 +2112,22 @@ async fn do_git_clone(
         return Err(format!("{}: {}", i18n::t("backend.git.targetPathExists"), local_path));
     }
 
-    // Send start event
+    // Store the URL and local_path in shared state *before* emitting the
+    // started event, so a frontend page refresh can recover them via
+    // `git_clone_status`.
+    {
+        let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
+        guard.url = url.to_string();
+        guard.local_path = local_path.to_string();
+    }
+
+    // Send start event (include url + local_path so the frontend can
+    // restore form fields even after a page refresh).
     let _ = app.emit("git-clone-progress", serde_json::json!({
         "status": "started",
-        "message": i18n::t("backend.git.cloning")
+        "message": i18n::t("backend.git.cloning"),
+        "url": url,
+        "local_path": local_path
     }));
 
     // If credentials provided, set up GIT_ASKPASS
@@ -2062,31 +2171,132 @@ async fn do_git_clone(
 
     let mut cmd = super::create_command("git");
     cmd.args(["clone", "--progress", url, local_path])
-        .stdout(Stdio::piped())
+        // stdout is set to null: if piped but not consumed, the OS pipe buffer
+        // (typically 64KB) fills up and causes git to block on write, making
+        // the clone extremely slow or hanging indefinitely.
+        .stdout(Stdio::null())
         .stderr(Stdio::piped());
+
+    // Prevent git from prompting for credentials interactively (would hang in non-TTY)
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
 
     if let Some(ref askpass_path) = askpass_script_path {
         cmd.env("GIT_ASKPASS", askpass_path);
-        cmd.env("GIT_TERMINAL_PROMPT", "0");
     }
 
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to execute git clone: {}", e))?;
 
-    // Read stderr for progress (git clone outputs progress to stderr)
-    if let Some(stderr) = child.stderr.take() {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            // Send progress update
-            let _ = app.emit("git-clone-progress", serde_json::json!({
-                "status": "progress",
-                "message": line
-            }));
-        }
+    // Store the child PID so the frontend can cancel the clone.
+    let pid = child.id();
+    {
+        let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
+        guard.pid = Some(pid);
     }
 
-    let status = child.wait().map_err(|e| format!("Failed to wait for git clone: {}", e))?;
+    // Read stderr for progress in a separate thread to avoid blocking the async runtime.
+    let stderr_handle = if let Some(stderr) = child.stderr.take() {
+        let app_clone = app.clone();
+        Some(std::thread::spawn(move || {
+            let mut reader = BufReader::new(stderr);
+            let mut buf = [0u8; 4096];
+            let mut pending = String::new();
+            let mut progress_buffer = String::new();
+            let mut last_emit_time = std::time::Instant::now();
+            let mut last_percent: Option<u32> = None;
+            const EMIT_INTERVAL_MS: u64 = 200;
+            const BUFFER_MAX_SIZE: usize = 2000;
+
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+
+                        // Split on \r or \n to capture individual progress updates.
+                        // git uses \r for in-place progress updates (e.g.
+                        // "Receiving objects:  14% (2996/21045), 8.90 MiB | 33.00 KiB/s")
+                        // and \n for line-terminated messages.
+                        // reader.lines() only splits on \n, so all \r-separated
+                        // intermediate updates would be merged into one long line
+                        // and the user would never see intermediate percentages.
+                        while let Some(pos) = pending.find(|c| c == '\r' || c == '\n') {
+                            let segment = pending[..pos].trim().to_string();
+                            let delimiter_len = if pending[pos..].starts_with("\r\n") { 2 } else { 1 };
+                            pending = pending[pos + delimiter_len..].to_string();
+
+                            if segment.is_empty() {
+                                continue;
+                            }
+                            progress_buffer.push_str(&segment);
+                            progress_buffer.push('\n');
+
+                            if let Some(pct) = extract_percent(&segment) {
+                                last_percent = Some(pct);
+                            }
+                        }
+
+                        if last_emit_time.elapsed().as_millis() >= EMIT_INTERVAL_MS as u128
+                            || progress_buffer.len() > BUFFER_MAX_SIZE
+                        {
+                            let _ = app_clone.emit("git-clone-progress", serde_json::json!({
+                                "status": "progress",
+                                "message": progress_buffer.clone(),
+                                "percent": last_percent
+                            }));
+                            progress_buffer.clear();
+                            last_emit_time = std::time::Instant::now();
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            // Process any remaining pending data after EOF
+            let segment = pending.trim();
+            if !segment.is_empty() {
+                progress_buffer.push_str(segment);
+                progress_buffer.push('\n');
+                if let Some(pct) = extract_percent(segment) {
+                    last_percent = Some(pct);
+                }
+            }
+
+            if !progress_buffer.is_empty() {
+                let _ = app_clone.emit("git-clone-progress", serde_json::json!({
+                    "status": "progress",
+                    "message": progress_buffer,
+                    "percent": last_percent
+                }));
+            }
+        }))
+    } else {
+        None
+    };
+
+    // child.wait() is blocking and can last minutes for large repos.
+    // Wrap it in spawn_blocking to avoid blocking the Tauri async runtime.
+    let local_path_owned = local_path.to_string();
+    let status = {
+        tokio::task::spawn_blocking(move || {
+            let status = child
+                .wait()
+                .map_err(|e| format!("Failed to wait for git clone: {}", e))?;
+            if let Some(handle) = stderr_handle {
+                let _ = handle.join();
+            }
+            Ok::<std::process::ExitStatus, String>(status)
+        })
+        .await
+        .map_err(|e| format!("Clone task panicked: {}", e))?
+    }?;
+
+    // Clear the clone state — clone is no longer running.
+    {
+        let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
+        *guard = CloneStateInfo::default();
+    }
 
     // Clean up askpass script
     if let Some(ref askpass_path) = askpass_script_path {
@@ -2098,8 +2308,10 @@ async fn do_git_clone(
             "status": "completed",
             "message": i18n::t("backend.git.cloneCompleted")
         }));
-        Ok(local_path.replace('\\', "/"))
+        Ok(local_path_owned.replace('\\', "/"))
     } else {
+        // Clean up partial clone directory on failure/cancel
+        let _ = std::fs::remove_dir_all(&local_path_owned);
         let _ = app.emit("git-clone-progress", serde_json::json!({
             "status": "error",
             "message": i18n::t("backend.git.cloneFailed")
