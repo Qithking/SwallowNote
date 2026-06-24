@@ -96,9 +96,10 @@
 "sync.uploadPath": "Upload Path",
     "sync.uploadPath.desc": "Storage path for uploaded files in BlockNote editor. Variables: $folder (file directory), $rootPath (root directory), $userRootPath (user home)",
     "sync.uploadPath.placeholder": "Default: file directory, e.g. $folder/images",
-    "sync.showConflictBadge": "Show Conflict Badge",
-    "sync.showConflictBadge.desc": "When conflict repos exist, display the count as a badge on the Git icon in the sidebar",
-    "ai.provider": "AI Provider",
+"sync.showConflictBadge": "Show Conflict Badge",
+"sync.showConflictBadge.desc": "When conflict repos exist, display the count as a badge on the Git icon in the sidebar",
+"direction": "Direction",
+"ai.provider": "AI Provider",
     "ai.provider.desc": "Select AI service provider, different providers support different models",
     "ai.apiKey": "API Key",
     "ai.apiKey.desc": "AI service access key, encrypted and stored locally",
@@ -670,7 +671,14 @@
     "yamlIndexDoneTooltip": "YAML metadata indexing complete",
     "cloneProgress": "Clone({{url}}) {{percent}}%",
     "cloneInProgress": "Cloning({{url}})...",
-    "cloneProgressTooltip": "Cloning {{url}}"
+    "cloneProgressTooltip": "Cloning {{url}}",
+    "clonePrefix": "Clone({{url}})",
+    "syncRepos": "Sync Repos",
+    "syncResultTooltip": "{{succeeded}} succeeded, {{failed}} failed, {{conflicted}} conflicted"
+  },
+  "error": {
+    "componentRenderError": "Component render error",
+    "renderFailed": "Render failed"
   },
   "recent": {
     "workspaceName": "Workspace",
@@ -838,10 +846,11 @@
         "notifications": { "name": "Notifications", "description": "Show desktop notifications" }
       }
     },
-    "market": {
-      "tabManage": "Installed",
-      "tabMarket": "Marketplace",
-      "repoPlaceholder": "https://…/repo.json",
+"market": {
+"tabManage": "Installed",
+"tabMarket": "Marketplace",
+"official": "Official",
+"repoPlaceholder": "https://…/repo.json",
       "apply": "Apply",
       "refresh": "Refresh",
       "searchPlaceholder": "Search by name / description / tag",

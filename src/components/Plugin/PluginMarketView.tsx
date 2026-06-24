@@ -198,7 +198,7 @@ function PluginMarketView() {
               onChange={(e) => handleSourceChange(e.target.value)}
               aria-label={t('plugin.market.sourceSelect', { defaultValue: '选择来源' })}
             >
-              <option value={OFFICIAL_REPO_URL}>官网</option>
+              <option value={OFFICIAL_REPO_URL}>{t('plugin.market.official')}</option>
               {repoSources.map((source) => (
                 <option key={source.url} value={source.url}>
                   {source.name}

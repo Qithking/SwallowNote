@@ -5,6 +5,7 @@
  */
 import { useEffect, useId, useMemo, useState, useRef, useLayoutEffect } from 'react'
 import { Maximize2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'  
 import {
   Dialog,
   DialogContent,
@@ -116,6 +117,7 @@ function SafeSvgDiv({ svg, className }: { svg: string; className?: string }) {
 }
 
 export function MermaidBlock({ diagram }: MermaidBlockProps) {
+  const { t } = useTranslation()
   const reactId = useId()
   const renderId = useMemo(() => renderIdFromReactId(reactId), [reactId])
   const [state, setState] = useState<RenderState>({ diagram: '', svg: '', error: false })
@@ -143,7 +145,7 @@ export function MermaidBlock({ diagram }: MermaidBlockProps) {
       <div className="my-2 rounded-md overflow-hidden border border-border/50 bg-black/[0.02] dark:bg-white/[0.02]">
         <div className="flex items-center px-3 py-1 text-[10px] text-muted-foreground bg-black/5 dark:bg-white/5">
           <span className="font-mono">mermaid</span>
-          <span className="ml-2 text-destructive text-[9px]">渲染失败</span>
+          <span className="ml-2 text-destructive text-[9px]">{t('error.renderFailed')}</span>
         </div>
         <pre className="p-3 m-0 overflow-x-auto text-xs font-mono leading-relaxed">
           <code>{diagram}</code>

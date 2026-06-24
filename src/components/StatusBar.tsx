@@ -435,7 +435,7 @@ function StatusBar() {
                 >
                   <GitBranch size={12} className="animate-pulse" />
                   <span className="text-[11px] max-w-[160px] truncate">
-                    {`克隆(${displayCloneUrl})`}
+                    {t('statusBar.clonePrefix', { url: displayCloneUrl })}
                   </span>
                   <span className="text-[11px] tabular-nums min-w-[3ch] text-right">
                     {`${displayClonePercent ?? 0}%`}
@@ -476,32 +476,41 @@ function StatusBar() {
           {syncStatus.lastSyncTime != null && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="flex items-center gap-1 opacity-60 hover:opacity-100">
+                <span className="flex items-center gap-1.5 opacity-60 hover:opacity-100">
+                  <span className="text-[11px]">{t('statusBar.syncRepos')}</span>
                   {syncStatus.isSyncing ? (
                     <RefreshCw size={12} className="animate-spin" />
-                  ) : syncStatus.failed > 0 || syncStatus.conflicted > 0 ? (
-                    syncStatus.conflicted > 0 ? (
-                      <AlertTriangle size={12} className="text-yellow-500" />
-                    ) : (
-                      <XCircle size={12} className="text-red-500" />
-                    )
                   ) : (
-                    <CheckCircle2 size={12} className="text-green-500" />
+                    <>
+                      {/* 成功图标+数量 */}
+                      <span className="flex items-center gap-0.5">
+                        <CheckCircle2 size={12} className="text-green-500" />
+                        <span className="text-[11px]">{syncStatus.succeeded}</span>
+                      </span>
+                      {/* 失败图标+数量 */}
+                      <span className="flex items-center gap-0.5">
+                        <XCircle size={12} className="text-red-500" />
+                        <span className="text-[11px]">{syncStatus.failed}</span>
+                      </span>
+                      {/* 冲突图标+数量 */}
+                      {syncStatus.conflicted > 0 && (
+                        <span className="flex items-center gap-0.5">
+                          <AlertTriangle size={12} className="text-yellow-500" />
+                          <span className="text-[11px]">{syncStatus.conflicted}</span>
+                        </span>
+                      )}
+                    </>
                   )}
-                  <span className="text-[11px]">
-                    {syncStatus.isSyncing
-                      ? t('statusBar.syncing')
-                      : t('statusBar.syncResult', {
-                          succeeded: syncStatus.succeeded,
-                          failed: syncStatus.failed + syncStatus.conflicted,
-                        })}
-                  </span>
                 </span>
               </TooltipTrigger>
               <TooltipContent>
                 {syncStatus.isSyncing
                   ? t('statusBar.syncing')
-                  : `${t('statusBar.syncResult', { succeeded: syncStatus.succeeded, failed: syncStatus.failed + syncStatus.conflicted })}${syncStatus.conflicted > 0 ? ` (${t('statusBar.syncConflicted', { count: syncStatus.conflicted })})` : ''}`}
+                  : t('statusBar.syncResultTooltip', {
+                      succeeded: syncStatus.succeeded,
+                      failed: syncStatus.failed,
+                      conflicted: syncStatus.conflicted,
+                    })}
               </TooltipContent>
             </Tooltip>
           )}
