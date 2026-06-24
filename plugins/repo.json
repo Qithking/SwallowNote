@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-18T07:46:39Z",
+  "updated_at": "2026-06-23T12:45:18Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -23,7 +23,7 @@
     {
       "id": "com.swallownote.export",
       "name": "文档导出",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "description": "将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式",
       "author": "SwallowNote",
       "tags": [
@@ -34,9 +34,9 @@
         "html"
       ],
       "download_url": "./export/com.swallownote.export.zip",
-      "sha256": "2843bee3b0637745f3f09d27e648ae8ee8369879e2c07a9689bda0ab0e7288ba",
+      "sha256": "97a39f4d5fe8f4529938514158ea5ea91061a6093e8ad1b287834f4075556418",
       "changelog": "v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
-      "published_at": "2026-06-18T07:45:06Z",
+      "published_at": "2026-06-23T12:45:11Z",
       "dependencies": []
     },
     {

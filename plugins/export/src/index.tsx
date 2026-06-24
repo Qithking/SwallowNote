@@ -406,6 +406,110 @@ function splitOversizedChild(
 const CUSTOM_BLOCK_LANGS = ['mermaid', 'katex', 'markmap'] as const
 
 /**
+ * 渲染 mermaid/katex/markmap 代码块为 PNG 图片，
+ * 返回 `{ assetKey: base64_png_no_prefix }` 映射。
+ * assetKey 格式：`__{lang}_{index}__`，与后端 convert.rs 一致。
+ *
+ * 扫描 markdown 中所有前端渲染类代码块，按出现顺序分配序号，
+ * 使用对应的渲染库（mermaid.js / KaTeX / markmap-view）渲染后
+ * 通过 `domToCanvas` 截取为 PNG 图片。
+ */
+async function renderCustomBlocksForDocx(
+  markdown: string,
+): Promise<Record<string, string>> {
+  // 扫描所有前端渲染类代码块，记录语言和序号
+  const blockPattern = /```(mermaid|katex|markmap)\n([\s\S]*?)```/g
+  const blocks: { lang: string; index: number; source: string }[] = []
+  let match: RegExpExecArray | null
+  let idx = 0
+  while ((match = blockPattern.exec(markdown)) !== null) {
+    blocks.push({ lang: match[1], index: idx, source: match[2] })
+    idx++
+  }
+  if (blocks.length === 0) return {}
+
+  // 动态 import 渲染库
+  const [mermaid, katex, markmap] = await Promise.all([
+    import('mermaid' as any).catch(() => null),
+    import('katex' as any).catch(() => null),
+    import('markmap-view' as any).catch(() => null),
+  ])
+
+  // mermaid 需要初始化
+  if (mermaid) {
+    try {
+      mermaid.default.initialize({ startOnLoad: false, securityLevel: 'loose' })
+    } catch { /* 忽略重复初始化错误 */ }
+  }
+
+  // 逐块渲染 → Canvas → PNG
+  const result: Record<string, string> = {}
+  for (const block of blocks) {
+    try {
+      const pngBase64 = await renderBlockToPng(block, mermaid, katex, markmap)
+      if (pngBase64) {
+        result[`__${block.lang}_${block.index}__`] = pngBase64
+      }
+    } catch (e) {
+      console.warn(`[export] render ${block.lang} block ${block.index} failed`, e)
+    }
+  }
+  return result
+}
+
+/**
+ * 将单个代码块渲染为 PNG base64（无 data: 前缀）。
+ * 在屏幕外创建临时 DOM 容器，渲染后通过 domToCanvas 截取。
+ */
+async function renderBlockToPng(
+  block: { lang: string; index: number; source: string },
+  mermaid: any, katex: any, markmap: any,
+): Promise<string | null> {
+  const container = document.createElement('div')
+  container.style.cssText = 'position:fixed;left:0;top:0;transform:translateX(-200vw);background:#fff;padding:16px;z-index:-1;pointer-events:none;'
+  document.body.appendChild(container)
+
+  try {
+    if (block.lang === 'mermaid' && mermaid) {
+      const id = `mermaid-docx-${block.index}-${Math.random().toString(36).slice(2, 6)}`
+      const { svg } = await mermaid.default.render(id, block.source)
+      container.innerHTML = svg
+    } else if (block.lang === 'katex' && katex) {
+      const html = katex.default.renderToString(block.source, {
+        displayMode: true,
+        throwOnError: false,
+      })
+      container.innerHTML = html
+      // KaTeX 渲染需要字体加载，短暂等待
+      await new Promise((r) => setTimeout(r, 100))
+    } else if (block.lang === 'markmap' && markmap) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      svg.style.width = '720px'
+      svg.style.height = '400px'
+      const mm = markmap.Markmap.create(svg, undefined, block.source)
+      await mm.fit()
+      await new Promise((r) => setTimeout(r, 200))
+      container.appendChild(svg)
+    } else {
+      return null
+    }
+
+    // DOM → Canvas → PNG
+    const canvas = await domToCanvas(container, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+    })
+    const blob = await new Promise<Blob>((resolve) => {
+      canvas.toBlob((b) => resolve(b!), 'image/png')
+    })
+    const buf = await blob.arrayBuffer()
+    return await uint8ToBase64(new Uint8Array(buf))
+  } finally {
+    document.body.removeChild(container)
+  }
+}
+
+/**
  * Post-process the hidden HTML container so that every
  * `<pre><code class="language-mermaid|katex|markmap">` block is
  * replaced with the corresponding rendered figure (SVG / HTML
@@ -877,17 +981,15 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   const handleExportDocx = useCallback(async () => {
     const markdown = compactMarkdown(activeNoteContent)
     await runExport('docx', async () => {
-      // Collect image bytes up front so the backend can embed
-      // them as real DOCX drawings instead of `[图片]` text
-      // placeholders. `collectImageAssets` is bounded by
-      // `MAX_EMBEDDED_IMAGE_BYTES` (50 MB) and silently skips
-      // unreachable / malformed URLs, so a failed read here
-      // can't abort the export — those images just fall back
-      // to the placeholder branch in `convert.rs`.
-      const imageAssets = await collectImageAssets(markdown, activeNotePath)
+      // 并行收集图片资源和渲染前端渲染类代码块
+      const [imageAssets, renderedAssets] = await Promise.all([
+        collectImageAssets(markdown, activeNotePath),
+        renderCustomBlocksForDocx(markdown),
+      ])
       const b64 = (await invokeBackend('markdown_to_docx', {
         markdown,
         imageAssets,
+        renderedAssets,
       })) as string
       return b64
     })
@@ -1014,7 +1116,7 @@ const manifest: PluginManifest = {
   id: 'com.swallownote.export',
   name: '文档导出',
   description: '将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式',
-  version: '0.2.3',
+  version: '0.2.4',
   author: 'SwallowNote',
   publishedAt: '2026-06-13',
   iconPosition: 'editorToolbar',
