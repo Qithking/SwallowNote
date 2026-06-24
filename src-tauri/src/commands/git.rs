@@ -980,11 +980,38 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
         }
     }
 
-    // Force push
+    // Force push (with detached HEAD handling)
     let result = run_git(repo_path, &["push", "--force"]);
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
+            // detached HEAD 时 `git push --force` 没有上游分支，会报
+            // "fatal: You are not currently on a branch"。此时改为
+            // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
+            let err_lower = e.to_lowercase();
+            if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                if let Some(branch) = resolve_push_target_branch(repo_path) {
+                    eprintln!("[INFO] git_force_upload_file: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    let retry = run_git(
+                        repo_path,
+                        &["push", "--force", "origin", &format!("HEAD:refs/heads/{}", branch)],
+                    );
+                    return match retry {
+                        Ok(_) => Ok(()),
+                        Err(retry_err) => {
+                            if is_auth_error(&retry_err) {
+                                Err(format!("AUTH_REQUIRED:{}", retry_err))
+                            } else {
+                                Err(format!("Failed to force push: {}", retry_err))
+                            }
+                        }
+                    };
+                }
+                return Err(format!(
+                    "Failed to force push: repository is in detached HEAD state and no target branch could be resolved: {}",
+                    e
+                ));
+            }
             if is_auth_error(&e) {
                 Err(format!("AUTH_REQUIRED:{}", e))
             } else {
@@ -994,8 +1021,55 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
     }
 }
 
+/// 解析"应该把当前 HEAD 推送到哪个远程分支"。
+/// 优先级：rebase 状态记录的分支 > 当前分支（已处理 detached HEAD）> 远程默认分支。
+fn resolve_push_target_branch(repo_path: &str) -> Option<String> {
+    if let Some(branch) = get_rebase_branch(repo_path) {
+        if !branch.is_empty() && branch != "HEAD" {
+            return Some(branch);
+        }
+    }
+    if let Ok(branch) = get_branch(repo_path) {
+        let trimmed = branch.trim();
+        if !trimmed.is_empty() && trimmed != "HEAD" {
+            return Some(trimmed.to_string());
+        }
+    }
+    if let Ok(sym) = run_git(repo_path, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+        let trimmed = sym.trim().trim_start_matches("origin/").to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+    None
+}
+
+/// 获取当前分支名。
+/// 注意：在 detached HEAD 状态下，`git rev-parse --abbrev-ref HEAD` 会返回字面量 "HEAD"，
+/// 后续若拼成 `origin/HEAD:path` 会因 `origin/HEAD` 引用不存在而失败（Windows 上常见）。
+/// 因此在 detached HEAD 时按以下顺序回退到真实分支名：
+///   1. `refs/remotes/origin/HEAD` 符号引用（远程默认分支）
+///   2. `init.defaultBranch` 配置
+///   3. 兜底返回字符串 "HEAD"（保持向后兼容）
 fn get_branch(path: &str) -> Result<String, String> {
-    run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
+    let raw = run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if raw.trim() != "HEAD" {
+        return Ok(raw);
+    }
+    // detached HEAD：尝试解析远程默认分支
+    if let Ok(sym) = run_git(path, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+        let trimmed = sym.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    if let Ok(default_branch) = run_git(path, &["config", "--get", "init.defaultBranch"]) {
+        let trimmed = default_branch.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    Ok("HEAD".to_string())
 }
 
 /// Get the branch name that is being rebased, from the rebase state files

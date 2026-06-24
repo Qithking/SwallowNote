@@ -134,6 +134,15 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
       onClick={onClick}
       style={{ cursor: onClick ? 'pointer' : undefined }}
     >
+      {/* 右上角「待更新」三角标签：仅在 hasUpdate 时显示 */}
+      {hasUpdate && (
+        <div
+          className="pa-installed-corner-flag"
+          data-plugin-corner-flag="update"
+          title={remoteVersion ? `有新版本 v${remoteVersion}` : t('plugin.market.updateTo', { defaultValue: 'Update' })}
+          aria-label={t('plugin.market.updateTo', { defaultValue: 'Update' })}
+        />
+      )}
       <div className="pa-market-card-body">
         <div className="pa-market-card-head">
           <div style={{ minWidth: 0, flex: 1 }}>

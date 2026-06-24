@@ -1885,6 +1885,22 @@ body, #root {
   background: var(--pa-accent);
   color: #fff;
 }
+
+/* ── Installed-card corner flag (「待更新」三角标签) ─────
+   绝对定位在卡片右上角的直角三角形，使用 clip-path 形成
+   几何形状，颜色复用主题色 --pa-accent。设置
+   `pointer-events: none` 避免拦截卡片的 click 事件。 */
+.pa-installed-corner-flag {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  background: var(--pa-accent);
+  clip-path: polygon(100% 0, 100% 100%, 0 0);
+  pointer-events: none;
+  z-index: 1;
+}
 .pa-source-label {
   font-family: var(--pa-font-mono);
   font-size: 9.5px;
