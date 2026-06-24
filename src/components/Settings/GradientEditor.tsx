@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ChevronDown, Plus, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
+import { cn } from '@/lib/utils'  
 
 interface GradientStop {
   color: string
@@ -51,6 +52,7 @@ function buildGradient(angle: number, stops: GradientStop[]): string {
 }
 
 export function GradientEditor({ value, onChange, disabled }: GradientEditorProps) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [angle, setAngle] = useState(135)
   const [stops, setStops] = useState<GradientStop[]>([
@@ -153,7 +155,7 @@ export function GradientEditor({ value, onChange, disabled }: GradientEditorProp
         <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-[var(--bg-secondary)] border border-border rounded-md shadow-lg p-2 space-y-2">
           {/* Direction */}
           <div className="flex items-center gap-1">
-            <span className="text-[9px] text-muted-foreground w-6 shrink-0">方向</span>
+            <span className="text-[9px] text-muted-foreground w-6 shrink-0">{t('settings.direction')}</span>
             <div className="flex gap-0.5">
               {DIRECTIONS.map((d) => (
                 <button

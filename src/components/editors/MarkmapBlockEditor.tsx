@@ -4,6 +4,7 @@
  */
 import { useEffect, useState, useRef } from 'react'
 import { Maximize2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import {
   Dialog,
   DialogContent,
@@ -33,6 +34,7 @@ type MarkmapInstance = {
 }
 
 export function MarkmapBlockEditor({ diagram, source, width, height, scale, block, editor }: MarkmapBlockEditorProps) {
+  const { t } = useTranslation()
   const svgRef = useRef<SVGSVGElement>(null)
   const dialogSvgRef = useRef<SVGSVGElement>(null)
   const markmapRef = useRef<MarkmapInstance | null>(null)
@@ -212,7 +214,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       <figure className="markmap-block-editor markmap-block-editor--error my-2 rounded-md overflow-hidden border border-border/50 bg-black/[0.02] dark:bg-white/[0.02]">
         <figcaption className="flex items-center px-3 py-1 text-[10px] text-muted-foreground bg-black/5 dark:bg-white/5">
           <span className="font-mono">markmap</span>
-          <span className="ml-2 text-destructive text-[9px]">渲染失败</span>
+          <span className="ml-2 text-destructive text-[9px]">{t('error.renderFailed')}</span>
         </figcaption>
         <pre className="p-3 m-0 overflow-x-auto text-xs font-mono leading-relaxed">
           <code>{source}</code>

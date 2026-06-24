@@ -98,6 +98,7 @@
     "sync.uploadPath.placeholder": "默认文件所在目录，如：$folder/images",
     "sync.showConflictBadge": "显示冲突仓库徽标",
     "sync.showConflictBadge.desc": "当存在冲突仓库时，在侧边栏 Git 图标右上角显示冲突仓库数量",
+    "direction": "方向",
     "ai.provider": "AI 服务商",
     "ai.provider.desc": "选择 AI 服务提供商，不同服务商支持不同的模型",
     "ai.apiKey": "API Key",
@@ -670,7 +671,14 @@
     "yamlIndexDoneTooltip": "YAML元数据索引已完成",
     "cloneProgress": "克隆({{url}})进度{{percent}}%",
     "cloneInProgress": "克隆({{url}})中...",
-    "cloneProgressTooltip": "正在克隆 {{url}}"
+    "cloneProgressTooltip": "正在克隆 {{url}}",
+    "clonePrefix": "克隆({{url}})",
+    "syncRepos": "同步仓库",
+    "syncResultTooltip": "成功{{succeeded}}个，失败{{failed}}个，冲突{{conflicted}}个"
+  },
+  "error": {
+    "componentRenderError": "组件渲染出错",
+    "renderFailed": "渲染失败"
   },
   "recent": {
     "workspaceName": "工作区",
@@ -841,6 +849,7 @@
     "market": {
       "tabManage": "已安装",
       "tabMarket": "插件市场",
+      "official": "官网",
       "repoPlaceholder": "https://…/repo.json",
       "apply": "应用",
       "refresh": "刷新",

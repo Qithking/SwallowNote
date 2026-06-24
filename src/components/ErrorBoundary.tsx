@@ -12,6 +12,7 @@
  */
 import { Component, type ReactNode } from 'react'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
+import i18n from '@/i18n'
 
 interface Props {
   children: ReactNode
@@ -55,7 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex flex-col items-center justify-center h-full gap-3 text-[var(--text-muted)] p-6">
           <AlertTriangle size={32} className="text-yellow-500 opacity-70" />
-          <p className="text-sm font-medium text-[var(--text-secondary)]">组件渲染出错</p>
+          <p className="text-sm font-medium text-[var(--text-secondary)]">{i18n.t('error.componentRenderError')}</p>
           {this.state.error && (
             <p className="text-xs font-mono text-[var(--text-muted)] max-w-sm text-center truncate" title={this.state.error.message}>
               {this.state.error.message}
@@ -66,7 +67,7 @@ export class ErrorBoundary extends Component<Props, State> {
             className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md border border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <RefreshCw size={12} />
-            重试
+            {i18n.t('common.retry')}
           </button>
         </div>
       )
