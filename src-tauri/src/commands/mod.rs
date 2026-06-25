@@ -7,6 +7,7 @@ pub mod file;
 pub mod folder_history;
 pub mod frontmatter;
 pub mod git;
+pub mod image_downloader;
 pub mod market_sources;
 pub mod plugin;
 pub mod plugin_invoke;

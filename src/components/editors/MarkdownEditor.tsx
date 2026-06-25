@@ -15,9 +15,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { stripFrontmatter } from '@/lib/utils/frontmatter'
 import { buildTableOfContents } from '@/utils/tableOfContents'
-import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile } from '@/lib/tauri'
+import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, downloadRemoteImages, type RemoteImageRequest } from '@/lib/tauri'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { Network, Sigma } from 'lucide-react'
 import { EditorContextMenu } from './EditorContextMenu'
 import { MermaidBlockSpec, transformMermaidBlocks, MERMAID_BLOCK_TYPE } from './mermaidBlockSpec'
@@ -415,6 +416,103 @@ function BlockNoteInner({
       window.removeEventListener('scroll-to-block-id', handler)
     }
   }, [editor])
+
+  // 监听下载远程图片事件（由 EditorToolbar 派发）。
+  // 流程：遍历 editor.document 中所有 image/file blocks，过滤出 http(s) 远程 URL，
+  // 调用后端 download_remote_images 命令统一下载，拿到相对路径后替换 block URL。
+  useEffect(() => {
+    let cancelled = false
+    const handler = async () => {
+      if (cancelled || !editor) return
+      try {
+        // 1. 收集远程图片 block
+        const remoteBlocks: { blockId: string; url: string }[] = []
+        for (const block of editor.document as any[]) {
+          if (!block || (block.type !== 'image' && block.type !== 'file')) continue
+          const url = (block.props as any)?.url
+          if (typeof url !== 'string') continue
+          if (!/^https?:\/\//i.test(url)) continue
+          remoteBlocks.push({ blockId: block.id, url })
+        }
+
+        if (remoteBlocks.length === 0) {
+          toast.info('当前文档无远程图片')
+          return
+        }
+
+        // 2. 解析上传目录与文件所在目录
+        const targetDir = await resolveUploadDir()
+        const filePath = activeTab?.path || ''
+        const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/')
+
+        // 3. 构造请求，调用后端命令
+        const images: RemoteImageRequest[] = remoteBlocks.map((b) => ({
+          url: b.url,
+          target_dir: targetDir,
+          file_dir: fileDir,
+          root_path: rootPath || '',
+        }))
+
+        const loadingId = toast.loading(`正在下载 ${images.length} 张图片…`)
+
+        let results: Awaited<ReturnType<typeof downloadRemoteImages>> = []
+        try {
+          results = await downloadRemoteImages({ images })
+        } catch (err) {
+          toast.dismiss(loadingId)
+          toast.error(`下载失败：${String(err)}`)
+          return
+        }
+
+        if (cancelled) {
+          toast.dismiss(loadingId)
+          return
+        }
+
+        // 4. 替换 block URL
+        let successCount = 0
+        let failedCount = 0
+        for (let i = 0; i < remoteBlocks.length; i++) {
+          const blockInfo = remoteBlocks[i]
+          const result = results[i]
+          if (!result || !result.ok || !result.relative_path) {
+            failedCount++
+            continue
+          }
+          try {
+            editor.updateBlock(blockInfo.blockId, {
+              type: 'image',
+              props: {
+                url: result.relative_path,
+                name: result.file_name || '',
+              },
+            } as any)
+            successCount++
+          } catch (e) {
+            console.error('Failed to update block url:', e)
+            failedCount++
+          }
+        }
+
+        toast.dismiss(loadingId)
+        if (failedCount === 0) {
+          toast.success(`已下载 ${successCount} 张远程图片`)
+        } else if (successCount === 0) {
+          toast.error(`下载失败：${failedCount} 张`)
+        } else {
+          toast.warning(`成功 ${successCount} 张，失败 ${failedCount} 张`)
+        }
+      } catch (err) {
+        console.error('Failed to download remote images:', err)
+        toast.error(`下载远程图片失败：${String(err)}`)
+      }
+    }
+    window.addEventListener('editor:download-remote-images', handler)
+    return () => {
+      cancelled = true
+      window.removeEventListener('editor:download-remote-images', handler)
+    }
+  }, [editor, activeTab?.path, rootPath, uploadPath])
 
   // Insert text at cursor position in BlockNote
   // AI results are Markdown, so we need to parse them into BlockNote blocks

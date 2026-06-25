@@ -328,6 +328,53 @@ export async function writeBinaryFile(path: string, data: string): Promise<void>
   await invoke('write_binary_file', { path, data })
 }
 
+// ===== 远程图片批量下载（后端 image_downloader.rs） =====
+
+/** 单张远程图片的下载请求。 */
+export interface RemoteImageRequest {
+  /** 远程图片 URL（http / https） */
+  url: string
+  /** 落盘目录（绝对路径，由前端解析 uploadPath 规则得到） */
+  target_dir: string
+  /** 当前文件所在目录（用于计算相对路径） */
+  file_dir: string
+  /** 工作区根目录（用于计算相对路径的 fallback） */
+  root_path: string
+  /** 可选的文件名 hint（来自 URL 原文件名，预留扩展） */
+  name_hint?: string
+}
+
+/** 单张远程图片的下载结果。 */
+export interface RemoteImageResult {
+  /** 原始 URL */
+  url: string
+  /** 是否成功 */
+  ok: boolean
+  /** 写入的绝对路径（仅成功时有值） */
+  local_path: string | null
+  /** 基于当前文件目录的相对路径（仅成功时有值） */
+  relative_path: string | null
+  /** 生成的文件名（仅成功时有值） */
+  file_name: string | null
+  /** 失败信息（仅失败时有值） */
+  error: string | null
+}
+
+/** 批量下载入参（与后端 DownloadImagesPayload 对应）。 */
+export interface DownloadImagesPayload {
+  images: RemoteImageRequest[]
+}
+
+/**
+ * 调用后端 `download_remote_images` 命令批量下载远程图片。
+ * 前端不直接下载图片字节，所有下载 / 落盘 / 相对路径计算均由后端完成。
+ */
+export async function downloadRemoteImages(
+  payload: DownloadImagesPayload
+): Promise<RemoteImageResult[]> {
+  return await invoke<RemoteImageResult[]>('download_remote_images', { payload })
+}
+
 export async function getHomeDir(): Promise<string> {
   return await invoke('get_home_dir')
 }

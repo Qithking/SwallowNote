@@ -2,7 +2,7 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2 } from 'lucide-react'
+import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2, DownloadCloud } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore, usePluginStore } from '@/stores'
 import type { ConflictRepoRecord } from '@/lib/tauri'
@@ -284,6 +284,19 @@ function EditorToolbar() {
               </button>
             </TooltipTrigger>
             <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('editor:download-remote-images'))}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: 'var(--text-primary)' }}
+                aria-label={t('editorToolbar.downloadRemoteImages')}
+              >
+                <DownloadCloud size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.downloadRemoteImages')}</TooltipContent>
           </Tooltip>
         </>)}
         {/* History, Open Folder, Copy - available for all file types */}

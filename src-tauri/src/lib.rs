@@ -106,6 +106,7 @@ pub fn run() {
             commands::file::read_clipboard_file_paths,
             commands::file::open_in_finder,
             commands::file::search_in_files,
+            commands::image_downloader::download_remote_images,
             commands::git::git_is_repo,
             commands::git::git_init,
             commands::git::git_status,
