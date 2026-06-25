@@ -108,6 +108,9 @@ export interface RenderOptions {
   /** Footnote auto-generation (WeChat only). */
   isAddFootnote: boolean
   themeOverrides: ThemeOverrides
+  /** When true, theme color overrides (primary / blockquote / text) are
+   * skipped and the article follows the colors of the selected theme. */
+  themeFollowTheme: boolean
   paragraphOptions: ParagraphOptions
   paragraphFollowTheme: boolean
   codeBlockOptions: CodeBlockOptions
@@ -143,14 +146,18 @@ const SHADOW_CSS: Record<CodeBlockOptions['shadow'], string> = {
 /** Build a <style> tag string that overrides the article's theme CSS. */
 function buildOverrideCss(opts: RenderOptions): string {
   const lines: string[] = []
-  // Theme overrides (always applied — color/font are independent of the
-  // paragraph / code block "follow theme" toggles).
-  lines.push(`#wenyan { color: ${opts.themeOverrides.textColor}; }`)
-  lines.push(
-    `#wenyan h1, #wenyan h2, #wenyan h3, #wenyan h4, #wenyan h5, #wenyan h6 { color: ${opts.themeOverrides.primaryColor}; }`
-  )
-  lines.push(`#wenyan a, #wenyan .footnote { color: ${opts.themeOverrides.primaryColor}; }`)
-  lines.push(`#wenyan blockquote { background-color: ${opts.themeOverrides.blockquoteBg}; }`)
+  // Theme color overrides — only applied when the user opts out of
+  // "跟随主题". Mirrors the behavior of paragraphFollowTheme /
+  // codeBlockFollowTheme so the three setting groups stay consistent.
+  if (!opts.themeFollowTheme) {
+    const t = opts.themeOverrides
+    lines.push(`#wenyan { color: ${t.textColor}; }`)
+    lines.push(
+      `#wenyan h1, #wenyan h2, #wenyan h3, #wenyan h4, #wenyan h5, #wenyan h6 { color: ${t.primaryColor}; }`
+    )
+    lines.push(`#wenyan a, #wenyan .footnote { color: ${t.primaryColor}; }`)
+    lines.push(`#wenyan blockquote { background-color: ${t.blockquoteBg}; }`)
+  }
 
   // Paragraph overrides — only when not following theme.
   if (!opts.paragraphFollowTheme) {

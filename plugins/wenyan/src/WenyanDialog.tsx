@@ -80,6 +80,9 @@ const DEFAULT_OPTIONS: RenderOptions = {
   themeOverrides: DEFAULT_THEME_OVERRIDES,
   paragraphOptions: DEFAULT_PARAGRAPH_OPTIONS,
   paragraphFollowTheme: true,
+  // 默认「跟随主题」：主色 / 引用块背景 / 文字色跟随选中的文章主题；
+  // 取消勾选后才会用 themeOverrides 自定义覆盖。
+  themeFollowTheme: true,
   codeBlockOptions: DEFAULT_CODE_BLOCK_OPTIONS,
   codeBlockFollowTheme: true,
 }
@@ -517,36 +520,47 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
               open={openSections.theme}
               onToggle={() => setOpenSections((s) => ({ ...s, theme: !s.theme }))}
             >
-              <ColorRow
-                label="主色"
-                value={options.themeOverrides.primaryColor}
+              <Toggle
+                label="跟随主题"
+                checked={options.themeFollowTheme}
                 onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    themeOverrides: { ...o.themeOverrides, primaryColor: v },
-                  }))
+                  setOptions((o) => ({ ...o, themeFollowTheme: v }))
                 }
               />
-              <ColorRow
-                label="引用块背景"
-                value={options.themeOverrides.blockquoteBg}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    themeOverrides: { ...o.themeOverrides, blockquoteBg: v },
-                  }))
-                }
-              />
-              <ColorRow
-                label="文字色"
-                value={options.themeOverrides.textColor}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    themeOverrides: { ...o.themeOverrides, textColor: v },
-                  }))
-                }
-              />
+              {!options.themeFollowTheme && (
+                <>
+                  <ColorRow
+                    label="主色"
+                    value={options.themeOverrides.primaryColor}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        themeOverrides: { ...o.themeOverrides, primaryColor: v },
+                      }))
+                    }
+                  />
+                  <ColorRow
+                    label="引用块背景"
+                    value={options.themeOverrides.blockquoteBg}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        themeOverrides: { ...o.themeOverrides, blockquoteBg: v },
+                      }))
+                    }
+                  />
+                  <ColorRow
+                    label="文字色"
+                    value={options.themeOverrides.textColor}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        themeOverrides: { ...o.themeOverrides, textColor: v },
+                      }))
+                    }
+                  />
+                </>
+              )}
             </CollapsibleSection>
 
             <CollapsibleSection
