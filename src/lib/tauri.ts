@@ -252,7 +252,10 @@ export async function writePluginSettings(
   pluginId: string,
   values: Record<string, unknown>
 ): Promise<void> {
-  await invoke('write_plugin_settings', { args: { pluginId, values } })
+  // 嵌套结构体 WriteSettingsArgs（plugin_id, values）后端无 rename_all，
+  // Tauri v2 不做 camelCase → snake_case 自动转换，需传 snake_case 字段名
+  // （与项目内 CreateFileRequest / RenameFileRequest 一致）。
+  await invoke('write_plugin_settings', { args: { plugin_id: pluginId, values } })
 }
 
 export async function deletePluginSettings(pluginId: string): Promise<void> {

@@ -1,6 +1,6 @@
 [package]
 name = "swallownote-plugin-wenyan"
-version = "0.1.2"
+version = "0.1.4"
 description = "SwallowNote wenyan plugin backend — push article draft to WeChat Official Account"
 authors = ["SwallowNote"]
 edition = "2021"

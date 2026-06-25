@@ -981,6 +981,10 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
                   boxSizing: 'border-box',
                   borderRadius: 4,
                   boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                  // 强制允许文本选择：Tauri macOS WKWebView 在透明无边框
+                  // 窗口下可能默认禁用文本选择，需显式覆盖。
+                  userSelect: 'text',
+                  WebkitUserSelect: 'text',
                 }}
               />
             </div>
@@ -993,6 +997,7 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
         open={customDialogOpen}
         onClose={() => setCustomDialogOpen(false)}
         selectedId={isCustomThemeActive ? options.themeId : null}
+        markdown={activeNoteContent}
         onSelect={(theme) => {
           setOptions((o) => ({
             ...o,

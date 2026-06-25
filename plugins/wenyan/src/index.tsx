@@ -25,7 +25,7 @@ const manifest: PluginManifest = {
   id: 'com.swallownote.wenyan',
   name: '文颜排版',
   description: '使用文颜引擎将 Markdown 排版为微信公众号样式的富文本，支持推送到公众号草稿箱',
-  version: '0.1.2',
+  version: '0.1.4',
   author: 'SwallowNote',
   publishedAt: '2026-06-18T07:00:17Z',
   iconPosition: 'editorToolbar',

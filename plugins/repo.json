@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-23T12:45:18Z",
+  "updated_at": "2026-06-25T09:36:13Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -42,7 +42,7 @@
     {
       "id": "com.swallownote.wenyan",
       "name": "文颜排版",
-      "version": "0.1.2",
+      "version": "0.1.4",
       "description": "使用文颜引擎将 Markdown 排版为微信公众号样式的富文本",
       "author": "SwallowNote",
       "tags": [
@@ -53,9 +53,9 @@
         "theme"
       ],
       "download_url": "./wenyan/com.swallownote.wenyan.zip",
-      "sha256": "0cc413594d6f4db38f075006fbde9d0317c457c46f1599b4d00f736e0d68a398",
+      "sha256": "f58c3b4d37ae6cfadbdb4f96efc5527f5b49d795c8761a8e5b10996f5b7452ea",
       "changelog": "初版发布：集成 @wenyan-md/core 排版引擎，支持多主题、代码高亮、实时预览、一键复制",
-      "published_at": "2026-06-18T07:46:22Z",
+      "published_at": "2026-06-25T09:36:03Z",
       "dependencies": []
     },
     {
