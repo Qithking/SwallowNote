@@ -15,7 +15,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { stripFrontmatter } from '@/lib/utils/frontmatter'
 import { buildTableOfContents } from '@/utils/tableOfContents'
-import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, downloadRemoteImages, type RemoteImageRequest } from '@/lib/tauri'
+import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile } from '@/lib/tauri'
+import { downloadCoordinator } from '@/lib/download-coordinator'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -417,12 +418,16 @@ function BlockNoteInner({
     }
   }, [editor])
 
-  // 监听下载远程图片事件（由 EditorToolbar 派发）。
-  // 流程：遍历 editor.document 中所有 image/file blocks，过滤出 http(s) 远程 URL，
-  // 调用后端 download_remote_images 命令统一下载，拿到相对路径后替换 block URL。
+  // 监听下载远程图片事件（由 EditorToolbar 派发，带 tabId 防止多 tab 错处理）。
+  // 流程：仅当事件的 tabId 匹配当前 activeTab.id 时才处理；遍历 editor.document
+  // 收集 image/file blocks 中的 http(s) URL，统一交给全局 downloadCoordinator，
+  // 由协调器合并多文件进度并即时替换 block URL。
   useEffect(() => {
     let cancelled = false
-    const handler = async () => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      // 事件携带 tabId 时只处理当前 tab；旧版事件无 tabId 时也接受（向后兼容）
+      if (detail.tabId && activeTabId && detail.tabId !== activeTabId) return
       if (cancelled || !editor) return
       try {
         // 1. 收集远程图片 block
@@ -445,65 +450,21 @@ function BlockNoteInner({
         const filePath = activeTab?.path || ''
         const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/')
 
-        // 3. 构造请求，调用后端命令
-        const images: RemoteImageRequest[] = remoteBlocks.map((b) => ({
-          url: b.url,
-          target_dir: targetDir,
-          file_dir: fileDir,
-          root_path: rootPath || '',
-        }))
-
-        const loadingId = toast.loading(`正在下载 ${images.length} 张图片…`)
-
-        let results: Awaited<ReturnType<typeof downloadRemoteImages>> = []
-        try {
-          results = await downloadRemoteImages({ images })
-        } catch (err) {
-          toast.dismiss(loadingId)
-          toast.error(`下载失败：${String(err)}`)
-          return
+        // 3. 构造 url → { editor, blockId } 映射 + batch items
+        const blockContexts = new Map<string, { editor: any; blockId: string }>()
+        for (const b of remoteBlocks) {
+          blockContexts.set(b.url, { editor, blockId: b.blockId })
         }
+        const items = remoteBlocks.map((b) => ({ url: b.url, blockId: b.blockId }))
 
-        if (cancelled) {
-          toast.dismiss(loadingId)
-          return
-        }
-
-        // 4. 替换 block URL
-        let successCount = 0
-        let failedCount = 0
-        for (let i = 0; i < remoteBlocks.length; i++) {
-          const blockInfo = remoteBlocks[i]
-          const result = results[i]
-          if (!result || !result.ok || !result.relative_path) {
-            failedCount++
-            continue
-          }
-          try {
-            editor.updateBlock(blockInfo.blockId, {
-              type: 'image',
-              props: {
-                url: result.relative_path,
-                name: result.file_name || '',
-              },
-            } as any)
-            successCount++
-          } catch (e) {
-            console.error('Failed to update block url:', e)
-            failedCount++
-          }
-        }
-
-        toast.dismiss(loadingId)
-        if (failedCount === 0) {
-          toast.success(`已下载 ${successCount} 张远程图片`)
-        } else if (successCount === 0) {
-          toast.error(`下载失败：${failedCount} 张`)
-        } else {
-          toast.warning(`成功 ${successCount} 张，失败 ${failedCount} 张`)
-        }
+        // 4. 交给协调器：合并 toast + 即时替换
+        downloadCoordinator.enqueueBatch(items, blockContexts, {
+          targetDir,
+          fileDir,
+          rootPath: rootPath || '',
+        })
       } catch (err) {
-        console.error('Failed to download remote images:', err)
+        console.error('Failed to enqueue download remote images:', err)
         toast.error(`下载远程图片失败：${String(err)}`)
       }
     }
@@ -512,7 +473,7 @@ function BlockNoteInner({
       cancelled = true
       window.removeEventListener('editor:download-remote-images', handler)
     }
-  }, [editor, activeTab?.path, rootPath, uploadPath])
+  }, [editor, activeTab?.id, activeTab?.path, rootPath, uploadPath])
 
   // Insert text at cursor position in BlockNote
   // AI results are Markdown, so we need to parse them into BlockNote blocks

@@ -288,7 +288,7 @@ function EditorToolbar() {
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => window.dispatchEvent(new CustomEvent('editor:download-remote-images'))}
+                onClick={() => window.dispatchEvent(new CustomEvent('editor:download-remote-images', { detail: { tabId: activeTab.id } }))}
                 className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
                 style={{ color: 'var(--text-primary)' }}
                 aria-label={t('editorToolbar.downloadRemoteImages')}
