@@ -53,8 +53,8 @@ class DownloadCoordinator {
   private failedCount = 0
   private bytesDownloaded = 0
   private startedAt = 0
-  /** url → 应用回调上下文（找到 block 立即替换）。 */
-  private urlMap: Map<string, ApplyContext> = new Map()
+  /** url → 应用回调上下文数组（同一 URL 可能被多个 block 引用，需逐个替换）。 */
+  private urlMap: Map<string, ApplyContext[]> = new Map()
   /** 已处理过的 URL（防止 item-done + results 重复计数）。 */
   private processedUrls: Set<string> = new Set()
   private listenersRegistered = false
@@ -102,16 +102,18 @@ class DownloadCoordinator {
       (e) => {
         const { url, ok, relative_path, file_name } = e.payload
 
-        // 替换 block URL（如果仍在 urlMap 中）
-        const ctx = this.urlMap.get(url)
-        if (ctx && ok && relative_path) {
-          try {
-            ctx.editor.updateBlock(ctx.blockId, {
-              type: 'image',
-              props: { url: relative_path, name: file_name || '' },
-            } as any)
-          } catch (err) {
-            console.error('Failed to apply downloaded url:', err)
+        // 替换 block URL（同一 URL 可能被多个 block 引用，逐个替换）
+        const contexts = this.urlMap.get(url)
+        if (contexts && ok && relative_path) {
+          for (const ctx of contexts) {
+            try {
+              ctx.editor.updateBlock(ctx.blockId, {
+                type: 'image',
+                props: { url: relative_path, name: file_name || '' },
+              } as any)
+            } catch (err) {
+              console.error('Failed to apply downloaded url:', err)
+            }
           }
         }
         this.urlMap.delete(url)
@@ -148,7 +150,7 @@ class DownloadCoordinator {
    */
   enqueueBatch(
     items: BatchItem[],
-    blockContexts: Map<string, ApplyContext>,
+    blockContexts: Map<string, ApplyContext[]>,
     ctx: { targetDir: string; fileDir: string; rootPath: string }
   ) {
     if (items.length === 0) return
@@ -164,18 +166,34 @@ class DownloadCoordinator {
       this.processedUrls.clear()
     }
 
-    // 2. 累积 urlMap
-    for (const [url, c] of blockContexts) {
-      this.urlMap.set(url, c)
+    // 2. 累积 urlMap + 统计新 URL 数量（跨批次去重）
+    //    - 新 URL：写入 urlMap，加入待下载列表，累加 total
+    //    - 已入队 URL（来自之前批次）：仅追加 block 上下文，不重复发起 IPC 调用
+    let newUrlCount = 0
+    const itemsToDownload: BatchItem[] = []
+    for (const item of items) {
+      const contexts = blockContexts.get(item.url) || []
+      if (this.urlMap.has(item.url)) {
+        // URL 已在之前批次入队：追加 block 上下文，避免重复下载
+        const existing = this.urlMap.get(item.url)!
+        this.urlMap.set(item.url, [...existing, ...contexts])
+      } else {
+        // 新 URL：记录上下文并入队下载
+        this.urlMap.set(item.url, contexts)
+        newUrlCount++
+        itemsToDownload.push(item)
+      }
     }
 
-    // 3. 增加 total
-    this.total += items.length
+    // 所有 URL 均已入队：仅完成上下文追加，无需新下载
+    if (itemsToDownload.length === 0) return
+
+    this.total += newUrlCount
     this.updateToast()
 
-    // 4. 启动后端调用（fire-and-forget）
+    // 3. 启动后端调用（fire-and-forget）
     this.inFlight++
-    this.runBatch(items, ctx)
+    this.runBatch(itemsToDownload, ctx)
   }
 
   /** 启动一次后端 download_remote_images 调用。 */

@@ -669,21 +669,22 @@ function BlockNoteInner({
         const filePath = activeTabPath || ''
         const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/')
 
-        // 3. 对 remoteBlocks 按 URL 去重：同一张远程图片只下载一次，避免重复下载
-        //    也避免 urlMap 因 key 冲突导致部分 block 无法替换。
+        // 3. 构造 url → ApplyContext[] 映射（保留所有 block，支持一对多替换）
+        //    items 按 URL 去重：同一 URL 只发一个下载请求，由协调器跨批次去重
+        const blockContexts = new Map<string, { editor: any; blockId: string }[]>()
         const seenUrls = new Set<string>()
-        const uniqueRemoteBlocks = remoteBlocks.filter((b) => {
-          if (seenUrls.has(b.url)) return false
-          seenUrls.add(b.url)
-          return true
-        })
-
-        // 4. 构造 url → { editor, blockId } 映射 + batch items
-        const blockContexts = new Map<string, { editor: any; blockId: string }>()
-        for (const b of uniqueRemoteBlocks) {
-          blockContexts.set(b.url, { editor, blockId: b.blockId })
+        const items: { url: string; blockId: string }[] = []
+        for (const b of remoteBlocks) {
+          // blockContexts 追加所有引用此 URL 的 block（一对多）
+          const existing = blockContexts.get(b.url) || []
+          existing.push({ editor, blockId: b.blockId })
+          blockContexts.set(b.url, existing)
+          // items 按 URL 去重（后端只下载一次）
+          if (!seenUrls.has(b.url)) {
+            seenUrls.add(b.url)
+            items.push({ url: b.url, blockId: b.blockId })
+          }
         }
-        const items = uniqueRemoteBlocks.map((b) => ({ url: b.url, blockId: b.blockId }))
 
         // 5. 交给协调器：合并 toast + 即时替换
         downloadCoordinator.enqueueBatch(items, blockContexts, {

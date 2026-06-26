@@ -5,15 +5,33 @@
 //! 前端不直接 fetch 图片字节。
 //! 下载过程中通过 `remote-image-download-progress` 事件推送实时进度与速度。
 
-use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
+use tokio::sync::Mutex as TokioMutex;
+
+/// URL in-flight 锁表：同一 URL 的并发请求串行化，保证只下载一次。
+/// key 为 URL，value 为对应 URL 专属的异步锁；锁释放后 entry 保留以便复用。
+type UrlLockMap = StdMutex<HashMap<String, Arc<TokioMutex<()>>>>;
+static URL_LOCKS: OnceLock<UrlLockMap> = OnceLock::new();
+
+/// 获取 URL 对应的异步锁（同一 URL 的并发请求串行化，保证只下载一次）。
+/// 不同 URL 之间互不阻塞，仅对同一 URL 的并发请求排队。
+fn get_url_lock(url: &str) -> Arc<TokioMutex<()>> {
+    let locks = URL_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
+    // 锁中毒时直接恢复（不会发生在正常流程中），避免 panic 影响下载主流程
+    let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(url.to_string())
+        .or_insert_with(|| Arc::new(TokioMutex::new(())))
+        .clone()
+}
 
 /// 全局共享的 reqwest Client（连接池复用 + 性能更优）。
 /// 首次调用时初始化，后续所有下载任务复用同一 client。
@@ -233,6 +251,22 @@ pub struct DownloadImagesPayload {
     pub images: Vec<RemoteImageRequest>,
 }
 
+/// 仅从 URL 路径推断扩展名（不发 HTTP 请求），无扩展名返回空字符串。
+/// 用于在发起 HTTP 请求之前预先确定文件名，以便命中去重缓存。
+fn infer_ext_from_url(url: &str) -> String {
+    if let Ok(parsed) = url::Url::parse(url) {
+        if let Some(path) = parsed.path_segments().and_then(|mut s| s.next_back()) {
+            if let Some(dot_idx) = path.rfind('.') {
+                let ext = &path[dot_idx + 1..];
+                if !ext.is_empty() && ext.len() <= 5 && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    return ext.to_lowercase();
+                }
+            }
+        }
+    }
+    String::new()
+}
+
 /// 推断文件扩展名：URL path → Content-Type → bin。
 fn infer_ext(url: &str, content_type: Option<&str>) -> String {
     if let Ok(parsed) = url::Url::parse(url) {
@@ -270,14 +304,20 @@ fn infer_ext(url: &str, content_type: Option<&str>) -> String {
     "bin".to_string()
 }
 
-/// 生成唯一文件名：${timestamp}-${random}.${ext}
-fn generate_file_name(ext: &str) -> String {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let random: u32 = rand::thread_rng().gen_range(100_000..999_999);
-    format!("{}-{:x}.{}", timestamp, random, ext)
+/// 生成基于 URL hash 的文件名：sha256(url) 前 32 hex 字符 + ext。
+/// 同一 URL 永远产生同一文件名，天然支持去重。
+fn generate_file_name(url: &str, ext: &str) -> String {
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let hash = hasher.finalize();
+    // 取前 16 字节（32 hex 字符）作为文件名主体，碰撞概率极低
+    let hex: String = hash.iter().take(16).map(|b| format!("{:02x}", b)).collect();
+    if ext.is_empty() {
+        hex
+    } else {
+        format!("{}.{}", hex, ext)
+    }
 }
 
 /// 计算相对路径：file_dir 优先 → root_path fallback → 仅文件名。
@@ -547,44 +587,26 @@ fn resolve_within_root(target_dir: &str, root_path: &str) -> Result<PathBuf, Str
 }
 
 /// 单张图片下载 + 落盘（tokio 异步）核心逻辑。
+/// 同一 URL 的并发请求通过 in-flight 锁串行化，保证只下载一次；后续命中已下载文件。
 async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
     let url = req.url.clone();
 
-    // 0. SSRF 校验：拒绝非 http/https 与私网/环回 IP 字面量
+    // 1. SSRF 校验（锁外，无副作用）：拒绝非 http/https 与私网/环回 IP 字面量
     if let Err(e) = validate_remote_url(&req.url) {
         return err_result(url, format!("SSRF blocked: {}", e));
     }
 
-    // 1. 请求图片（含重试）
-    let response = match fetch_image_with_retry(&req.url).await {
-        Ok(r) => r,
-        Err(e) => return err_result(url, e),
-    };
+    // 2. 从 URL 路径推断 ext（锁外，无副作用，不发 HTTP 请求）
+    let mut ext = infer_ext_from_url(&req.url);
+    let mut file_name = generate_file_name(&req.url, &ext);
 
-    // 2. 提取扩展名 + 读取字节
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-
-    let bytes = match response.bytes().await {
-        Ok(b) => b,
-        Err(e) => return err_result(url, format!("read body failed: {}", e)),
-    };
-    let bytes_len = bytes.len() as u64;
-
-    let ext = infer_ext(&req.url, content_type.as_deref());
-    let file_name = generate_file_name(&ext);
-
-    // 3. 确保目标目录存在
+    // 3. 确定 target_dir + 路径穿越校验（锁外，无副作用）
     let target_dir = req.target_dir.trim().to_string();
     let target_dir = if target_dir.is_empty() {
         req.file_dir.clone()
     } else {
         target_dir
     };
-
     // 安全校验（MISS-2）：target_dir 规范化后必须位于 root_path 之内，
     // 防止前端传入任意路径造成路径穿越。root_path 为空时无法校验，跳过（保持原行为）。
     if !target_dir.is_empty() && !req.root_path.trim().is_empty() {
@@ -593,6 +615,61 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
         }
     }
 
+    // 4. 获取 URL in-flight 锁（同一 URL 的并发请求串行化，保证只下载一次）
+    //    锁在函数返回时自动释放；SSRF/ext 推断/路径校验无需在锁内
+    //    注意：Arc 必须单独绑定到 url_lock，否则临时值在语句结束即释放，
+    //    而 MutexGuard 借用了 Arc 内部的 Mutex，会导致编译错误
+    let url_lock = get_url_lock(&url);
+    let _url_guard = url_lock.lock().await;
+
+    // 5. 计算本地路径
+    let local_path = if target_dir.is_empty() {
+        file_name.clone()
+    } else {
+        format!("{}/{}", target_dir.trim_end_matches('/'), file_name)
+    };
+
+    // 6. 【锁内】检查文件是否已存在（命中缓存，不发 HTTP 请求，bytes=0）
+    if tokio::fs::metadata(&local_path).await.is_ok() {
+        let relative_path = compute_relative_path(&local_path, &req.file_dir, &req.root_path);
+        return ok_result(url, local_path, relative_path, file_name, 0);
+    }
+
+    // 7. 【锁内】请求图片（含重试）+ 读取字节
+    let response = match fetch_image_with_retry(&req.url).await {
+        Ok(r) => r,
+        Err(e) => return err_result(url, e),
+    };
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let bytes = match response.bytes().await {
+        Ok(b) => b,
+        Err(e) => return err_result(url, format!("read body failed: {}", e)),
+    };
+    let bytes_len = bytes.len() as u64;
+
+    // 8. URL 无扩展名时，用 Content-Type 推断 ext 并更新 file_name
+    if ext.is_empty() {
+        ext = infer_ext(&req.url, content_type.as_deref());
+        file_name = generate_file_name(&req.url, &ext);
+    }
+
+    // 9. 【锁内】再次检查文件是否存在（ext 可能变化或并发可能已完成）
+    //    file_name 可能已更新，需重新计算 local_path
+    let local_path = if target_dir.is_empty() {
+        file_name.clone()
+    } else {
+        format!("{}/{}", target_dir.trim_end_matches('/'), file_name)
+    };
+    if tokio::fs::metadata(&local_path).await.is_ok() {
+        let relative_path = compute_relative_path(&local_path, &req.file_dir, &req.root_path);
+        return ok_result(url, local_path, relative_path, file_name, 0);
+    }
+
+    // 10. 【锁内】确保目标目录存在
     if let Err(e) = tokio::fs::create_dir_all(&target_dir).await {
         return RemoteImageResult {
             url,
@@ -605,13 +682,7 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
         };
     }
 
-    let local_path = if target_dir.is_empty() {
-        file_name.clone()
-    } else {
-        format!("{}/{}", target_dir.trim_end_matches('/'), file_name)
-    };
-
-    // 4. 原子写入：先写 .tmp 文件，成功后重命名，避免残留不完整文件
+    // 11. 【锁内】原子写入：先写 .tmp 文件，成功后重命名，避免残留不完整文件
     let tmp_path = format!("{}.tmp", local_path);
     if let Err(e) = tokio::fs::write(&tmp_path, &bytes).await {
         return RemoteImageResult {
@@ -638,9 +709,8 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
         };
     }
 
-    // 5. 计算相对路径
+    // 12. 计算相对路径并返回成功
     let relative_path = compute_relative_path(&local_path, &req.file_dir, &req.root_path);
-
     ok_result(url, local_path, relative_path, file_name, bytes_len)
 }
 
