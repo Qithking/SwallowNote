@@ -32,9 +32,8 @@ function EditorToolbar() {
   const conflictFilesMap = useGitStore((s) => s.conflictFilesMap)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
   const editorToolbarPlugins = usePluginStore((s) => s.registry.editorToolbar)
-  // Select only the fields EditorToolbar needs, excluding `content`.
-  // This prevents re-render on every keystroke — only metadata
-  // changes (path, viewMode, isDirty, etc.) trigger a re-render.
+  // Select only the fields EditorToolbar needs.
+  // Note: content is included because createToolbarButtonProps requires it.
   const activeTab = useEditorStore(
     useShallow((s) => {
       const tab = s.tabs.find((t) => t.id === s.activeTabId)

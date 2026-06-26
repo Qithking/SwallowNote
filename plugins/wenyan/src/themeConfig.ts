@@ -723,9 +723,11 @@ export function cssToConfig(css: string): ThemeConfig {
 
     /** 从已提取的块内容中按属性名提取值（正则匹配，不依赖 selector + '{'） */
     const extractProp = (block: string, prop: string): string | null => {
+      // 先移除 CSS 注释，避免注释中的属性被错误提取
+      const cleaned = block.replace(/\/\*[\s\S]*?\*\//g, '')
       const escaped = prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       const re = new RegExp(`(^|[\\s;{])${escaped}\\s*:\\s*([^;]+?)\\s*(;|$)`, 'i')
-      const m = re.exec(block)
+      const m = re.exec(cleaned)
       return m ? m[2].trim() : null
     }
 
@@ -806,7 +808,9 @@ export function cssToConfig(css: string): ThemeConfig {
   const headingWeightBlock = findBlock(HEADING_GROUP_SELECTOR) ?? findBlock('#wenyan h1')
   let headingWeightMatch: string | null = null
   if (headingWeightBlock) {
-    const m = /(^|[\s;{])font-weight\s*:\s*([^;]+?)\s*(;|$)/i.exec(headingWeightBlock)
+    // 移除 CSS 注释后再提取，避免注释中的 font-weight 被错误匹配
+    const cleaned = headingWeightBlock.replace(/\/\*[\s\S]*?\*\//g, '')
+    const m = /(^|[\s;{])font-weight\s*:\s*([^;]+?)\s*(;|$)/i.exec(cleaned)
     if (m) headingWeightMatch = m[2].trim()
   }
   if (headingWeightMatch) {

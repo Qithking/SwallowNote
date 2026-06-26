@@ -26,7 +26,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { stripFrontmatter } from '@/lib/utils/frontmatter'
 import { buildTableOfContents } from '@/utils/tableOfContents'
-import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, readFile } from '@/lib/tauri'
+import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, readFile, pathExists, getFileMetadata } from '@/lib/tauri'
 import { downloadCoordinator } from '@/lib/download-coordinator'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
@@ -59,7 +59,8 @@ function resolveFilePath(url: string, currentFilePath: string): string {
     return url
   }
   const fileDir = currentFilePath.split(/[\\/]/).slice(0, -1).join('/') || ''
-  const normalizedUrl = url.replace(/^\.\//, '')
+  // 统一将反斜杠转为正斜杠，兼容 Windows 路径写法
+  const normalizedUrl = url.replace(/^\.\//, '').replace(/\\/g, '/')
   const urlParts = normalizedUrl.split('/')
   const dirParts = fileDir.split('/')
   for (const part of urlParts) {
@@ -376,10 +377,19 @@ function BlockNoteInner({
     return undefined
   }
 
-  // Open a file from a link click as a new tab in the app
+  // 通过链接点击在应用内打开文件为新标签页
   const openFileInApp = useCallback(async (filePath: string) => {
     try {
-      const content = await readFile(filePath)
+      // 先检查文件是否存在，给出更友好的提示
+      const exists = await pathExists(filePath)
+      if (!exists) {
+        toast.error(`文件不存在: ${filePath}`)
+        return
+      }
+      const [content, meta] = await Promise.all([
+        readFile(filePath),
+        getFileMetadata(filePath).catch(() => null),
+      ])
       const fileName = filePath.split('/').pop() || filePath
       addTabRef.current({
         id: filePath,
@@ -389,8 +399,15 @@ function BlockNoteInner({
         isDirty: false,
         isEdited: false,
         viewMode: 'preview',
-        fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
-        modifiedTime: new Date().toLocaleString(),
+        // 使用文件元数据中的真实大小和修改时间，回退到近似值
+        fileSize: meta
+          ? meta.file_size > 1024
+            ? `${(meta.file_size / 1024).toFixed(1)}Kb`
+            : `${meta.file_size}B`
+          : content.length > 1024
+            ? `${(content.length / 1024).toFixed(1)}Kb`
+            : `${content.length}B`,
+        modifiedTime: meta?.modified_time || new Date().toLocaleString(),
         wordCount: countWords(content),
       })
     } catch (e) {
@@ -399,9 +416,10 @@ function BlockNoteInner({
     }
   }, [])
 
-  // Handle link clicks — relative paths open in-app, external URLs open in browser.
-  // This is passed to ProseMirror via links.onClick, but the primary interception
-  // happens in the capture-phase listener below. This serves as a fallback.
+  // links.onClick 回调：处理链接点击跳转。
+  // 注意：capture-phase listener 作为拦截 Tauri webview 导航的第一道防线，
+  // 但它依赖 editorContainerRef，在某些场景下可能未注册成功。
+  // 因此 handleLinkClick 必须保留完整跳转逻辑作为兜底。
   const handleLinkClick = useCallback((event: MouseEvent, _editor: BlockNoteEditor): boolean | void => {
     const target = event.target as HTMLElement
     const link = target.closest('a[data-inline-content-type="link"]') as HTMLAnchorElement | null
@@ -411,7 +429,7 @@ function BlockNoteInner({
     if (!href) return false
     if (href.startsWith('data:') || href.startsWith('asset://')) return false
 
-    // Prevent the browser's default <a> navigation
+    // 阻止 <a> 的默认导航行为
     event.preventDefault()
 
     if (isExternalUrl(href)) {
@@ -449,14 +467,22 @@ function BlockNoteInner({
     pasteHandler,
     links: {
       onClick: handleLinkClick,
+      // 覆盖 BlockNote 默认的 target="_blank"。
+      // Tauri webview 会在 native 层拦截 target="_blank" 并在系统浏览器中打开，
+      // 这个过程早于 JS 事件处理，preventDefault() 无法阻止。
+      // 设置为 _self 后，即使 preventDefault 失败也只会在当前 webview 内导航，
+      // 不会泄漏到系统浏览器。
+      HTMLAttributes: { target: '_self' },
     },
   })
 
-  // Capture-phase click listener: intercepts link clicks BEFORE Tauri's webview
-  // processes target="_blank" navigation. ProseMirror's handleClick (bubble phase)
-  // is too late — the webview has already opened the browser by then.
-  // We only call preventDefault() (not stopPropagation) so ProseMirror can still
-  // update the text selection when the user clicks on link text to edit it.
+  // Capture-phase click listener: 在捕获阶段拦截链接点击，调用 preventDefault()
+  // 并执行跳转。此 listener 对预览模式必需——BlockNote 的 links.onClick 在只读模式
+  // 下不会被调用（clickHandler.ts 中 !view.editable 时直接 return false）。
+  // 注意：此 listener 与 handleLinkClick 存在跳转逻辑重复——handleLinkClick 作为
+  // 兜底是必需的，因为此 listener 依赖 editorContainerRef，某些场景下可能未注册。
+  // 内部文件链接的双重调用无害（addTab 会去重），外部链接的双重 window.open
+  // 是已知的次要问题。
   useEffect(() => {
     const container = editorContainerRef.current
     if (!container) return
@@ -474,8 +500,7 @@ function BlockNoteInner({
       if (!href) return
       if (href.startsWith('data:') || href.startsWith('asset://')) return
 
-      // Prevent browser/Tauri default navigation for <a target="_blank">
-      // Do NOT stopPropagation — let ProseMirror handle selection updates normally.
+      // 阻止 <a> 的默认导航（target 已改为 _self，但仍需 preventDefault 避免当前 webview 导航）
       event.preventDefault()
 
       if (isExternalUrl(href)) {

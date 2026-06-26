@@ -23,5 +23,11 @@ export function registerFlushFn(fn: FlushFn): () => void {
 export async function flushAllEditors(): Promise<void> {
   const fns = Array.from(flushFns)
   if (fns.length === 0) return
-  await Promise.all(fns.map((fn) => fn().catch(() => {})))
+  await Promise.all(
+    fns.map((fn) =>
+      fn().catch((e) => {
+        console.error('[editor-flush] Flush failed:', e)
+      }),
+    ),
+  )
 }
