@@ -35,7 +35,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { getFileFrontmatter } from '@/lib/utils/searchQuery'
+import { getFileFrontmatter, getFileFrontmattersByPrefix } from '@/lib/utils/searchQuery'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 
 export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
@@ -98,35 +98,21 @@ function flattenNodes(
   // Sort nodes at this level
   const sortedNodes = sortFileNodes(nodes, sortMode, frontmatterCache)
 
-  // When sort mode is not default, group pinned files at the top within files
+  // Separate pinned files from the rest.
+  // In all sort modes (including 'default') we check frontmatterCache for
+  // pinned status so that pinned files are grouped at the top.
   const pinnedNodes: FileNode[] = []
   const unpinnedNodes: FileNode[] = []
 
-  if (sortMode !== 'default') {
-    for (const node of sortedNodes) {
-      if (node.isDirectory) {
-        unpinnedNodes.push(node)
+  for (const node of sortedNodes) {
+    if (node.isDirectory) {
+      unpinnedNodes.push(node)
+    } else {
+      const fm = frontmatterCache.get(node.path)
+      if (fm?.pinned === true) {
+        pinnedNodes.push(node)
       } else {
-        const fm = frontmatterCache.get(node.path)
-        if (fm?.pinned === true) {
-          pinnedNodes.push(node)
-        } else {
-          unpinnedNodes.push(node)
-        }
-      }
-    }
-  } else {
-    // In default mode, still check for pinned files
-    for (const node of sortedNodes) {
-      if (node.isDirectory) {
         unpinnedNodes.push(node)
-      } else {
-        const fm = frontmatterCache.get(node.path)
-        if (fm?.pinned === true) {
-          pinnedNodes.push(node)
-        } else {
-          unpinnedNodes.push(node)
-        }
       }
     }
   }
@@ -189,7 +175,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
   isDragOver,
   isDragging,
   isPinned,
-  expanded,
+  isExpanded,
   editingName,
   newItem,
   inputRef,
@@ -217,7 +203,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
   isDragOver: boolean
   isDragging: boolean
   isPinned?: boolean
-  expanded: Set<string>
+  isExpanded: boolean
   editingName: string
   newItem: { type: 'file' | 'folder' | 'mindmap'; parentPath: string; name: string } | null
   inputRef: React.RefObject<HTMLInputElement | null>
@@ -289,7 +275,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
         ) : (
           <ChevronRight
             size={12}
-            className={`transition-transform shrink-0 ${expanded.has(node.path) ? 'rotate-90' : ''}`}
+            className={`transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
             onClick={(e) => { e.stopPropagation(); onToggle(node.path) }}
           />
         )
@@ -374,64 +360,133 @@ const { t } = useTranslation()
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [sortMode, setSortMode] = useState<FileTreeSortMode>('default')
   const [frontmatterCache, setFrontmatterCache] = useState<Map<string, NoteFrontmatter>>(new Map())
+  // Ref to read the latest cache inside async without re-triggering the effect.
   const frontmatterCacheRef = useRef(frontmatterCache)
   frontmatterCacheRef.current = frontmatterCache
+  // Track the set of visible .md paths from the last run so we can skip
+  // the batch IPC query entirely when nothing changed (e.g. toggling
+  // loading state, expanding a dir with only subdirectories, collapsing).
+  const lastMdPathsRef = useRef<Set<string>>(new Set())
+  // Track which root paths have already been batch-queried. The batch
+  // query (query_frontmatter_by_prefix) returns ALL .md records under a
+  // root, including files in unexpanded directories. Re-running it on
+  // every directory expansion within the same root is wasteful — the
+  // result is identical. We only need to batch-query when a NEW root is
+  // added; for subsequent expansions we rely on the cache + individual
+  // fallback for any newly visible uncached files.
+  const queriedRootsRef = useRef<Set<string>>(new Set())
 
-  // Load frontmatter for all visible .md files when sort mode changes or tree refreshes
+  // Load frontmatter for all .md files when the tree changes.
+  //
+  // Performance strategy:
+  // 1. Collect visible .md paths; if unchanged from last run, skip entirely
+  //    (no IPC, no state update, no re-render).
+  // 2. If root paths changed (new root added), batch-query the new roots.
+  //    Skip batch query for existing roots — their data is already cached.
+  // 3. Fallback: individually load frontmatter for visible .md files not
+  //    yet in the cache (newly expanded directories, unindexed files).
+  // 4. Only call setFrontmatterCache if something actually changed.
   useEffect(() => {
     if (nodes.length === 0) return
+
+    // Collect visible .md file paths from the current tree
+    const collectMdPaths = (fileNodes: FileNode[]): string[] => {
+      const paths: string[] = []
+      for (const node of fileNodes) {
+        if (!node.isDirectory && node.name.toLowerCase().endsWith('.md')) {
+          paths.push(node.path)
+        }
+        if (node.children) {
+          paths.push(...collectMdPaths(node.children))
+        }
+      }
+      return paths
+    }
+
+    const mdPaths = collectMdPaths(nodes)
+    const mdPathSet = new Set(mdPaths)
+
+    // Early exit: if the set of visible .md paths hasn't changed since the
+    // last run, there's nothing to do. This covers:
+    //   - toggleNode setting isLoading (nodes ref changes, same .md paths)
+    //   - expanding a directory with only subdirectories
+    //   - collapsing a directory (children released, but paths were cached)
+    const prevSet = lastMdPathsRef.current
+    if (prevSet.size === mdPathSet.size) {
+      let same = true
+      for (const p of mdPathSet) {
+        if (!prevSet.has(p)) { same = false; break }
+      }
+      if (same) return
+    }
+    lastMdPathsRef.current = mdPathSet
+
+    const rootPaths = nodes.map((n) => n.path)
+    // Determine which roots need a fresh batch query.
+    // Only NEW roots (not previously queried) need it — existing roots'
+    // data is already in the cache and won't have changed.
+    const rootsToQuery = rootPaths.filter((p) => !queriedRootsRef.current.has(p))
+    // Clean up queriedRootsRef if a root was removed
+    if (rootsToQuery.length > 0 || rootPaths.length !== queriedRootsRef.current.size) {
+      const newRootSet = new Set(rootPaths)
+      for (const r of queriedRootsRef.current) {
+        if (!newRootSet.has(r)) queriedRootsRef.current.delete(r)
+      }
+      for (const r of rootsToQuery) queriedRootsRef.current.add(r)
+    }
 
     let cancelled = false
 
     const loadFrontmatter = async () => {
+      // Start from existing cache so we don't lose entries for paths
+      // that the batch query doesn't return (e.g. not yet indexed).
       const cache = new Map(frontmatterCacheRef.current)
       let changed = false
 
-      // 收集所有 .md 文件路径
-      const collectMdPaths = (fileNodes: FileNode[]): string[] => {
-        const paths: string[] = []
-        for (const node of fileNodes) {
-          if (!node.isDirectory && node.name.toLowerCase().endsWith('.md')) {
-            paths.push(node.path)
-          }
-          if (node.children) {
-            paths.push(...collectMdPaths(node.children))
-          }
-        }
-        return paths
-      }
-
-      const mdPaths = collectMdPaths(nodes)
-      // 清理不在当前树中的过期缓存条目
-      const mdPathSet = new Set(mdPaths)
-      for (const key of cache.keys()) {
-        if (!mdPathSet.has(key)) {
-          cache.delete(key)
-          changed = true
-        }
-      }
-      // 过滤出未缓存的路径
-      const uncachedPaths = mdPaths.filter((p) => !cache.has(p))
-      if (uncachedPaths.length === 0) return
-
-      // 分批并发加载，每批 5 个，避免 IPC 过载
-      const BATCH_SIZE = 5
-      for (let i = 0; i < uncachedPaths.length; i += BATCH_SIZE) {
-        if (cancelled) return
-        const batch = uncachedPaths.slice(i, i + BATCH_SIZE)
-        const results = await Promise.allSettled(
-          batch.map((path) => getFileFrontmatter(path))
+      // 1. Batch query: ONLY for new roots. One IPC call per new root
+      //    retrieves ALL indexed frontmatter records under that root.
+      if (rootsToQuery.length > 0) {
+        const batchResults = await Promise.all(
+          rootsToQuery.map((p) => getFileFrontmattersByPrefix(p)),
         )
         if (cancelled) return
-        for (let j = 0; j < results.length; j++) {
-          const result = results[j]
-          if (result.status === 'fulfilled') {
-            cache.set(batch[j], result.value)
+
+        for (const result of batchResults) {
+          for (const [path, fm] of result) {
+            cache.set(path, fm)
             changed = true
           }
         }
       }
 
+      // 2. Fallback: individually load frontmatter for visible .md files
+      //    not yet in the cache. This covers:
+      //    - Files in newly expanded directories (not in batch query scope
+      //      if the root was already queried but these files are new)
+      //    - Files not yet indexed by the backend
+      //    Usually very few (0-10).
+      const uncachedPaths = mdPaths.filter((p) => !cache.has(p))
+
+      if (uncachedPaths.length > 0) {
+        const FALLBACK_BATCH = 10
+        for (let i = 0; i < uncachedPaths.length; i += FALLBACK_BATCH) {
+          if (cancelled) return
+          const batch = uncachedPaths.slice(i, i + FALLBACK_BATCH)
+          const results = await Promise.allSettled(
+            batch.map((path) => getFileFrontmatter(path)),
+          )
+          if (cancelled) return
+          for (let j = 0; j < results.length; j++) {
+            if (results[j].status === 'fulfilled') {
+              cache.set(batch[j], results[j].value)
+              changed = true
+            }
+          }
+        }
+      }
+
+      // 3. Only update state if something actually changed — avoids
+      //    unnecessary re-renders when the cache content is identical.
       if (changed && !cancelled) {
         setFrontmatterCache(cache)
       }
@@ -515,11 +570,16 @@ const { t } = useTranslation()
     }
   }
 
+  // Refs to access latest values inside stable callbacks, avoiding
+  // unnecessary callback recreation when nodes/expanded change.
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
+
   const handleSelect = useCallback((node: FileNode, shiftKey: boolean) => {
     if (editingPath !== null) return
 
     if (shiftKey && lastClickedPath) {
-      const allPaths = collectAllPaths(nodes)
+      const allPaths = collectAllPaths(nodesRef.current)
       const startIdx = allPaths.indexOf(lastClickedPath)
       const endIdx = allPaths.indexOf(node.path)
       if (startIdx >= 0 && endIdx >= 0) {
@@ -554,7 +614,7 @@ const { t } = useTranslation()
         })
       })
       .catch(console.error)
-  }, [editingPath, lastClickedPath, nodes, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab, setMultiSelectedPaths])
+  }, [editingPath, lastClickedPath, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab, setMultiSelectedPaths])
 
   const handleOpenFolder = async () => {
     const path = await openFolderDialog()
@@ -750,7 +810,7 @@ const { t } = useTranslation()
                           isDragOver={dragOverPath === node.path}
                           isDragging={dragSourcePaths.includes(node.path)}
                           isPinned={isPinned}
-                          expanded={expanded}
+                          isExpanded={expanded.has(node.path)}
                           editingName={editingName}
                           newItem={newItem}
                           inputRef={inputRef}
