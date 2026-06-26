@@ -762,14 +762,30 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         // explorer /select,<file> opens Explorer and selects the file
+        // 关键修复：必须 canonicalize 拿到带反斜杠的绝对路径并去除 \\?\ 前缀，
+        // 同时用双引号包裹路径，避免路径含空格时被 explorer 截断。
+        let abs_path = std::fs::canonicalize(&path)
+            .map_err(|e| format!("Failed to get absolute path: {}", e))?;
+        let path_str = abs_path.to_string_lossy();
+        // 去掉 Windows canonicalize 产生的 \\?\ UNC 扩展长度前缀
+        let clean_path = if path_str.starts_with("\\\\?\\") {
+            &path_str[4..]
+        } else {
+            &path_str
+        };
+
         if path.is_file() {
+            // raw string 让 clean_path 中的反斜杠原样写入，无需额外转义
+            eprintln!("[INFO] open_in_finder(windows, file): {}", clean_path);
             super::create_command("explorer")
-                .arg(format!("/select,{}", path.display()))
+                .arg(format!(r#"/select,"{}""#, clean_path))
                 .spawn()
                 .map_err(|e| format!("Failed to open folder: {}", e))?;
         } else {
+            eprintln!("[INFO] open_in_finder(windows, dir): {}", clean_path);
+            // 目录场景同样用双引号包裹
             super::create_command("explorer")
-                .arg(&target)
+                .arg(format!(r#""{}""#, clean_path))
                 .spawn()
                 .map_err(|e| format!("Failed to open folder: {}", e))?;
         }
