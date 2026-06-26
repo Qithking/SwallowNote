@@ -477,8 +477,9 @@ const { t } = useTranslation()
           )
           if (cancelled) return
           for (let j = 0; j < results.length; j++) {
-            if (results[j].status === 'fulfilled') {
-              cache.set(batch[j], results[j].value)
+            const result = results[j]
+            if (result.status === 'fulfilled') {
+              cache.set(batch[j], result.value)
               changed = true
             }
           }
