@@ -710,34 +710,49 @@ export function cssToConfig(css: string): ThemeConfig {
   type LevelKey = HeadingLevel
   const INDIVIDUAL_LEVELS: Exclude<HeadingLevel, 'all'>[] = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']
 
-  /** 把单选 level 解析结果合并到 config.heading[level] */
+  /**
+   * 把单选 level 解析结果合并到 config.heading[level]。
+   *
+   * 注意：cssBlock 是已提取的块内容（不含选择器和大括号），
+   * 因此不能用 extractValueFromSelector（它内部调 extractBlock
+   * 搜索 selector + '{'）。这里直接用正则从块内容提取属性值。
+   */
   const applyLevel = (level: LevelKey, cssBlock: string | null) => {
     if (!cssBlock) return
     const fields: HeadingLevelFields = {}
-    const c = extractColorFromSelector(cssBlock, '{', 'color')
-    if (c) fields.color = c
-    const ff = extractValueFromSelector(cssBlock, '{', 'font-family')
+
+    /** 从已提取的块内容中按属性名提取值（正则匹配，不依赖 selector + '{'） */
+    const extractProp = (block: string, prop: string): string | null => {
+      const escaped = prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const re = new RegExp(`(^|[\\s;{])${escaped}\\s*:\\s*([^;]+?)\\s*(;|$)`, 'i')
+      const m = re.exec(block)
+      return m ? m[2].trim() : null
+    }
+
+    const c = extractProp(cssBlock, 'color')
+    if (c && /^(#|rgb\()/i.test(c)) fields.color = c
+    const ff = extractProp(cssBlock, 'font-family')
     if (ff) fields.fontFamily = ff
-    const fs = extractValueFromSelector(cssBlock, '{', 'font-size')
+    const fs = extractProp(cssBlock, 'font-size')
     if (fs) {
       const n = parsePxNumber(fs)
       if (n !== null) fields.fontSize = clampNumber(Math.round(n), 8, 72)
     }
-    const lh = extractValueFromSelector(cssBlock, '{', 'line-height')
+    const lh = extractProp(cssBlock, 'line-height')
     if (lh) {
       const n = parseUnitless(lh)
       if (n !== null) fields.lineHeight = clampNumber(Math.round(n * 100) / 100, 0.8, 3)
     }
-    const ls = extractValueFromSelector(cssBlock, '{', 'letter-spacing')
+    const ls = extractProp(cssBlock, 'letter-spacing')
     if (ls) {
       const n = parseEmNumber(ls) ?? parsePxNumber(ls)
       if (n !== null) fields.letterSpacing = clampNumber(Math.round(n), -10, 50)
     }
-    const ta = extractValueFromSelector(cssBlock, '{', 'text-align')
+    const ta = extractProp(cssBlock, 'text-align')
     if (ta && /^(left|center|right|justify)$/i.test(ta.trim())) {
       fields.textAlign = ta.trim().toLowerCase() as TextAlign
     }
-    const d = extractValueFromSelector(cssBlock, '{', 'display')
+    const d = extractProp(cssBlock, 'display')
     if (d) {
       const v = d.trim().toLowerCase()
       if (
@@ -757,18 +772,24 @@ export function cssToConfig(css: string): ThemeConfig {
     }
   }
 
+  // 用 parseAllBlocks 做精确选择器匹配，避免 indexOf 子串匹配问题
+  // （例如 '#wenyan h1' 会匹配合并选择器 '#wenyan h1, #wenyan h2, ...' 中的子串）
+  const allBlocks = parseAllBlocks(css)
+  const findBlock = (selector: string): string | null =>
+    allBlocks.find((b) => b.selector === selector)?.body ?? null
+
   // 1. 合并规则 → all
-  const allBlock = extractBlock(css, HEADING_GROUP_SELECTOR)
+  const allBlock = findBlock(HEADING_GROUP_SELECTOR) ?? extractBlock(css, HEADING_GROUP_SELECTOR)
   applyLevel('all', allBlock)
   // 兼容旧数据中只设置 #wenyan h1 的情况：把 h1 的字段也作为 all 的兜底
   if (!config.heading.all || Object.keys(config.heading.all).length === 0) {
-    const h1Block = extractBlock(css, '#wenyan h1')
+    const h1Block = findBlock('#wenyan h1')
     applyLevel('all', h1Block)
   }
 
   // 2. 逐个独立 level 解析（覆盖 all 中的对应字段）
   for (const lv of INDIVIDUAL_LEVELS) {
-    applyLevel(lv, extractBlock(css, `#wenyan ${lv}`))
+    applyLevel(lv, findBlock(`#wenyan ${lv}`))
   }
 
   // heading 兜底色（colors.headingColor）：从 all.color 或 h1.color 中取
@@ -780,11 +801,14 @@ export function cssToConfig(css: string): ThemeConfig {
     if (h1Color) config.colors.headingColor = h1Color
   }
 
-  const headingWeightMatch = extractValueFromSelector(
-    css,
-    HEADING_GROUP_SELECTOR,
-    'font-weight'
-  ) ?? extractValueFromSelector(css, '#wenyan h1', 'font-weight')
+  // font-weight: 优先从合并规则块中提取，回退到独立 #wenyan h1 块。
+  // 使用 findBlock 做精确选择器匹配，避免 indexOf 子串匹配问题。
+  const headingWeightBlock = findBlock(HEADING_GROUP_SELECTOR) ?? findBlock('#wenyan h1')
+  let headingWeightMatch: string | null = null
+  if (headingWeightBlock) {
+    const m = /(^|[\s;{])font-weight\s*:\s*([^;]+?)\s*(;|$)/i.exec(headingWeightBlock)
+    if (m) headingWeightMatch = m[2].trim()
+  }
   if (headingWeightMatch) {
     const w = parseInt(headingWeightMatch, 10)
     if (Number.isFinite(w)) {

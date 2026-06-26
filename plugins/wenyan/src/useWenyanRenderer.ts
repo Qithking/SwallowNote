@@ -207,6 +207,11 @@ export function useWenyanRenderer() {
   const wechatCoreRef = useRef<WenyanCoreInstance | null>(null)
   const otherCoreRef = useRef<WenyanCoreInstance | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  // Render ID for cancelling stale async renders. Each call to `render`
+  // increments this ref; after each `await` checkpoint the render checks
+  // if it's still the latest — if not, it bails out without updating state.
+  // This prevents a slow earlier render from overwriting a faster later one.
+  const renderIdRef = useRef(0)
   const [html, setHtml] = useState('')
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
@@ -260,6 +265,12 @@ export function useWenyanRenderer() {
 
   const render = useCallback(
     async (markdown: string, options: RenderOptions) => {
+      // Assign a unique ID to this render call. After each `await` we
+      // check if a newer render has started; if so, this one is stale
+      // and we bail out without touching state.
+      // NOTE: This must run BEFORE the empty-markdown early return so
+      // that a previous in-progress render is properly cancelled.
+      const renderId = ++renderIdRef.current
       if (!markdown.trim()) {
         setHtml('')
         setError(null)
@@ -272,9 +283,12 @@ export function useWenyanRenderer() {
         // the neutral core plus their own post-processing function.
         const isWechatPlatform = options.platform === 'wechat'
         const wenyan = await ensureCore(isWechatPlatform)
+        if (renderId !== renderIdRef.current) return // stale
         const fm = await wenyan.handleFrontMatter(markdown)
+        if (renderId !== renderIdRef.current) return // stale
         setTitle(fm.title || '')
         const rawHtml = await wenyan.renderMarkdown(fm.content)
+        if (renderId !== renderIdRef.current) return // stale
         const article = ensureContainer()
         article.innerHTML = rawHtml
         // applyStylesWithTheme modifies the article in place. The Mac-
@@ -292,11 +306,13 @@ export function useWenyanRenderer() {
           applyOptions.themeCss = options.customThemeCss
         }
         await wenyan.applyStylesWithTheme(article, applyOptions)
+        if (renderId !== renderIdRef.current) return // stale
         // For non-WeChat platforms, run the platform-specific post-
         // processing. It mutates the article in place and returns its
         // outerHTML.
         if (!isWechatPlatform) {
           const mod = await getWenyanModule()
+          if (renderId !== renderIdRef.current) return // stale
           const platformFn =
             options.platform === 'toutiao'
               ? mod.getContentForToutiao
@@ -314,14 +330,20 @@ export function useWenyanRenderer() {
         // Append user overrides as a <style> tag inside the article so
         // they ride along with the copied HTML.
         applyOverrides(article, options)
+        if (renderId !== renderIdRef.current) return // stale
         setHtml(article.outerHTML)
       } catch (e) {
+        if (renderId !== renderIdRef.current) return // stale
         const msg = e instanceof Error ? e.message : String(e)
         console.error('[wenyan] render failed:', e)
         setError(msg)
         setHtml('')
       } finally {
-        setLoading(false)
+        // Only clear loading if this is still the latest render;
+        // otherwise a newer render is in charge of the loading state.
+        if (renderId === renderIdRef.current) {
+          setLoading(false)
+        }
       }
     },
     [ensureCore, ensureContainer]

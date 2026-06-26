@@ -22,8 +22,6 @@ export interface BoxModelFieldProps {
   onChange: (next: BoxSpacing) => void
   className?: string
   disabled?: boolean
-  /** 字段名（用于父级 onFieldClick 透传） */
-  fieldKey?: string
 }
 
 const DEFAULT_SPACING: BoxSpacing = { top: 0, right: 0, bottom: 0, left: 0 }

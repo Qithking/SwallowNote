@@ -178,15 +178,6 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
     render(debouncedContent, options)
   }, [open, debouncedContent, options, render])
 
-  // Sync preview DOM with rendered html. Using dangerouslySetInnerHTML
-  // ensures the preview is initialized correctly on remount — otherwise,
-  // if `html` is unchanged from a previous open, the [html]-only effect
-  // would skip and leave the new preview div empty.
-  useEffect(() => {
-    // No-op: actual sync is handled by dangerouslySetInnerHTML on the
-    // preview div itself. Kept as a hook for future side-effects.
-  }, [html])
-
   // Close on Escape.
   useEffect(() => {
     if (!open) return
