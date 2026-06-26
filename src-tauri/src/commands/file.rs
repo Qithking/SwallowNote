@@ -737,69 +737,76 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
         return Err(format!("Path does not exist: {}", path.display()));
     }
 
-    // Determine the folder to open
-    let target = if path.is_dir() {
-        path.clone()
-    } else {
-        path.parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| path.clone())
-    };
+    // 每个平台块各自独立、自包含，避免跨 cfg 的变量引用导致未使用变量警告。
 
     #[cfg(target_os = "macos")]
     {
+        // open -R <file>  → 在 Finder 中定位并选中该文件
+        // open    <dir>   → 在 Finder 中打开该目录
+        let mut cmd = super::create_command("open");
         if path.is_file() {
-            // open -R opens Finder and selects the file
-            StdCommand::new("open")
-                .arg("-R")
-                .arg(&path)
-                .spawn()
-                .map_err(|e| format!("Failed to open folder: {}", e))?;
-        } else {
-            StdCommand::new("open")
-                .arg(&target)
-                .spawn()
-                .map_err(|e| format!("Failed to open folder: {}", e))?;
+            cmd.arg("-R");
         }
+        cmd.arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
     }
 
     #[cfg(target_os = "windows")]
     {
-        // explorer /select,<file> opens Explorer and selects the file
-        // 关键修复：必须 canonicalize 拿到带反斜杠的绝对路径并去除 \\?\ 前缀，
-        // 同时用双引号包裹路径，避免路径含空格时被 explorer 截断。
+        use std::os::windows::process::CommandExt;
+
+        // explorer /select,"<file>" → 在资源管理器中定位并选中该文件
+        // explorer "<dir>"          → 在资源管理器中打开该目录
+        //
+        // canonicalize 拿到带反斜杠的绝对路径并去除 \\?\ 扩展长度前缀，
+        // 用双引号包裹路径避免含空格时被 explorer 截断，
+        // 用 raw_arg 避免 Rust 对内嵌引号做额外转义。
         let abs_path = std::fs::canonicalize(&path)
             .map_err(|e| format!("Failed to get absolute path: {}", e))?;
-        let path_str = abs_path.to_string_lossy();
-        // 去掉 Windows canonicalize 产生的 \\?\ UNC 扩展长度前缀
-        let clean_path = if path_str.starts_with("\\\\?\\") {
-            &path_str[4..]
+        let path_str = abs_path.to_string_lossy().to_string();
+        // 去掉 Windows canonicalize 产生的扩展长度前缀：
+        //   \\?\C:\...     →  C:\...
+        //   \\?\UNC\...    →  \\...
+        let clean_path = if let Some(rest) = path_str.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{}", rest)
+        } else if let Some(rest) = path_str.strip_prefix(r"\\?\") {
+            rest.to_string()
         } else {
-            &path_str
+            path_str
         };
 
+        let mut cmd = super::create_command("explorer");
         if path.is_file() {
-            // raw string 让 clean_path 中的反斜杠原样写入，无需额外转义
-            eprintln!("[INFO] open_in_finder(windows, file): {}", clean_path);
-            super::create_command("explorer")
-                .arg(format!(r#"/select,"{}""#, clean_path))
-                .spawn()
-                .map_err(|e| format!("Failed to open folder: {}", e))?;
+            cmd.raw_arg(format!(r#"/select,"{}""#, clean_path));
         } else {
-            eprintln!("[INFO] open_in_finder(windows, dir): {}", clean_path);
-            // 目录场景同样用双引号包裹
-            super::create_command("explorer")
-                .arg(format!(r#""{}""#, clean_path))
-                .spawn()
-                .map_err(|e| format!("Failed to open folder: {}", e))?;
+            cmd.raw_arg(format!(r#""{}""#, clean_path));
         }
+        cmd.spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
     }
 
     #[cfg(target_os = "linux")]
-    StdCommand::new("xdg-open")
-        .arg(&target)
-        .spawn()
-        .map_err(|e| format!("Failed to open folder: {}", e))?;
+    {
+        // xdg-open 只能打开目录，无法选中文件。
+        // 对于文件，打开其所在父目录；对于目录，直接打开。
+        let target = if path.is_dir() {
+            path.clone()
+        } else {
+            path.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| path.clone())
+        };
+        super::create_command("xdg-open")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        return Err("Unsupported platform: open in file explorer is only supported on macOS, Windows, and Linux".to_string());
+    }
 
     Ok(())
 }
