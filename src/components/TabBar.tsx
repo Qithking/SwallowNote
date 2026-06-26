@@ -19,7 +19,10 @@ import { useTranslation } from 'react-i18next'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 
 function TabBar() {
-  const { tabs, activeTabId, setActiveTab, removeTab } = useEditorStore()
+  const tabs = useEditorStore((s) => s.tabs)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const setActiveTab = useEditorStore((s) => s.setActiveTab)
+  const removeTab = useEditorStore((s) => s.removeTab)
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const workspaceMode = useUIStore((s) => s.workspaceMode)
   const showToast = useUIStore((s) => s.showToast)

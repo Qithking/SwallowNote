@@ -5,6 +5,7 @@
 import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2, DownloadCloud, Loader2 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore, usePluginStore } from '@/stores'
+import { useShallow } from 'zustand/react/shallow'
 import type { ConflictRepoRecord } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -14,8 +15,6 @@ import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 import { downloadCoordinator } from '@/lib/download-coordinator'
 
 function EditorToolbar() {
-  const tabs = useEditorStore((s) => s.tabs)
-  const activeTabId = useEditorStore((s) => s.activeTabId)
   const toggleViewMode = useEditorStore((s) => s.toggleViewMode)
   const rightPanelType = useUIStore((s) => s.rightPanelType)
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
@@ -33,7 +32,29 @@ function EditorToolbar() {
   const conflictFilesMap = useGitStore((s) => s.conflictFilesMap)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
   const editorToolbarPlugins = usePluginStore((s) => s.registry.editorToolbar)
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  // Select only the fields EditorToolbar needs, excluding `content`.
+  // This prevents re-render on every keystroke — only metadata
+  // changes (path, viewMode, isDirty, etc.) trigger a re-render.
+  const activeTab = useEditorStore(
+    useShallow((s) => {
+      const tab = s.tabs.find((t) => t.id === s.activeTabId)
+      if (!tab) return null
+      return {
+        id: tab.id,
+        path: tab.path,
+        name: tab.name,
+        content: tab.content ?? '',
+        isDirty: tab.isDirty,
+        viewMode: tab.viewMode,
+        type: tab.type,
+        fileSize: tab.fileSize,
+        modifiedTime: tab.modifiedTime,
+        wordCount: tab.wordCount,
+        cursorPosition: tab.cursorPosition,
+        hasExternalChange: tab.hasExternalChange ?? false,
+      }
+    })
+  )
   const [copied, setCopied] = useState(false)
   const [isWide, setIsWide] = useState(noteWidth === 'wide')
   const [downloading, setDownloading] = useState(false)

@@ -11,6 +11,7 @@ import { listPluginCommands } from '@/lib/plugin-commands'
 import { toast } from 'sonner'
 import i18n from 'i18next'
 import { findNodeByPath, generateUniqueName, updateNodesWithChildren } from '@/lib/utils/treeUtils'
+import { flushAllEditors } from '@/lib/editor-flush'
 
 function getShortcut(key: ShortcutKey): string {
   return getShortcutKey(key, useUIStore.getState().customShortcuts)
@@ -163,6 +164,8 @@ export async function handleOpenFile() {
 }
 
 export async function handleSaveFile() {
+  // Flush any pending debounced editor content before reading from the store
+  await flushAllEditors()
   const { tabs, activeTabId } = useEditorStore.getState()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   if (!activeTab || (!activeTab.isDirty && !activeTab.frontmatterDirty)) return
@@ -236,6 +239,7 @@ export async function handleSaveFile() {
 }
 
 async function handleSaveAll() {
+  await flushAllEditors()
   await useEditorStore.getState().saveAllDirtyTabs()
 }
 

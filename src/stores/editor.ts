@@ -385,25 +385,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   updateTabContent: (id, content) => {
     set((state) => {
-      const tabs = state.tabs.map((t) => {
-        if (t.id !== id) return t
-        // 只有内容真正变化时才标记为 dirty
-        // Note: t.content can be undefined (not loaded yet) while content might be '' (empty file)
-        // Treat undefined and '' as equivalent to avoid falsely marking empty files as dirty
-        const currentNormalized = t.content ?? ''
-        const newNormalized = content ?? ''
-        if (currentNormalized === newNormalized) return t
-        return { ...t, content, isDirty: true, isEdited: true }
-      })
-      // Locate the tab that actually changed. The map above already
-      // updated `isDirty`/`isEdited`, so we can re-read the tab from
-      // the new array. We emit only on a real content transition to
-      // avoid one event per keystroke that ends up a no-op due to
-      // normalisation (e.g. setting '' to '' when the file is empty).
-      const updated = tabs.find((t) => t.id === id)
-      if (updated && (updated.content ?? '') === (content ?? '') && updated.isDirty) {
-        queueMicrotask(() => emitNoteChanged(updated.id, updated.path, updated.content ?? ''))
-      }
+      const tab = state.tabs.find((t) => t.id === id)
+      if (!tab) return state
+      // 只有内容真正变化时才标记为 dirty
+      // Note: t.content can be undefined (not loaded yet) while content might be '' (empty file)
+      // Treat undefined and '' as equivalent to avoid falsely marking empty files as dirty
+      const currentNormalized = tab.content ?? ''
+      const newNormalized = content ?? ''
+      // Early return: if content hasn't changed, return the SAME state
+      // object so Zustand skips notifying all subscribers. This prevents
+      // unnecessary re-renders of every component subscribed to `tabs`.
+      if (currentNormalized === newNormalized) return state
+      const tabs = state.tabs.map((t) =>
+        t.id === id ? { ...t, content, isDirty: true, isEdited: true } : t
+      )
+      // Emit note:changed only on a real content transition
+      queueMicrotask(() => emitNoteChanged(id, tab.path, content ?? ''))
       return { tabs }
     })
   },

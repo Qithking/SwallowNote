@@ -19,8 +19,9 @@ interface TreeNode {
 }
 
 function DirectoryView() {
-  const { tabs, activeTabId } = useEditorStore()
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const activeTabName = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.name ?? '')
+  const activeTabContent = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.content ?? '')
   const { t } = useTranslation()
   const [toc, setToc] = useState<TocItem | null>(null)
   const [treeData, setTreeData] = useState<TreeNode[]>([])
@@ -69,8 +70,10 @@ function DirectoryView() {
     return () => window.removeEventListener('block-editor-ready', handler)
   }, [])
 
+  // Source mode TOC: debounced to avoid rebuilding on every keystroke.
+  // BlockNote mode TOC is handled by the 'block-editor-ready' event.
   useEffect(() => {
-    if (!activeTab) {
+    if (!activeTabId) {
       setToc(null)
       setTreeData([])
       setExpandedKeys([])
@@ -80,7 +83,7 @@ function DirectoryView() {
 
     setSelectedId('')
 
-    const isMarkdown = activeTab.name.toLowerCase().endsWith('.md')
+    const isMarkdown = activeTabName.toLowerCase().endsWith('.md')
     if (!isMarkdown) {
       setToc(null)
       setTreeData([])
@@ -88,26 +91,32 @@ function DirectoryView() {
       return
     }
 
-    if (!activeTab.content) {
+    if (!activeTabContent) {
       setToc(null)
       setTreeData([])
       setExpandedKeys([])
       return
     }
 
-    const entryTitle = activeTab.name.replace(/\.md$/i, '')
-    const newToc = buildTableOfContentsFromMarkdown(entryTitle, activeTab.content)
+    // Debounce TOC rebuild: wait 300ms after the last content change
+    // before parsing the full Markdown and rebuilding the heading tree.
+    const timer = setTimeout(() => {
+      const entryTitle = activeTabName.replace(/\.md$/i, '')
+      const newToc = buildTableOfContentsFromMarkdown(entryTitle, activeTabContent)
 
-    if (newToc.children.length > 0) {
-      setToc(newToc)
-      setTreeData(tocToTree(newToc))
-      setExpandedKeys(flattenTocItems(newToc).map((item) => item.blockId || item.id))
-    } else {
-      setToc(null)
-      setTreeData([])
-      setExpandedKeys([])
-    }
-  }, [activeTab?.content, activeTab?.name])
+      if (newToc.children.length > 0) {
+        setToc(newToc)
+        setTreeData(tocToTree(newToc))
+        setExpandedKeys(flattenTocItems(newToc).map((item) => item.blockId || item.id))
+      } else {
+        setToc(null)
+        setTreeData([])
+        setExpandedKeys([])
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [activeTabId, activeTabName, activeTabContent])
 
   const scrollToPosition = useCallback((item: TocItem) => {
     const blockId = item.blockId || item.id
@@ -180,7 +189,7 @@ function DirectoryView() {
     )
   }
 
-  if (!activeTab) {
+  if (!activeTabId) {
     return (
       <div className="flex flex-col h-full">
         <div

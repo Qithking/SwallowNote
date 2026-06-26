@@ -11,6 +11,7 @@ import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuI
 import { codeBlockOptions } from '@blocknote/code-block'
 import { TextSelection } from 'prosemirror-state'
 import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
+import { registerFlushFn } from '@/lib/editor-flush'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { stripFrontmatter } from '@/lib/utils/frontmatter'
@@ -50,8 +51,9 @@ function BlockNoteInner({
 }) {
   const uploadPath = useUIStore((state) => state.uploadPath)
   const { rootPath } = useWorkspaceStore()
-  const { tabs, activeTabId } = useEditorStore()
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
+  const activeTabName = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.name ?? '')
   const { t } = useTranslation()
   const {
     widePaddingVertical,
@@ -97,7 +99,7 @@ function BlockNoteInner({
   }), [])
 
   const resolveUploadDir = async (): Promise<string> => {
-    const filePath = activeTab?.path || ''
+    const filePath = activeTabPath || ''
     const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
     const root = rootPath || folder
     let userRoot = ''
@@ -114,7 +116,7 @@ function BlockNoteInner({
   }
 
   const uploadFile = async (file: File): Promise<string> => {
-    const filePath = activeTab?.path || ''
+    const filePath = activeTabPath || ''
     const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
     const uploadDir = await resolveUploadDir()
     const ext = file.name.split('.').pop() || 'bin'
@@ -166,7 +168,7 @@ function BlockNoteInner({
         absolutePath = url
       } else {
         // Resolve relative path based on the current file's directory
-        const filePath = activeTab?.path || ''
+        const filePath = activeTabPath || ''
         const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/') || rootPath || ''
 
         if (!fileDir) {
@@ -202,7 +204,7 @@ function BlockNoteInner({
    * Returns the relative URL for the copied file.
    */
   const uploadFileFromPath = async (sourcePath: string): Promise<string> => {
-    const filePath = activeTab?.path || ''
+    const filePath = activeTabPath || ''
     const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
     const uploadDir = await resolveUploadDir()
     const ext = sourcePath.split('.').pop() || 'bin'
@@ -455,7 +457,7 @@ function BlockNoteInner({
 
         // 2. 解析上传目录与文件所在目录
         const targetDir = await resolveUploadDir()
-        const filePath = activeTab?.path || ''
+        const filePath = activeTabPath || ''
         const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/')
 
         // 3. 对 remoteBlocks 按 URL 去重：同一张远程图片只下载一次，避免重复下载
@@ -490,7 +492,7 @@ function BlockNoteInner({
       cancelled = true
       window.removeEventListener('editor:download-remote-images', handler)
     }
-  }, [editor, activeTab?.id, activeTab?.path, rootPath, uploadPath])
+  }, [editor, activeTabId, activeTabPath, rootPath, uploadPath])
 
   // Insert text at cursor position in BlockNote
   // AI results are Markdown, so we need to parse them into BlockNote blocks
@@ -688,7 +690,13 @@ function BlockNoteInner({
     }
   }, [editor])
 
-  const handleChange = useCallback(async () => {
+  // Debounce timer ref — delays expensive serialization to avoid
+  // blocking the UI on every keystroke.
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // The actual serialization + notification logic (expensive).
+  // Also dispatches the TOC event so DirectoryView updates are debounced too.
+  const serializeAndNotify = useCallback(async () => {
     if (!onChange || !editor) return
     try {
       // Custom serialization for mermaid blocks
@@ -751,23 +759,64 @@ function BlockNoteInner({
       const md = compactMarkdown(rawMd)
       lastContentRef.current = md
       onChange(md)
+
+      // Update TOC (debounced with content change)
+      try {
+        const entryTitle = activeTabName.replace(/\.md$/i, '') || t('editor.untitled')
+        const toc = buildTableOfContents(entryTitle, editor.document)
+        window.dispatchEvent(new CustomEvent('block-editor-ready', {
+          detail: { toc, isBlockNote: true }
+        }))
+      } catch (error) {
+        console.error('Error building table of contents:', error)
+      }
     } catch (e) {
       console.error('[MarkdownEditor] Failed to convert blocks to markdown:', e)
       // Don't propagate error to avoid breaking the editor
     }
-  }, [onChange, editor])
+  }, [onChange, editor, activeTabName, t])
 
-  // 编辑器就绪后发送目录数据
-  // Use handleChange as the trigger: every content change should update the TOC.
-  // Relying on editor?.document?.length is unreliable because:
-  //   - It uses optional chaining which produces `undefined` when editor/document is not ready,
-  //     and React skips updates when the dependency value hasn't changed (undefined -> undefined).
-  //   - Document length doesn't change when text within existing blocks is modified.
+  // Debounced handleChange — coalesces rapid edits into a single
+  // serialization pass every 300ms, keeping the UI responsive.
+  const debouncedHandleChange = useCallback(() => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null
+      serializeAndNotify()
+    }, 300)
+  }, [serializeAndNotify])
+
+  // Flush pending content immediately (used before save operations).
+  const flushPendingContent = useCallback(async () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = null
+      await serializeAndNotify()
+    }
+  }, [serializeAndNotify])
+
+  // Register flush function so save handlers can flush before writing.
+  useEffect(() => {
+    return registerFlushFn(flushPendingContent)
+  }, [flushPendingContent])
+
+  // Cleanup debounce timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
+    }
+  }, [])
+
+  // Build initial TOC when editor mounts or tab switches.
+  // Subsequent TOC updates are handled by the debounced serializeAndNotify.
   useEffect(() => {
     if (!editor || !editor.document) return
 
     try {
-      const entryTitle = activeTab?.name.replace(/\.md$/i, '') || t('editor.untitled')
+      const entryTitle = activeTabName.replace(/\.md$/i, '') || t('editor.untitled')
       const toc = buildTableOfContents(entryTitle, editor.document)
 
       window.dispatchEvent(new CustomEvent('block-editor-ready', {
@@ -776,7 +825,7 @@ function BlockNoteInner({
     } catch (error) {
       console.error('Error building table of contents:', error)
     }
-  }, [editor, handleChange, activeTab?.name, t])
+  }, [editor, activeTabName, t])
 
   const themeSetting = useUIStore((state) => state.theme)
   const [systemIsDark, setSystemIsDark] = useState(
@@ -1133,7 +1182,7 @@ function BlockNoteInner({
             <BlockNoteView
               editor={editor}
               theme={blocknoteTheme}
-              onChange={handleChange}
+              onChange={debouncedHandleChange}
               slashMenu={false}
             >
               <SuggestionMenuController

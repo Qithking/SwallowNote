@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { ChevronRight, Folder, FolderOpen, RefreshCw, Plus, Pencil, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -40,15 +40,20 @@ export function CategoryView() {
   const editInputRef = useRef<HTMLInputElement>(null)
   const newInputRef = useRef<HTMLInputElement>(null)
 
-  // 监听文件保存事件，刷新分类树
+  // 监听文件保存事件，刷新分类树（debounce 500ms 合并多次保存）
   // index_saved_file 已同步更新 md_frontmatter 表，可直接刷新
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
     const handleFileSaved = () => {
-      useCategoryStore.getState().loadTree()
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        useCategoryStore.getState().loadTree()
+      }, 500)
     }
     window.addEventListener('file-saved', handleFileSaved)
     return () => {
       window.removeEventListener('file-saved', handleFileSaved)
+      if (timer) clearTimeout(timer)
     }
   }, [])
 
@@ -281,7 +286,7 @@ export function CategoryView() {
 }
 
 /// 分类树节点组件（含内联文件列表）
-function CategoryTreeNode({
+const CategoryTreeNode = memo(function CategoryTreeNode({
   node,
   depth,
   selectedPath,
@@ -493,4 +498,4 @@ function CategoryTreeNode({
       )}
     </div>
   )
-}
+})

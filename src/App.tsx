@@ -9,6 +9,7 @@ import { EditorView } from '@/components/Editor'
 import { NotePropertiesPanel } from '@/components/NoteProperties/NotePropertiesPanel'
 import { SettingsView } from '@/components/Settings/SettingsView'
 const AIView = lazy(() => import('@/components/AI/AIView').then(m => ({ default: m.AIView })))
+import { flushAllEditors } from '@/lib/editor-flush'
 const DirectoryView = lazy(() => import('@/components/Directory/DirectoryView').then(m => ({ default: m.DirectoryView })))
 const HistoryView = lazy(() => import('@/components/History/HistoryView').then(m => ({ default: m.HistoryView })))
 const EditorSettings = lazy(() => import('@/components/EditorSettings/EditorSettings').then(m => ({ default: m.EditorSettings })))
@@ -499,6 +500,7 @@ function App() {
     setShowSaveDialog(false)
     pendingCloseRef.current = false
     if (!shouldClose) { actionTakenRef.current = false; return }
+    await flushAllEditors()
     await useEditorStore.getState().saveAllDirtyTabs()
     const win = getCurrentWindow()
     await saveSessionStateNow()
