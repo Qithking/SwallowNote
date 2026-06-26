@@ -294,13 +294,13 @@ function App() {
           for (const folder of workspaceFolders) {
             if (parentPath === folder || parentPath.startsWith(folder + '/')) {
               const fileTreeStore = useFileTreeStore.getState()
-              fileTreeStore.refreshNode(parentPath)
+              fileTreeStore.refreshNodeDebounced(parentPath)
               break
             }
           }
         } else if (rootPath && (parentPath === rootPath || parentPath.startsWith(rootPath + '/'))) {
           const fileTreeStore = useFileTreeStore.getState()
-          fileTreeStore.refreshNode(parentPath)
+          fileTreeStore.refreshNodeDebounced(parentPath)
         }
       }
     })
