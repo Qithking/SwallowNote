@@ -48,13 +48,16 @@ export function findParentNode(node: FileNode, list: FileNode[]): FileNode | nul
   return null
 }
 
-/** Collect all visible node paths in depth-first order (matching render order) */
-export function collectAllPaths(nodes: FileNode[]): string[] {
+/** Collect all visible node paths in depth-first order (matching render order).
+ *  仅遍历已展开的目录，跳过折叠目录内不可见的子节点，避免 shift-click 多选时
+ *  选中用户看不到的路径。*/
+export function collectAllPaths(nodes: FileNode[], expanded: Set<string>): string[] {
   const paths: string[] = []
   for (const n of nodes) {
     paths.push(n.path)
-    if (n.children) {
-      paths.push(...collectAllPaths(n.children))
+    // 仅当目录已展开时才递归其子节点
+    if (n.children && expanded.has(n.path)) {
+      paths.push(...collectAllPaths(n.children, expanded))
     }
   }
   return paths

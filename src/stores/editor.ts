@@ -263,9 +263,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setActiveTab: (id) => {
     set((state) => {
       const prevActiveId = state.activeTabId
-      // Release content of non-active, non-dirty file tabs to save memory
+      // Release content of non-active, non-dirty file tabs to save memory.
+      // 注意：必须同时检查 !t.frontmatterDirty，否则 frontmatterDirty=true 但 isDirty=false
+      // 的 tab 内容会被释放，后续保存时会用空内容覆盖原文件（saveAllDirtyTabs 防御的兜底场景）。
       const tabs = state.tabs.map((t) => {
-        if (t.id === prevActiveId && t.id !== id && !t.isDirty && t.type !== 'diff' && t.type !== 'conflict' && t.content !== undefined) {
+        if (t.id === prevActiveId && t.id !== id && !t.isDirty && !t.frontmatterDirty && t.type !== 'diff' && t.type !== 'conflict' && t.content !== undefined) {
           return { ...t, content: undefined as unknown as string, frontmatter: undefined, isLoading: false }
         }
         return t
@@ -420,17 +422,74 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => ({
       tabs: state.tabs.map((t) => (t.id === id ? { ...t, hasExternalChange: false } : t)),
     })),
-  updateTabPath: (oldPath, newPath, newName) =>
+  updateTabPath: (oldPath, newPath, newName) => {
     set((state) => ({
       tabs: state.tabs.map((t) =>
         // Update tabs whose path starts with oldPath (handles both file and directory moves)
         t.path === oldPath
           ? { ...t, path: newPath, name: newName }
           : t.path.startsWith(oldPath + '/')
-            ? { ...t, path: newPath + t.path.slice(oldPath.length), name: newName || t.name }
+            // 子文件自身名字未变，仅父目录路径变化，故只更新 path，name 保留 t.name
+            ? { ...t, path: newPath + t.path.slice(oldPath.length) }
             : t
       ),
-    })),
+    }))
+
+    // 同步更新 frontmatter.categories：当目录/文件移动且原 categories 基于目录路径时，
+    // 将与原路径相关的分类路径替换为新路径对应的路径，并标记 frontmatterDirty=true。
+    // 使用 queueMicrotask + 动态 import 获取 rootPath，避免与 workspace store 形成循环依赖。
+    queueMicrotask(async () => {
+      try {
+        const { useWorkspaceStore } = await import('@/stores/workspace')
+        const rootPath = useWorkspaceStore.getState().rootPath
+        if (!rootPath) return
+
+        // categories 存储相对路径，需将绝对路径转为相对于 workspace root 的相对路径
+        const toRel = (absPath: string): string => {
+          if (absPath.startsWith(rootPath + '/')) {
+            return absPath.slice(rootPath.length + 1)
+          }
+          return absPath
+        }
+        const oldRel = toRel(oldPath)
+        const newRel = toRel(newPath)
+
+        set((state) => ({
+          tabs: state.tabs.map((t) => {
+            // 只处理 .md 文件且有 categories 的 tab
+            if (!t.path.toLowerCase().endsWith('.md') || !t.frontmatter?.categories) return t
+            // 只处理 path 已被上方 set 更新为 newPath（或其子路径）的 tab
+            if (t.path !== newPath && !t.path.startsWith(newPath + '/')) return t
+
+            const cats = t.frontmatter.categories as string[]
+            let changed = false
+            // 匹配等于 oldRel 或以 oldRel + '/' 开头的分类路径，替换为对应的新路径
+            const newCats = cats.map((c) => {
+              if (c === oldRel) {
+                changed = true
+                return newRel
+              }
+              if (oldRel && c.startsWith(oldRel + '/')) {
+                changed = true
+                return newRel + c.slice(oldRel.length)
+              }
+              return c
+            })
+            if (!changed) return t
+
+            return {
+              ...t,
+              frontmatter: {
+                ...t.frontmatter,
+                categories: newCats,
+              },
+              frontmatterDirty: true,
+            }
+          }),
+        }))
+      } catch { /* 测试环境可能未初始化 workspace store，忽略 */ }
+    })
+  },
   updateCursorPosition: (id, line, column) =>
     set((state) => ({
       tabs: state.tabs.map((t) =>
@@ -491,6 +550,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const dirtyTabs = get().tabs.filter((t) => t.isDirty || t.frontmatterDirty)
     for (const tab of dirtyTabs) {
       try {
+        // For .md files, merge frontmatter with body before writing
+        const isMarkdown = tab.path.toLowerCase().endsWith('.md')
+        // 防御：frontmatterDirty 可能导致 isDirty=false 的 tab 内容被释放（setActiveTab）
+        // 后仍被纳入保存流程，此时 content===undefined，写入会丢失正文。遇到此情况跳过写入。
+        if (tab.content === undefined && isMarkdown) {
+          console.warn(`[saveAllDirtyTabs] Skipping save for tab with undefined content: ${tab.path}`)
+          continue
+        }
+
         // Mark path as saving to prevent file-watcher from closing the tab
         set((state) => {
           const newSet = new Set(state.savingPaths)
@@ -498,9 +566,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           return { savingPaths: newSet }
         })
 
-        // For .md files, merge frontmatter with body before writing
-        const isMarkdown = tab.path.toLowerCase().endsWith('.md')
         let writeContent = tab.content
+        // 记录保存前的正文基准，await 写入期间若用户再次编辑，content 会变化，
+        // 据此做 CAS 式判断，避免把用户新编辑误标为已保存导致内容丢失
+        const savingContent = tab.content
         let fm: NoteFrontmatter | undefined
         if (isMarkdown) {
           fm = { ...(tab.frontmatter || {}), updated: new Date().toISOString() }
@@ -523,11 +592,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             console.error('Failed to index saved file:', tab.path, e)
           }
         }
-        set((state) => ({
-          tabs: state.tabs.map((t) =>
-            t.id === tab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
-          ),
-        }))
+        // CAS 式保护：await 写入期间用户可能再次编辑使 isDirty=true。
+        // 仅当 content 仍与保存前一致（期间无新编辑）时才清除脏标记，
+        // 否则保留 isDirty=true，待下次保存处理，避免用户新编辑被误标为已保存
+        const currentTab = get().tabs.find((t) => t.id === tab.id)
+        if (currentTab && currentTab.content === savingContent) {
+          set((state) => ({
+            tabs: state.tabs.map((t) =>
+              t.id === tab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
+            ),
+          }))
+        }
         // Notify plugins: a dirty tab has been successfully persisted.
         // We emit after the store commit so the `isDirty=false` state
         // is observable by subscribers reading from the store.

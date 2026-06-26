@@ -24,14 +24,18 @@ impl FileWatcherState {
 static FILE_WATCHER: Mutex<Option<FileWatcherState>> = Mutex::new(None);
 
 pub fn init_watcher(app_handle: AppHandle) {
-    let mut guard = FILE_WATCHER.lock().unwrap();
+    // 锁中毒（持有锁的线程 panic）时恢复内部数据，避免当前线程连锁 panic
+    let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
+        eprintln!("锁中毒: {}", e);
+        e.into_inner()
+    });
     if guard.is_some() {
         return;
     }
 
     let app_handle_clone = app_handle.clone();
 
-    let debouncer = new_debouncer(
+    let debouncer = match new_debouncer(
         Duration::from_millis(500),
         None,
         move |res: DebounceEventResult| {
@@ -78,8 +82,14 @@ pub fn init_watcher(app_handle: AppHandle) {
                 }
             }
         },
-    )
-    .expect("Failed to create debouncer");
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            // 优雅降级：创建失败时记录日志并直接返回，避免 panic 导致启动崩溃
+            eprintln!("Failed to create debouncer: {}", e);
+            return;
+        }
+    };
 
     *guard = Some(FileWatcherState {
         debouncer: Some(debouncer),
@@ -89,7 +99,11 @@ pub fn init_watcher(app_handle: AppHandle) {
 
 #[tauri::command]
 pub fn watch_directory(path: String) -> Result<(), String> {
-    let mut guard = FILE_WATCHER.lock().unwrap();
+    // 锁中毒（持有锁的线程 panic）时恢复内部数据，避免当前线程连锁 panic
+    let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
+        eprintln!("锁中毒: {}", e);
+        e.into_inner()
+    });
     let state = guard.as_mut().ok_or("File watcher not initialized")?;
 
     let path_buf = PathBuf::from(&path);
@@ -116,7 +130,11 @@ pub fn watch_directory(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn unwatch_directory(path: String) -> Result<(), String> {
-    let mut guard = FILE_WATCHER.lock().unwrap();
+    // 锁中毒（持有锁的线程 panic）时恢复内部数据，避免当前线程连锁 panic
+    let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
+        eprintln!("锁中毒: {}", e);
+        e.into_inner()
+    });
     let state = guard.as_mut().ok_or("File watcher not initialized")?;
 
     let path_buf = PathBuf::from(&path);

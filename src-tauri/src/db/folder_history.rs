@@ -2,7 +2,11 @@ use crate::db::Database;
 use rusqlite::Result;
 
 pub fn save_folder(db: &Database, path: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     
     conn.execute(
         "INSERT OR REPLACE INTO folder_history (path, opened_at) VALUES (?1, datetime('now'))",
@@ -20,7 +24,11 @@ pub fn save_folder(db: &Database, path: &str) -> Result<()> {
 }
 
 pub fn get_latest_folder(db: &Database) -> Result<Option<String>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     
     let mut stmt = conn.prepare(
         "SELECT path FROM folder_history ORDER BY opened_at DESC LIMIT 1"
@@ -36,7 +44,11 @@ pub fn get_latest_folder(db: &Database) -> Result<Option<String>> {
 }
 
 pub fn get_folder_history(db: &Database) -> Result<Vec<String>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     
     let mut stmt = conn.prepare(
         "SELECT path FROM folder_history ORDER BY opened_at DESC LIMIT 50"
@@ -53,7 +65,11 @@ pub fn get_folder_history(db: &Database) -> Result<Vec<String>> {
 }
 
 pub fn remove_folder(db: &Database, path: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     
     conn.execute(
         "DELETE FROM folder_history WHERE path = ?1",
@@ -64,7 +80,11 @@ pub fn remove_folder(db: &Database, path: &str) -> Result<()> {
 }
 
 pub fn clear_other_history(db: &Database, current_path: Option<&str>) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     
     match current_path {
         Some(path) => {

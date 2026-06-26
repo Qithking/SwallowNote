@@ -269,9 +269,23 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const { expanded, nodes } = get()
     const filterParams = getFilterParams()
 
+    // 过滤 expanded set，清理已删除 root 的残留路径。
+    // 仅保留属于当前某个 root 的路径（root 自身或其子目录），
+    // 避免已移除 root 下的子目录路径长期残留导致无效刷新。
+    const rootPaths = nodes.map(n => n.path)
+    const validExpanded = new Set<string>()
+    for (const path of expanded) {
+      if (rootPaths.some(root => path === root || path.startsWith(root + '/'))) {
+        validExpanded.add(path)
+      }
+    }
+    if (validExpanded.size !== expanded.size) {
+      set({ expanded: validExpanded })
+    }
+
     // Collect paths of expanded directories that actually exist in the tree
     const pathsToRefresh: string[] = []
-    for (const path of expanded) {
+    for (const path of validExpanded) {
       const node = findNodeByPath(path, nodes)
     if (node && node.isDirectory) {
         pathsToRefresh.push(path)

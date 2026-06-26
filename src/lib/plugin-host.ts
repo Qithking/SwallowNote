@@ -27,12 +27,41 @@ import { getPluginStoragePath, pathExists, readFile, writeFile } from './tauri'
 import { assertPermission } from './plugin-permission-guard'
 import { buildPluginContext as sdkBuildPluginContext } from '@swallow-note/plugin-sdk'
 
+// ─── Circuit breaker (tripped plugins) ───────────────────────────────────────
+/**
+ * 已熔断插件集合。生命周期钩子超时后由 plugin-host-takeover 标记，
+ * 在事件总线 dispatch、storage 写入、IPC 调用入口处检查：为 true 时拒绝
+ * 该插件的后续副作用，避免超时后仍在后台运行的 hookPromise 继续产生
+ * 写入/事件/IPC 等副作用。熔断标志仅在用户手动重新启用插件时清除
+ * （见 plugin store 的 setPluginEnabled 启用路径），不在每轮钩子调用前
+ * 清除，以避免上一轮超时的 hookPromise 绕过熔断检查（P0 NEW-4）。
+ */
+const trippedPlugins = new Set<string>()
+
+/** 标记插件已熔断（生命周期钩子超时）。 */
+export function markPluginTripped(pluginId: string): void {
+  trippedPlugins.add(pluginId)
+}
+
+/** 清除插件熔断标记（新一轮钩子调用前重置）。 */
+export function clearPluginTripped(pluginId: string): void {
+  trippedPlugins.delete(pluginId)
+}
+
+/** 查询插件是否已熔断。 */
+export function isPluginTripped(pluginId: string): boolean {
+  return trippedPlugins.has(pluginId)
+}
+
 // ─── Event bus ─────────────────────────────────────────────────────────────────
 
 type AnyHandler = PluginEventHandler<PluginEvent>
 
 /** 进程内事件总线，错误隔离。 */
-class PluginEventBusImpl implements PluginEventBus {
+// 注意：不写 `implements PluginEventBus`，因为 `off` 在此实现中强制要求
+// `expectedPluginId`（3 参数），与接口的 2 参数签名不兼容。该接口仅作为
+// 面向插件的公共契约（由 createPluginEventBus 返回的对象字面量满足）。
+class PluginEventBusImpl {
   private readonly handlers = new Map<PluginEvent, Set<AnyHandler>>()
   /**
    * Monotonic counter incremented every time a plugin's handlers
@@ -85,30 +114,26 @@ class PluginEventBusImpl implements PluginEventBus {
   }
 
   /**
-   * Unsubscribe a handler. `expectedPluginId` is optional but
-   * recommended: when supplied, the bus only removes the handler if
-   * its `__pluginId` tag matches. This closes a low-probability
-   * cross-plugin removal race where one plugin could pass another
-   * plugin's reference into `off` and silently break the second
-   * plugin's subscriptions (the `__pluginId` tag is duck-typed and
-   * not protected by the type system).
+   * Unsubscribe a handler. `expectedPluginId` 为必填：移除前强制校验
+   * listener 注册时的 `__pluginId` 与传入值一致，不一致时拒绝并抛错。
+   * 这关闭了一个跨插件取消订阅的安全漏洞——`__pluginId` 是鸭子类型、
+   * 不受类型系统保护，若 `off` 不校验，一个插件可把另一插件的 handler
+   * 引用传入 `off` 并静默破坏其订阅，绕过 `on()` 的权限门。
    */
   off<E extends PluginEvent>(
     event: E,
     handler: PluginEventHandler<E>,
-    expectedPluginId?: string,
+    expectedPluginId: string,
   ): void {
     const set = this.handlers.get(event)
     if (!set) return
-    if (expectedPluginId !== undefined) {
-      const owner = this.readPluginId(handler as unknown as { __pluginId?: string })
-      if (owner !== expectedPluginId) {
-        // Refuse to remove a handler that doesn't belong to the
-        // caller. Returning silently (rather than throwing) keeps
-        // the bus call-site symmetric with the no-op behaviour
-        // when a handler is simply not registered.
-        return
-      }
+    // 强制归属校验：handler 注册时的 __pluginId 必须与 expectedPluginId 一致，
+    // 否则拒绝移除并抛错，防止跨插件恶意/误用取消订阅绕过安全检查。
+    const owner = this.readPluginId(handler as unknown as { __pluginId?: string })
+    if (owner !== expectedPluginId) {
+      throw new Error(
+        `[plugin-host] events.off() refused: handler __pluginId "${owner ?? '<none>'}" does not match expected "${expectedPluginId}"`
+      )
     }
     set.delete(handler as AnyHandler)
   }
@@ -170,6 +195,10 @@ class PluginEventBusImpl implements PluginEventBus {
     // dispatch don't mutate the iteration target.
     for (const handler of Array.from(set)) {
       const owner = this.readPluginId(handler as unknown as { __pluginId?: string }) ?? hostOwner
+      // 熔断插件的 handler 不再派发，拒绝超时后仍在后台运行的钩子产生事件副作用。
+      if (owner !== hostOwner && isPluginTripped(owner)) {
+        continue
+      }
       const stats = perPlugin.get(owner) ?? {
         durationMs: 0,
         errors: 0,
@@ -221,7 +250,10 @@ class PluginEventBusImpl implements PluginEventBus {
 }
 
 /** Global event bus singleton. */
-export const pluginEventBus: PluginEventBus & { emit: PluginEventBusImpl['emit'] } & { removeAllListenersForPlugin: PluginEventBusImpl['removeAllListenersForPlugin'] } =
+export const pluginEventBus: Omit<PluginEventBus, 'off'> &
+  { off: PluginEventBusImpl['off'] } &
+  { emit: PluginEventBusImpl['emit'] } &
+  { removeAllListenersForPlugin: PluginEventBusImpl['removeAllListenersForPlugin'] } =
   new PluginEventBusImpl()
 
 /** 创建每插件事件总线代理。 */
@@ -233,7 +265,9 @@ export function createPluginEventBus(pluginId: string): PluginEventBus {
       return pluginEventBus.on(event, handler)
     },
     off: (event, handler) => {
-      pluginEventBus.off(event, handler)
+      // 强制传入 pluginId 作为 expectedPluginId，确保 off 经过归属校验，
+      // 防止绕过 on() 的权限门而静默移除他人订阅。
+      pluginEventBus.off(event, handler, pluginId)
     },
     removeAllListenersForPlugin: (id) => {
       pluginEventBus.removeAllListenersForPlugin(id)
@@ -258,6 +292,11 @@ class PluginStorageImpl implements PluginStorage {
   private loadPromise: Promise<Record<string, unknown>> | null = null
   private writePromise: Promise<void> | null = null
   private dirty = false
+  /**
+   * 损坏标志：load() 解析磁盘文件失败时置为 true。flush() 检测到该标志
+   * 时拒绝写入，避免用空缓存覆盖原始（可能仍可抢救的）文件，导致数据彻底丢失。
+   */
+  private corrupted = false
   /**
    * Monotonic counter incremented on every mutation. Captured at the
    * start of `doFlush` so the write-completion check can tell
@@ -294,6 +333,18 @@ class PluginStorageImpl implements PluginStorage {
     assertPermission(this.pluginId, 'storage', op)
   }
 
+  /**
+   * 熔断检查：已熔断插件拒绝写入，防止生命周期钩子超时后仍在后台运行的
+   * hookPromise 继续持久化副作用。读操作不受限制，允许插件读取自身状态。
+   */
+  private requireNotTripped(): void {
+    if (isPluginTripped(this.pluginId)) {
+      throw new Error(
+        `[plugin-host] storage write refused: plugin "${this.pluginId}" is tripped (lifecycle hook timed out)`
+      )
+    }
+  }
+
   private async load(): Promise<Record<string, unknown>> {
     if (this.cache) return this.cache
     if (this.loadPromise) return this.loadPromise
@@ -307,9 +358,11 @@ class PluginStorageImpl implements PluginStorage {
           this.cache = {}
         }
       } catch (err) {
-        // Corrupt file or no Tauri: log and start fresh. We don't want
-        // a typo in storage.json to brick the whole plugin.
-        console.warn(`[plugin-host] storage for ${this.pluginId} unreadable, resetting:`, err)
+        // 损坏文件或无 Tauri：标记 corrupted 并以空缓存继续运行（读操作返回空）。
+        // corrupted 标志会阻止后续 flush() 用空缓存覆盖原文件，给用户/诊断工具
+        // 留出抢救原始数据的机会。
+        this.corrupted = true
+        console.warn(`[plugin-host] storage for ${this.pluginId} unreadable, marked corrupted:`, err)
         this.cache = {}
       }
       return this.cache!
@@ -318,6 +371,13 @@ class PluginStorageImpl implements PluginStorage {
   }
 
   private async flush(): Promise<void> {
+    // 损坏保护：corrupted 为 true 时拒绝任何写入，避免空缓存覆盖原始文件导致数据彻底丢失。
+    if (this.corrupted) {
+      console.error(
+        `[plugin-host] storage for ${this.pluginId} is corrupted; refusing to flush to avoid overwriting the original file.`
+      )
+      return
+    }
     // 先排空飞行中写入，再检查 dirty。
     if (this.writePromise) {
       try {
@@ -378,6 +438,7 @@ class PluginStorageImpl implements PluginStorage {
 
   async set<T = unknown>(key: string, value: T): Promise<void> {
     this.requireStoragePermission('write storage')
+    this.requireNotTripped()
     const start = performance.now()
     let success = true
     let errorMsg: string | undefined
@@ -410,6 +471,7 @@ class PluginStorageImpl implements PluginStorage {
 
   async delete(key: string): Promise<void> {
     this.requireStoragePermission('write storage')
+    this.requireNotTripped()
     await this._doDelete(key)
   }
 
@@ -451,6 +513,7 @@ class PluginStorageImpl implements PluginStorage {
 
   async clear(): Promise<void> {
     this.requireStoragePermission('write storage')
+    this.requireNotTripped()
     await this._doClear()
   }
 

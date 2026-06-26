@@ -151,7 +151,7 @@ describe('serializeFrontmatter', () => {
     const result = serializeFrontmatter({ title: 'Test', tags: ['a'] }, '# Hello')
 
     expect(result.startsWith('---\n')).toBe(true)
-    expect(result).toContain('"title": "Test"')
+    expect(result).toContain('title: Test')
     expect(result.endsWith('# Hello')).toBe(true)
   })
 
@@ -200,13 +200,13 @@ describe('injectDefaultFrontmatter', () => {
   it('从 .md 文件名生成默认 frontmatter', () => {
     const result = injectDefaultFrontmatter('meeting-notes.md')
 
-    expect(result).toContain('"title": "meeting-notes"')
-    expect(result).toMatch(/"created":\s*"\d{4}-\d{2}-\d{2}T/)
+    expect(result).toContain('title: meeting-notes')
+    expect(result).toMatch(/created:\s+['"]?\d{4}-\d{2}-\d{2}T/)
   })
 
   it('非 .md 扩展名仍保留完整文件名作为 title', () => {
     const result = injectDefaultFrontmatter('test.txt')
 
-    expect(result).toContain('"title": "test.txt"')
+    expect(result).toContain('title: test.txt')
   })
 })

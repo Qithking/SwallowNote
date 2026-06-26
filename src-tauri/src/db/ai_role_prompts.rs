@@ -14,7 +14,11 @@ pub struct AiRolePrompt {
 }
 
 pub fn load_role_prompts(db: &Database) -> Result<Vec<AiRolePrompt>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare(
         "SELECT id, role_key, name, prompt, is_builtin, created_at, updated_at FROM ai_role_prompts ORDER BY id ASC",
     )?;
@@ -38,7 +42,11 @@ pub fn load_role_prompts(db: &Database) -> Result<Vec<AiRolePrompt>> {
 }
 
 pub fn get_role_prompt(db: &Database, role_key: &str) -> Result<Option<AiRolePrompt>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare(
         "SELECT id, role_key, name, prompt, is_builtin, created_at, updated_at FROM ai_role_prompts WHERE role_key = ?1",
     )?;
@@ -61,7 +69,11 @@ pub fn get_role_prompt(db: &Database, role_key: &str) -> Result<Option<AiRolePro
 }
 
 pub fn update_role_prompt(db: &Database, role_key: &str, prompt: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute(
         "UPDATE ai_role_prompts SET prompt = ?1, updated_at = datetime('now','localtime') WHERE role_key = ?2",
         [prompt, role_key],
@@ -70,7 +82,11 @@ pub fn update_role_prompt(db: &Database, role_key: &str, prompt: &str) -> Result
 }
 
 pub fn add_role_prompt(db: &Database, role_key: &str, name: &str, prompt: &str) -> Result<AiRolePrompt> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute(
         "INSERT INTO ai_role_prompts (role_key, name, prompt, is_builtin) VALUES (?1, ?2, ?3, 0)",
         [role_key, name, prompt],
@@ -88,7 +104,11 @@ pub fn add_role_prompt(db: &Database, role_key: &str, name: &str, prompt: &str) 
 }
 
 pub fn delete_role_prompt(db: &Database, role_key: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     // Only allow deleting non-builtin prompts
     conn.execute(
         "DELETE FROM ai_role_prompts WHERE role_key = ?1 AND is_builtin = 0",
@@ -98,7 +118,11 @@ pub fn delete_role_prompt(db: &Database, role_key: &str) -> Result<()> {
 }
 
 pub fn update_role_prompt_name(db: &Database, role_key: &str, name: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute(
         "UPDATE ai_role_prompts SET name = ?1, updated_at = datetime('now','localtime') WHERE role_key = ?2",
         [name, role_key],

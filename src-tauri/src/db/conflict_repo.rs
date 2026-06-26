@@ -37,7 +37,11 @@ pub fn create_table(conn: &rusqlite::Connection) -> Result<()> {
 /// Upsert a conflict repo record.
 /// If the repo already exists, update its name and file count.
 pub fn upsert_conflict_repo(db: &Database, repo_path: &str, repo_name: &str, file_count: i64) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute(
         "INSERT INTO conflict_repos (repo_path, repo_name, conflict_file_count, updated_at)
          VALUES (?1, ?2, ?3, datetime('now','localtime'))
@@ -52,7 +56,11 @@ pub fn upsert_conflict_repo(db: &Database, repo_path: &str, repo_name: &str, fil
 
 /// Remove a conflict repo record (when all conflicts are resolved)
 pub fn remove_conflict_repo(db: &Database, repo_path: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute(
         "DELETE FROM conflict_repos WHERE repo_path = ?1",
         [repo_path],
@@ -62,7 +70,11 @@ pub fn remove_conflict_repo(db: &Database, repo_path: &str) -> Result<()> {
 
 /// Get all conflict repo records
 pub fn get_all_conflict_repos(db: &Database) -> Result<Vec<ConflictRepoRecord>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare(
         "SELECT repo_path, repo_name, conflict_file_count, detected_at, updated_at
          FROM conflict_repos ORDER BY detected_at ASC"
@@ -88,7 +100,11 @@ pub fn get_all_conflict_repos(db: &Database) -> Result<Vec<ConflictRepoRecord>> 
 /// Clear all conflict repo records (e.g., on session cleanup)
 #[allow(dead_code)]
 pub fn clear_all_conflict_repos(db: &Database) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute("DELETE FROM conflict_repos", [])?;
     Ok(())
 }
@@ -100,7 +116,11 @@ pub fn sync_conflict_repos(
     db: &Database,
     current_conflicts: &[(String, String, i64)], // (repo_path, repo_name, file_count)
 ) -> Result<Vec<ConflictRepoRecord>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
 
     // Get existing records
     let existing_paths: Vec<String> = {

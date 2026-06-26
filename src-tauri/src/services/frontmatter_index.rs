@@ -32,7 +32,8 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
     let (tx, rx) = std::sync::mpsc::sync_channel::<IndexTask>(256);
     INDEX_SENDER.set(tx).ok();
 
-    std::thread::Builder::new()
+    // 优雅降级：线程创建失败时记录日志并返回，避免 panic 导致启动崩溃
+    if let Err(e) = std::thread::Builder::new()
         .name("frontmatter-index".into())
         .spawn(move || {
             // 打开独立的数据库连接（WAL 模式下可并发读写）
@@ -74,28 +75,41 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
                 }
             }
         })
-        .expect("Failed to spawn frontmatter-index thread");
+    {
+        eprintln!("[frontmatter-index] Failed to spawn index thread: {}", e);
+    }
 }
 
-/// 提交扫描任务（通道满时静默丢弃，避免阻塞调用方）
-pub fn submit_scan(path: String) {
+/// 提交索引任务的内部封装：通道满或断开时记录告警，不再静默丢弃。
+fn submit_task(task: IndexTask, label: &str) {
     if let Some(tx) = INDEX_SENDER.get() {
-        let _ = tx.try_send(IndexTask::ScanDirectory { path });
+        if let Err(e) = tx.try_send(task) {
+            // Rust 1.94 起TrySendError 不再提供 is_full()，直接按变体匹配
+            match e {
+                std::sync::mpsc::TrySendError::Full(_) => {
+                    eprintln!("[frontmatter-index] channel full, dropped {} task", label);
+                }
+                std::sync::mpsc::TrySendError::Disconnected(_) => {
+                    eprintln!("[frontmatter-index] channel disconnected, dropped {} task", label);
+                }
+            }
+        }
     }
+}
+
+/// 提交扫描任务（通道满时告警，不阻塞调用方）
+pub fn submit_scan(path: String) {
+    submit_task(IndexTask::ScanDirectory { path }, "scan");
 }
 
 /// 提交文件变更任务
 pub fn submit_file_changed(path: String) {
-    if let Some(tx) = INDEX_SENDER.get() {
-        let _ = tx.try_send(IndexTask::FileChanged { path });
-    }
+    submit_task(IndexTask::FileChanged { path }, "file_changed");
 }
 
 /// 提交文件删除任务
 pub fn submit_file_removed(path: String) {
-    if let Some(tx) = INDEX_SENDER.get() {
-        let _ = tx.try_send(IndexTask::FileRemoved { path });
-    }
+    submit_task(IndexTask::FileRemoved { path }, "file_removed");
 }
 
 /// 发射索引进度事件

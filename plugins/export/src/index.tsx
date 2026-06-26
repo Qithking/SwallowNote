@@ -872,9 +872,14 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
   // the user always sees a meaningful filename in the save
   // dialog. Prefers the host-supplied `activeNoteName` so the
   // path-parsing rules stay in one place.
-  const noteName = activeNoteName || activeNotePath
-    ? activeNotePath.split('/').pop() || activeNotePath
-    : 'untitled'
+  // 注意：此处必须使用 `||` 链而非三元运算符。原写法
+  // `activeNoteName || activeNotePath ? ... : 'untitled'` 因三元
+  // 优先级低于 `||`，等价于 `(activeNoteName || activeNotePath) ? ...`
+  // 导致 true 分支完全忽略 `activeNoteName`，与注释意图相悖。
+  const noteName = activeNoteName
+    || activeNotePath.split('/').pop()
+    || activeNotePath
+    || 'untitled'
 
   // The export is only enabled when the active note has content.
   // We compare against the *raw* `activeNoteContent` because the
@@ -947,11 +952,19 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
         }
         const filePath = (selected as string).replace(/\\/g, '/')
         // DOCX / PDF come back as base64 strings (or Uint8Array for
-        // PDF) from the backend. HTML is already a string and is
-        // uploaded as-is. `uint8ToBase64` is now async (FileReader)
+        // PDF) from the backend. HTML comes back as a raw HTML
+        // string. `uint8ToBase64` is now async (FileReader)
         // — the previous `String.fromCharCode.apply` path
         // stack-overflowed on multi-megabyte PDF buffers.
-        const b64 = typeof result === 'string' ? result : await uint8ToBase64(result)
+        // 注意：`write_binary_file` 后端强制 base64 解码。DOCX 返回的
+        // 字符串已是 base64，可直接写入；但 HTML 返回的是原始 HTML
+        // 文本，必须先编码为 Uint8Array 再转 base64，否则后端解码失败。
+        // PDF 返回 Uint8Array，走 `uint8ToBase64` 分支。
+        const b64 = typeof result === 'string'
+          ? (format === 'html'
+              ? await uint8ToBase64(new TextEncoder().encode(result))
+              : result)
+          : await uint8ToBase64(result)
         await invoke('write_binary_file', { path: filePath, data: b64 })
         toast.success(strings.exportSuccess, { id: toastId })
       } catch (err) {

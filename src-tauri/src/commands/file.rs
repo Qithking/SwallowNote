@@ -690,24 +690,27 @@ if ($files) { $files -join '|' } else { '' }
                 }
                 // Remove file:// prefix and decode URI
                 let path_str = if trimmed.starts_with("file://") {
-                    // Simple percent-decode for file URIs
+                    // percent-decode：收集原始字节后再 String::from_utf8，
+                    // 避免逐字节 `byte as char` 破坏多字节 UTF-8（如中文路径）。
                     let uri = &trimmed[7..];
-                    let mut decoded = String::with_capacity(uri.len());
-                    let mut chars = uri.chars();
-                    while let Some(c) = chars.next() {
-                        if c == '%' {
-                            let hex: String = chars.by_ref().take(2).collect();
-                            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                                decoded.push(byte as char);
-                            } else {
-                                decoded.push('%');
-                                decoded.push_str(&hex);
+                    let src = uri.as_bytes();
+                    let mut bytes: Vec<u8> = Vec::with_capacity(src.len());
+                    let mut i = 0;
+                    while i < src.len() {
+                        if src[i] == b'%' && i + 2 < src.len() {
+                            let hex = &src[i + 1..i + 3];
+                            if let Ok(s) = std::str::from_utf8(hex) {
+                                if let Ok(b) = u8::from_str_radix(s, 16) {
+                                    bytes.push(b);
+                                    i += 3;
+                                    continue;
+                                }
                             }
-                        } else {
-                            decoded.push(c);
                         }
+                        bytes.push(src[i]);
+                        i += 1;
                     }
-                    decoded
+                    String::from_utf8(bytes).unwrap_or_else(|_| trimmed.to_string())
                 } else {
                     trimmed.to_string()
                 };
@@ -901,7 +904,11 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
                 }
 
                 if !line_matches.is_empty() {
-                    let mut matches_map = file_matches_clone.lock().unwrap();
+                    // 锁中毒时恢复内部数据，避免 spawn_blocking 任务连锁 panic
+                    let mut matches_map = file_matches_clone.lock().unwrap_or_else(|e| {
+                        eprintln!("锁中毒: {}", e);
+                        e.into_inner()
+                    });
                     let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();
                     for m in line_matches {
                         line_map.entry(m.line_number).or_insert(m);
@@ -915,7 +922,7 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
         }
     }).await.map_err(|e| format!("Search task failed: {}", e))?;
 
-    let matches_map = file_matches.lock().unwrap();
+    let matches_map = file_matches.lock().map_err(|e| format!("DB lock error: {}", e))?;
     let results: Vec<SearchResult> = matches_map.iter()
         .map(|(path, line_matches)| {
             let file_name = PathBuf::from(path)

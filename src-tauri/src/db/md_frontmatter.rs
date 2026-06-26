@@ -106,7 +106,11 @@ pub fn upsert_frontmatter(
     raw_yaml: &str,
     modified_at: &str,
 ) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
 
     let title = yaml_value.get("title").and_then(|v| v.as_str()).map(|s| s.to_string());
     let created = yaml_value.get("created").and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -201,7 +205,11 @@ pub fn upsert_frontmatter(
 
 /// 删除单条记录（仅文件删除时调用）
 pub fn delete_frontmatter(db: &Database, file_path: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute(
         "DELETE FROM md_frontmatter WHERE file_path = ?1",
         [file_path],
@@ -211,7 +219,11 @@ pub fn delete_frontmatter(db: &Database, file_path: &str) -> Result<()> {
 
 /// 创建空分类（无文件关联的分类），持久化到 categories 表
 pub fn create_category(db: &Database, path: &str) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute(
         "INSERT OR IGNORE INTO categories (path) VALUES (?1)",
         params![path],
@@ -247,7 +259,11 @@ pub fn sync_categories_from_frontmatter(conn: &Connection, categories: &str) -> 
 /// 将其分类路径及父路径补全到 categories 表中。
 /// 用于修复历史数据不完整的情况。
 pub fn sync_all_categories_from_frontmatter(db: &Database) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare(
         "SELECT categories FROM md_frontmatter WHERE categories IS NOT NULL AND categories != '[]'",
     )?;
@@ -260,7 +276,11 @@ pub fn sync_all_categories_from_frontmatter(db: &Database) -> Result<()> {
 
 /// 查询单条记录
 pub fn get_frontmatter(db: &Database, file_path: &str) -> Result<Option<FrontmatterRecord>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare(
         "SELECT id, file_path, title, created, updated, tags, categories, author, status, pinned, extra_yaml, raw_yaml, modified_at, indexed_at
          FROM md_frontmatter WHERE file_path = ?1",
@@ -291,7 +311,11 @@ pub fn get_frontmatter(db: &Database, file_path: &str) -> Result<Option<Frontmat
 
 /// 按标签查询
 pub fn query_by_tag(db: &Database, tag: &str) -> Result<Vec<FrontmatterRecord>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare(
         "SELECT id, file_path, title, created, updated, tags, categories, author, status, pinned, extra_yaml, raw_yaml, modified_at, indexed_at
          FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?1)",
@@ -325,7 +349,11 @@ pub fn query_by_tag(db: &Database, tag: &str) -> Result<Vec<FrontmatterRecord>> 
 
 /// 按路径前缀查询（用于获取当前工作区下的所有记录）
 pub fn query_by_prefix(db: &Database, path_prefix: &str) -> Result<Vec<FrontmatterRecord>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare(
         "SELECT id, file_path, title, created, updated, tags, categories, author, status, pinned, extra_yaml, raw_yaml, modified_at, indexed_at
          FROM md_frontmatter WHERE file_path LIKE ?1",
@@ -360,7 +388,11 @@ pub fn query_by_prefix(db: &Database, path_prefix: &str) -> Result<Vec<Frontmatt
 
 /// 获取单条记录的修改时间（用于增量判断）
 pub fn get_modified_at(db: &Database, file_path: &str) -> Result<Option<String>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare(
         "SELECT modified_at FROM md_frontmatter WHERE file_path = ?1",
     )?;
@@ -374,7 +406,11 @@ pub fn get_modified_at(db: &Database, file_path: &str) -> Result<Option<String>>
 
 /// 一次性获取所有记录的 file_path -> modified_at 映射（用于批量增量判断，避免逐条查询）
 pub fn get_all_modified_at(db: &Database) -> Result<HashMap<String, String>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     let mut stmt = conn.prepare("SELECT file_path, modified_at FROM md_frontmatter")?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -476,7 +512,11 @@ pub fn search_frontmatter(
 
     // Phase 2: 锁内执行查询并收集原始数据
     let raw_rows = {
-        let conn = db.conn.lock().unwrap();
+        // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+        let conn = db.conn.lock().unwrap_or_else(|e| {
+            eprintln!("[DB] mutex poisoned: {}", e);
+            e.into_inner()
+        });
         let mut stmt = conn.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::ToSql> = param_values.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
         let rows = stmt.query_map(params.as_slice(), |row| {
@@ -527,7 +567,11 @@ pub fn search_frontmatter(
 pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
     // Phase 1: 在锁内查询原始数据，锁外构建树
     let (all_paths_set, file_associations) = {
-        let conn = db.conn.lock().unwrap();
+        // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+        let conn = db.conn.lock().unwrap_or_else(|e| {
+            eprintln!("[DB] mutex poisoned: {}", e);
+            e.into_inner()
+        });
 
         // 从 categories 表获取所有分类路径
         let mut cat_stmt = conn.prepare("SELECT path FROM categories ORDER BY path")?;
@@ -640,9 +684,17 @@ pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
 
 /// 重命名分类：将所有记录中包含 old_path 的 categories 更新为 new_path
 pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<usize> {
-    // Phase 1: 锁内查询匹配行
-    let rows_data = {
-        let conn = db.conn.lock().unwrap();
+    // 修复 OLD-4：读取-修改-写入必须在同一次锁持有内完成。
+    // 原 Phase 1 读取与 Phase 3 写入之间释放过锁，期间其他并发 upsert 的修改
+    // 会被 Phase 3 基于旧数据的 UPDATE 覆盖，造成丢更新。现合并为单次锁持有。
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
+
+    // Phase 1: 读取匹配行（锁内）
+    let rows_data: Vec<(i64, String)> = {
         let mut stmt = conn.prepare(
             "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
         )?;
@@ -651,9 +703,9 @@ pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
         rows.collect::<Result<Vec<_>, _>>()?
-    }; // ← 锁释放
+    }; // stmt 在此释放，conn 仍持有锁
 
-    // Phase 2: 锁外解析 JSON + 修改分类路径
+    // Phase 2: 解析 JSON + 修改分类路径（锁内，仅 CPU 操作耗时短）
     let mut updates: Vec<(String, i64)> = Vec::new();
     for (id, categories_str) in rows_data {
         let mut categories: Vec<String> = match serde_json::from_str(&categories_str) {
@@ -678,9 +730,7 @@ pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<
         }
     }
 
-    // Phase 3: 锁内批量 UPDATE
-    if updates.is_empty() { return Ok(0); }
-    let conn = db.conn.lock().unwrap();
+    // Phase 3: 批量 UPDATE（与 Phase 1 同一锁持有，确保读-写原子）
     for (new_categories_str, id) in &updates {
         conn.execute(
             "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
@@ -692,10 +742,22 @@ pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<
 
 /// 删除分类：从所有记录的 categories 中移除该分类路径，并从 categories 表中删除
 pub fn delete_category(db: &Database, path: &str) -> Result<usize> {
-    // Phase 1: 锁内查询匹配行
-    let rows_data = {
-        let conn = db.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
+    // 修复 OLD-4：读取-修改-写入必须在同一次锁持有内完成。
+    // 原 Phase 1 读取与 Phase 3 写入之间释放过锁，期间其他并发 upsert 的修改
+    // 会被 Phase 3 基于旧数据的 UPDATE 覆盖，造成丢更新。现合并为单次锁持有。
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
+    // 修复 OLD-5：多条 UPDATE + DELETE 用 unchecked_transaction 包裹，
+    // 保证 md_frontmatter 与 categories 表的修改原子提交，避免部分成功导致两表不一致。
+    // 选用 unchecked_transaction 而非 transaction：前者在已存在事务中不会报错，更适合此处。
+    let tx = conn.unchecked_transaction()?;
+
+    // Phase 1: 读取匹配行（锁内）
+    let rows_data: Vec<(i64, String)> = {
+        let mut stmt = tx.prepare(
             "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
         )?;
         let prefix_pattern = format!("{}/%", path);
@@ -703,9 +765,9 @@ pub fn delete_category(db: &Database, path: &str) -> Result<usize> {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
         rows.collect::<Result<Vec<_>, _>>()?
-    }; // ← 锁释放
+    }; // stmt 在此释放，tx 仍持有锁
 
-    // Phase 2: 锁外解析 JSON + 移除分类
+    // Phase 2: 解析 JSON + 移除分类（锁内，仅 CPU 操作耗时短）
     let mut updates: Vec<(Option<String>, i64)> = Vec::new();
     for (id, categories_str) in rows_data {
         let mut categories: Vec<String> = match serde_json::from_str(&categories_str) {
@@ -726,24 +788,24 @@ pub fn delete_category(db: &Database, path: &str) -> Result<usize> {
         }
     }
 
-    // Phase 3: 锁内批量 UPDATE + DELETE
-    let conn = db.conn.lock().unwrap();
+    // Phase 3: 批量 UPDATE + DELETE（事务内，原子提交）
     for (new_categories_opt, id) in &updates {
         if let Some(ref new_categories_str) = new_categories_opt {
-            conn.execute(
+            tx.execute(
                 "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
                 params![new_categories_str, id],
             )?;
         } else {
-            conn.execute(
+            tx.execute(
                 "UPDATE md_frontmatter SET categories = NULL WHERE id = ?1",
                 params![id],
             )?;
         }
     }
     // 从 categories 表中删除该分类及其子分类
-    conn.execute("DELETE FROM categories WHERE path = ?1 OR path LIKE ?2", params![path, format!("{}/%", path)])?;
+    tx.execute("DELETE FROM categories WHERE path = ?1 OR path LIKE ?2", params![path, format!("{}/%", path)])?;
 
+    tx.commit()?;
     Ok(updates.len())
 }
 
@@ -811,7 +873,11 @@ tags:
         assert!(result.is_ok());
 
         // 验证 categories 被正确存储
-        let conn = db.conn.lock().unwrap();
+        // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+        let conn = db.conn.lock().unwrap_or_else(|e| {
+            eprintln!("[DB] mutex poisoned: {}", e);
+            e.into_inner()
+        });
         let categories: String = conn.query_row(
             "SELECT categories FROM md_frontmatter WHERE file_path = ?1",
             ["/test/file.md"],
@@ -861,7 +927,11 @@ categories:
         assert!(result.is_ok());
 
         // 验证 categories 被正确存储
-        let conn = db.conn.lock().unwrap();
+        // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+        let conn = db.conn.lock().unwrap_or_else(|e| {
+            eprintln!("[DB] mutex poisoned: {}", e);
+            e.into_inner()
+        });
         let categories: String = conn.query_row(
             "SELECT categories FROM md_frontmatter WHERE file_path = ?1",
             ["/test/file.md"],
@@ -877,7 +947,11 @@ categories:
     fn test_get_category_tree_normal_hierarchy() {
         // 验证正常层级分类树构建正确
         let db = create_test_db();
-        let conn = db.conn.lock().unwrap();
+        // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+        let conn = db.conn.lock().unwrap_or_else(|e| {
+            eprintln!("[DB] mutex poisoned: {}", e);
+            e.into_inner()
+        });
         conn.execute(
             "INSERT INTO categories (path) VALUES (?1), (?2), (?3), (?4)",
             params!["技术", "技术/前端", "技术/前端/React", "技术/后端"],
@@ -911,7 +985,11 @@ categories:
     fn test_get_category_tree_orphan_nodes_not_lost() {
         // 验证父路径缺失时，子分类作为孤立根节点保留，不会丢失
         let db = create_test_db();
-        let conn = db.conn.lock().unwrap();
+        // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+        let conn = db.conn.lock().unwrap_or_else(|e| {
+            eprintln!("[DB] mutex poisoned: {}", e);
+            e.into_inner()
+        });
         conn.execute(
             "INSERT INTO categories (path) VALUES (?1), (?2), (?3)",
             params!["技术/前端/React", "笔记", "其他/A/B"],

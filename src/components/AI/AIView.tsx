@@ -77,9 +77,13 @@ function AIView() {
   // (so the chat bubble shows "[润色] src/App.tsx (L10-L25)" instead of the entire file content)
   const contextMenuDisplayTexts = useRef<Map<string, string>>(new Map())
 
-  // Pending display text mappings: maps messages.length at send time to display text
-  // Once the new message appears in messages array, we map it by message.id instead
-  const pendingDisplayTexts = useRef<Map<number, string>>(new Map())
+  // 待映射的展示文本：以发送时生成的稳定 correlation id 为 key（Task 21）
+  // 使用稳定 id 而非 messages.length，避免 history 头部插入消息后索引错位
+  const pendingDisplayTexts = useRef<Map<string, string>>(new Map())
+  // 发送顺序队列：按 FIFO 将 pending 展示文本匹配到新出现的 user 消息
+  const pendingDisplayTextQueue = useRef<Array<string>>([])
+  // 已匹配过展示文本的 user 消息 id 集合，避免重复匹配
+  const displayTextMappedIds = useRef<Set<string>>(new Set())
 
   // Use Zustand selectors to avoid unnecessary re-renders from unrelated state changes
   const aiModels = useUIStore((s) => s.aiModels)
@@ -102,6 +106,13 @@ function AIView() {
   const editorActiveTabId = useEditorStore((s) => s.activeTabId)
   const { rootPath } = useWorkspaceStore()
 
+  // 使用 ref 让 mount-only useEffect 能读取到最新的 aiPort / activeAiModelId，
+  // 避免空依赖数组导致的 stale closure（Task 19）
+  const aiPortRef = useRef(aiPort)
+  aiPortRef.current = aiPort
+  const activeAiModelIdRef = useRef(activeAiModelId)
+  activeAiModelIdRef.current = activeAiModelId
+
   const isConfigured = aiModels.length > 0
 
   const chat = useChat({
@@ -113,15 +124,23 @@ function AIView() {
   const { messages, status, stop, error, sendMessage, setMessages } = chat
   const isLoading = status === 'submitted' || status === 'streaming'
 
-  // When messages change, resolve any pending display text mappings to message IDs
+  // 当 messages 变化时，按 FIFO 顺序把待映射展示文本匹配到新出现的 user 消息（Task 21）
   useEffect(() => {
-    if (pendingDisplayTexts.current.size === 0) return
-    for (const [countAtSend, displayText] of pendingDisplayTexts.current) {
-      const msg = messages[countAtSend]
-      if (msg && msg.role === 'user') {
+    if (pendingDisplayTextQueue.current.length === 0) return
+    // 找出尚未匹配展示文本的 user 消息
+    const unmapped = messages.filter(
+      (msg) => msg.role === 'user' && !displayTextMappedIds.current.has(msg.id)
+    )
+    // 按 FIFO 顺序消费待映射项，与 unmapped user 消息一一对应
+    while (pendingDisplayTextQueue.current.length > 0 && unmapped.length > 0) {
+      const correlationId = pendingDisplayTextQueue.current.shift()!
+      const msg = unmapped.shift()!
+      const displayText = pendingDisplayTexts.current.get(correlationId)
+      if (displayText !== undefined) {
         contextMenuDisplayTexts.current.set(msg.id, displayText)
-        pendingDisplayTexts.current.delete(countAtSend)
+        pendingDisplayTexts.current.delete(correlationId)
       }
+      displayTextMappedIds.current.add(msg.id)
     }
   }, [messages])
 
@@ -150,26 +169,59 @@ function AIView() {
     if (messages.length <= MAX_IN_MEMORY_MESSAGES) return
     // Don't trim during active streaming to avoid disrupting the response
     if (isLoading) return
-    // Keep the most recent messages, discard older ones
-    const trimmed = messages.slice(messages.length - MAX_IN_MEMORY_MESSAGES)
-    setMessages(trimmed)
+    // 裁剪前先把尚未入库的 user 消息保存到 DB，避免丢弃后无法找回（Task 20）
+    // assistant 消息在流式结束时已保存；db- 前缀消息已存在于 DB，跳过避免重复入库
+    const discardCount = messages.length - MAX_IN_MEMORY_MESSAGES
+    const toDiscard = messages.slice(0, discardCount)
+    // 裁剪前先把待裁剪的 user 消息 flush 到 DB，失败则跳过裁剪保留在内存，下次 effect 重新尝试（P0 NEW-3）
+    // 使用内部 async 函数，避免 useEffect 回调本身返回 Promise（React 不允许）
+    let cancelled = false
+    const flushAndTrim = async () => {
+      for (const msg of toDiscard) {
+        if (msg.role === 'user' && !savedMessageIds.current.has(msg.id)) {
+          const text = getMessageText(msg)
+          if (text) {
+            try {
+              await saveAiMessage('user', text, activeAiModelIdRef.current || '')
+              // 标记为已入库，避免下次 effect 重试时重复写入
+              savedMessageIds.current.add(msg.id)
+            } catch (e) {
+              console.error('[AIView] Failed to flush user message before trim, skipping trim:', e)
+              // flush 失败则不裁剪，保留在内存中，等待下次 effect 重新尝试
+              return
+            }
+          }
+        }
+      }
+      // flush 全部成功后才裁剪；若 effect 已被清理（依赖变化）则跳过 setMessages 避免竞态
+      if (cancelled) return
+      const trimmed = messages.slice(messages.length - MAX_IN_MEMORY_MESSAGES)
+      setMessages(trimmed)
+    }
+    flushAndTrim()
+    return () => {
+      cancelled = true
+    }
   }, [messages.length, isLoading])
 
   useEffect(() => {
+    // 通过 ref 读取最新值，避免空依赖数组导致的 stale closure（Task 19）
+    const currentActiveAiModelId = activeAiModelIdRef.current
+    const currentAiPort = aiPortRef.current
     // If no active model or active model not in list, set default model
-    if ((!activeAiModelId || !aiModels.find((m) => m.id === activeAiModelId)) && aiModels.length > 0) {
+    if ((!currentActiveAiModelId || !aiModels.find((m) => m.id === currentActiveAiModelId)) && aiModels.length > 0) {
       // Priority: 1. defaultAiModelId if valid, 2. first available model
       const defaultModel = defaultAiModelId && aiModels.find((m) => m.id === defaultAiModelId)
       setActiveAiModel(defaultModel ? defaultModel.id : aiModels[0].id)
     }
-    if (activeAiModelId) {
-      const model = aiModels.find((m) => m.id === activeAiModelId)
+    if (currentActiveAiModelId) {
+      const model = aiModels.find((m) => m.id === currentActiveAiModelId)
       if (model) {
         const apiKey = model._decryptedApiKey || ''
-        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, aiPort).catch(console.error)
+        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, currentAiPort).catch(console.error)
       }
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load role prompts on mount and listen for changes from settings panel
   const reloadRolePrompts = useCallback(() => {
@@ -412,8 +464,10 @@ function AIView() {
       const countBeforeSend = messages.length
       pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
 
-      // Store the display text as pending; it will be mapped to message.id once the message appears
-      pendingDisplayTexts.current.set(countBeforeSend, displayMessage)
+      // 生成稳定 correlation id 作为 key，避免 messages.length 索引错位（Task 21）
+      const correlationId = crypto.randomUUID()
+      pendingDisplayTexts.current.set(correlationId, displayMessage)
+      pendingDisplayTextQueue.current.push(correlationId)
 
       const rolePrompt = aiRolePrompts.find((p) => p.role_key === roleKey)
       const systemPrompt = rolePrompt?.prompt || ''
@@ -499,7 +553,10 @@ function AIView() {
       if (fileParts.length > 0) {
         displayText = text + '\n\n[' + displayNames.join(', ') + ']'
         aiContent = text + '\n\n' + fileParts.join('\n\n')
-        pendingDisplayTexts.current.set(countBeforeSend, displayText)
+        // 生成稳定 correlation id 作为 key，避免 messages.length 索引错位（Task 21）
+        const correlationId = crypto.randomUUID()
+        pendingDisplayTexts.current.set(correlationId, displayText)
+        pendingDisplayTextQueue.current.push(correlationId)
       }
       // Clear attached files after sending
       clearAiAttachedFiles()
@@ -517,8 +574,10 @@ function AIView() {
         }
         displayText = `[${activePrompt?.name || activeRoleKey}] ${filePath}`
         aiContent = `${displayText}\n\n${activeTab.content}`
-        // Map the display text for this message
-        pendingDisplayTexts.current.set(countBeforeSend, displayText)
+        // 生成稳定 correlation id 作为 key，避免 messages.length 索引错位（Task 21）
+        const correlationId = crypto.randomUUID()
+        pendingDisplayTexts.current.set(correlationId, displayText)
+        pendingDisplayTextQueue.current.push(correlationId)
       }
     }
 

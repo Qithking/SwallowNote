@@ -23,16 +23,9 @@ export type {
 export type LinkFormat = 'markdown' | 'html' | 'url'
 export type UploadFormat = 'original' | 'webp' | 'jpg' | 'png'
 export type FilenameStrategy = 'original' | 'uuid' | 'timestamp'
-export type ProviderId =
-  | 'smms'
-  | 'imgur'
-  | 'github'
-  | 'tencent'
-  | 'aliyun'
-  | 'qiniu'
-  | 'upyun'
-  | 'minio'
-  | 'custom'
+// 仅保留已实现上传逻辑的提供商；未实现的 tencent/aliyun/qiniu/upyun/minio
+// 已从用户可见的选择项中移除，避免选择后上传抛错。
+export type ProviderId = 'smms' | 'imgur' | 'github' | 'custom'
 export type CustomMethod = 'POST' | 'PUT'
 
 /**
@@ -44,14 +37,6 @@ export type CustomMethod = 'POST' | 'PUT'
  * Defaults mirror `settings.json`; `getAllSettings` should be
  * merged with these defaults before being used to drive upload
  * logic so a half-configured user doesn't crash on `undefined`.
- *
- * Note: schema version 2 added five cloud-storage providers
- * (Tencent COS / Aliyun OSS / Qiniu / UPYUN / MinIO). They are
- * exposed in the settings dialog only; the upload logic for
- * these providers is not implemented yet — selecting one and
- * uploading will fail until the corresponding provider file is
- * dropped into `src/providers/<id>.ts` and registered in
- * `src/providers/index.ts`.
  */
 export interface AllSettings {
   defaultProvider: ProviderId
@@ -74,47 +59,6 @@ export interface AllSettings {
   githubRepo: string
   githubBranch: string
   githubPathPrefix: string
-
-  // Tencent COS
-  tencentSecretId: string
-  tencentSecretKey: string
-  tencentRegion: string
-  tencentBucket: string
-  tencentProtocol: 'https' | 'http'
-  tencentKeyPrefix: string
-
-  // Aliyun OSS
-  aliyunAccessKeyId: string
-  aliyunAccessKeySecret: string
-  aliyunRegion: string
-  aliyunBucket: string
-  aliyunEndpoint: string
-  aliyunKeyPrefix: string
-
-  // Qiniu
-  qiniuAccessKey: string
-  qiniuSecretKey: string
-  qiniuBucket: string
-  qiniuZone: 'z0' | 'z1' | 'z2' | 'na0' | 'as0'
-  qiniuDomain: string
-  qiniuKeyPrefix: string
-
-  // UPYUN
-  upyunOperator: string
-  upyunPassword: string
-  upyunBucket: string
-  upyunDomain: string
-  upyunKeyPrefix: string
-
-  // MinIO (S3-compatible)
-  minioEndpoint: string
-  minioAccessKey: string
-  minioSecretKey: string
-  minioBucket: string
-  minioRegion: string
-  minioUseSsl: boolean
-  minioPathStyle: boolean
-  minioKeyPrefix: string
 
   // Custom
   customEndpoint: string

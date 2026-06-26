@@ -7,7 +7,8 @@
 
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::net::{Ipv4Addr, Ipv6Addr};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -20,6 +21,9 @@ fn shared_http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
+            // 安全：禁止自动跟随重定向，改由 fetch_with_redirect 手动逐跳校验后再跟随，
+            // 防止公网 URL 通过 302 跳到 127.0.0.1 等内网地址绕过 SSRF 校验
+            .redirect(reqwest::redirect::Policy::none())
             // 连接池配置：默认即可（max_idle_per_host=32）
             .pool_idle_timeout(Duration::from_secs(90))
             // 单次连接空闲超时
@@ -40,6 +44,8 @@ fn shared_http_client() -> &'static reqwest::Client {
 const RETRY_COUNT: usize = 3;
 /// 两次重试之间的初始退避（毫秒），后续指数倍增。
 const RETRY_BACKOFF_MS: u64 = 300;
+/// 手动跟随重定向的最大次数，超过则视为失败，避免无限重定向。
+const MAX_REDIRECTS: usize = 5;
 
 /// 浏览器请求头 Accept：按 q 值递减匹配，CDN/防盗链多按此协商。
 const BROWSER_ACCEPT: &str =
@@ -61,6 +67,56 @@ fn is_retryable_error(err: &reqwest::Error) -> bool {
         return is_retryable_status(status.as_u16());
     }
     false
+}
+
+/// 判断 IPv4 是否属于私网/环回/链路本地等不可访问范围。
+fn is_private_ipv4(ip: &Ipv4Addr) -> bool {
+    ip.is_loopback()          // 127.0.0.0/8
+        || ip.is_private()    // 10.0.0.0/8、172.16.0.0/12、192.168.0.0/16
+        || ip.is_link_local() // 169.254.0.0/16
+        || ip.is_unspecified() // 0.0.0.0
+        || ip.is_broadcast()   // 255.255.255.255
+}
+
+/// 判断 IPv6 是否属于环回/唯一本地/链路本地等不可访问范围。
+fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() {
+        // ::1 / ::
+        return true;
+    }
+    let segs = ip.segments();
+    // fc00::/7 唯一本地地址：首字节为 0xfc 或 0xfd
+    if (segs[0] & 0xfe00) == 0xfc00 {
+        return true;
+    }
+    // fe80::/10 链路本地地址
+    if (segs[0] & 0xffc0) == 0xfe80 {
+        return true;
+    }
+    false
+}
+
+/// SSRF 校验：仅允许 http/https scheme，并拒绝私网/环回/链路本地 IP 字面量。
+/// 注意：简化实现，仅校验 IP 字面量形式的 host，不解析域名（DNS rebinding 不在范围内）。
+fn validate_remote_url(raw: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(raw).map_err(|e| format!("invalid url: {}", e))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("unsupported scheme: {}", other)),
+    }
+    let host = parsed.host_str().ok_or_else(|| "missing host".to_string())?;
+    // IPv6 字面量在 URL 中以 [::1] 形式出现，host_str 可能带方括号，统一去除
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = host.parse::<Ipv4Addr>() {
+        if is_private_ipv4(&ip) {
+            return Err(format!("private/loopback IPv4 not allowed: {}", ip));
+        }
+    } else if let Ok(ip) = host.parse::<Ipv6Addr>() {
+        if is_private_ipv6(&ip) {
+            return Err(format!("private/loopback IPv6 not allowed: {}", ip));
+        }
+    }
+    Ok(())
 }
 
 /// 进度事件名（与前端 MarkdownEditor 中 listen() 的事件名一致）。
@@ -344,13 +400,74 @@ async fn fetch_image_once(url: &str) -> Result<reqwest::Response, reqwest::Error
     req.send().await
 }
 
+/// 下载过程中的错误分类，用于区分可重试与不可重试错误。
+enum DownloadError {
+    /// 网络/HTTP 错误，是否重试由 is_retryable_error / is_retryable_status 判断
+    Request(reqwest::Error),
+    /// 重定向处理错误（含 SSRF 阻断、超过最大跳数等），不可重试
+    Redirect(String),
+}
+
+/// 发送请求并手动逐跳处理重定向。
+/// 因 shared_http_client 已禁用自动重定向，此处对每个 3xx 响应：
+/// 1. 解析 Location（支持相对路径，基于当前 URL resolve）
+/// 2. 重新调用 validate_remote_url 进行 SSRF 校验
+/// 3. 校验通过才跟随，最多跟随 MAX_REDIRECTS 次
+/// 这样可防止公网 URL 302 到 127.0.0.1 等内网地址绕过初始 SSRF 校验。
+async fn fetch_with_redirect(start_url: &str) -> Result<reqwest::Response, DownloadError> {
+    let mut current_url = start_url.to_string();
+    let mut redirects = 0usize;
+    loop {
+        let response = fetch_image_once(&current_url)
+            .await
+            .map_err(DownloadError::Request)?;
+        // 非重定向响应：直接返回（含 2xx 成功与 4xx/5xx 错误，交给上层重试逻辑判断）
+        if !response.status().is_redirection() {
+            return Ok(response);
+        }
+        // 超过最大重定向次数：视为失败
+        if redirects >= MAX_REDIRECTS {
+            return Err(DownloadError::Redirect(format!(
+                "too many redirects (max {})",
+                MAX_REDIRECTS
+            )));
+        }
+        redirects += 1;
+        // 解析 Location header
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                DownloadError::Redirect("redirect without Location header".to_string())
+            })?
+            .to_string();
+        // 基于当前 URL resolve Location（处理相对路径与绝对路径）
+        let base = url::Url::parse(&current_url)
+            .map_err(|e| DownloadError::Redirect(format!("invalid url: {}", e)))?;
+        let next = base
+            .join(&location)
+            .map_err(|e| DownloadError::Redirect(format!("invalid redirect location: {}", e)))?;
+        let next_str = next.as_str().to_string();
+        // 关键：对重定向目标重新进行 SSRF 校验，阻止跳向内网地址
+        if let Err(e) = validate_remote_url(&next_str) {
+            return Err(DownloadError::Redirect(format!(
+                "SSRF blocked on redirect: {}",
+                e
+            )));
+        }
+        current_url = next_str;
+    }
+}
+
 /// 请求图片，含 RETRY_COUNT 次重试与指数退避。
+/// 重定向由 fetch_with_redirect 手动处理；重定向/SSRF 错误不可重试，立即返回。
 /// 返回 Response 或最后一次错误描述字符串。
 async fn fetch_image_with_retry(url: &str) -> Result<reqwest::Response, String> {
     let mut attempt = 0usize;
 
     loop {
-        match fetch_image_once(url).await {
+        match fetch_with_redirect(url).await {
             Ok(r) if r.status().is_success() => return Ok(r),
             Ok(r) => {
                 let status = r.status().as_u16();
@@ -362,7 +479,11 @@ async fn fetch_image_with_retry(url: &str) -> Result<reqwest::Response, String> 
                     return Err(err);
                 }
             }
-            Err(e) => {
+            Err(DownloadError::Redirect(msg)) => {
+                // 重定向/SSRF 阻断错误不可重试，直接返回
+                return Err(msg);
+            }
+            Err(DownloadError::Request(e)) => {
                 let err = format!("request failed: {}", e);
                 if !is_retryable_error(&e) {
                     return Err(err);
@@ -380,9 +501,59 @@ async fn fetch_image_with_retry(url: &str) -> Result<reqwest::Response, String> 
     }
 }
 
+/// 对可能尚不存在的路径做规范化：逐级向上找到已存在的祖先 canonicalize 后，
+/// 再把剩余路径片段拼回，用于在 create_dir_all 之前校验 target_dir 归属。
+fn canonicalize_for_check(path: &Path) -> Option<PathBuf> {
+    // 路径已存在：直接 canonicalize
+    if let Ok(canon) = path.canonicalize() {
+        return Some(canon);
+    }
+    // 路径不存在：逐级向上找已存在的祖先
+    let mut current = path.to_path_buf();
+    let mut remaining: Vec<PathBuf> = Vec::new();
+    while !current.exists() {
+        match current.file_name() {
+            Some(name) => remaining.push(PathBuf::from(name)),
+            None => return None,
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+    let mut canon = current.canonicalize().ok()?;
+    for part in remaining.into_iter().rev() {
+        canon = canon.join(part);
+    }
+    Some(canon)
+}
+
+/// 校验 target_dir 规范化后必须位于 root_path 之内，防止路径穿越。
+/// root_path 必须已存在；target_dir 允许不存在（用 canonicalize_for_check 规范化）。
+fn resolve_within_root(target_dir: &str, root_path: &str) -> Result<PathBuf, String> {
+    let root_canon = PathBuf::from(root_path)
+        .canonicalize()
+        .map_err(|e| format!("root_path canonicalize failed ({}): {}", root_path, e))?;
+    let target_canon = canonicalize_for_check(Path::new(target_dir))
+        .ok_or_else(|| format!("target_dir canonicalize failed: {}", target_dir))?;
+    // starts_with 按 path 组件比较，可正确处理边界（/foo/bar 不算在 /foo/ba 内）
+    if !target_canon.starts_with(&root_canon) {
+        return Err(format!(
+            "target_dir not within root_path: target={} root={}",
+            target_canon.display(),
+            root_canon.display()
+        ));
+    }
+    Ok(target_canon)
+}
+
 /// 单张图片下载 + 落盘（tokio 异步）核心逻辑。
 async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
     let url = req.url.clone();
+
+    // 0. SSRF 校验：拒绝非 http/https 与私网/环回 IP 字面量
+    if let Err(e) = validate_remote_url(&req.url) {
+        return err_result(url, format!("SSRF blocked: {}", e));
+    }
 
     // 1. 请求图片（含重试）
     let response = match fetch_image_with_retry(&req.url).await {
@@ -413,6 +584,14 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
     } else {
         target_dir
     };
+
+    // 安全校验（MISS-2）：target_dir 规范化后必须位于 root_path 之内，
+    // 防止前端传入任意路径造成路径穿越。root_path 为空时无法校验，跳过（保持原行为）。
+    if !target_dir.is_empty() && !req.root_path.trim().is_empty() {
+        if let Err(e) = resolve_within_root(&target_dir, &req.root_path) {
+            return err_result(url, format!("path traversal blocked: {}", e));
+        }
+    }
 
     if let Err(e) = tokio::fs::create_dir_all(&target_dir).await {
         return RemoteImageResult {

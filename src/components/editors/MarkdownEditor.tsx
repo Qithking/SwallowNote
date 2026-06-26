@@ -73,6 +73,31 @@ function resolveFilePath(url: string, currentFilePath: string): string {
   return dirParts.join('/')
 }
 
+/**
+ * 递归遍历 blocks（包括嵌套的 block.children），对每个 block 调用 visitor。
+ * - visitor 返回非 undefined 值时，用返回值替换原 block（用于 block 转换）
+ * - visitor 返回 undefined 时，保留原 block（用于副作用收集，如收集符合条件的 block）
+ * 返回新数组（不修改原数组），children 也会被递归遍历。
+ */
+function walkBlocks(blocks: any[], visitor: (block: any) => any): any[] {
+  const result: any[] = []
+  for (const block of blocks) {
+    if (!block) {
+      result.push(block)
+      continue
+    }
+    const visited = visitor(block)
+    const current = visited !== undefined ? visited : block
+    if (Array.isArray(current.children) && current.children.length > 0) {
+      // 递归遍历 children，创建新对象避免修改原 block
+      result.push({ ...current, children: walkBlocks(current.children, visitor) })
+    } else {
+      result.push(current)
+    }
+  }
+  return result
+}
+
 interface MarkdownEditorProps {
   content: string
   onChange?: (content: string) => void
@@ -328,10 +353,11 @@ function BlockNoteInner({
 
     // No Files in WebView clipboard — read system clipboard via Tauri.
     readClipboardFilePaths()
-      .then((filePaths) => {
+      .then(async (filePaths) => {
         if (filePaths.length > 0) {
           // System clipboard has file paths → insert as file blocks
-          filePaths.forEach((sourcePath) => {
+          // 使用 for...of + await 顺序插入，避免 forEach 并发导致顺序逆序（C,B,A）
+          for (const sourcePath of filePaths) {
             try {
               const fileBlockType = getFileBlockType(sourcePath)
               const fileName = sourcePath.split('/').pop() || 'file'
@@ -357,17 +383,17 @@ function BlockNoteInner({
                 )[0].id
               }
 
-              uploadFileFromPath(sourcePath).then((url) => {
-                if (insertedBlockId) {
-                  bnEditor.updateBlock(insertedBlockId, {
-                    props: { url },
-                  } as PartialBlock)
-                }
-              })
+              // await 上传完成，确保前一个文件插入完成后再处理下一个
+              const url = await uploadFileFromPath(sourcePath)
+              if (insertedBlockId) {
+                bnEditor.updateBlock(insertedBlockId, {
+                  props: { url },
+                } as PartialBlock)
+              }
             } catch (e) {
               console.error('Failed to paste file from clipboard:', sourcePath, e)
             }
-          })
+          }
         }
         // If no file paths found, do nothing — nothing to paste
       })
@@ -479,10 +505,9 @@ function BlockNoteInner({
   // Capture-phase click listener: 在捕获阶段拦截链接点击，调用 preventDefault()
   // 并执行跳转。此 listener 对预览模式必需——BlockNote 的 links.onClick 在只读模式
   // 下不会被调用（clickHandler.ts 中 !view.editable 时直接 return false）。
-  // 注意：此 listener 与 handleLinkClick 存在跳转逻辑重复——handleLinkClick 作为
-  // 兜底是必需的，因为此 listener 依赖 editorContainerRef，某些场景下可能未注册。
-  // 内部文件链接的双重调用无害（addTab 会去重），外部链接的双重 window.open
-  // 是已知的次要问题。
+  // 外部链接跳转统一交给 handleLinkClick 处理（编辑模式下），capture listener 仅
+  // 负责 preventDefault 以避免双重 window.open；内部文件链接与锚点跳转仍由 capture
+  // listener 处理（预览模式下 handleLinkClick 不会被调用）。
   useEffect(() => {
     const container = editorContainerRef.current
     if (!container) return
@@ -504,7 +529,8 @@ function BlockNoteInner({
       event.preventDefault()
 
       if (isExternalUrl(href)) {
-        window.open(href, '_blank')
+        // 外部链接跳转交给 handleLinkClick 统一处理，避免双重 window.open。
+        // 这里仅 preventDefault 后 return，不执行 window.open。
         return
       }
 
@@ -623,21 +649,15 @@ function BlockNoteInner({
       try {
         // 1. 收集远程图片 block（递归遍历 document，包含嵌套在列表/引用/表格等 children 中的图片）
         const remoteBlocks: { blockId: string; url: string }[] = []
-        const collectRemoteImages = (blocks: any[]) => {
-          for (const block of blocks) {
-            if (!block) continue
-            if (block.type === 'image' || block.type === 'file') {
-              const url = (block.props as any)?.url
-              if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
-                remoteBlocks.push({ blockId: block.id, url })
-              }
-            }
-            if (Array.isArray(block.children) && block.children.length > 0) {
-              collectRemoteImages(block.children)
+        // 使用 walkBlocks 递归遍历，visitor 仅做副作用收集（返回 undefined 保留原 block）
+        walkBlocks(editor.document as any[], (block) => {
+          if (block.type === 'image' || block.type === 'file') {
+            const url = (block.props as any)?.url
+            if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+              remoteBlocks.push({ blockId: block.id, url })
             }
           }
-        }
-        collectRemoteImages(editor.document as any[])
+        })
 
         if (remoteBlocks.length === 0) {
           toast.info('当前文档无远程图片')
@@ -888,8 +908,9 @@ function BlockNoteInner({
   const serializeAndNotify = useCallback(async () => {
     if (!onChange || !editor) return
     try {
-      // Custom serialization for mermaid blocks
-      const document = (editor.document as any[]).map((block: any) => {
+      // Custom serialization: 使用 walkBlocks 递归遍历 document（包含嵌套 block.children），
+      // 对 mermaid/katex/markmap 特殊 block 转换为 codeBlock，其他 block 保留原样。
+      const document = walkBlocks(editor.document as any[], (block: any) => {
         if (block.type === MERMAID_BLOCK_TYPE) {
           const props = block.props || {}
           const diagram = props.diagram || ''
@@ -942,7 +963,7 @@ function BlockNoteInner({
             content: [{ type: 'text', text: diagram }],
           }
         }
-        return block
+        // 返回 undefined，保留原 block（walkBlocks 会继续递归其 children）
       })
       const rawMd = await editor.blocksToMarkdownLossy(document as typeof editor.document)
       const md = compactMarkdown(rawMd)

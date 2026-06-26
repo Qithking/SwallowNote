@@ -141,9 +141,10 @@ pub async fn git_init(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn git_status(path: String) -> Result<GitStatus, String> {
     let branch = get_branch(&path).unwrap_or_else(|_| "unknown".to_string());
-    let modified = run_git(&path, &["diff", "--name-only"]).unwrap_or_default();
-    let staged_modified = run_git(&path, &["diff", "--cached", "--name-only"]).unwrap_or_default();
-    let untracked = run_git(&path, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default();
+    // 不再吞掉 run_git 错误：git 失败时向上传播，避免前端误以为"无改动"。
+    let modified = run_git(&path, &["diff", "--name-only"])?;
+    let staged_modified = run_git(&path, &["diff", "--cached", "--name-only"])?;
+    let untracked = run_git(&path, &["ls-files", "--others", "--exclude-standard"])?;
 
     // Filter modified to not include staged files
     let mut all_modified: Vec<String> = Vec::new();
@@ -168,7 +169,7 @@ pub async fn git_status(path: String) -> Result<GitStatus, String> {
     }
 
     // Get deleted files
-    let deleted_output = run_git(&path, &["ls-files", "--deleted"]).unwrap_or_default();
+    let deleted_output = run_git(&path, &["ls-files", "--deleted"])?;
     let mut all_deleted: Vec<String> = Vec::new();
     for d in deleted_output.lines() {
         if !d.is_empty() {
@@ -282,6 +283,17 @@ pub async fn git_pull(path: String) -> Result<(), String> {
     }
 }
 
+/// RAII 守卫：Drop 时删除临时 askpass 脚本，防止明文凭证残留磁盘。
+/// 拥有 PathBuf 所有权，可在创建作用域之外（如 clone 流程的 if-let 块）存活至函数末尾，
+/// 确保所有 return / `?` 提前返回路径都执行清理。
+struct TempScriptGuard(std::path::PathBuf);
+
+impl Drop for TempScriptGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Pull changes from remote with provided credentials
 #[tauri::command]
 pub async fn git_pull_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
@@ -299,13 +311,16 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
 
     #[cfg(target_os = "windows")]
     let script_content = format!(
-        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
+        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
         username.replace('"', "\"\""),
         password.replace('"', "\"\"")
     );
 
     std::fs::write(&askpass_script, &script_content)
         .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+    // 脚本已写入磁盘，立即建立 RAII 守卫：后续 set_permissions 或 spawn git 失败时，
+    // Drop 会自动删除脚本，避免明文凭证残留。
+    let _askpass_guard = TempScriptGuard(askpass_script.clone());
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -420,13 +435,16 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
 
     #[cfg(target_os = "windows")]
     let script_content = format!(
-        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
+        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
         username.replace('"', "\"\""),
         password.replace('"', "\"\"")
     );
 
     std::fs::write(&askpass_script, &script_content)
         .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+    // 脚本已写入磁盘，立即建立 RAII 守卫：后续 set_permissions 或 spawn git 失败时，
+    // Drop 会自动删除脚本，避免明文凭证残留。
+    let _askpass_guard = TempScriptGuard(askpass_script.clone());
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -492,13 +510,16 @@ pub async fn git_force_push_with_credentials(path: String, username: String, pas
 
     #[cfg(target_os = "windows")]
     let script_content = format!(
-        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
+        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
         username.replace('"', "\"\""),
         password.replace('"', "\"\"")
     );
 
     std::fs::write(&askpass_script, &script_content)
         .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+    // 脚本已写入磁盘，立即建立 RAII 守卫：后续 set_permissions 或 spawn git 失败时，
+    // Drop 会自动删除脚本，避免明文凭证残留。
+    let _askpass_guard = TempScriptGuard(askpass_script.clone());
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -987,6 +1008,35 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
         &["show", "--no-color", &remote_ref],
     )?;
 
+    // 检测本地是否有未提交改动：git diff --quiet 退出码 0=无改动，1=有改动，其他（如 128 路径不存在）=错误。
+    // 有改动时拒绝 checkout，避免静默覆盖用户本地修改。
+    let diff_status = {
+        let mut cmd = super::create_command("git");
+        cmd.current_dir(repo_path)
+            .args(["diff", "--quiet", "--", relative_path_str])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+    };
+    match diff_status {
+        Ok(status) if status.success() => { /* 无本地改动，可安全 checkout */ }
+        // 仅退出码 1 视为"有改动"，拒绝覆盖
+        Ok(status) if status.code() == Some(1) => {
+            return Err(format!("LOCAL_CHANGES: {}", relative_path_str));
+        }
+        // 其他非零退出码（如 128 路径不存在）视为错误，避免误判为"有改动"
+        Ok(status) => {
+            let code = status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "terminated by signal".to_string());
+            return Err(format!("Failed to check local changes: git diff exit code {}", code));
+        }
+        Err(e) => {
+            return Err(format!("Failed to check local changes: {}", e));
+        }
+    }
+
     // Also checkout the file from remote to update the working tree
     run_git(repo_path, &["checkout", &format!("origin/{}", branch), "--", relative_path_str])
         .map_err(|e| format!("Failed to checkout file: {}", e))?;
@@ -1116,7 +1166,9 @@ fn get_branch(path: &str) -> Result<String, String> {
     }
     // detached HEAD：尝试解析远程默认分支
     if let Ok(sym) = run_git(path, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
-        let trimmed = sym.trim();
+        // symbolic-ref 返回形如 "origin/main"，需剥离 "origin/" 前缀，
+        // 否则后续 git_pull_file_latest 会拼出 "origin/origin/main:path" 必然失败。
+        let trimmed = sym.trim().trim_start_matches("origin/");
         if !trimmed.is_empty() {
             return Ok(trimmed.to_string());
         }
@@ -1844,7 +1896,10 @@ pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, sid
     // If side is "local" or "remote", we overwrite with the chosen side's content.
     if side != "current" {
         let content = get_conflict_content(&repo_path, rel_path_str, &side)?;
-        std::fs::write(&file_path, &content)
+        // 写入目标必须基于 repo_path + 相对路径，避免前端传入的 file_path
+        // 指向仓库外（路径穿越）。
+        let target_path = Path::new(&repo_path).join(rel_path_str);
+        std::fs::write(&target_path, &content)
             .map_err(|e| format!("Failed to write file: {}", e))?;
     }
 
@@ -1910,7 +1965,9 @@ pub async fn git_save_conflict_file_content(repo_path: String, file_path: String
     // Write the edited content back to the file
     // Do NOT run `git add` here — that would prematurely resolve the conflict.
     // Staging is done in `git_resolve_conflict_file` when the user explicitly resolves.
-    std::fs::write(&file_path, &content)
+    // 写入目标基于 repo_path + 相对路径，避免前端传入的 file_path 指向仓库外（路径穿越）。
+    let target_path = Path::new(&repo_path).join(rel_path_str);
+    std::fs::write(&target_path, &content)
         .map_err(|e| format!("Failed to write file: {}", e))?;
 
     Ok(())
@@ -2131,6 +2188,8 @@ async fn do_git_clone(
     }));
 
     // If credentials provided, set up GIT_ASKPASS
+    // RAII 守卫提前声明在外层作用域，使其存活至函数末尾：覆盖 set_permissions / spawn / wait 等所有失败路径。
+    let mut _askpass_guard: Option<TempScriptGuard> = None;
     let askpass_script_path = if let (Some(username), Some(password)) = (username, password) {
         let temp_dir = std::env::temp_dir();
         let unique_id = uuid::Uuid::new_v4().to_string();
@@ -2145,13 +2204,17 @@ async fn do_git_clone(
 
         #[cfg(target_os = "windows")]
         let script_content = format!(
-            "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo {}\n) else (\n  echo {}\n)",
+            // Windows cmd 的 echo 会自动追加 \r\n，会导致 git 把凭证末尾的 \r 当作密码一部分而认证失败；
+            // 改用 `<NUL set /p=` 输出不带换行的字符串，与其他 askpass 脚本保持一致。
+            "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
             username.replace('"', "\"\""),
             password.replace('"', "\"\"")
         );
 
         std::fs::write(&askpass_script, &script_content)
             .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+        // 脚本写入成功，建立守卫：此后任何 `?` 提前返回都会触发 Drop 删除脚本
+        _askpass_guard = Some(TempScriptGuard(askpass_script.clone()));
 
         #[cfg(not(target_os = "windows"))]
         {

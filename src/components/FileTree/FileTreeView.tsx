@@ -6,13 +6,14 @@
  * 工具函数来自 @/lib/utils/treeUtils
  */
 import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
-import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, Pin, ArrowUpDown } from 'lucide-react'
+import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, Pin, ArrowUpDown, ClipboardPaste } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
-import { loadFileContent } from '@/lib/api'
-import { openFolderDialog } from '@/lib/tauri'
+import { loadFileContent, loadDirectory } from '@/lib/api'
+import { openFolderDialog, deleteFile } from '@/lib/tauri'
+import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -22,11 +23,11 @@ import { useTranslation } from 'react-i18next'
 import { dispatchBuiltin } from '@/hooks/useKeyboardShortcuts'
 import { useFileTreeActions } from '@/hooks/useFileTreeActions'
 import { useFileTreeDragDrop } from '@/hooks/useFileTreeDragDrop'
-import { findNodeByPath, collectAllPaths } from '@/lib/utils/treeUtils'
+import { findNodeByPath, collectAllPaths, updateNodesWithChildren } from '@/lib/utils/treeUtils'
 import { countWords } from '@/lib/utils/wordCount'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
-import { ContextMenuContent } from '@/components/ui/context-menu'
+import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 import {
   DropdownMenu,
@@ -122,13 +123,22 @@ function flattenNodes(
     result.push({ node, depth, isPinned: true })
     if (node.isDirectory && expanded.has(node.path) && node.children) {
       result.push(...flattenNodes(node.children, expanded, newItem, sortMode, frontmatterCache, depth + 1))
+      // 在子节点末尾添加新增输入框虚拟节点（与 unpinned 段逻辑保持一致）
+      if (newItem && newItem.parentPath === node.path) {
+        result.push({
+          node: { id: 'new-item', name: newItem.name, path: 'new-item', isDirectory: false },
+          depth: depth + 1,
+          isLastInParent: true,
+        })
+      }
     }
   }
 
-  // Add separator if there are both pinned and unpinned files
+  // Add separator if there are both pinned and unpinned files.
+  // id/path 包含 depth，避免多个 depth 层级同时存在 pinned+unpinned 时 React key 冲突
   if (pinnedNodes.length > 0 && unpinnedNodes.length > 0) {
     result.push({
-      node: { id: 'pinned-separator', name: '', path: 'pinned-separator', isDirectory: false },
+      node: { id: `pinned-separator-${depth}`, name: '', path: `pinned-separator-${depth}`, isDirectory: false },
       depth,
       isPinnedSeparator: true,
     })
@@ -355,7 +365,75 @@ export const FileTreeView = memo(function FileTreeView() {
   const lastClickedPath = useFileTreeStore((s) => s.lastClickedPath)
   const setLastClickedPath = useFileTreeStore((s) => s.setLastClickedPath)
 const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
+  const setNodes = useFileTreeStore((s) => s.setNodes)
+  const clipboardFiles = useUIStore((s) => s.clipboardFiles)
+  const clipboardIsCut = useUIStore((s) => s.clipboardIsCut)
+  const setClipboardFiles = useUIStore((s) => s.setClipboardFiles)
+  const showToast = useUIStore((s) => s.showToast)
+  const showAllFiles = useUIStore((s) => s.showAllFiles)
+  const markdownOnly = useUIStore((s) => s.markdownOnly)
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
 const { t } = useTranslation()
+
+  const hasClipboard = clipboardFiles.length > 0
+
+  // 空白区域粘贴的目标目录
+  const getEmptyAreaPasteTarget = useCallback((): string | null => {
+    if (workspaceMode === 'folder') return rootPath
+    // 工作区模式：优先用选中路径的根目录，否则用第一个根目录
+    if (selectedPath && workspaceFolders.length > 0) {
+      const folder = workspaceFolders.find(f => selectedPath.startsWith(f))
+      if (folder) return folder
+    }
+    return workspaceFolders[0] || null
+  }, [workspaceMode, rootPath, selectedPath, workspaceFolders])
+
+  // 空白区域粘贴处理
+  const handleEmptyAreaPaste = useCallback(async () => {
+    const targetDir = getEmptyAreaPasteTarget()
+    if (!targetDir || !hasClipboard) return
+
+    let successCount = 0
+    let failCount = 0
+    let skipCount = 0
+
+    for (const sourcePath of clipboardFiles) {
+      const fileName = sourcePath.split(/[\\/]/).pop() || sourcePath
+      const destPath = `${targetDir}/${fileName}`
+      if (sourcePath === destPath) { skipCount++; continue }
+      try {
+        await invoke('copy_file', { req: { old_path: sourcePath, new_path: destPath } })
+        successCount++
+        if (clipboardIsCut) {
+          await deleteFile(sourcePath)
+          const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
+          invalidateFrontmatterCache(sourcePath)
+          const editorStore = useEditorStore.getState()
+          editorStore.updateTabPath(sourcePath, destPath, fileName)
+        }
+      } catch (e) {
+        console.error('Failed to paste:', e)
+        failCount++
+      }
+    }
+
+    if (clipboardIsCut) {
+      setClipboardFiles([], false)
+    }
+
+    // 刷新目标目录
+    const currentNodes = useFileTreeStore.getState().nodes
+    const children = await loadDirectory(targetDir, showAllFiles, markdownOnly)
+    const updatedNodes = updateNodesWithChildren(currentNodes, targetDir, children)
+    setNodes(updatedNodes)
+
+    if (failCount === 0 && skipCount === 0) {
+      showToast(t('contextMenu.pastedSuccess', { count: successCount }))
+    } else if (failCount > 0) {
+      showToast(t('contextMenu.pastedPartial', { count: successCount, failCount }))
+    }
+  }, [getEmptyAreaPasteTarget, hasClipboard, clipboardFiles, clipboardIsCut, setClipboardFiles, showAllFiles, markdownOnly, setNodes, showToast, t])
 
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [sortMode, setSortMode] = useState<FileTreeSortMode>('default')
@@ -575,12 +653,14 @@ const { t } = useTranslation()
   // unnecessary callback recreation when nodes/expanded change.
   const nodesRef = useRef(nodes)
   nodesRef.current = nodes
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
 
   const handleSelect = useCallback((node: FileNode, shiftKey: boolean) => {
     if (editingPath !== null) return
 
     if (shiftKey && lastClickedPath) {
-      const allPaths = collectAllPaths(nodesRef.current)
+      const allPaths = collectAllPaths(nodesRef.current, expandedRef.current)
       const startIdx = allPaths.indexOf(lastClickedPath)
       const endIdx = allPaths.indexOf(node.path)
       if (startIdx >= 0 && endIdx >= 0) {
@@ -770,7 +850,7 @@ const { t } = useTranslation()
                     if (isPinnedSeparator) {
                       return (
                         <div
-                          key="pinned-separator"
+                          key={node.path}
                           style={{
                             position: 'absolute',
                             top: 0,
@@ -858,6 +938,16 @@ const { t } = useTranslation()
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
           }}
         >
+          {hasClipboard && (
+            <ContextMenuItem
+              onClick={handleEmptyAreaPaste}
+              style={{ color: 'var(--text-secondary)' }}
+              className="cursor-pointer"
+            >
+              <ClipboardPaste size={12} />
+              <span>{t('contextMenu.paste')}</span>
+            </ContextMenuItem>
+          )}
           <PluginContextMenuItems location="fileTreeEmpty" ctx={{}} />
         </ContextMenuContent>
       </ContextMenuPrimitive.Root>

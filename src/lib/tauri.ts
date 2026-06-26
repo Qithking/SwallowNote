@@ -6,6 +6,13 @@ import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { platform } from '@tauri-apps/plugin-os'
 
+/**
+ * Tauri v2 参数命名约定：
+ * - 顶层原始类型参数：#[tauri::command] 宏自动将后端 snake_case 转为前端 camelCase，
+ *   前端 invoke payload 使用 camelCase（如 { apiKey, baseUrl, repoPath }）。
+ * - struct 字段：不自动转换，前端必须使用与后端 struct 字段一致的 snake_case。
+ */
+
 // 路径分隔符统一为正斜杠
 function normalizePath(path: string | null): string | null {
   if (!path) return null
