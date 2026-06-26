@@ -14,19 +14,35 @@
  */
 import type { BorderSpec, BoxSpacing, Display, TextAlign } from './components/ElementStyle'
 
-export type FontFamily = 'sans-serif' | 'serif' | 'monospace'
+export type FontFamily = 'sans-serif' | 'serif' | 'monospace' | (string & {})
 
 /** FONT_FAMILY_CSS 中预设的 3 种关键字常量。 */
 const PRESET_FONT_KEYS: readonly FontFamily[] = ['sans-serif', 'serif', 'monospace']
 
-/** 把 font-family 字符串归一化为 FontFamily 关键字；不能识别则返回原值。 */
-export function resolveFontFamily(raw: string | undefined): string {
+/**
+ * 把 font-family 字符串归一化为 FontFamily 关键字。
+ * - 命中「3 个 preset 关键字」或「对应的 FONT_FAMILY_CSS 全串」时返回该关键字
+ *   （大小写不敏感、首尾空白容忍），这样 roundtrip 不会丢用户的栈选择。
+ * - 命中 'system-ui' / 'inherit' 这类未注册关键字、或自定义栈（如
+ *   '"Helvetica Neue", sans-serif'）时返回 null，调用方原样保留用户字符串。
+ */
+export function resolveFontFamily(raw: string | undefined): FontFamily | null {
   if (!raw) return 'sans-serif'
-  const lower = raw.toLowerCase()
-  if (/monospace/i.test(lower)) return 'monospace'
-  if (/serif/i.test(lower) && !/sans-serif/i.test(lower)) return 'serif'
-  if (/sans-serif/i.test(lower) || /system/i.test(lower)) return 'sans-serif'
-  return raw
+  const trimmed = raw.trim()
+  const lower = trimmed.toLowerCase()
+  // 1. preset 关键字（精确匹配）
+  for (const key of PRESET_FONT_KEYS) {
+    if (key === lower) return key
+  }
+  // 2. preset 全串匹配（大小写不敏感）：用户选了 SF Mono 栈时
+  //    在 cssToConfig 中归一化为 'monospace'，由 configToCss 还原成 FONT_FAMILY_CSS
+  for (const key of PRESET_FONT_KEYS) {
+    if (FONT_FAMILY_CSS[key as keyof typeof FONT_FAMILY_CSS].toLowerCase() === lower) {
+      return key
+    }
+  }
+  // 3. 未识别的字符串（自定义栈、system-ui、inherit 等）—— 原样保留
+  return null
 }
 
 export interface ThemeColors {
@@ -45,6 +61,11 @@ export interface ThemeColors {
 }
 
 export interface ThemeTypography {
+  /**
+   * 字体族。可以是 3 个 preset 关键字（sans-serif/serif/monospace），
+   * 也可以是任意 CSS 字符串（如 '"Helvetica Neue", sans-serif'），
+   * 序列化为 CSS 时会原样输出（除非是 preset 关键字，此时走 FONT_FAMILY_CSS）。
+   */
   fontFamily: FontFamily
   /** #wenyan { font-size: ... px } —— 正文字号 */
   fontSize: number
@@ -72,6 +93,7 @@ export type HeadingLevel = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'all'
 /** 单个 heading level 可配置的字段（与 ElementStyle 兼容） */
 export interface HeadingLevelFields {
   color?: string
+  fontFamily?: string
   fontSize?: number
   lineHeight?: number
   letterSpacing?: number
@@ -96,16 +118,29 @@ export interface ParagraphConfig {
   textAlign?: TextAlign
   padding?: BoxSpacing
   margin?: BoxSpacing
+  backgroundColor?: string
+  backgroundImage?: string
+  boxShadow?: 'none' | 'sm' | 'md' | 'lg'
+  border?: BorderSpec
+  borderRadius?: number
+  display?: Display
 }
 
 /** 引用块分组：#wenyan blockquote 规则 */
 export interface QuoteConfig {
   color?: string
+  fontFamily?: string
   backgroundColor?: string
+  backgroundImage?: string
   borderRadius?: number
   padding?: BoxSpacing
+  margin?: BoxSpacing
   border?: BorderSpec
   fontSize?: number
+  lineHeight?: number
+  letterSpacing?: number
+  textAlign?: TextAlign
+  boxShadow?: 'none' | 'sm' | 'md' | 'lg'
   display?: Display
 }
 
@@ -130,6 +165,25 @@ const PARAGRAPH_SPACING_MARGIN: Record<ThemeTypography['paragraphSpacing'], stri
   small: '0.5em 0',
   standard: '1em 0',
   loose: '1.6em 0',
+}
+
+/** 阴影档位 → CSS box-shadow 映射（与 ElementStyle/BoxShadowField 一致） */
+const BOX_SHADOW_TO_CSS: Record<'none' | 'sm' | 'md' | 'lg', string> = {
+  none: 'none',
+  sm: '0 1px 2px rgba(0, 0, 0, 0.1)',
+  md: '0 4px 6px rgba(0, 0, 0, 0.1)',
+  lg: '0 10px 15px rgba(0, 0, 0, 0.1)',
+}
+
+/** 把 CSS box-shadow 字符串反匹配为档位 key。匹配失败返回 undefined。 */
+function mapBoxShadowKey(value: string): 'none' | 'sm' | 'md' | 'lg' | undefined {
+  const v = value.trim()
+  if (/^none$/i.test(v)) return 'none'
+  // 简单按位数匹配（与 BOX_SHADOW_TO_CSS 的输出对齐）
+  if (/^0 1px 2px/.test(v)) return 'sm'
+  if (/^0 4px 6px/.test(v)) return 'md'
+  if (/^0 10px 15px/.test(v)) return 'lg'
+  return undefined
 }
 
 /** 字体族 → CSS font-family 映射（与 WenyanDialog 的内置映射保持视觉一致） */
@@ -217,7 +271,7 @@ function parseBox(value: string): BoxSpacing | null {
 
 function parseBorder(value: string): BorderSpec | null {
   const v = value.trim()
-  if (/^none$/i.test(v)) return { width: 0, style: 'none', color: '#000000' }
+  if (/^none$/i.test(v)) return { width: 0, style: 'none', color: 'transparent' }
   const m = /(\d+(?:\.\d+)?)px\s+(solid|dashed|dotted|double)\s+(.+)$/i.exec(v)
   if (m) {
     return {
@@ -231,8 +285,59 @@ function parseBorder(value: string): BorderSpec | null {
 
 // ─── 通用：从 CSS 文本中按选择器与属性提取值 ───────────────────────────
 
+/** CSS 块（selector + declarations） */
+export interface CssBlock {
+  /** 完整选择器字符串（含 `,` 分割的多选择器） */
+  selector: string
+  /** 块内声明（不含外层大括号） */
+  body: string
+}
+
+/**
+ * Single-pass CSS 切分：把所有 selector { ... } 块抽成数组。
+ * - 正确处理嵌套大括号（伪类等）
+ * - 跳过 CSS 注释
+ * - 保留原始空白 / 缩进
+ *
+ * 与多次 indexOf + extractBlock 相比，复杂度从 O(n×k) 降到 O(n)。
+ */
+export function parseAllBlocks(css: string): CssBlock[] {
+  const blocks: CssBlock[] = []
+  let i = 0
+  const len = css.length
+  while (i < len) {
+    // 跳过 CSS 注释
+    if (css[i] === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2)
+      i = end === -1 ? len : end + 2
+      continue
+    }
+    // 找下一个 '{'
+    const braceStart = css.indexOf('{', i)
+    if (braceStart === -1) break
+    // 提取 selector（去除前后空白与注释行）
+    const selectorRaw = css.slice(i, braceStart)
+    const selector = selectorRaw.replace(/\/\*[\s\S]*?\*\//g, '').trim()
+    // 配对 '}'（考虑嵌套）
+    let depth = 1
+    let j = braceStart + 1
+    while (j < len && depth > 0) {
+      if (css[j] === '{') depth++
+      else if (css[j] === '}') depth--
+      if (depth === 0) break
+      j++
+    }
+    if (depth !== 0) break
+    const body = css.slice(braceStart + 1, j)
+    if (selector) blocks.push({ selector, body })
+    i = j + 1
+  }
+  return blocks
+}
+
 /**
  * 在 css 中查找指定选择器块的起始位置，返回从 `{` 到匹配 `}` 的内容。
+ * 保留供 cssToConfig 内部按指定 selector 提取属性。
  */
 function extractBlock(css: string, selector: string): string | null {
   const idx = css.indexOf(selector)
@@ -306,10 +411,16 @@ function clampNumber(n: number, min: number, max: number): number {
 /**
  * 将 ThemeConfig 序列化为 CSS 字符串。
  * 输出的选择器覆盖 #wenyan 及其下属常见元素。
+ *
+ * @param extraCss 未被识别的额外 CSS 段（来自 parseThemeCss）。
+ *                 拼接在末尾以保留手写属性（list-style / transition / transform 等）。
  */
-export function configToCss(config: ThemeConfig): string {
+export function configToCss(config: ThemeConfig, extraCss: string = ''): string {
   const { colors, typography, heading, paragraph, quote } = config
-  const fontFamilyCss = FONT_FAMILY_CSS[typography.fontFamily]
+  // 字体族：preset 关键字走预设长串，custom 字符串原样输出
+  const fontFamilyCss = PRESET_FONT_KEYS.includes(typography.fontFamily)
+    ? FONT_FAMILY_CSS[typography.fontFamily as keyof typeof FONT_FAMILY_CSS]
+    : typography.fontFamily
   const paragraphMargin = PARAGRAPH_SPACING_MARGIN[typography.paragraphSpacing]
   const headingWeight = typography.headingWeight === 'bold' ? 700 : 400
   const letterSpacing = `${typography.letterSpacing}px`
@@ -343,6 +454,13 @@ export function configToCss(config: ThemeConfig): string {
     const color = fields.color ?? colors.headingColor
     decls.push(`  color: ${color};`)
     decls.push(`  font-weight: ${headingWeight};`)
+    if (fields.fontFamily !== undefined) {
+      const familyCss =
+        fields.fontFamily in FONT_FAMILY_CSS
+          ? FONT_FAMILY_CSS[fields.fontFamily as FontFamily]
+          : fields.fontFamily
+      decls.push(`  font-family: ${familyCss};`)
+    }
     if (fields.fontSize !== undefined) decls.push(`  font-size: ${fields.fontSize}px;`)
     if (fields.lineHeight !== undefined) decls.push(`  line-height: ${fields.lineHeight};`)
     if (fields.letterSpacing !== undefined)
@@ -396,11 +514,29 @@ export function configToCss(config: ThemeConfig): string {
     paragraphDecls.push(`  letter-spacing: ${paragraph.letterSpacing}px;`)
   const paragraphTextAlign = paragraph.textAlign ?? typography.textAlign
   paragraphDecls.push(`  text-align: ${paragraphTextAlign};`)
+  if (paragraph.backgroundColor !== undefined)
+    paragraphDecls.push(`  background-color: ${paragraph.backgroundColor};`)
+  if (paragraph.backgroundImage !== undefined)
+    paragraphDecls.push(`  background-image: ${paragraph.backgroundImage};`)
+  if (paragraph.boxShadow !== undefined)
+    paragraphDecls.push(`  box-shadow: ${BOX_SHADOW_TO_CSS[paragraph.boxShadow]};`)
+  if (paragraph.border !== undefined) {
+    if (paragraph.border.width > 0 && paragraph.border.style !== 'none') {
+      paragraphDecls.push(
+        `  border: ${paragraph.border.width}px ${paragraph.border.style} ${paragraph.border.color};`
+      )
+    } else {
+      paragraphDecls.push(`  border: none;`)
+    }
+  }
+  if (paragraph.borderRadius !== undefined)
+    paragraphDecls.push(`  border-radius: ${paragraph.borderRadius}px;`)
+  if (paragraph.display !== undefined) paragraphDecls.push(`  display: ${paragraph.display};`)
   if (paragraph.padding !== undefined) {
     paragraphDecls.push(`  padding: ${formatBox(paragraph.padding)};`)
-  } else {
-    paragraphDecls.push(`  text-indent: ${textIndent};`)
   }
+  // textIndent 与 padding 在 CSS 中是独立属性，二者并存即可
+  paragraphDecls.push(`  text-indent: ${textIndent};`)
   if (paragraph.margin !== undefined) {
     paragraphDecls.push(`  margin: ${formatBox(paragraph.margin)};`)
   } else {
@@ -412,11 +548,20 @@ export function configToCss(config: ThemeConfig): string {
   const quoteDecls: string[] = []
   const quoteColor = quote.color ?? colors.blockquoteTextColor
   quoteDecls.push(`  color: ${quoteColor};`)
+  if (quote.fontFamily !== undefined) {
+    const familyCss =
+      quote.fontFamily in FONT_FAMILY_CSS
+        ? FONT_FAMILY_CSS[quote.fontFamily as FontFamily]
+        : quote.fontFamily
+    quoteDecls.push(`  font-family: ${familyCss};`)
+  }
   if (quote.backgroundColor !== undefined) {
     quoteDecls.push(`  background: ${quote.backgroundColor};`)
   } else {
     quoteDecls.push(`  background: ${colors.blockquoteBg};`)
   }
+  if (quote.backgroundImage !== undefined)
+    quoteDecls.push(`  background-image: ${quote.backgroundImage};`)
   // 优先使用新 border 字段；否则回退到旧的 border-left 形式
   if (quote.border !== undefined) {
     if (quote.border.width > 0 && quote.border.style !== 'none') {
@@ -429,11 +574,23 @@ export function configToCss(config: ThemeConfig): string {
     quoteDecls.push(`  border-left: 4px solid ${colors.blockquoteBorderColor};`)
   }
   if (quote.fontSize !== undefined) quoteDecls.push(`  font-size: ${quote.fontSize}px;`)
+  if (quote.lineHeight !== undefined) quoteDecls.push(`  line-height: ${quote.lineHeight};`)
+  if (quote.letterSpacing !== undefined)
+    quoteDecls.push(`  letter-spacing: ${quote.letterSpacing}px;`)
+  if (quote.textAlign !== undefined) quoteDecls.push(`  text-align: ${quote.textAlign};`)
+  if (quote.boxShadow !== undefined)
+    quoteDecls.push(`  box-shadow: ${BOX_SHADOW_TO_CSS[quote.boxShadow]};`)
   if (quote.padding !== undefined) quoteDecls.push(`  padding: ${formatBox(quote.padding)};`)
+  if (quote.margin !== undefined) quoteDecls.push(`  margin: ${formatBox(quote.margin)};`)
   if (quote.borderRadius !== undefined)
     quoteDecls.push(`  border-radius: ${quote.borderRadius}px;`)
   if (quote.display !== undefined) quoteDecls.push(`  display: ${quote.display};`)
   blocks.push(`#wenyan blockquote {\n${quoteDecls.join('\n')}\n}`)
+
+  // 末尾追加未被识别的 CSS（手写 list-style / transition / transform 等），
+  // 避免 visual 编辑时把额外规则 roundtrip 丢失
+  const trimmedExtra = extraCss.trim()
+  if (trimmedExtra) blocks.push(`/* @category:extra */\n${trimmedExtra}`)
 
   return blocks.join('\n')
 }
@@ -451,10 +608,53 @@ function marginTopToSpacing(margin: string): ThemeTypography['paragraphSpacing']
   return 'loose'
 }
 
+/** 解析结果：ThemeConfig + 未识别的 CSS（保留在原始 editCss 中的额外规则） */
+export interface ParsedThemeCss {
+  config: ThemeConfig
+  /**
+   * 未被任何已知选择器 / 字段覆盖的 CSS 段。
+   * 写入 editCss 时由 configToCss 末尾追加，避免 roundtrip 时丢失手写属性
+   * （如 list-style / transform / transition / filter 等）。
+   */
+  extraCss: string
+}
+
+/** ThemeConfig 能识别的 selector 集合。其它 selector 块进入 extraCss。 */
+const KNOWN_SELECTORS: ReadonlySet<string> = new Set([
+  '#wenyan',
+  '#wenyan a',
+  '#wenyan p',
+  '#wenyan blockquote',
+  '#wenyan h1, #wenyan h2, #wenyan h3, #wenyan h4, #wenyan h5, #wenyan h6',
+  '#wenyan h1',
+  '#wenyan h2',
+  '#wenyan h3',
+  '#wenyan h4',
+  '#wenyan h5',
+  '#wenyan h6',
+])
+
+/**
+ * 把 css 拆为 { config, extraCss }。
+ * - 已知 selector 走原 cssToConfig 解析；
+ * - 未知 selector 块保留为 extraCss，由 configToCss 末尾追加。
+ */
+export function parseThemeCss(css: string): ParsedThemeCss {
+  const config = cssToConfig(css)
+  const allBlocks = parseAllBlocks(css)
+  const extraLines: string[] = []
+  for (const block of allBlocks) {
+    if (!KNOWN_SELECTORS.has(block.selector)) {
+      extraLines.push(`${block.selector} {\n${block.body}\n}`)
+    }
+  }
+  return { config, extraCss: extraLines.join('\n\n') }
+}
+
 /**
  * 从 CSS 字符串 best-effort 解析为 ThemeConfig。
- * - 任何无法识别的规则被忽略（手写 CSS 的额外规则保留在原始 editCss 中）。
  * - 任何未匹配到的字段回退到 DEFAULT_THEME_CONFIG。
+ * - 若想保留手写 CSS 额外规则，请改用 parseThemeCss() 拿到 extraCss。
  */
 export function cssToConfig(css: string): ThemeConfig {
   const config: ThemeConfig = JSON.parse(JSON.stringify(DEFAULT_THEME_CONFIG))
@@ -482,10 +682,12 @@ export function cssToConfig(css: string): ThemeConfig {
   const fontFamilyRaw = extractValueFromSelector(css, '#wenyan {', 'font-family')
   if (fontFamilyRaw) {
     const resolved = resolveFontFamily(fontFamilyRaw)
-    if (PRESET_FONT_KEYS.includes(resolved as FontFamily)) {
-      config.typography.fontFamily = resolved as FontFamily
+    if (resolved !== null && PRESET_FONT_KEYS.includes(resolved)) {
+      config.typography.fontFamily = resolved
     } else {
-      config.typography.fontFamily = 'sans-serif'
+      // 非 preset 字符串（含 Helvetica Neue / PingFang 等自定义字体或 stack）
+      // 原样保留，避免 roundtrip 失真
+      config.typography.fontFamily = fontFamilyRaw
     }
   }
 
@@ -514,6 +716,8 @@ export function cssToConfig(css: string): ThemeConfig {
     const fields: HeadingLevelFields = {}
     const c = extractColorFromSelector(cssBlock, '{', 'color')
     if (c) fields.color = c
+    const ff = extractValueFromSelector(cssBlock, '{', 'font-family')
+    if (ff) fields.fontFamily = ff
     const fs = extractValueFromSelector(cssBlock, '{', 'font-size')
     if (fs) {
       const n = parsePxNumber(fs)
@@ -649,6 +853,41 @@ export function cssToConfig(css: string): ThemeConfig {
     const num = parseEmNumber(textIndent)
     if (num !== null) config.typography.textIndent = num >= 1 ? 2 : 0
   }
+  // 段落新字段：backgroundColor / backgroundImage / boxShadow / border / borderRadius / display
+  const paragraphBgColor = extractColorFromSelector(css, '#wenyan p', 'background-color')
+  if (paragraphBgColor) config.paragraph.backgroundColor = paragraphBgColor
+  const paragraphBgImage = extractValueFromSelector(css, '#wenyan p', 'background-image')
+  if (paragraphBgImage) config.paragraph.backgroundImage = paragraphBgImage
+  const paragraphBoxShadow = extractValueFromSelector(css, '#wenyan p', 'box-shadow')
+  if (paragraphBoxShadow) {
+    const k = mapBoxShadowKey(paragraphBoxShadow)
+    if (k) config.paragraph.boxShadow = k
+  }
+  const paragraphBorder = extractValueFromSelector(css, '#wenyan p', 'border')
+  if (paragraphBorder) {
+    const parsed = parseBorder(paragraphBorder)
+    if (parsed) config.paragraph.border = parsed
+  }
+  const paragraphBorderRadius = extractValueFromSelector(css, '#wenyan p', 'border-radius')
+  if (paragraphBorderRadius) {
+    const num = parsePxNumber(paragraphBorderRadius)
+    if (num !== null) config.paragraph.borderRadius = clampNumber(num, 0, 50)
+  }
+  const paragraphDisplay = extractValueFromSelector(css, '#wenyan p', 'display')
+  if (paragraphDisplay) {
+    const v = paragraphDisplay.trim().toLowerCase()
+    if (
+      v === 'block' ||
+      v === 'inline-block' ||
+      v === 'inline' ||
+      v === 'flex' ||
+      v === 'grid' ||
+      v === 'inline-flex' ||
+      v === 'none'
+    ) {
+      config.paragraph.display = v as Display
+    }
+  }
 
   // ── #wenyan blockquote 引用 ─────────────────────────────────────────
   const blockquoteText = extractColorFromSelector(css, '#wenyan blockquote', 'color')
@@ -661,10 +900,46 @@ export function cssToConfig(css: string): ThemeConfig {
     config.colors.blockquoteBg = blockquoteBg
     config.quote.backgroundColor = blockquoteBg
   }
+  const blockquoteBgImage = extractValueFromSelector(css, '#wenyan blockquote', 'background-image')
+  if (blockquoteBgImage) config.quote.backgroundImage = blockquoteBgImage
   const blockquoteFontSize = extractValueFromSelector(css, '#wenyan blockquote', 'font-size')
   if (blockquoteFontSize) {
     const num = parsePxNumber(blockquoteFontSize)
     if (num !== null) config.quote.fontSize = clampNumber(Math.round(num), 8, 72)
+  }
+  const blockquoteLineHeight = extractValueFromSelector(css, '#wenyan blockquote', 'line-height')
+  if (blockquoteLineHeight) {
+    const num = parseUnitless(blockquoteLineHeight)
+    if (num !== null) config.quote.lineHeight = clampNumber(Math.round(num * 100) / 100, 0.8, 3)
+  }
+  const blockquoteLetterSpacing = extractValueFromSelector(
+    css,
+    '#wenyan blockquote',
+    'letter-spacing'
+  )
+  if (blockquoteLetterSpacing) {
+    const num = parseEmNumber(blockquoteLetterSpacing) ?? parsePxNumber(blockquoteLetterSpacing)
+    if (num !== null) config.quote.letterSpacing = clampNumber(Math.round(num), -10, 50)
+  }
+  const blockquoteTextAlign = extractValueFromSelector(css, '#wenyan blockquote', 'text-align')
+  if (blockquoteTextAlign && /^(left|center|right|justify)$/i.test(blockquoteTextAlign.trim())) {
+    config.quote.textAlign = blockquoteTextAlign.trim().toLowerCase() as TextAlign
+  }
+  const blockquoteFontFamily = extractValueFromSelector(
+    css,
+    '#wenyan blockquote',
+    'font-family'
+  )
+  if (blockquoteFontFamily) config.quote.fontFamily = blockquoteFontFamily
+  const blockquoteMargin = extractValueFromSelector(css, '#wenyan blockquote', 'margin')
+  if (blockquoteMargin) {
+    const bs = parseBox(blockquoteMargin)
+    if (bs) config.quote.margin = bs
+  }
+  const blockquoteBoxShadow = extractValueFromSelector(css, '#wenyan blockquote', 'box-shadow')
+  if (blockquoteBoxShadow) {
+    const k = mapBoxShadowKey(blockquoteBoxShadow)
+    if (k) config.quote.boxShadow = k
   }
   const blockquoteBorderRadius = extractValueFromSelector(
     css,

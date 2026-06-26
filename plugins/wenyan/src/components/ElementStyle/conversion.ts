@@ -19,9 +19,9 @@ const BOX_SHADOW_MAP: Record<NonNullable<ElementStyle['boxShadow']>, string> = {
   lg: '0 10px 15px rgba(0, 0, 0, 0.1)',
 }
 
-/** 把 4 边 em 数值格式化为 `<top>em <right>em <bottom>em <left>em` */
+/** 把 4 边 px 数值格式化为 `<top>px <right>px <bottom>px <left>px` */
 function formatBox(value: BoxSpacing): string {
-  return `${value.top}em ${value.right}em ${value.bottom}em ${value.left}em`
+  return `${value.top}px ${value.right}px ${value.bottom}px ${value.left}px`
 }
 
 /** 把 BorderSpec 格式化为 CSS border 简写 */
@@ -51,7 +51,7 @@ export function elementStyleToCss(value: ElementStyle, selector: string): string
     decls.push(`border-radius: ${value.borderRadius}px;`)
   if (value.lineHeight !== undefined) decls.push(`line-height: ${value.lineHeight};`)
   if (value.letterSpacing !== undefined)
-    decls.push(`letter-spacing: ${value.letterSpacing}em;`)
+    decls.push(`letter-spacing: ${value.letterSpacing}px;`)
   if (value.textAlign !== undefined) decls.push(`text-align: ${value.textAlign};`)
   if (value.display !== undefined) decls.push(`display: ${value.display};`)
 
@@ -138,27 +138,57 @@ function parseBoxSpacing(value: string): BoxSpacing | null {
   }
 }
 
-/** 解析 border 简写 `2px solid #333` / `none` / `1px dashed rgb(...)` */
+/**
+ * 解析 border 简写。覆盖以下形式：
+ *  - `none` → 0/none/transparent
+ *  - `<width> <style> <color?>`：color 缺省时按 currentColor 兜底
+ *  - `solid`/`dashed`/`dotted`/`double` 是合法 style
+ *
+ * 颜色未指定时用 'currentColor'，避免用 #000000 让用户编辑时看到错误颜色。
+ */
 function parseBorder(value: string): BorderSpec | null {
   const v = value.trim()
-  if (/^none$/i.test(v)) return { width: 0, style: 'none', color: '#000000' }
-  // 找宽度 + 样式 + 颜色
-  const m = /(\d+(?:\.\d+)?)px\s+(solid|dashed|dotted|double)\s+(.+)$/i.exec(v)
+  if (/^none$/i.test(v)) {
+    return { width: 0, style: 'none', color: 'transparent' }
+  }
+  // 找宽度 + 样式 + (可选) 颜色
+  // 颜色可省略，省略时用 currentColor；可取 #hex / rgb() / rgba() / named color
+  const m = /(\d+(?:\.\d+)?)(?:px)?\s+(solid|dashed|dotted|double)(?:\s+(.+))?$/i.exec(v)
   if (m) {
-    return { width: parseFloat(m[1]), style: m[2].toLowerCase() as BorderSpec['style'], color: m[3].trim() }
+    return {
+      width: parseFloat(m[1]),
+      style: m[2].toLowerCase() as BorderSpec['style'],
+      color: (m[3] ?? 'currentColor').trim(),
+    }
   }
   return null
 }
 
-/** 解析 box-shadow 档位 */
+/**
+ * 解析 box-shadow 档位。
+ * 用模糊半径（box-shadow 第 3 个长度值）粗略反推档位，比之前的「10px 15px 字符串
+ * 匹配」更鲁棒，能识别自定义 shadow 值。档位边界：
+ *  - sm: 模糊半径 ≤ 3
+ *  - md: 3 < 模糊半径 ≤ 8
+ *  - lg: 模糊半径 > 8
+ * 多层 box-shadow（逗号分隔）取第一个（最外层）。
+ */
 function parseBoxShadow(value: string): ElementStyle['boxShadow'] {
   const v = value.trim().toLowerCase()
   if (v === 'none') return 'none'
-  // 用生成值简单反推：含 10px 15px → lg；含 4px 6px → md；含 1px 2px → sm
-  if (/10px\s+15px/.test(v)) return 'lg'
-  if (/4px\s+6px/.test(v)) return 'md'
-  if (/1px\s+2px/.test(v)) return 'sm'
-  return undefined
+  // 取第一层（按逗号切分的第一段），避免多层 shadow 误判
+  const first = v.split(',')[0]?.trim() ?? v
+  // box-shadow 至少含 offset-x, offset-y, blur（blur 缺省时为 0）
+  // 提取所有长度 token：<num>(px|em|rem)
+  const lengthTokens = first.match(/-?\d+(?:\.\d+)?(?:px|em|rem)?/g)
+  if (!lengthTokens || lengthTokens.length < 2) return undefined
+  // 第 3 个长度是 blur（offset-x / offset-y / blur / spread）
+  const blurToken = lengthTokens[2] ?? '0'
+  const num = parseFloat(blurToken)
+  if (!isFinite(num) || num <= 0) return 'sm' // 极小或无 blur 视为 sm
+  if (num <= 3) return 'sm'
+  if (num <= 8) return 'md'
+  return 'lg'
 }
 
 const KNOWN_PROPS = new Set([

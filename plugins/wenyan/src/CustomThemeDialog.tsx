@@ -12,33 +12,29 @@
  *     currently edited CSS (300ms debounced).
  *
  * Data model: `editCss` is the single source of truth. `ThemeConfig`
- * is derived from `editCss` via `cssToConfig(editCss)`; every form
- * control writes back via `setEditCss(configToCss(newConfig))`.
+ * is derived from `editCss` via `parseThemeCss(editCss)`; every form
+ * control writes back via `setEditCss(configToCss(newConfig, extraCss))`.
+ * 桥接函数（map / merge / CATEGORY_FIELD_SHOW）抽离到 ./themeConfigBridges.ts。
  */
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { PluginStorage } from '@swallow-note/plugin-sdk'
 import { toast } from 'sonner'
-import { useWenyanRenderer, type RenderOptions } from './useWenyanRenderer'
+import { useWenyanRenderer } from './useWenyanRenderer'
 import {
   configToCss,
-  cssToConfig,
   DEFAULT_THEME_CONFIG,
-  FONT_FAMILY_CSS,
-  resolveFontFamily,
   categoryAtLine,
   categorySelector,
   findSelectorLine,
+  parseThemeCss,
   type ThemeConfig,
-  type ThemeTypography,
   type HeadingLevel,
-  type HeadingLevelFields,
 } from './themeConfig'
-import {
-  ElementStyleEditor,
-  type ElementStyle,
-} from './components/ElementStyle'
+import { VisualEditor, type VisualCategory } from './CustomThemeVisual'
 import { CodeEditor, type CodeEditorRef } from '@/components/CodeEditor'
+import { useDebounce } from '@/components/Plugin/useDebounce'
+import { STORAGE_KEY, PREVIEW_OPTIONS, EXAMPLE_CUSTOM_CSS } from './constants'
 
 export interface CustomTheme {
   /** Stable id of the form `custom:<uuid>`. */
@@ -47,8 +43,6 @@ export interface CustomTheme {
   /** Raw CSS for the theme. */
   css: string
 }
-
-const STORAGE_KEY = 'wenyan-custom-themes'
 
 function newId(): string {
   // crypto.randomUUID exists in modern browsers / Tauri webview; the
@@ -60,94 +54,23 @@ function newId(): string {
 }
 
 /**
- * Default CSS shown in the editor when the user creates a new custom
- * theme. Covers the major selectors used by the @wenyan-md/core
- * renderer so the user can see what's available and tweak any of
- * them. The CSS is intentionally simple — comments label each block
- * with the corresponding Markdown element.
+ * 工具栏按钮共享样式。放在文件顶部（OPT-1/2/3/4 复用）。
  */
-const EXAMPLE_CUSTOM_CSS = `/* 自定义主题示例 —— 选择器参考
-   主题 CSS 通过 applyStylesWithTheme 注入到文章根元素 #wenyan。
-   可用的选择器（按 Markdown 元素分组）： */
-
-/* === 整篇文章 === */
-/* #wenyan                —— 文章根元素
-   #wenyan *              —— 任意后代 */
-
-/* === 标题（# / ## / ### ...） === */
-#wenyan h1 { color: #2c3e50; font-weight: 700; }
-#wenyan h2 { color: #34495e; font-weight: 700; }
-#wenyan h3 { color: #34495e; font-weight: 600; }
-#wenyan h4 { color: #555;    font-weight: 600; }
-#wenyan h5 { color: #666;    font-weight: 600; }
-#wenyan h6 { color: #777;    font-weight: 600; }
-
-/* === 段落（普通段落） === */
-#wenyan p { color: #3f3f3f; }
-
-/* === 引用块（> ...） === */
-#wenyan blockquote {
-  color: #6a737d;
-  background: #f5f5f5;
-  border-left: 4px solid #dfe2e5;
-  padding: 0.5em 1em;
-  margin: 1em 0;
+const TOOLBAR_BTN_STYLE: React.CSSProperties = {
+  padding: '6px 10px',
+  fontSize: 12,
+  borderRadius: 4,
+  border: '1px solid #d1d5db',
+  background: '#fff',
+  color: '#111',
+  cursor: 'pointer',
 }
 
-/* === 链接（[text](url)） === */
-#wenyan a { color: #1aad19; text-decoration: none; }
-
-/* === 列表（- / 1.） === */
-#wenyan ul, #wenyan ol { color: #3f3f3f; }
-#wenyan li { margin: 0.3em 0; }
-
-/* === 表格 === */
-#wenyan table { border-collapse: collapse; }
-#wenyan th, #wenyan td {
-  border: 1px solid #ddd;
-  padding: 0.5em 0.8em;
+const TOOLBAR_BTN_DISABLED_STYLE: React.CSSProperties = {
+  ...TOOLBAR_BTN_STYLE,
+  color: '#9ca3af',
+  cursor: 'not-allowed',
 }
-#wenyan th { background: #f7f7f7; font-weight: 600; }
-
-/* === 代码块（\`\`\`） === */
-#wenyan pre {
-  background: #282c34;
-  color: #abb2bf;
-  border-radius: 5px;
-  padding: 1em;
-  font-size: 12px;
-  overflow-x: auto;
-}
-
-/* === 行内代码（\`code\`） === */
-#wenyan code {
-  background: #f0f0f0;
-  color: #d6336c;
-  border-radius: 3px;
-  padding: 0 4px;
-  font-size: 0.9em;
-}
-/* pre 内的 code 不要套用行内样式 */
-#wenyan pre code {
-  background: transparent;
-  color: inherit;
-  padding: 0;
-  font-size: inherit;
-}
-
-/* === 脚注 === */
-#wenyan .footnote { color: #1aad19; font-size: 0.9em; }
-
-/* === 图片 === */
-#wenyan img { max-width: 100%; border-radius: 4px; }
-
-/* === 分隔线（---） === */
-#wenyan hr {
-  border: none;
-  border-top: 1px dashed #ccc;
-  margin: 1.5em 0;
-}
-`
 
 function loadThemes(store: PluginStorage): Promise<CustomTheme[]> {
   return store.get<CustomTheme[]>(STORAGE_KEY).then((v) => v ?? [])
@@ -155,16 +78,6 @@ function loadThemes(store: PluginStorage): Promise<CustomTheme[]> {
 
 function saveThemes(store: PluginStorage, themes: CustomTheme[]): Promise<void> {
   return store.set(STORAGE_KEY, themes)
-}
-
-/** Debounce helper (matches the one used in WenyanDialog). */
-function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(t)
-  }, [value, delay])
-  return debounced
 }
 
 interface CustomThemeDialogProps {
@@ -181,39 +94,89 @@ interface CustomThemeDialogProps {
 }
 
 type EditMode = 'visual' | 'css'
-type VisualCategory = 'global' | 'heading' | 'paragraph' | 'quote'
 
-/** 固定平台与代码高亮主题预览参数。 */
-const PREVIEW_OPTIONS: RenderOptions = {
-  platform: 'wechat',
-  themeId: 'default',
-  hlThemeId: 'solarized-light',
-  customThemeCss: null,
-  isAddFootnote: false,
-  themeFollowTheme: true,
-  paragraphFollowTheme: true,
-  codeBlockFollowTheme: true,
-  themeOverrides: {
-    primaryColor: '#1aad19',
-    blockquoteBg: '#afb8c133',
-    textColor: '#3f3f3f',
-  },
-  paragraphOptions: {
-    fontSize: 16,
-    lineHeight: 1.75,
-    lineSpacing: 0,
-    fontFamily: 'sans-serif',
-    letterSpacing: 'normal',
-    paragraphSpacing: 'standard',
-    textAlign: 'left',
-    textIndent: 0,
-  },
-  codeBlockOptions: {
-    borderRadius: 5,
-    fontSize: 12,
-    shadow: 'heavy',
-    isMacStyle: true,
-  },
+/** 主题列表项（OPT-3：双击进入 inline 重命名） */
+function ThemeListItem({
+  name,
+  active,
+  onSelect,
+  onRename,
+}: {
+  name: string
+  active: boolean
+  onSelect: () => void
+  onRename: (newName: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  // 进入编辑态时聚焦
+  useEffect(() => {
+    if (editing) inputRef.current?.select()
+  }, [editing])
+
+  const commit = () => {
+    setEditing(false)
+    if (draft.trim() && draft !== name) onRename(draft)
+    else setDraft(name)
+  }
+
+  return (
+    <div
+      onClick={!editing ? onSelect : undefined}
+      onDoubleClick={() => {
+        setDraft(name)
+        setEditing(true)
+      }}
+      style={{
+        padding: '8px 10px',
+        margin: '2px 0',
+        borderRadius: 4,
+        cursor: editing ? 'text' : 'pointer',
+        background: active ? '#dbeafe' : 'transparent',
+        color: active ? '#1d4ed8' : '#374151',
+        fontSize: 13,
+        fontWeight: active ? 600 : 400,
+      }}
+    >
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Escape') {
+              setDraft(name)
+              setEditing(false)
+            }
+          }}
+          // 阻止点击/双击冒泡触发选中
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          style={{
+            width: '100%',
+            border: '1px solid #93c5fd',
+            borderRadius: 3,
+            padding: '2px 4px',
+            fontSize: 13,
+            outline: 'none',
+          }}
+        />
+      ) : (
+        <>
+          {name}
+          <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 6 }}>
+            （双击重命名）
+          </span>
+        </>
+      )}
+    </div>
+  )
 }
 
 export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
@@ -262,10 +225,16 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
     }
   }, [activeId, themes])
 
-  // 派生 ThemeConfig（始终以 editCss 为单一来源）
-  const themeConfig = useMemo<ThemeConfig>(() => {
-    if (!editCss.trim()) return DEFAULT_THEME_CONFIG
-    return cssToConfig(editCss)
+  // 派生 ThemeConfig + extraCss（始终以 editCss 为单一来源）。
+  // extraCss 收集用户手写但 ThemeConfig 不可识别的规则，
+  // 改 visual 时由 configToCss(next, extraCss) 末尾追加，避免 roundtrip 丢失。
+  const { themeConfig, extraCss } = useMemo<{
+    themeConfig: ThemeConfig
+    extraCss: string
+  }>(() => {
+    if (!editCss.trim()) return { themeConfig: DEFAULT_THEME_CONFIG, extraCss: '' }
+    const parsed = parseThemeCss(editCss)
+    return { themeConfig: parsed.config, extraCss: parsed.extraCss }
   }, [editCss])
 
   // 触发预览渲染。
@@ -283,9 +252,10 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
   const updateConfig = useCallback(
     (updater: (cfg: ThemeConfig) => ThemeConfig) => {
       const next = updater(themeConfig)
-      setEditCss(configToCss(next))
+      // 把 extraCss 串回去，保留手写 CSS 额外规则
+      setEditCss(configToCss(next, extraCss))
     },
-    [themeConfig]
+    [themeConfig, extraCss]
   )
 
   // ── 可视化设计 ↔ 手写 CSS 同步分类切换 ──────────────────────
@@ -338,6 +308,88 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
     toast.success('已新建自定义主题')
   }, [store])
 
+  // OPT-1: 复制当前主题为新主题（id 用 newId()，name 加「-副本」）
+  const handleDuplicate = useCallback(() => {
+    if (!activeId) return
+    const t = themes.find((x) => x.id === activeId)
+    if (!t) return
+    const id = newId()
+    const dup: CustomTheme = {
+      id,
+      name: `${t.name}-副本`,
+      css: t.css,
+    }
+    setThemes((prev) => {
+      const next = [...prev, dup]
+      void saveThemes(store, next)
+      return next
+    })
+    setActiveId(id)
+    toast.success('已复制主题')
+  }, [activeId, themes, store])
+
+  // OPT-2: 导出当前主题为 .json 文件（用 a 标签触发下载）
+  const handleExport = useCallback(() => {
+    if (!activeId) return
+    const t = themes.find((x) => x.id === activeId)
+    if (!t) return
+    try {
+      const blob = new Blob([JSON.stringify({ name: t.name, css: t.css }, null, 2)], {
+        type: 'application/json',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${t.name || 'theme'}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error('导出主题失败')
+      console.error('Export failed:', err)
+    }
+  }, [activeId, themes])
+
+  // OPT-2: 导入主题（接受 .json；如失败则回退为 raw css 字符串）
+  const handleImport = useCallback(() => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json,application/json,.css,text/css'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const text = String(reader.result ?? '')
+        let name = file.name.replace(/\.(json|css)$/i, '')
+        let css = text
+        if (file.name.toLowerCase().endsWith('.json')) {
+          try {
+            const obj = JSON.parse(text)
+            if (typeof obj.name === 'string') name = obj.name
+            if (typeof obj.css === 'string') css = obj.css
+          } catch (err) {
+            toast.error('JSON 解析失败')
+            return
+          }
+        }
+        const id = newId()
+        const theme: CustomTheme = { id, name, css }
+        setThemes((prev) => {
+          const next = [...prev, theme]
+          void saveThemes(store, next)
+          return next
+        })
+        setActiveId(id)
+        toast.success('已导入主题')
+      }
+      reader.readAsText(file)
+    }
+    input.click()
+  }, [store])
+
+  // OPT-4: 删除带 undo（toast 提供 5s 撤销窗口）
   const handleDelete = useCallback(() => {
     if (!activeId) return
     const t = themes.find((x) => x.id === activeId)
@@ -349,8 +401,37 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
       return next
     })
     setActiveId(null)
-    toast.success('已删除自定义主题')
+    // 提供撤销能力
+    const undo = () => {
+      setThemes((prev) => {
+        if (prev.some((x) => x.id === t.id)) return prev
+        const next = [...prev, t]
+        void saveThemes(store, next)
+        return next
+      })
+      setActiveId(t.id)
+    }
+    toast.success(`已删除主题「${t.name}」`, {
+      description: '5 秒内可撤销',
+      action: { label: '撤销', onClick: undo },
+      duration: 5000,
+    })
   }, [activeId, themes, store])
+
+  // OPT-3: inline 重命名（双击列表项进入编辑，blur/Enter 保存）
+  const handleRename = useCallback(
+    (id: string, name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      setThemes((prev) => {
+        const next = prev.map((x) => (x.id === id ? { ...x, name: trimmed } : x))
+        void saveThemes(store, next)
+        return next
+      })
+      toast.success('已重命名')
+    },
+    [store]
+  )
 
   const handleSave = useCallback(() => {
     if (!activeId) return
@@ -364,6 +445,33 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
     })
     toast.success('主题已保存')
   }, [activeId, editName, editCss, store])
+
+  // OPT-7: 复制当前编辑区 CSS 到剪贴板（不依赖「保存」按钮，已存盘 vs 草稿都支持）
+  const handleCopyCss = useCallback(async () => {
+    if (!editCss.trim()) {
+      toast.error('当前没有可复制的 CSS')
+      return
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(editCss)
+      } else {
+        // 兜底：旧 webview / 非安全上下文下的 textarea 复制
+        const ta = document.createElement('textarea')
+        ta.value = editCss
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      }
+      toast.success('CSS 已复制到剪贴板')
+    } catch (err) {
+      console.error('Copy CSS failed:', err)
+      toast.error('复制失败，请手动选择文本')
+    }
+  }, [editCss])
 
   const handleSelectInParent = useCallback(() => {
     if (!activeId) return
@@ -433,31 +541,65 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
           <span style={{ fontSize: 15, fontWeight: 600, color: '#111' }}>
             自定义主题
           </span>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 4,
-              borderRadius: 4,
-              color: '#6b7280',
-              lineHeight: 1,
-            }}
-            title="关闭"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* OPT-7: 复制当前编辑区 CSS 到剪贴板 */}
+            <button
+              onClick={handleCopyCss}
+              disabled={!editCss.trim()}
+              title="复制当前 CSS 到剪贴板"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                background: 'transparent',
+                border: '1px solid #d1d5db',
+                cursor: editCss.trim() ? 'pointer' : 'not-allowed',
+                padding: '4px 8px',
+                borderRadius: 4,
+                color: editCss.trim() ? '#374151' : '#9ca3af',
+                fontSize: 12,
+                lineHeight: 1,
+              }}
             >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              复制 CSS
+            </button>
+            <button
+              onClick={onClose}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 4,
+                borderRadius: 4,
+                color: '#6b7280',
+                lineHeight: 1,
+              }}
+              title="关闭"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Body: 2 columns */}
@@ -477,38 +619,45 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
               style={{
                 padding: 12,
                 borderBottom: '1px solid #e5e7eb',
-                display: 'flex',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
                 gap: 6,
               }}
             >
               <button
                 onClick={handleNew}
-                style={{
-                  flex: 1,
-                  padding: '6px 10px',
-                  fontSize: 12,
-                  borderRadius: 4,
-                  border: '1px solid #d1d5db',
-                  background: '#fff',
-                  color: '#111',
-                  cursor: 'pointer',
-                }}
+                style={TOOLBAR_BTN_STYLE}
               >
                 新建
               </button>
               <button
+                onClick={handleDuplicate}
+                disabled={!activeId}
+                style={!activeId ? TOOLBAR_BTN_DISABLED_STYLE : TOOLBAR_BTN_STYLE}
+              >
+                复制
+              </button>
+              <button
+                onClick={handleImport}
+                style={TOOLBAR_BTN_STYLE}
+              >
+                导入
+              </button>
+              <button
+                onClick={handleExport}
+                disabled={!activeId}
+                style={!activeId ? TOOLBAR_BTN_DISABLED_STYLE : TOOLBAR_BTN_STYLE}
+              >
+                导出
+              </button>
+              <button
                 onClick={handleDelete}
                 disabled={!activeId}
-                style={{
-                  flex: 1,
-                  padding: '6px 10px',
-                  fontSize: 12,
-                  borderRadius: 4,
-                  border: '1px solid #d1d5db',
-                  background: '#fff',
-                  color: !activeId ? '#9ca3af' : '#b91c1c',
-                  cursor: !activeId ? 'not-allowed' : 'pointer',
-                }}
+                style={
+                  !activeId
+                    ? TOOLBAR_BTN_DISABLED_STYLE
+                    : { ...TOOLBAR_BTN_STYLE, color: '#b91c1c', gridColumn: 'span 2' }
+                }
               >
                 删除
               </button>
@@ -527,22 +676,13 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
                 </div>
               ) : (
                 themes.map((t) => (
-                  <div
+                  <ThemeListItem
                     key={t.id}
-                    onClick={() => setActiveId(t.id)}
-                    style={{
-                      padding: '8px 10px',
-                      margin: '2px 0',
-                      borderRadius: 4,
-                      cursor: 'pointer',
-                      background: activeId === t.id ? '#dbeafe' : 'transparent',
-                      color: activeId === t.id ? '#1d4ed8' : '#374151',
-                      fontSize: 13,
-                      fontWeight: activeId === t.id ? 600 : 400,
-                    }}
-                  >
-                    {t.name}
-                  </div>
+                    name={t.name}
+                    active={activeId === t.id}
+                    onSelect={() => setActiveId(t.id)}
+                    onRename={(newName) => handleRename(t.id, newName)}
+                  />
                 ))
               )}
             </div>
@@ -823,363 +963,8 @@ function ModeTab({
   )
 }
 
-/** 嵌套分类 tab（全局 / 标题 / 段落 / 引用） */
-function VisualCategoryTabs({
-  category,
-  onChange,
-}: {
-  category: VisualCategory
-  onChange: (c: VisualCategory) => void
-}): ReactNode {
-  const items: Array<{ id: VisualCategory; label: string }> = [
-    { id: 'global', label: '全局' },
-    { id: 'heading', label: '标题' },
-    { id: 'paragraph', label: '段落' },
-    { id: 'quote', label: '引用' },
-  ]
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: 6,
-        padding: '10px 16px',
-        borderBottom: '1px solid #e5e7eb',
-        background: '#fafafa',
-        flexShrink: 0,
-      }}
-    >
-      {items.map((it) => {
-        const active = category === it.id
-        return (
-          <button
-            key={it.id}
-            onClick={() => onChange(it.id)}
-            style={{
-              padding: '4px 12px',
-              fontSize: 12,
-              fontWeight: active ? 600 : 400,
-              color: active ? '#fff' : '#374151',
-              background: active ? '#1aad19' : '#fff',
-              border: active ? '1px solid #1aad19' : '1px solid #d1d5db',
-              borderRadius: 4,
-              cursor: 'pointer',
-            }}
-          >
-            {it.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-// ---- 4 个分类面板的 ThemeConfig ↔ ElementStyle 桥接函数 ----
-//
-// 设计原则：editCss 是单一来源；ThemeConfig 通过 cssToConfig(editCss) 派生；
-// ElementStyleEditor 的 value 由 ThemeConfig 派生而来，onChange 触发
-// ThemeConfig 更新后再次 setEditCss(configToCss(next)) 写回。
-// 桥接函数负责「主题模型 ↔ 通用样式模型」的双向转换。
-
-/** 全局面板：绑 typography（注：colors.textColor 在 configToCss 中未输出，
- *  全局面板不再暴露 color 字段以避免无效操作） */
-function mapGlobalToElementStyle(config: ThemeConfig): ElementStyle {
-  return {
-    // 把 FontFamily 关键字展开为 ElementStyle 的 CSS 字符串，便于在编辑器中显示
-    fontFamily: FONT_FAMILY_CSS[config.typography.fontFamily],
-    fontSize: config.typography.fontSize,
-    lineHeight: config.typography.lineHeight,
-    letterSpacing: config.typography.letterSpacing,
-  }
-}
-
-function mergeGlobalFromElementStyle(
-  config: ThemeConfig,
-  next: ElementStyle
-): ThemeConfig {
-  // fontFamily 受 FontFamily 枚举约束，需要把 CSS 字符串归一化为关键字
-  const fontFamilyKey: ThemeTypography['fontFamily'] =
-    next.fontFamily !== undefined
-      ? (resolveFontFamily(next.fontFamily) as ThemeTypography['fontFamily'])
-      : config.typography.fontFamily
-  return {
-    ...config,
-    typography: {
-      ...config.typography,
-      fontFamily: fontFamilyKey,
-      fontSize: next.fontSize ?? config.typography.fontSize,
-      lineHeight: next.lineHeight ?? config.typography.lineHeight,
-      letterSpacing: next.letterSpacing ?? config.typography.letterSpacing,
-    },
-  }
-}
-
-/** 标题面板：绑 heading（按 level 拆分） */
-function mapHeadingToElementStyle(
-  config: ThemeConfig,
-  level: HeadingLevel
-): ElementStyle {
-  // level 字段优先于 all；缺失字段回退到 all
-  const fields: HeadingLevelFields = {
-    ...(config.heading.all ?? {}),
-    ...(config.heading[level] ?? {}),
-  }
-  return {
-    color: fields.color,
-    fontSize: fields.fontSize,
-    lineHeight: fields.lineHeight,
-    letterSpacing: fields.letterSpacing,
-    textAlign: fields.textAlign,
-    display: fields.display,
-  }
-}
-
-function mergeHeadingFromElementStyle(
-  config: ThemeConfig,
-  level: HeadingLevel,
-  next: ElementStyle
-): ThemeConfig {
-  // `all` 级别合并到 heading.all；具体 level 合并到 heading[level]
-  const updateFields = (
-    prev: HeadingLevelFields | undefined,
-    src: ElementStyle
-  ): HeadingLevelFields => {
-    const merged: HeadingLevelFields = { ...(prev ?? {}) }
-    if (next.color !== undefined) merged.color = next.color
-    if (next.fontSize !== undefined) merged.fontSize = next.fontSize
-    if (next.lineHeight !== undefined) merged.lineHeight = next.lineHeight
-    if (next.letterSpacing !== undefined) merged.letterSpacing = next.letterSpacing
-    if (next.textAlign !== undefined) merged.textAlign = next.textAlign
-    if (next.display !== undefined) merged.display = next.display
-    return merged
-  }
-
-  if (level === 'all') {
-    return {
-      ...config,
-      heading: {
-        ...config.heading,
-        all: updateFields(config.heading.all, next),
-      },
-    }
-  }
-  return {
-    ...config,
-    heading: {
-      ...config.heading,
-      [level]: updateFields(config.heading[level], next),
-    },
-  }
-}
-
-/** 段落面板：绑 paragraph */
-function mapParagraphToElementStyle(config: ThemeConfig): ElementStyle {
-  return {
-    fontFamily: config.paragraph.fontFamily,
-    fontSize: config.paragraph.fontSize,
-    color: config.paragraph.color,
-    lineHeight: config.paragraph.lineHeight,
-    letterSpacing: config.paragraph.letterSpacing,
-    textAlign: config.paragraph.textAlign,
-    padding: config.paragraph.padding,
-    margin: config.paragraph.margin,
-  }
-}
-
-function mergeParagraphFromElementStyle(
-  config: ThemeConfig,
-  next: ElementStyle
-): ThemeConfig {
-  return {
-    ...config,
-    paragraph: {
-      ...config.paragraph,
-      fontFamily: next.fontFamily,
-      fontSize: next.fontSize,
-      color: next.color,
-      lineHeight: next.lineHeight,
-      letterSpacing: next.letterSpacing,
-      textAlign: next.textAlign,
-      padding: next.padding,
-      margin: next.margin,
-    },
-  }
-}
-
-/** 引用面板：绑 quote */
-function mapQuoteToElementStyle(config: ThemeConfig): ElementStyle {
-  return {
-    color: config.quote.color,
-    backgroundColor: config.quote.backgroundColor,
-    borderRadius: config.quote.borderRadius,
-    padding: config.quote.padding,
-    border: config.quote.border,
-    fontSize: config.quote.fontSize,
-    display: config.quote.display,
-  }
-}
-
-function mergeQuoteFromElementStyle(
-  config: ThemeConfig,
-  next: ElementStyle
-): ThemeConfig {
-  return {
-    ...config,
-    quote: {
-      ...config.quote,
-      color: next.color,
-      backgroundColor: next.backgroundColor,
-      borderRadius: next.borderRadius,
-      padding: next.padding,
-      border: next.border,
-      fontSize: next.fontSize,
-      display: next.display,
-    },
-  }
-}
-
-/** 可视化设计编辑器主组件 */
-function VisualEditor({
-  config,
-  category,
-  onCategoryChange,
-  onChange,
-  onFieldClick,
-}: {
-  config: ThemeConfig
-  category: VisualCategory
-  onCategoryChange: (c: VisualCategory) => void
-  onChange: (updater: (cfg: ThemeConfig) => ThemeConfig) => void
-  onFieldClick?: (cat: VisualCategory) => void
-}): ReactNode {
-  // 标题级别选择（仅在 heading 分类下生效）
-  const [headingLevel, setHeadingLevel] = useState<HeadingLevel>('all')
-
-  return (
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        // 横向不滚动（与 overflowY 区分；子控件用 box model 布局不再撑破）
-        maxWidth: '100%',
-      }}
-    >
-      <VisualCategoryTabs category={category} onChange={onCategoryChange} />
-      {category === 'heading' && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '8px 16px 0',
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontSize: 12, color: '#6b7280' }}>标题级别</span>
-          <select
-            value={headingLevel}
-            onChange={(e) => setHeadingLevel(e.target.value as HeadingLevel)}
-            style={{
-              padding: '4px 8px',
-              fontSize: 12,
-              border: '1px solid #d1d5db',
-              borderRadius: 4,
-              background: '#fff',
-              outline: 'none',
-            }}
-          >
-            <option value="all">全部 (h1..h6)</option>
-            <option value="h1">H1</option>
-            <option value="h2">H2</option>
-            <option value="h3">H3</option>
-            <option value="h4">H4</option>
-            <option value="h5">H5</option>
-            <option value="h6">H6</option>
-          </select>
-          <span style={{ fontSize: 11, color: '#9ca3af' }}>
-            {headingLevel === 'all'
-              ? '编辑将应用到所有 h1-h6 标题'
-              : `仅编辑 ${headingLevel} 标题，其它继承自「全部」`}
-          </span>
-        </div>
-      )}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          minWidth: 0,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          padding: 16,
-        }}
-      >
-        {category === 'global' && (
-          <ElementStyleEditor
-            value={mapGlobalToElementStyle(config)}
-            onChange={(next) => onChange((cfg) => mergeGlobalFromElementStyle(cfg, next))}
-            onFieldClick={onFieldClick ? () => onFieldClick('global') : undefined}
-            show={{
-              fontFamily: true,
-              fontSize: true,
-              lineHeight: true,
-              letterSpacing: true,
-            }}
-          />
-        )}
-        {category === 'heading' && (
-          <ElementStyleEditor
-            value={mapHeadingToElementStyle(config, headingLevel)}
-            onChange={(next) =>
-              onChange((cfg) => mergeHeadingFromElementStyle(cfg, headingLevel, next))
-            }
-            onFieldClick={onFieldClick ? () => onFieldClick('heading') : undefined}
-            show={{
-              color: true,
-              fontSize: true,
-              lineHeight: true,
-              letterSpacing: true,
-              textAlign: true,
-              display: true,
-            }}
-          />
-        )}
-        {category === 'paragraph' && (
-          <ElementStyleEditor
-            value={mapParagraphToElementStyle(config)}
-            onChange={(next) =>
-              onChange((cfg) => mergeParagraphFromElementStyle(cfg, next))
-            }
-            onFieldClick={onFieldClick ? () => onFieldClick('paragraph') : undefined}
-            show={{
-              fontFamily: true,
-              fontSize: true,
-              color: true,
-              lineHeight: true,
-              letterSpacing: true,
-              textAlign: true,
-              padding: true,
-              margin: true,
-            }}
-          />
-        )}
-        {category === 'quote' && (
-          <ElementStyleEditor
-            value={mapQuoteToElementStyle(config)}
-            onChange={(next) => onChange((cfg) => mergeQuoteFromElementStyle(cfg, next))}
-            onFieldClick={onFieldClick ? () => onFieldClick('quote') : undefined}
-            show={{
-              color: true,
-              backgroundColor: true,
-              borderRadius: true,
-              padding: true,
-              border: true,
-              fontSize: true,
-              display: true,
-            }}
-          />
-        )}
-      </div>
-    </div>
-  )
-}
+/** 嵌套分类 tab 与可视化设计编辑器已抽离到 ./CustomThemeVisual.tsx
+ *  - VisualCategoryTabs
+ *  - VisualEditor
+ *  - VisualCategory
+ */
