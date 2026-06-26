@@ -123,11 +123,15 @@ fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) 
     }
 
     // 用 jwalk 并行预取 metadata；max_depth(1)+sort 保证单层一致排序。
+    // jwalk 默认 skip_hidden=true 会过滤掉所有点开头的文件/目录，这会导致
+    // show_all_files=true 时隐藏文件仍然不显示。这里显式关闭 jwalk 的隐藏过滤，
+    // 交给下方应用层逻辑根据 show_all_files 统一处理。
     let mut nodes: Vec<FileNode> = Vec::new();
 
     for entry_result in jwalk::WalkDir::new(path)
         .max_depth(1)
         .sort(true)
+        .skip_hidden(false)
     {
         let entry = match entry_result {
             Ok(e) => e,
