@@ -55,9 +55,21 @@ class DownloadCoordinator {
   private startedAt = 0
   /** url → 应用回调上下文（找到 block 立即替换）。 */
   private urlMap: Map<string, ApplyContext> = new Map()
+  /** 已处理过的 URL（防止 item-done + results 重复计数）。 */
+  private processedUrls: Set<string> = new Set()
   private listenersRegistered = false
   /** 当前正在飞行的后端 invoke 任务数。 */
   private inFlight = 0
+
+  constructor() {
+    // 应用启动即注册全局事件监听，避免第一次点击时监听器尚未就绪导致事件丢失。
+    this.ensureListeners()
+  }
+
+  /** 是否有正在飞行的下载任务（用于 Toolbar 禁用按钮）。 */
+  get isBusy(): boolean {
+    return this.inFlight > 0
+  }
 
   /** 将已下载字节数与耗时格式化为速度字符串。 */
   private formatSpeed(bytes: number, elapsedMs: number): string {
@@ -79,19 +91,20 @@ class DownloadCoordinator {
     toast.loading(text, { id: this.toastId })
   }
 
-  /** 注册一次性的全局事件监听（监听器引用不保存，应用生命周期内常驻）。 */
+  /** 注册一次性的全局事件监听（应用生命周期内常驻）。 */
   private async ensureListeners() {
     if (this.listenersRegistered) return
     this.listenersRegistered = true
 
-    // 监听单张完成事件：成功时立即替换 block URL
+    // 监听单张完成事件：成功时立即替换 block URL，并即时刷新进度
     await listen<ItemDonePayload>(
       'remote-image-download-item-done',
       (e) => {
         const { url, ok, relative_path, file_name } = e.payload
+
+        // 替换 block URL（如果仍在 urlMap 中）
         const ctx = this.urlMap.get(url)
-        if (!ctx) return
-        if (ok && relative_path) {
+        if (ctx && ok && relative_path) {
           try {
             ctx.editor.updateBlock(ctx.blockId, {
               type: 'image',
@@ -102,6 +115,15 @@ class DownloadCoordinator {
           }
         }
         this.urlMap.delete(url)
+
+        // 去重计数：item-done 与 runBatch 的结果可能重复到达
+        if (!this.processedUrls.has(url)) {
+          this.processedUrls.add(url)
+          this.done = Math.min(this.done + 1, this.total)
+          if (ok) this.successCount++
+          else this.failedCount++
+          this.updateToast()
+        }
       }
     )
 
@@ -139,8 +161,8 @@ class DownloadCoordinator {
       this.successCount = 0
       this.failedCount = 0
       this.bytesDownloaded = 0
+      this.processedUrls.clear()
     }
-    this.ensureListeners()
 
     // 2. 累积 urlMap
     for (const [url, c] of blockContexts) {
@@ -179,20 +201,21 @@ class DownloadCoordinator {
         toast.error(`远程图片下载失败：${message}`)
       }
 
-      // 累加 done（即便 invoke 失败也按 items.length 计）
-      const completed = results.length > 0 ? results.length : items.length
+      // 累加 done：优先使用 invoke 返回的 results，补充尚未被 item-done 处理的 URL
       if (results.length > 0) {
         for (const r of results) {
-          this.done++
-          if (r.ok) this.successCount++
-          else this.failedCount++
+          if (!this.processedUrls.has(r.url)) {
+            this.processedUrls.add(r.url)
+            this.done = Math.min(this.done + 1, this.total)
+            if (r.ok) this.successCount++
+            else this.failedCount++
+          }
         }
       } else {
-        // invoke 失败：本批全算失败
-        this.done += items.length
+        // invoke 整体失败：本批全算失败
+        this.done = Math.min(this.done + items.length, this.total)
         this.failedCount += items.length
       }
-      void completed
 
       this.inFlight--
       this.updateToast()
@@ -217,6 +240,7 @@ class DownloadCoordinator {
     this.bytesDownloaded = 0
     this.startedAt = 0
     this.urlMap.clear()
+    this.processedUrls.clear()
 
     if (id !== null) toast.dismiss(id)
 

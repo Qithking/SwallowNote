@@ -430,15 +430,23 @@ function BlockNoteInner({
       if (detail.tabId && activeTabId && detail.tabId !== activeTabId) return
       if (cancelled || !editor) return
       try {
-        // 1. 收集远程图片 block
+        // 1. 收集远程图片 block（递归遍历 document，包含嵌套在列表/引用/表格等 children 中的图片）
         const remoteBlocks: { blockId: string; url: string }[] = []
-        for (const block of editor.document as any[]) {
-          if (!block || (block.type !== 'image' && block.type !== 'file')) continue
-          const url = (block.props as any)?.url
-          if (typeof url !== 'string') continue
-          if (!/^https?:\/\//i.test(url)) continue
-          remoteBlocks.push({ blockId: block.id, url })
+        const collectRemoteImages = (blocks: any[]) => {
+          for (const block of blocks) {
+            if (!block) continue
+            if (block.type === 'image' || block.type === 'file') {
+              const url = (block.props as any)?.url
+              if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+                remoteBlocks.push({ blockId: block.id, url })
+              }
+            }
+            if (Array.isArray(block.children) && block.children.length > 0) {
+              collectRemoteImages(block.children)
+            }
+          }
         }
+        collectRemoteImages(editor.document as any[])
 
         if (remoteBlocks.length === 0) {
           toast.info('当前文档无远程图片')
@@ -450,14 +458,23 @@ function BlockNoteInner({
         const filePath = activeTab?.path || ''
         const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/')
 
-        // 3. 构造 url → { editor, blockId } 映射 + batch items
+        // 3. 对 remoteBlocks 按 URL 去重：同一张远程图片只下载一次，避免重复下载
+        //    也避免 urlMap 因 key 冲突导致部分 block 无法替换。
+        const seenUrls = new Set<string>()
+        const uniqueRemoteBlocks = remoteBlocks.filter((b) => {
+          if (seenUrls.has(b.url)) return false
+          seenUrls.add(b.url)
+          return true
+        })
+
+        // 4. 构造 url → { editor, blockId } 映射 + batch items
         const blockContexts = new Map<string, { editor: any; blockId: string }>()
-        for (const b of remoteBlocks) {
+        for (const b of uniqueRemoteBlocks) {
           blockContexts.set(b.url, { editor, blockId: b.blockId })
         }
-        const items = remoteBlocks.map((b) => ({ url: b.url, blockId: b.blockId }))
+        const items = uniqueRemoteBlocks.map((b) => ({ url: b.url, blockId: b.blockId }))
 
-        // 4. 交给协调器：合并 toast + 即时替换
+        // 5. 交给协调器：合并 toast + 即时替换
         downloadCoordinator.enqueueBatch(items, blockContexts, {
           targetDir,
           fileDir,
