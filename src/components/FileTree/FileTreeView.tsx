@@ -19,7 +19,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
 import { useTranslation } from 'react-i18next'
-import { matchShortcut, getShortcutKey } from '@/lib/shortcuts'
+import { dispatchBuiltin } from '@/hooks/useKeyboardShortcuts'
 import { useFileTreeActions } from '@/hooks/useFileTreeActions'
 import { useFileTreeDragDrop } from '@/hooks/useFileTreeDragDrop'
 import { findNodeByPath, collectAllPaths } from '@/lib/utils/treeUtils'
@@ -368,9 +368,8 @@ export const FileTreeView = memo(function FileTreeView() {
   const setMultiSelectedPaths = useFileTreeStore((s) => s.setMultiSelectedPaths)
   const lastClickedPath = useFileTreeStore((s) => s.lastClickedPath)
   const setLastClickedPath = useFileTreeStore((s) => s.setLastClickedPath)
-  const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
-  const customShortcuts = useUIStore((s) => s.customShortcuts)
-  const { t } = useTranslation()
+const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
+const { t } = useTranslation()
 
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [sortMode, setSortMode] = useState<FileTreeSortMode>('default')
@@ -569,6 +568,11 @@ export const FileTreeView = memo(function FileTreeView() {
   }
 
   // 键盘快捷键 (F2 重命名 / Delete 删除)
+  // Uses dispatchBuiltin so plugin-command conflicts are detected
+  // and surfaced to the user via toast (same as all other built-in
+  // shortcuts).  dispatchBuiltin reads the latest customShortcuts
+  // from the store internally, so we don't need customShortcuts in
+  // the dependency array.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement
@@ -576,26 +580,21 @@ export const FileTreeView = memo(function FileTreeView() {
         return
       }
 
-      const renameShortcut = getShortcutKey('renameFile', customShortcuts)
-      if (matchShortcut(e, renameShortcut)) {
-        e.preventDefault()
+      if (dispatchBuiltin(e, 'renameFile', () => {
         if (selectedPath) {
           const node = findNodeByPath(selectedPath, nodes)
           if (node) handleStartEdit(node.path, node.name, node.isDirectory)
         }
-        return
-      }
+      })) return
 
-      const deleteShortcut = getShortcutKey('deleteFile', customShortcuts)
-      if (matchShortcut(e, deleteShortcut)) {
-        e.preventDefault()
+      dispatchBuiltin(e, 'deleteFile', () => {
         handleDeleteSelected()
-      }
+      })
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedPath, nodes, customShortcuts, handleStartEdit, handleDeleteSelected])
+  }, [selectedPath, nodes, handleStartEdit, handleDeleteSelected])
 
   const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath, nodes)?.isDirectory ?? false) : false
 

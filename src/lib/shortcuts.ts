@@ -53,6 +53,54 @@ export function getShortcutKey(
   return customShortcuts[key] ?? DEFAULT_SHORTCUTS_MAP[key]
 }
 
+/**
+ * Map a physical `e.code` to the normalised key name used in
+ * shortcut strings (e.g. 'KeyA' → 'A', 'Digit3' → '3',
+ * 'Comma' → ',').  Returns `null` for codes we don't recognise.
+ *
+ * On macOS, holding Alt (Option) causes `e.key` to produce a
+ * different character (Alt+S → 'ß', Alt+2 → '™', Alt+, → '≤',
+ * etc.).  Both `parseKeyEvent` and `matchShortcut` use this
+ * helper to normalise via the physical key (`e.code`) so that
+ * Alt-containing shortcuts are stored and matched consistently
+ * regardless of platform.
+ */
+const CODE_TO_KEY: Record<string, string> = {
+  // Letters
+  ...Object.fromEntries(
+    Array.from({ length: 26 }, (_, i) =>
+      [`Key${String.fromCharCode(65 + i)}`, String.fromCharCode(65 + i)])
+  ),
+  // Digits
+  ...Object.fromEntries(
+    Array.from({ length: 10 }, (_, i) => [`Digit${i}`, String(i)])
+  ),
+  // Punctuation
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  Minus: '-',
+  Equal: '=',
+  BracketLeft: '[',
+  BracketRight: ']',
+  Semicolon: ';',
+  Quote: "'",
+  Backquote: '`',
+  Backslash: '\\',
+  // Whitespace / special
+  Space: 'Space',
+  Enter: 'Enter',
+  Tab: 'Tab',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+}
+
+function codeToKeyName(code: string): string | null {
+  // F1-F12 are not in CODE_TO_KEY but follow a simple pattern.
+  if (/^F([1-9]|1[0-2])$/.test(code)) return code
+  return CODE_TO_KEY[code] ?? null
+}
+
 export function matchShortcut(
   e: KeyboardEvent,
   shortcutString: string
@@ -69,7 +117,32 @@ export function matchShortcut(
   const shiftMatch = needShift ? e.shiftKey : !e.shiftKey
   const altMatch = needAlt ? e.altKey : !e.altKey
 
-  return ctrlMatch && shiftMatch && altMatch && e.key.toLowerCase() === mainKey
+  const keyLower = e.key.toLowerCase()
+
+  // Primary match: direct e.key comparison
+  let keyMatch = keyLower === mainKey
+
+  // #5: On macOS MacBook keyboards the "Delete" key reports as
+  // "Backspace".  Accept both so the shortcut works regardless of
+  // which physical key the user pressed.
+  if (!keyMatch) {
+    if (mainKey === 'delete' && keyLower === 'backspace') keyMatch = true
+    else if (mainKey === 'backspace' && keyLower === 'delete') keyMatch = true
+  }
+
+  // #4: On macOS, holding Alt (Option) causes e.key to produce a
+  // different character (Alt+S → 'ß', Alt+2 → '™', Alt+, → '≤',
+  // etc.).  Fall back to e.code (which reflects the physical key,
+  // not the produced character) so Alt combos match correctly
+  // cross-platform.
+  if (!keyMatch) {
+    const codeKey = codeToKeyName(e.code)
+    if (codeKey !== null) {
+      keyMatch = codeKey.toLowerCase() === mainKey
+    }
+  }
+
+  return ctrlMatch && shiftMatch && altMatch && keyMatch
 }
 
 export function parseKeyEvent(e: KeyboardEvent): string | null {
@@ -82,25 +155,27 @@ export function parseKeyEvent(e: KeyboardEvent): string | null {
   if (e.altKey) parts.push('Alt')
 
   let keyName = e.key
+
+  // On macOS, holding Alt (Option) causes e.key to produce a
+  // different character (Alt+S → 'ß', Alt+2 → '™', Alt+, → '≤',
+  // etc.).  Normalise back to the physical key via e.code so the
+  // recorded shortcut string is platform-independent.  We only
+  // override when e.code gives us a recognisable key; if e.code
+  // is unknown we keep the original e.key (better to store
+  // something than nothing).
+  if (e.altKey) {
+    const codeKey = codeToKeyName(e.code)
+    if (codeKey !== null) {
+      keyName = codeKey
+    }
+  }
+
   if (keyName === ' ') keyName = 'Space'
   else if (keyName.length === 1) keyName = keyName.toUpperCase()
   else keyName = keyName.charAt(0).toUpperCase() + keyName.slice(1)
 
   parts.push(keyName)
   return parts.join('+')
-}
-
-export function findShortcutConflict(
-  key: ShortcutKey,
-  value: string,
-  customShortcuts: Record<string, string>
-): ShortcutKey | null {
-  for (const def of DEFAULT_SHORTCUTS) {
-    if (def.key === key) continue
-    const currentKey = customShortcuts[def.key] ?? def.defaultKey
-    if (currentKey === value) return def.key
-  }
-  return null
 }
 
 /**

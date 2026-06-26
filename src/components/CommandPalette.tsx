@@ -14,7 +14,6 @@ import {
   FileText,
   FolderOpen,
   Settings,
-  Terminal,
   Save,
   RefreshCw,
   Zap,
@@ -35,8 +34,15 @@ import {
   CommandList,
   CommandShortcut,
 } from '@/components/ui/command'
-import { formatShortcutForDisplay } from '@/lib/shortcuts'
+import { formatShortcutForDisplay, getShortcutKey } from '@/lib/shortcuts'
 import type { PluginCommand } from '@/types/plugin'
+import {
+  handleNewFile,
+  handleOpenFile,
+  handleSaveFile,
+  handleToggleSettings,
+  handleRefreshFileTree,
+} from '@/hooks/useKeyboardShortcuts'
 
 interface CommandItem {
   id: string
@@ -60,7 +66,7 @@ function pluginIconFor(command: PluginCommand): typeof Zap {
 function CommandPalette() {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const { commandPaletteVisible, toggleCommandPalette, pluginCommandShortcuts } = useUIStore()
+  const { commandPaletteVisible, toggleCommandPalette, pluginCommandShortcuts, customShortcuts } = useUIStore()
   const pluginCommands = usePluginCommands()
 
   // Lookup plugin id by command id so we can show the bound
@@ -94,35 +100,40 @@ function CommandPalette() {
   }, [pluginCommands, pluginCommandShortcuts])
 
   const commands: CommandItem[] = useMemo(() => {
+    const sk = (k: Parameters<typeof getShortcutKey>[0]) =>
+      formatShortcutForDisplay(getShortcutKey(k, customShortcuts))
     const builtIn: CommandItem[] = [
       {
         id: 'open-folder',
         label: 'Open Folder',
         icon: FolderOpen,
-        shortcut: 'Ctrl+O',
+        shortcut: sk('openFile'),
         group: 'navigation',
-        action: async () => {
+        action: () => {
           toggleCommandPalette()
+          void handleOpenFile()
         },
       },
       {
         id: 'new-file',
         label: 'New File',
         icon: FileText,
-        shortcut: 'Ctrl+N',
+        shortcut: sk('newFile'),
         group: 'navigation',
         action: () => {
           toggleCommandPalette()
+          void handleNewFile()
         },
       },
       {
         id: 'save',
         label: 'Save',
         icon: Save,
-        shortcut: 'Ctrl+S',
+        shortcut: sk('saveFile'),
         group: 'edit',
         action: () => {
           toggleCommandPalette()
+          void handleSaveFile()
         },
       },
       {
@@ -132,32 +143,23 @@ function CommandPalette() {
         group: 'edit',
         action: () => {
           toggleCommandPalette()
+          void handleRefreshFileTree()
         },
       },
       {
         id: 'settings',
         label: 'Open Settings',
         icon: Settings,
-        shortcut: 'Ctrl+,',
-        group: 'view',
-        action: () => {
-          useUIStore.getState().setSidebarView('settings')
-          toggleCommandPalette()
-        },
-      },
-      {
-        id: 'terminal',
-        label: 'Open Terminal',
-        icon: Terminal,
-        shortcut: 'Ctrl+`',
+        shortcut: sk('settings'),
         group: 'view',
         action: () => {
           toggleCommandPalette()
+          handleToggleSettings()
         },
       },
     ]
     return [...builtIn, ...pluginCommandItems]
-  }, [pluginCommandItems, toggleCommandPalette])
+  }, [pluginCommandItems, toggleCommandPalette, customShortcuts])
 
   useEffect(() => {
     setOpen(commandPaletteVisible)

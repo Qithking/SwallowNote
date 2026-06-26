@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/stores'
-import { ShortcutKey, parseKeyEvent, findShortcutConflict, formatShortcutForDisplay, getShortcutKey } from '@/lib/shortcuts'
+import { ShortcutKey, parseKeyEvent, findShortcutConflictDetailed, formatShortcutForDisplay, getShortcutKey } from '@/lib/shortcuts'
+import { usePluginCommands } from '@/lib/plugin-hooks'
+import type { PluginCommand } from '@/types/plugin'
 import { RotateCcw } from 'lucide-react'
 
 interface ShortcutRecorderProps {
@@ -12,10 +14,23 @@ interface ShortcutRecorderProps {
 
 export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
   const { t } = useTranslation()
-  const { customShortcuts, setShortcut, resetShortcut } = useUIStore()
+  const { customShortcuts, pluginCommandShortcuts, setShortcut, resetShortcut } = useUIStore()
   const [recording, setRecording] = useState(false)
-  const [conflict, setConflict] = useState<ShortcutKey | null>(null)
+  const [conflict, setConflict] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Build a label map for all registered plugin commands so that
+  // findShortcutConflictDetailed can show *which* plugin command
+  // clashes, not just the raw binding key.
+  const pluginCommands = usePluginCommands()
+  const pluginCommandLabels = useMemo(() => {
+    const labels: Record<string, string> = {}
+    for (const cmd of pluginCommands) {
+      const entry = cmd as PluginCommand & { __pluginId: string }
+      labels[`${entry.__pluginId}:${cmd.id}`] = cmd.label
+    }
+    return labels
+  }, [pluginCommands])
 
   const currentValue = getShortcutKey(shortcutKey, customShortcuts)
   const isDefault = !customShortcuts[shortcutKey]
@@ -45,15 +60,35 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
       const parsed = parseKeyEvent(e)
       if (!parsed) return
 
-      const conflictKey = findShortcutConflict(shortcutKey, parsed, customShortcuts)
-      setConflict(conflictKey)
+      // Use the detailed conflict checker so both built-in and
+      // plugin-command clashes are detected.
+      const found = findShortcutConflictDetailed(
+        shortcutKey,
+        parsed,
+        customShortcuts,
+        pluginCommandShortcuts,
+        pluginCommandLabels,
+      )
+
       setShortcut(shortcutKey, parsed)
       handleStopRecording()
+
+      // Set conflict AFTER handleStopRecording (which clears conflict)
+      // so the message survives into the idle state.
+      if (found) {
+        if (found.source.kind === 'plugin-command') {
+          setConflict(found.message)
+        } else {
+          setConflict(t('settings.shortcuts.conflict', { key: t(`settings.shortcuts.${found.source.key}`) }))
+        }
+      } else {
+        setConflict(null)
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [recording, shortcutKey, customShortcuts, setShortcut, handleStopRecording])
+  }, [recording, shortcutKey, customShortcuts, pluginCommandShortcuts, pluginCommandLabels, setShortcut, handleStopRecording, t])
 
   useEffect(() => {
     if (!recording) return
@@ -87,7 +122,7 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
       </div>
       {conflict && (
         <span className="text-xs text-yellow-500">
-          {t('settings.shortcuts.conflict', { key: t(`settings.shortcuts.${conflict}`) })}
+          {conflict}
         </span>
       )}
       {!isDefault && (
