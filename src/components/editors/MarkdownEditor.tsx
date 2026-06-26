@@ -7,7 +7,17 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { BlockNoteEditor, PartialBlock, createCodeBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
-import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react'
+import {
+  useCreateBlockNote,
+  SuggestionMenuController,
+  getDefaultReactSlashMenuItems,
+  LinkToolbarController,
+  EditLinkButton,
+  DeleteLinkButton,
+  useComponentsContext,
+  useDictionary,
+} from '@blocknote/react'
+import type { LinkToolbarProps } from '@blocknote/react'
 import { codeBlockOptions } from '@blocknote/code-block'
 import { TextSelection } from 'prosemirror-state'
 import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
@@ -16,12 +26,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { stripFrontmatter } from '@/lib/utils/frontmatter'
 import { buildTableOfContents } from '@/utils/tableOfContents'
-import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile } from '@/lib/tauri'
+import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, readFile } from '@/lib/tauri'
 import { downloadCoordinator } from '@/lib/download-coordinator'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Network, Sigma } from 'lucide-react'
+import { Network, Sigma, ExternalLink } from 'lucide-react'
+import { countWords } from '@/lib/utils/wordCount'
 import { EditorContextMenu } from './EditorContextMenu'
 import { MermaidBlockSpec, transformMermaidBlocks, MERMAID_BLOCK_TYPE } from './mermaidBlockSpec'
 import {
@@ -35,6 +46,31 @@ import {
   MARKMAP_BLOCK_TYPE,
 } from './markmapBlockSpec'
 import '@blocknote/mantine/style.css'
+
+/** Check if a URL is an external protocol (http, https, mailto, etc.) */
+function isExternalUrl(url: string): boolean {
+  return /^(https?:|ftp:|mailto:|tel:|callto:|sms:)/i.test(url)
+}
+
+/** Resolve a relative URL to an absolute file path based on the current file's directory */
+function resolveFilePath(url: string, currentFilePath: string): string {
+  // Already an absolute path (Unix-style or Windows drive letter)
+  if (url.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(url)) {
+    return url
+  }
+  const fileDir = currentFilePath.split(/[\\/]/).slice(0, -1).join('/') || ''
+  const normalizedUrl = url.replace(/^\.\//, '')
+  const urlParts = normalizedUrl.split('/')
+  const dirParts = fileDir.split('/')
+  for (const part of urlParts) {
+    if (part === '..') {
+      dirParts.pop()
+    } else if (part && part !== '.') {
+      dirParts.push(part)
+    }
+  }
+  return dirParts.join('/')
+}
 
 interface MarkdownEditorProps {
   content: string
@@ -54,6 +90,7 @@ function BlockNoteInner({
   const activeTabId = useEditorStore((s) => s.activeTabId)
   const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
   const activeTabName = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.name ?? '')
+  const addTab = useEditorStore((s) => s.addTab)
   const { t } = useTranslation()
   const {
     widePaddingVertical,
@@ -64,6 +101,11 @@ function BlockNoteInner({
   const editorContainerRef = useRef<HTMLDivElement>(null)
   // Cache the last onChange result so getFullContent can return it synchronously
   const lastContentRef = useRef<string>('')
+  // Refs to access latest values inside stable callbacks (editor is created once)
+  const activeTabPathRef = useRef(activeTabPath)
+  activeTabPathRef.current = activeTabPath
+  const addTabRef = useRef(addTab)
+  addTabRef.current = addTab
 
   useEffect(() => {
     if (noteWidth !== 'wide') return
@@ -334,6 +376,70 @@ function BlockNoteInner({
     return undefined
   }
 
+  // Open a file from a link click as a new tab in the app
+  const openFileInApp = useCallback(async (filePath: string) => {
+    try {
+      const content = await readFile(filePath)
+      const fileName = filePath.split('/').pop() || filePath
+      addTabRef.current({
+        id: filePath,
+        path: filePath,
+        name: fileName,
+        content,
+        isDirty: false,
+        isEdited: false,
+        viewMode: 'preview',
+        fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
+        modifiedTime: new Date().toLocaleString(),
+        wordCount: countWords(content),
+      })
+    } catch (e) {
+      console.error('Failed to open file from link:', e)
+      toast.error(`无法打开文件: ${filePath}`)
+    }
+  }, [])
+
+  // Handle link clicks — relative paths open in-app, external URLs open in browser.
+  // This is passed to ProseMirror via links.onClick, but the primary interception
+  // happens in the capture-phase listener below. This serves as a fallback.
+  const handleLinkClick = useCallback((event: MouseEvent, _editor: BlockNoteEditor): boolean | void => {
+    const target = event.target as HTMLElement
+    const link = target.closest('a[data-inline-content-type="link"]') as HTMLAnchorElement | null
+    if (!link) return false
+
+    const href = link.getAttribute('href') || ''
+    if (!href) return false
+    if (href.startsWith('data:') || href.startsWith('asset://')) return false
+
+    // Prevent the browser's default <a> navigation
+    event.preventDefault()
+
+    if (isExternalUrl(href)) {
+      window.open(href, '_blank')
+      return true
+    }
+
+    if (href.startsWith('#')) {
+      const anchor = href.substring(1)
+      const container = editorContainerRef.current
+      if (container) {
+        const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6')
+        for (const h of headings) {
+          const text = h.textContent?.trim().toLowerCase().replace(/\s+/g, '-') || ''
+          if (text === anchor.toLowerCase()) {
+            h.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            break
+          }
+        }
+      }
+      return true
+    }
+
+    const absolutePath = resolveFilePath(href, activeTabPathRef.current)
+    openFileInApp(absolutePath)
+    return true
+  }, [openFileInApp])
+
   const editor = useCreateBlockNote({
     initialContent: blocks,
     schema,
@@ -341,7 +447,65 @@ function BlockNoteInner({
     uploadFile,
     resolveFileUrl,
     pasteHandler,
+    links: {
+      onClick: handleLinkClick,
+    },
   })
+
+  // Capture-phase click listener: intercepts link clicks BEFORE Tauri's webview
+  // processes target="_blank" navigation. ProseMirror's handleClick (bubble phase)
+  // is too late — the webview has already opened the browser by then.
+  // We only call preventDefault() (not stopPropagation) so ProseMirror can still
+  // update the text selection when the user clicks on link text to edit it.
+  useEffect(() => {
+    const container = editorContainerRef.current
+    if (!container) return
+
+    const handleClickCapture = (event: MouseEvent) => {
+      if (event.button !== 0) return
+
+      const target = event.target as HTMLElement
+      if (!target) return
+
+      const link = target.closest('a[data-inline-content-type="link"]') as HTMLAnchorElement | null
+      if (!link) return
+
+      const href = link.getAttribute('href') || ''
+      if (!href) return
+      if (href.startsWith('data:') || href.startsWith('asset://')) return
+
+      // Prevent browser/Tauri default navigation for <a target="_blank">
+      // Do NOT stopPropagation — let ProseMirror handle selection updates normally.
+      event.preventDefault()
+
+      if (isExternalUrl(href)) {
+        window.open(href, '_blank')
+        return
+      }
+
+      if (href.startsWith('#')) {
+        const anchor = href.substring(1)
+        const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6')
+        for (const h of headings) {
+          const text = h.textContent?.trim().toLowerCase().replace(/\s+/g, '-') || ''
+          if (text === anchor.toLowerCase()) {
+            h.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            break
+          }
+        }
+        return
+      }
+
+      const absolutePath = resolveFilePath(href, activeTabPathRef.current)
+      openFileInApp(absolutePath)
+    }
+
+    container.addEventListener('click', handleClickCapture, true)
+
+    return () => {
+      container.removeEventListener('click', handleClickCapture, true)
+    }
+  }, [openFileInApp])
 
 
   // 滚动到指定行
@@ -1170,6 +1334,69 @@ function BlockNoteInner({
     })
   }, [editor])
 
+  // Custom link toolbar — replaces the default one to handle relative path links.
+  // useMemo with stable deps ensures the component type doesn't change across renders.
+  const customLinkToolbar = useMemo(() => {
+    return function CustomLinkToolbar(props: LinkToolbarProps) {
+      const Components = useComponentsContext()!
+      const dict = useDictionary()
+
+      const handleOpen = () => {
+        const url = props.url
+        if (isExternalUrl(url)) {
+          window.open(url, '_blank')
+          return
+        }
+        if (url.startsWith('#')) {
+          const anchor = url.substring(1)
+          const container = editorContainerRef.current
+          if (container) {
+            const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6')
+            for (const h of headings) {
+              const text = h.textContent?.trim().toLowerCase().replace(/\s+/g, '-') || ''
+              if (text === anchor.toLowerCase()) {
+                h.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                break
+              }
+            }
+          }
+          return
+        }
+        if (url.startsWith('data:') || url.startsWith('asset://')) {
+          window.open(url, '_blank')
+          return
+        }
+        // Relative or absolute file path — open in app
+        const absolutePath = resolveFilePath(url, activeTabPathRef.current)
+        openFileInApp(absolutePath)
+      }
+
+      return (
+        <Components.LinkToolbar.Root className="bn-toolbar bn-link-toolbar">
+          <EditLinkButton
+            url={props.url}
+            text={props.text}
+            range={props.range}
+            setToolbarOpen={props.setToolbarOpen}
+            setToolbarPositionFrozen={props.setToolbarPositionFrozen}
+          />
+          <Components.LinkToolbar.Button
+            className="bn-button"
+            mainTooltip={dict.link_toolbar.open.tooltip}
+            label={dict.link_toolbar.open.tooltip}
+            isSelected={false}
+            onClick={handleOpen}
+            icon={<ExternalLink size={16} />}
+          />
+          <DeleteLinkButton
+            range={props.range}
+            setToolbarOpen={props.setToolbarOpen}
+          />
+        </Components.LinkToolbar.Root>
+      )
+    }
+  }, [openFileInApp])
+
   return (
     <EditorContextMenu
       getSelectedText={getSelectedText}
@@ -1184,11 +1411,13 @@ function BlockNoteInner({
               theme={blocknoteTheme}
               onChange={debouncedHandleChange}
               slashMenu={false}
+              linkToolbar={false}
             >
               <SuggestionMenuController
                 triggerCharacter="/"
                 getItems={getCustomSlashMenuItems}
               />
+              <LinkToolbarController linkToolbar={customLinkToolbar} />
             </BlockNoteView>
           </div>
         </ScrollArea>

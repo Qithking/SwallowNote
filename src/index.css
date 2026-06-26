@@ -3225,3 +3225,8 @@ body, #root {
 .dark .ai-code-block pre { background: #0d1117 !important; }
 .ai-code-block > div:first-child:not(.dark *) { background: rgba(0, 0, 0, 0.04); }
 .dark .ai-code-block > div:first-child { background: rgba(255, 255, 255, 0.05); }
+
+/* BlockNote: show pointer cursor on link inline content */
+.blocknote-editor-container a[data-inline-content-type="link"] {
+  cursor: pointer;
+}
