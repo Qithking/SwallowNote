@@ -6,13 +6,9 @@ import { Sidebar } from '@/components/Sidebar'
 import { TabBar } from '@/components/TabBar'
 import { EditorToolbar } from '@/components/EditorToolbar'
 import { EditorView } from '@/components/Editor'
-import { NotePropertiesPanel } from '@/components/NoteProperties/NotePropertiesPanel'
+import { RightPanelContent, FullPanelPluginContent } from '@/components/PanelContent'
 import { SettingsView } from '@/components/Settings/SettingsView'
-const AIView = lazy(() => import('@/components/AI/AIView').then(m => ({ default: m.AIView })))
 import { flushAllEditors } from '@/lib/editor-flush'
-const DirectoryView = lazy(() => import('@/components/Directory/DirectoryView').then(m => ({ default: m.DirectoryView })))
-const HistoryView = lazy(() => import('@/components/History/HistoryView').then(m => ({ default: m.HistoryView })))
-const EditorSettings = lazy(() => import('@/components/EditorSettings/EditorSettings').then(m => ({ default: m.EditorSettings })))
 const PluginManagerView = lazy(() => import('@/components/Plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })))
 
 // Simple loading placeholder for PluginManager
@@ -36,11 +32,10 @@ export function preloadPluginManager() {
     void import('@/components/Plugin/PluginManagerView')
   }
 }
-import { PluginPanelHost } from '@/components/Plugin/PluginPanelHost'
 import { StatusBar } from '@/components/StatusBar'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useGitStore, usePluginStore } from '@/stores'
-import type { UIState, EditorState, GitState, PullResult } from '@/stores'
+import type { UIState, GitState, PullResult } from '@/stores'
 import type { GitRepository } from '@/stores/git'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
 import { useSessionPersistence } from '@/hooks/useSessionPersistence'
@@ -55,7 +50,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { useEditorSettingsStore } from '@/stores'
-import { isPluginSidebarView, isPluginRightPanelType, extractPluginId, pluginRightPanelType, createPluginPanelProps } from '@/lib/plugin-utils'
+import { isPluginSidebarView } from '@/lib/plugin-utils'
 
 function App() {
   useTheme()
@@ -71,9 +66,10 @@ function App() {
   const syncInterval = useUIStore((s: UIState) => s.syncInterval)
   const autoSyncPush = useUIStore((s: UIState) => s.autoSyncPush)
   const sidebarView = useUIStore((s: UIState) => s.sidebarView)
-  const tabs = useEditorStore((s: EditorState) => s.tabs)
-  const activeTabId = useEditorStore((s: EditorState) => s.activeTabId)
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  // Boolean selector — only re-renders App when a tab is added or removed,
+  // not when tab content changes (the previous `tabs` subscription caused
+  // the entire component tree to re-render on every keystroke).
+  const hasTabs = useEditorStore((s) => s.tabs.length > 0)
   const cachedRepositories = useGitStore((s: GitState) => s.cachedRepositories)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
@@ -685,50 +681,6 @@ function App() {
   // Check if the plugin manager is active
   const isPluginManagerActive = settingsPanelVisible && sidebarView === 'plugin:__plugin_manager'
 
-  const renderRightPanel = () => {
-    // Check for plugin right panel
-    if (rightPanelType && isPluginRightPanelType(rightPanelType)) {
-      const pluginId = extractPluginId(rightPanelType)
-      const plugin = allPlugins.find((p) => p.id === pluginId)
-      if (plugin) {
-        const panel = plugin.panel
-        const isActive = rightPanelType === pluginRightPanelType(plugin.id)
-        const panelProps = createPluginPanelProps(
-          plugin.id,
-          isActive,
-          () => {
-            // Symmetric close path: hide the right panel and clear the
-            // active plugin id, matching the ActivityBar/TitleBar close
-            // paths.
-            useUIStore.getState().setRightPanelType(null)
-            usePluginStore.getState().setActivePlugin(null, 'rightPanel')
-          },
-          activeTab?.content ?? '',
-          activeTab?.path ?? ''
-        )
-        // `key={pluginId}` on PluginPanelHost forces a remount when
-        // the user switches from one right-panel plugin to another,
-        // so onUnmount / onMount fire for the previous plugin. The
-        // host itself dispatches onActivate / onDeactivate based on
-        // the isActive prop.
-        return <PluginPanelHost key={plugin.id} plugin={plugin} panel={panel} isActive={isActive} panelProps={panelProps} />
-      }
-      return null
-    }
-    switch (rightPanelType) {
-      case 'ai': return <Suspense fallback={null}><AIView /></Suspense>
-      case 'directory': return <Suspense fallback={null}><DirectoryView /></Suspense>
-      case 'history': return <Suspense fallback={null}><HistoryView visible={true} /></Suspense>
-      case 'editorSettings': return <Suspense fallback={null}><EditorSettings /></Suspense>
-      case 'noteProperties': {
-        if (!activeTab) return null
-        const fm = activeTab.frontmatter
-        return <NotePropertiesPanel tabId={activeTab.id} frontmatter={fm || {}} />
-      }
-      default: return null
-    }
-  }
-
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
   const handleContextMenu = useCallback((_e: React.MouseEvent) => {
@@ -786,41 +738,10 @@ function App() {
             ) : isPluginManagerActive ? (
               <Suspense fallback={<PluginManagerLoading />}><PluginManagerView /></Suspense>
             ) : activeFullPanelPlugin ? (
-              <Suspense fallback={null}>{(() => {
-                const panel = activeFullPanelPlugin.panel
-                const panelProps = createPluginPanelProps(
-                  activeFullPanelPlugin.id,
-                  true,
-                  () => {
-                    // Close the full-panel plugin AND reset sidebarView so
-                    // the next time the user opens the sidebar, the default
-                    // view is shown instead of this plugin's stale view.
-                    // Also clear the active plugin id to match the
-                    // ActivityBar/TitleBar close paths.
-                    useUIStore.getState().setSettingsPanelVisible(false)
-                    useUIStore.getState().setSidebarView('explorer')
-                    usePluginStore.getState().setActivePlugin(null, 'fullPanel')
-                  },
-                  activeTab?.content ?? '',
-                  activeTab?.path ?? ''
-                )
-                // `key={id}` ensures a fresh mount (and onMount /
-                // onUnmount) when the user switches from one fullPanel
-                // plugin to another. onActivate fires on the
-                // initial mount because isActive=true.
-                return (
-                  <PluginPanelHost
-                    key={activeFullPanelPlugin.id}
-                    plugin={activeFullPanelPlugin}
-                    panel={panel}
-                    isActive={true}
-                    panelProps={panelProps}
-                  />
-                )
-              })()}</Suspense>
+              <Suspense fallback={null}><FullPanelPluginContent plugin={activeFullPanelPlugin} /></Suspense>
             ) : (
               <div className="flex-1 flex flex-col overflow-hidden">
-                {tabs.length > 0 && (
+                {hasTabs && (
                   <>
                     <TabBar />
                     <EditorToolbar />
@@ -858,7 +779,7 @@ function App() {
           {/* Right Panel - moved outside editor, same level as sidebar */}
           {rightPanelType && (
             <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] " style={{ width: rightPanelWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))', borderColor: 'var(--border-color)' }}>
-              {renderRightPanel()}
+              <RightPanelContent />
             </div>
           )}
         </div>
