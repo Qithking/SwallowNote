@@ -105,8 +105,12 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   const canShowGitInit = node.isDirectory && !isInGitRepo
 
   const hasClipboard = clipboardFiles.length > 0
-  // 只有目标是目录时才显示粘贴菜单
-  const canPaste = hasClipboard && node.isDirectory
+  // 粘贴菜单：剪贴板非空即可显示（文件节点粘贴到其父目录）
+  const canPaste = hasClipboard
+  // 粘贴目标目录：目录节点用自身路径，文件节点取父目录路径
+  const targetDir = node.isDirectory
+    ? node.path
+    : node.path.substring(0, node.path.lastIndexOf('/'))
 
   const handleOpen = async () => {
     if (node.isDirectory) {
@@ -187,13 +191,16 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   }
 
   const handlePaste = async () => {
-    if (!canPaste || !rootPath) return
+    if (!canPaste || !targetDir) return
 
     let successCount = 0
     let failCount = 0
+    let skipCount = 0
 
     for (const sourcePath of clipboardFiles) {
-      const destPath = getDestinationPath(node.path, sourcePath)
+      const destPath = getDestinationPath(targetDir, sourcePath)
+      // 跳过源路径与目标路径完全相同的条目（复制到自身所在目录）
+      if (sourcePath === destPath) { skipCount++; continue }
       try {
         await invoke('copy_file', {
           req: {
@@ -226,12 +233,14 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
     }
 
     // 刷新目标目录
-    const children = await loadDirectory(node.path, showAllFiles, markdownOnly)
-    const updatedNodes = updateNodesWithChildren(nodes, node.path, children)
+    const children = await loadDirectory(targetDir, showAllFiles, markdownOnly)
+    const updatedNodes = updateNodesWithChildren(nodes, targetDir, children)
     setNodes(updatedNodes)
 
-    if (failCount === 0) {
+    if (failCount === 0 && skipCount === 0) {
       showToast(t('contextMenu.pastedSuccess', { count: successCount }))
+    } else if (failCount === 0 && skipCount > 0 && successCount === 0) {
+      // 全部跳过（复制到自身目录），无需提示成功
     } else {
       showToast(t('contextMenu.pastedPartial', { count: successCount, failCount }))
     }

@@ -6,6 +6,13 @@ import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { platform } from '@tauri-apps/plugin-os'
 
+/**
+ * Tauri v2 参数命名约定：
+ * - 顶层原始类型参数：#[tauri::command] 宏自动将后端 snake_case 转为前端 camelCase，
+ *   前端 invoke payload 使用 camelCase（如 { apiKey, baseUrl, repoPath }）。
+ * - struct 字段：不自动转换，前端必须使用与后端 struct 字段一致的 snake_case。
+ */
+
 // 路径分隔符统一为正斜杠
 function normalizePath(path: string | null): string | null {
   if (!path) return null
@@ -252,7 +259,10 @@ export async function writePluginSettings(
   pluginId: string,
   values: Record<string, unknown>
 ): Promise<void> {
-  await invoke('write_plugin_settings', { args: { pluginId, values } })
+  // 嵌套结构体 WriteSettingsArgs（plugin_id, values）后端无 rename_all，
+  // Tauri v2 不做 camelCase → snake_case 自动转换，需传 snake_case 字段名
+  // （与项目内 CreateFileRequest / RenameFileRequest 一致）。
+  await invoke('write_plugin_settings', { args: { plugin_id: pluginId, values } })
 }
 
 export async function deletePluginSettings(pluginId: string): Promise<void> {
@@ -323,6 +333,53 @@ export async function getPluginStorageSize(pluginId: string): Promise<number> {
 
 export async function writeBinaryFile(path: string, data: string): Promise<void> {
   await invoke('write_binary_file', { path, data })
+}
+
+// ===== 远程图片批量下载（后端 image_downloader.rs） =====
+
+/** 单张远程图片的下载请求。 */
+export interface RemoteImageRequest {
+  /** 远程图片 URL（http / https） */
+  url: string
+  /** 落盘目录（绝对路径，由前端解析 uploadPath 规则得到） */
+  target_dir: string
+  /** 当前文件所在目录（用于计算相对路径） */
+  file_dir: string
+  /** 工作区根目录（用于计算相对路径的 fallback） */
+  root_path: string
+  /** 可选的文件名 hint（来自 URL 原文件名，预留扩展） */
+  name_hint?: string
+}
+
+/** 单张远程图片的下载结果。 */
+export interface RemoteImageResult {
+  /** 原始 URL */
+  url: string
+  /** 是否成功 */
+  ok: boolean
+  /** 写入的绝对路径（仅成功时有值） */
+  local_path: string | null
+  /** 基于当前文件目录的相对路径（仅成功时有值） */
+  relative_path: string | null
+  /** 生成的文件名（仅成功时有值） */
+  file_name: string | null
+  /** 失败信息（仅失败时有值） */
+  error: string | null
+}
+
+/** 批量下载入参（与后端 DownloadImagesPayload 对应）。 */
+export interface DownloadImagesPayload {
+  images: RemoteImageRequest[]
+}
+
+/**
+ * 调用后端 `download_remote_images` 命令批量下载远程图片。
+ * 前端不直接下载图片字节，所有下载 / 落盘 / 相对路径计算均由后端完成。
+ */
+export async function downloadRemoteImages(
+  payload: DownloadImagesPayload
+): Promise<RemoteImageResult[]> {
+  return await invoke<RemoteImageResult[]>('download_remote_images', { payload })
 }
 
 export async function getHomeDir(): Promise<string> {

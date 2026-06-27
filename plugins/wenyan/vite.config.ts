@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 
+// 允许文颜插件 `import { ... } from '@/components/...'` 引用主项目源码。
+// shadcn/ui 通用组件（label / select / number-input 等）位于主项目 src/components/ui，
+// 与其它主项目 lib 工具（cn 等）一并通过该别名暴露给插件使用。
+const SRC_ALIAS = { '@': resolve(__dirname, '../../src') }
+
 export default defineConfig(({ mode }) => {
   if (mode === 'production') {
     return {
@@ -40,6 +45,7 @@ export default defineConfig(({ mode }) => {
           },
         },
       ],
+      resolve: { alias: SRC_ALIAS },
       define: {
         'process.env.NODE_ENV': JSON.stringify('production'),
       },
@@ -66,6 +72,7 @@ export default defineConfig(({ mode }) => {
   }
   return {
     plugins: [react()],
+    resolve: { alias: SRC_ALIAS },
     server: { port: 5175, open: true },
   }
 })

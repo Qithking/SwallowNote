@@ -1,6 +1,6 @@
 {
   "name": "swallownote-plugin-wenyan",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Wenyan Markdown typesetting plugin for WeChat Official Accounts",
   "type": "module",
   "scripts": {
@@ -11,13 +11,21 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-radio-group": "^1.3.0",
+    "@radix-ui/react-select": "^2.2.0",
+    "@radix-ui/react-slot": "^1.2.0",
     "@swallow-note/plugin-sdk": "file:../../docs/plugin-sdk",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@wenyan-md/core": "^3.0.10",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
     "html2canvas": "^1.4.1",
+    "lucide-react": "^0.460.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.5.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",

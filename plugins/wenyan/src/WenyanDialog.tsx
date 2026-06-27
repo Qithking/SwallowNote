@@ -14,7 +14,6 @@ import {
   PLATFORMS,
   PLATFORM_DEFAULT_THEME,
   type RenderOptions,
-  type ThemeOverrides,
   type ParagraphOptions,
   type CodeBlockOptions,
   type Platform,
@@ -31,6 +30,8 @@ import {
   isGzhConfigured,
   type GzhSettings,
 } from './gzhSettings'
+import { STORAGE_KEY, PREVIEW_OPTIONS } from './constants'
+import { useDebounce } from '@/components/Plugin/useDebounce'
 
 interface WenyanDialogProps {
   open: boolean
@@ -46,52 +47,11 @@ interface WenyanDialogProps {
   getAllSettings: () => Promise<Record<string, unknown>>
 }
 
-const DEFAULT_THEME_OVERRIDES: ThemeOverrides = {
-  primaryColor: '#1aad19',
-  blockquoteBg: '#afb8c133',
-  textColor: '#3f3f3f',
-}
-
-const DEFAULT_PARAGRAPH_OPTIONS: ParagraphOptions = {
-  fontSize: 16,
-  lineHeight: 1.75,
-  lineSpacing: 0,
-  fontFamily: 'sans-serif',
-  letterSpacing: 'normal',
-  paragraphSpacing: 'standard',
-  textAlign: 'left',
-  textIndent: 0,
-}
-
-const DEFAULT_CODE_BLOCK_OPTIONS: CodeBlockOptions = {
-  borderRadius: 5,
-  fontSize: 12,
-  shadow: 'heavy',
-  isMacStyle: true,
-}
-
-// Default settings.
+// Default settings —— 各子选项的默认值从 constants.ts 的 PREVIEW_OPTIONS 复用，
+// 保证 WenyanDialog 初始 settings 与 CustomThemeDialog 预览保持一致。
 const DEFAULT_OPTIONS: RenderOptions = {
-  platform: 'wechat',
-  themeId: 'default',
-  hlThemeId: 'solarized-light',
+  ...PREVIEW_OPTIONS,
   customThemeCss: null,
-  isAddFootnote: true,
-  themeOverrides: DEFAULT_THEME_OVERRIDES,
-  paragraphOptions: DEFAULT_PARAGRAPH_OPTIONS,
-  paragraphFollowTheme: true,
-  codeBlockOptions: DEFAULT_CODE_BLOCK_OPTIONS,
-  codeBlockFollowTheme: true,
-}
-
-// Debounce helper.
-function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(t)
-  }, [value, delay])
-  return debounced
 }
 
 export function WenyanDialog(props: WenyanDialogProps): ReactNode {
@@ -124,7 +84,7 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    void store.get<CustomTheme[]>('wenyan-custom-themes').then((v) => {
+    void store.get<CustomTheme[]>(STORAGE_KEY).then((v) => {
       if (cancelled) return
       setCustomThemes(v ?? [])
     })
@@ -159,7 +119,7 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
   // in the parent dropdown without a full dialog reopen.
   useEffect(() => {
     if (customDialogOpen) return
-    void store.get<CustomTheme[]>('wenyan-custom-themes').then((v) => {
+    void store.get<CustomTheme[]>(STORAGE_KEY).then((v) => {
       setCustomThemes(v ?? [])
     })
   }, [customDialogOpen, store])
@@ -217,15 +177,6 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
     if (!open) return
     render(debouncedContent, options)
   }, [open, debouncedContent, options, render])
-
-  // Sync preview DOM with rendered html. Using dangerouslySetInnerHTML
-  // ensures the preview is initialized correctly on remount — otherwise,
-  // if `html` is unchanged from a previous open, the [html]-only effect
-  // would skip and leave the new preview div empty.
-  useEffect(() => {
-    // No-op: actual sync is handled by dangerouslySetInnerHTML on the
-    // preview div itself. Kept as a hook for future side-effects.
-  }, [html])
 
   // Close on Escape.
   useEffect(() => {
@@ -387,6 +338,9 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
                     // Reset theme to the platform's default so the
                     // controlled <select> always has a valid value.
                     themeId: PLATFORM_DEFAULT_THEME[platform],
+                    // 同步清空 customThemeCss，避免 select 显示内置主题
+                    // 但渲染管线仍叠加旧 custom CSS 的不一致问题。
+                    customThemeCss: null,
                   }))
                 }}
                 style={{
@@ -517,36 +471,47 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
               open={openSections.theme}
               onToggle={() => setOpenSections((s) => ({ ...s, theme: !s.theme }))}
             >
-              <ColorRow
-                label="主色"
-                value={options.themeOverrides.primaryColor}
+              <Toggle
+                label="跟随主题"
+                checked={options.themeFollowTheme}
                 onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    themeOverrides: { ...o.themeOverrides, primaryColor: v },
-                  }))
+                  setOptions((o) => ({ ...o, themeFollowTheme: v }))
                 }
               />
-              <ColorRow
-                label="引用块背景"
-                value={options.themeOverrides.blockquoteBg}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    themeOverrides: { ...o.themeOverrides, blockquoteBg: v },
-                  }))
-                }
-              />
-              <ColorRow
-                label="文字色"
-                value={options.themeOverrides.textColor}
-                onChange={(v) =>
-                  setOptions((o) => ({
-                    ...o,
-                    themeOverrides: { ...o.themeOverrides, textColor: v },
-                  }))
-                }
-              />
+              {!options.themeFollowTheme && (
+                <>
+                  <ColorRow
+                    label="主色"
+                    value={options.themeOverrides.primaryColor}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        themeOverrides: { ...o.themeOverrides, primaryColor: v },
+                      }))
+                    }
+                  />
+                  <ColorRow
+                    label="引用块背景"
+                    value={options.themeOverrides.blockquoteBg}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        themeOverrides: { ...o.themeOverrides, blockquoteBg: v },
+                      }))
+                    }
+                  />
+                  <ColorRow
+                    label="文字色"
+                    value={options.themeOverrides.textColor}
+                    onChange={(v) =>
+                      setOptions((o) => ({
+                        ...o,
+                        themeOverrides: { ...o.themeOverrides, textColor: v },
+                      }))
+                    }
+                  />
+                </>
+              )}
             </CollapsibleSection>
 
             <CollapsibleSection
@@ -967,6 +932,10 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
                   boxSizing: 'border-box',
                   borderRadius: 4,
                   boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                  // 强制允许文本选择：Tauri macOS WKWebView 在透明无边框
+                  // 窗口下可能默认禁用文本选择，需显式覆盖。
+                  userSelect: 'text',
+                  WebkitUserSelect: 'text',
                 }}
               />
             </div>
@@ -979,6 +948,7 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
         open={customDialogOpen}
         onClose={() => setCustomDialogOpen(false)}
         selectedId={isCustomThemeActive ? options.themeId : null}
+        markdown={activeNoteContent}
         onSelect={(theme) => {
           setOptions((o) => ({
             ...o,

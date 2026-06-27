@@ -11,7 +11,7 @@ import type {
 } from '@/types/plugin'
 import { emptyRegistry } from '@/types/plugin'
 import { useUIStore } from './ui'
-import { dropPluginStorage, pluginEventBus, buildPluginContext } from '@/lib/plugin-host'
+import { dropPluginStorage, pluginEventBus, buildPluginContext, clearPluginTripped } from '@/lib/plugin-host'
 import { runPluginLifecycleHook, type PluginWithModule } from '@/lib/plugin-host-takeover'
 import { clearPluginMenuItems } from '@/lib/plugin-menu'
 import { clearPluginCommands } from '@/lib/plugin-commands'
@@ -440,6 +440,11 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       // (see `setPlugins`). Without this, the plugin's event
       // subscriptions, storage seeding, and timers never run.
       if (enabled && !wasEnabled) {
+        // 用户手动重新启用插件时清除熔断标志，使之前因超时被熔断的插件恢复工作。
+        // 不能在 runPluginLifecycleHook 入口清除：上一轮超时的 hookPromise 仍在后台
+        // 运行，入口清除会让旧 promise 的 storage.set / invokeBackend 绕过熔断检查
+        // （P0 NEW-4 时序竞态）。
+        clearPluginTripped(id)
         void runPluginLifecycleHook(target, target.hooks?.onLoad, buildPluginContext(target), 'onLoad')
       }
       const hook = enabled ? target.hooks?.onEnable : target.hooks?.onDisable

@@ -28,7 +28,6 @@ import {
   gitSaveConflictFileContent,
   removeConflictRepoRecord,
   checkAndUpdateConflictRepo,
-  readFile,
   ConflictFile,
 } from '@/lib/tauri'
 import { useUIStore, useGitStore, useFileTreeStore, useEditorStore } from '@/stores'
@@ -335,14 +334,14 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       setEditedLocalContent('')
       setRemoteContent('')
       try {
-        // First try to read the actual file content (user may have saved changes)
-        // Fall back to git conflict content if file read fails
-        let local: string
+        // 本地内容只从 git 获取干净的原始版本（不含 <<<<<<< HEAD 等冲突标记）。
+        // 不读取工作树文件——冲突期间工作树文件包含冲突标记，不是原始本地内容。
+        // 若 git 返回空（如 delete/modify 冲突中该侧文件不存在），则本地内容为空。
+        let local = ''
         try {
-          local = await readFile(selectedFile.file.abs_path)
-        } catch {
-          // If reading actual file fails, fall back to git's local version
           local = await gitGetConflictLocalContent(selectedFile.repoPath, selectedFile.file.path)
+        } catch (e) {
+          console.warn('[ConflictResolver] gitGetConflictLocalContent failed:', e)
         }
         const remote = await gitGetConflictRemoteContent(selectedFile.repoPath, selectedFile.file.path)
         // Set all content atomically to prevent SplitDiffViewer from seeing mismatched states

@@ -238,11 +238,15 @@ export function usePluginEditors(): {
    *  identity itself changes. */
   revision: number
 } {
-  // We use a module-level counter so every consumer observes
-  // the same revision (in a Zustand store every consumer
-  // would each have their own subscription; the counter is
-  // simpler and the registry mutates are infrequent).
-  const [revision, force] = useState(0)
+  // Cache the Set in state so the reference is stable between
+  // renders.  Previously, getActivePluginExtensions() was called
+  // on every render, returning a fresh Set object each time.
+  // This broke React.memo in consumers (Editor, FileTreeContextMenu)
+  // because the `extensions` prop was always a new reference.
+  const [extensions, setExtensions] = useState<Set<string>>(() =>
+    pluginEditorRegistry.getActivePluginExtensions()
+  )
+  const [revision, setRevision] = useState(0)
   useEffect(() => {
     let cancelled = false
     let off1: (() => void) | undefined
@@ -258,7 +262,10 @@ export function usePluginEditors(): {
       // throws `PluginPermissionDeniedError`.
       setGranted('host', ['events', 'editor', 'storage'])
       const bump = () => {
-        if (!cancelled) force((r) => r + 1)
+        if (!cancelled) {
+          setExtensions(pluginEditorRegistry.getActivePluginExtensions())
+          setRevision((r) => r + 1)
+        }
       }
       ;(bump as unknown as { __pluginId: string }).__pluginId = 'host'
       off1 = pluginEventBus.on('editor:registered', bump)
@@ -270,13 +277,8 @@ export function usePluginEditors(): {
       off2?.()
     }
   }, [])
-  // Return a fresh Set on every render so React's
-  // dependency comparison detects the change via the
-  // revision counter. The Set itself is a new object
-  // reference, so any `===` comparison on the returned
-  // value picks up the mutation too.
   return {
-    extensions: pluginEditorRegistry.getActivePluginExtensions(),
+    extensions,
     revision,
   }
 }

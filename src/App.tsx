@@ -6,12 +6,9 @@ import { Sidebar } from '@/components/Sidebar'
 import { TabBar } from '@/components/TabBar'
 import { EditorToolbar } from '@/components/EditorToolbar'
 import { EditorView } from '@/components/Editor'
-import { NotePropertiesPanel } from '@/components/NoteProperties/NotePropertiesPanel'
+import { RightPanelContent, FullPanelPluginContent } from '@/components/PanelContent'
 import { SettingsView } from '@/components/Settings/SettingsView'
-const AIView = lazy(() => import('@/components/AI/AIView').then(m => ({ default: m.AIView })))
-const DirectoryView = lazy(() => import('@/components/Directory/DirectoryView').then(m => ({ default: m.DirectoryView })))
-const HistoryView = lazy(() => import('@/components/History/HistoryView').then(m => ({ default: m.HistoryView })))
-const EditorSettings = lazy(() => import('@/components/EditorSettings/EditorSettings').then(m => ({ default: m.EditorSettings })))
+import { flushAllEditors } from '@/lib/editor-flush'
 const PluginManagerView = lazy(() => import('@/components/Plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })))
 
 // Simple loading placeholder for PluginManager
@@ -35,11 +32,10 @@ export function preloadPluginManager() {
     void import('@/components/Plugin/PluginManagerView')
   }
 }
-import { PluginPanelHost } from '@/components/Plugin/PluginPanelHost'
 import { StatusBar } from '@/components/StatusBar'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { useUIStore, useWorkspaceStore, useEditorStore, useFileTreeStore, useGitStore, usePluginStore } from '@/stores'
-import type { UIState, EditorState, GitState, PullResult } from '@/stores'
+import type { UIState, GitState, PullResult } from '@/stores'
 import type { GitRepository } from '@/stores/git'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
 import { useSessionPersistence } from '@/hooks/useSessionPersistence'
@@ -54,7 +50,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { useEditorSettingsStore } from '@/stores'
-import { isPluginSidebarView, isPluginRightPanelType, extractPluginId, pluginRightPanelType, createPluginPanelProps } from '@/lib/plugin-utils'
+import { isPluginSidebarView } from '@/lib/plugin-utils'
 
 function App() {
   useTheme()
@@ -70,9 +66,10 @@ function App() {
   const syncInterval = useUIStore((s: UIState) => s.syncInterval)
   const autoSyncPush = useUIStore((s: UIState) => s.autoSyncPush)
   const sidebarView = useUIStore((s: UIState) => s.sidebarView)
-  const tabs = useEditorStore((s: EditorState) => s.tabs)
-  const activeTabId = useEditorStore((s: EditorState) => s.activeTabId)
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  // Boolean selector — only re-renders App when a tab is added or removed,
+  // not when tab content changes (the previous `tabs` subscription caused
+  // the entire component tree to re-render on every keystroke).
+  const hasTabs = useEditorStore((s) => s.tabs.length > 0)
   const cachedRepositories = useGitStore((s: GitState) => s.cachedRepositories)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const [isDraggingLeft, setIsDraggingLeft] = useState(false)
@@ -88,88 +85,133 @@ function App() {
   const actionTakenRef = useRef(false)
   // rAF 节流：拖拽面板宽度时每帧最多更新一次
   const rafRef = useRef<number | null>(null)
+  // 防止 StrictMode 双调用导致 init() 重复执行
+  // 开发模式下 StrictMode 会调用 effect 两次，导致 restoreSessionState、
+  // scanPlugins 等副作用并发执行，引发 MarkdownEditor 重复 mount
+  const initRef = useRef(false)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
   const { saveSessionStateNow, restoreSessionState } = useSessionPersistence()
 
   useEffect(() => {
+    if (initRef.current) return
+    initRef.current = true
     const init = async () => {
       const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
       const { loadSettings: loadEditorSettings } = useEditorSettingsStore.getState()
       const { loadSettings: loadUISettings } = useUIStore.getState()
-      
+
       // Step 1: Initialize workspace mode first (determines folder vs workspace)
       await initMode()
-      
+
       // Step 2: Load settings in parallel (these are independent)
       await Promise.all([
         loadEditorSettings(),
         loadUISettings(),
       ])
-      
-      // Step 3: Load workspace/folder first to establish file tree
-      // This must complete before session restore to avoid race conditions
-      await loadLatestByMode()
-      
-      // Step 4: Restore session state (tabs, expanded folders, etc.)
-      // This depends on file tree being loaded first
-      await restoreSessionState()
-      
-      // Step 5: 异步加载插件（不阻塞首屏）
-      const { scanPlugins } = await import('@/lib/tauri')
-      const { loadAllPlugins } = await import('@/lib/plugin-loader')
-      // usePluginStore 已静态导入
-      scanPlugins()
-        .then(loadAllPlugins)
-        .then(async (result) => {
-          const { plugins: defs, failures } = result
-          usePluginStore.getState().setPlugins(defs)
-          // 记录加载失败信息
-          usePluginStore.getState().setLoadFailures(failures)
-          usePluginStore.getState().setLoaded(true)
-          // 用宿主端权威字节数 seed 存储大小追踪器
-          const { seedPluginStorageSizes } = await import('@/lib/plugin-telemetry')
-          const { getAllPluginStorageSizes } = await import('@/lib/tauri')
-          void getAllPluginStorageSizes()
-            .then((sizes) => seedPluginStorageSizes(sizes))
-            .catch((err) => {
-              // 非致命：下次写入时会重新填充
-              console.warn('[App] failed to seed plugin storage sizes:', err)
-            })
-          // 订阅宿主存储变更事件，reconcile 绕过 JS 路径的写入
-          const { subscribeToPluginStorageChanges } = await import('@/lib/plugin-telemetry')
-          void subscribeToPluginStorageChanges().catch((err) => {
-            console.warn('[App] failed to subscribe to plugin storage changes:', err)
-          })
-          // Hydrate 权限守卫缓存，确保跨 tab 授权变更即时生效
-          const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
-          void hydratePermissionGuard(defs.map((d) => d.id))
-          // Hydrate 自动更新配置并触发后台更新链（fire-and-forget）
-          const { hydrateAutoUpdateFromLocalStorage, runAutoUpdateOnStartup } =
-            await import('@/lib/plugin-auto-update')
-          hydrateAutoUpdateFromLocalStorage()
-          void runAutoUpdateOnStartup()
-        })
-        .catch((err) => {
-          // 仅传输层错误到达此 catch
-          console.error('[App] Failed to load plugins on startup:', err)
-          usePluginStore.getState().setLoaded(true)
-        })
 
-      // Sync current i18n language to the Rust backend
-      const { default: i18n } = await import('i18next')
-      setAppLocale(i18n.language).catch(() => {})
-
-      // 主题/设置加载完成后显示窗口，避免闪烁
+      // Step 3: 设置加载完成后立即显示窗口，避免用户等待文件树加载
       try {
         await getCurrentWindow().show()
       } catch { /* ignore */ }
 
-      // 窗口可见后发射 app:ready
+      // 显示窗口后立即应用 macOS 圆角窗口样式
+      // （从独立 useEffect 迁移至此，避免与 init 的 IPC 调用竞争后端主线程）
       try {
-        const { emitAppReady } = await import('@/lib/plugin-host')
+        const platform = await import('@tauri-apps/plugin-os').then(m => m.platform())
+        if (platform === 'linux') {
+          document.documentElement.style.borderRadius = '12px'
+          document.body.style.borderRadius = '12px'
+        } else if (platform === 'macos') {
+          await enableModernWindowStyle({ cornerRadius: 12 })
+        } else if (platform === 'windows') {
+          await enableModernWindowStyle({ cornerRadius: 12 })
+          // Windows 11 provides rounded corners via DWM, but the web content
+          // also needs matching border-radius to prevent black corner artifacts
+          document.documentElement.style.borderRadius = '8px'
+          document.body.style.borderRadius = '8px'
+        }
+      } catch {
+        // ignore errors
+      }
+
+      // Step 4: 窗口可见后加载文件树与恢复会话
+      // loadLatestByMode 需先完成以建立文件树，再恢复会话状态
+      await loadLatestByMode()
+      await restoreSessionState()
+      
+      // Step 5: 延迟加载插件和后台服务，确保编辑器先就绪可交互
+
+      // Sync current i18n language to the Rust backend (fire-and-forget)
+      import('i18next').then(({ default: i18n }) => {
+        setAppLocale(i18n.language).catch(() => {})
+      }).catch(() => {})
+
+      // 窗口可见后发射 app:ready（fire-and-forget，不阻塞）
+      import('@/lib/plugin-host').then(({ emitAppReady }) => {
         emitAppReady()
-      } catch { /* ignore */ }
+      }).catch(() => { /* ignore */ })
+
+      // 延迟 1500ms 后启动插件加载和后台服务
+      // 确保编辑器完全挂载、用户可操作之后才执行非关键任务
+      setTimeout(() => {
+        // 1. 启动后台服务（文件监听、frontmatter 扫描、历史保存）
+        useWorkspaceStore.getState().startBackgroundServices()
+
+        // 2. 加载插件（动态导入、注册、初始化）
+        ;(async () => {
+          try {
+            const { scanPlugins } = await import('@/lib/tauri')
+            const { loadAllPlugins } = await import('@/lib/plugin-loader')
+            const result = await scanPlugins().then(loadAllPlugins)
+            const { plugins: defs, failures } = result
+            usePluginStore.getState().setPlugins(defs)
+            usePluginStore.getState().setLoadFailures(failures)
+            usePluginStore.getState().setLoaded(true)
+
+            // 以下操作互相独立，各自 try-catch 避免级联失败
+            try {
+              const { seedPluginStorageSizes } = await import('@/lib/plugin-telemetry')
+              const { getAllPluginStorageSizes } = await import('@/lib/tauri')
+              void getAllPluginStorageSizes()
+                .then((sizes) => seedPluginStorageSizes(sizes))
+                .catch((err) => {
+                  console.warn('[App] failed to seed plugin storage sizes:', err)
+                })
+            } catch (err) {
+              console.warn('[App] failed to init plugin storage sizes:', err)
+            }
+
+            try {
+              const { subscribeToPluginStorageChanges } = await import('@/lib/plugin-telemetry')
+              void subscribeToPluginStorageChanges().catch((err) => {
+                console.warn('[App] failed to subscribe to plugin storage changes:', err)
+              })
+            } catch (err) {
+              console.warn('[App] failed to subscribe plugin storage changes:', err)
+            }
+
+            try {
+              const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
+              void hydratePermissionGuard(defs.map((d) => d.id))
+            } catch (err) {
+              console.warn('[App] failed to hydrate permission guard:', err)
+            }
+
+            try {
+              const { hydrateAutoUpdateFromLocalStorage, runAutoUpdateOnStartup } =
+                await import('@/lib/plugin-auto-update')
+              hydrateAutoUpdateFromLocalStorage()
+              void runAutoUpdateOnStartup()
+            } catch (err) {
+              console.warn('[App] failed to init plugin auto update:', err)
+            }
+          } catch (err) {
+            console.error('[App] Failed to load plugins on startup:', err)
+            usePluginStore.getState().setLoaded(true)
+          }
+        })()
+      }, 1500)
 
       // 空闲时段预加载 PluginManagerView chunk
       try {
@@ -177,7 +219,7 @@ function App() {
           ;(window as unknown as { requestIdleCallback: (cb: () => void) => void })
             .requestIdleCallback(() => { void preloadPluginManager() })
         } else {
-          setTimeout(() => { void preloadPluginManager() }, 1500)
+          setTimeout(() => { void preloadPluginManager() }, 3000)
         }
       } catch { /* ignore */ }
     }
@@ -293,13 +335,13 @@ function App() {
           for (const folder of workspaceFolders) {
             if (parentPath === folder || parentPath.startsWith(folder + '/')) {
               const fileTreeStore = useFileTreeStore.getState()
-              fileTreeStore.refreshNode(parentPath)
+              fileTreeStore.refreshNodeDebounced(parentPath)
               break
             }
           }
         } else if (rootPath && (parentPath === rootPath || parentPath.startsWith(rootPath + '/'))) {
           const fileTreeStore = useFileTreeStore.getState()
-          fileTreeStore.refreshNode(parentPath)
+          fileTreeStore.refreshNodeDebounced(parentPath)
         }
       }
     })
@@ -499,6 +541,7 @@ function App() {
     setShowSaveDialog(false)
     pendingCloseRef.current = false
     if (!shouldClose) { actionTakenRef.current = false; return }
+    await flushAllEditors()
     await useEditorStore.getState().saveAllDirtyTabs()
     const win = getCurrentWindow()
     await saveSessionStateNow()
@@ -544,29 +587,6 @@ function App() {
     setShowSaveDialog(false)
     pendingCloseRef.current = false
   }
-
-  useEffect(() => {
-    const initRoundedCorners = async () => {
-      try {
-        const platform = await import('@tauri-apps/plugin-os').then(m => m.platform())
-        if (platform === 'linux') {
-          document.documentElement.style.borderRadius = '12px'
-          document.body.style.borderRadius = '12px'
-        } else if (platform === 'macos') {
-          await enableModernWindowStyle({ cornerRadius: 12 })
-        } else if (platform === 'windows') {
-          await enableModernWindowStyle({ cornerRadius: 12 })
-          // Windows 11 provides rounded corners via DWM, but the web content
-          // also needs matching border-radius to prevent black corner artifacts
-          document.documentElement.style.borderRadius = '8px'
-          document.body.style.borderRadius = '8px'
-        }
-      } catch {
-        // ignore errors
-      }
-    }
-    initRoundedCorners()
-  }, [])
 
   const handleMouseDownLeft = useCallback(() => {
     setIsDraggingLeft(true)
@@ -661,50 +681,6 @@ function App() {
   // Check if the plugin manager is active
   const isPluginManagerActive = settingsPanelVisible && sidebarView === 'plugin:__plugin_manager'
 
-  const renderRightPanel = () => {
-    // Check for plugin right panel
-    if (rightPanelType && isPluginRightPanelType(rightPanelType)) {
-      const pluginId = extractPluginId(rightPanelType)
-      const plugin = allPlugins.find((p) => p.id === pluginId)
-      if (plugin) {
-        const panel = plugin.panel
-        const isActive = rightPanelType === pluginRightPanelType(plugin.id)
-        const panelProps = createPluginPanelProps(
-          plugin.id,
-          isActive,
-          () => {
-            // Symmetric close path: hide the right panel and clear the
-            // active plugin id, matching the ActivityBar/TitleBar close
-            // paths.
-            useUIStore.getState().setRightPanelType(null)
-            usePluginStore.getState().setActivePlugin(null, 'rightPanel')
-          },
-          activeTab?.content ?? '',
-          activeTab?.path ?? ''
-        )
-        // `key={pluginId}` on PluginPanelHost forces a remount when
-        // the user switches from one right-panel plugin to another,
-        // so onUnmount / onMount fire for the previous plugin. The
-        // host itself dispatches onActivate / onDeactivate based on
-        // the isActive prop.
-        return <PluginPanelHost key={plugin.id} plugin={plugin} panel={panel} isActive={isActive} panelProps={panelProps} />
-      }
-      return null
-    }
-    switch (rightPanelType) {
-      case 'ai': return <Suspense fallback={null}><AIView /></Suspense>
-      case 'directory': return <Suspense fallback={null}><DirectoryView /></Suspense>
-      case 'history': return <Suspense fallback={null}><HistoryView visible={true} /></Suspense>
-      case 'editorSettings': return <Suspense fallback={null}><EditorSettings /></Suspense>
-      case 'noteProperties': {
-        if (!activeTab) return null
-        const fm = activeTab.frontmatter
-        return <NotePropertiesPanel tabId={activeTab.id} frontmatter={fm || {}} />
-      }
-      default: return null
-    }
-  }
-
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
   const handleContextMenu = useCallback((_e: React.MouseEvent) => {
@@ -762,41 +738,10 @@ function App() {
             ) : isPluginManagerActive ? (
               <Suspense fallback={<PluginManagerLoading />}><PluginManagerView /></Suspense>
             ) : activeFullPanelPlugin ? (
-              <Suspense fallback={null}>{(() => {
-                const panel = activeFullPanelPlugin.panel
-                const panelProps = createPluginPanelProps(
-                  activeFullPanelPlugin.id,
-                  true,
-                  () => {
-                    // Close the full-panel plugin AND reset sidebarView so
-                    // the next time the user opens the sidebar, the default
-                    // view is shown instead of this plugin's stale view.
-                    // Also clear the active plugin id to match the
-                    // ActivityBar/TitleBar close paths.
-                    useUIStore.getState().setSettingsPanelVisible(false)
-                    useUIStore.getState().setSidebarView('explorer')
-                    usePluginStore.getState().setActivePlugin(null, 'fullPanel')
-                  },
-                  activeTab?.content ?? '',
-                  activeTab?.path ?? ''
-                )
-                // `key={id}` ensures a fresh mount (and onMount /
-                // onUnmount) when the user switches from one fullPanel
-                // plugin to another. onActivate fires on the
-                // initial mount because isActive=true.
-                return (
-                  <PluginPanelHost
-                    key={activeFullPanelPlugin.id}
-                    plugin={activeFullPanelPlugin}
-                    panel={panel}
-                    isActive={true}
-                    panelProps={panelProps}
-                  />
-                )
-              })()}</Suspense>
+              <Suspense fallback={null}><FullPanelPluginContent plugin={activeFullPanelPlugin} /></Suspense>
             ) : (
               <div className="flex-1 flex flex-col overflow-hidden">
-                {tabs.length > 0 && (
+                {hasTabs && (
                   <>
                     <TabBar />
                     <EditorToolbar />
@@ -834,7 +779,7 @@ function App() {
           {/* Right Panel - moved outside editor, same level as sidebar */}
           {rightPanelType && (
             <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] " style={{ width: rightPanelWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))', borderColor: 'var(--border-color)' }}>
-              {renderRightPanel()}
+              <RightPanelContent />
             </div>
           )}
         </div>

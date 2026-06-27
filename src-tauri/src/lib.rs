@@ -106,6 +106,7 @@ pub fn run() {
             commands::file::read_clipboard_file_paths,
             commands::file::open_in_finder,
             commands::file::search_in_files,
+            commands::image_downloader::download_remote_images,
             commands::git::git_is_repo,
             commands::git::git_init,
             commands::git::git_status,
@@ -219,25 +220,31 @@ commands::upgrade::download_latest_release,
             commands::frontmatter::create_category,
         ])
         .setup(|app| {
-            let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+            // 获取 app_data_dir，失败时优雅降级（跳过 DB 初始化），避免 panic 导致启动崩溃
+            let app_data_dir = match app.path().app_data_dir() {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("Failed to get app data dir, skipping DB init: {}", e);
+                    std::path::PathBuf::new()
+                }
+            };
             std::fs::create_dir_all(&app_data_dir).ok();
 
             // Initialize backend i18n translations
             crate::i18n::init_translations();
 
-            match db::init_db(app_data_dir.clone()) {
-                Ok(db) => {
-                    // 启动时同步分类：补全历史数据中缺失的父路径
-                    if let Err(e) = db::md_frontmatter::sync_all_categories_from_frontmatter(&db) {
-                        eprintln!("Failed to sync categories on startup: {}", e);
+            // 仅在成功获取 app_data_dir 时初始化 DB
+            if !app_data_dir.as_os_str().is_empty() {
+                match db::init_db(app_data_dir.clone()) {
+                    Ok(db) => {
+                        app.handle().manage(db);
+                        // 启动 frontmatter 索引子线程（使用独立数据库连接）
+                        let index_db_path = app_data_dir.join("swallownote.db");
+                        services::frontmatter_index::start_index_thread(index_db_path, app.handle().clone());
                     }
-                    app.handle().manage(db);
-                    // 启动 frontmatter 索引子线程（使用独立数据库连接）
-                    let index_db_path = app_data_dir.join("swallownote.db");
-                    services::frontmatter_index::start_index_thread(index_db_path, app.handle().clone());
-                }
-                Err(e) => {
-                    eprintln!("Failed to initialize database: {}", e);
+                    Err(e) => {
+                        eprintln!("Failed to initialize database: {}", e);
+                    }
                 }
             }
 

@@ -398,7 +398,6 @@ export interface UIState {
   statusBarVisible: boolean
   editorViewMode: EditorViewMode
   commandPaletteVisible: boolean
-  searchPanelVisible: boolean
   settingsPanelVisible: boolean
   /**
    * Section to focus when the Settings panel opens.
@@ -454,7 +453,6 @@ export interface UIState {
   toggleStatusBar: () => void
   setEditorViewMode: (mode: EditorViewMode) => void
   toggleCommandPalette: () => void
-  toggleSearchPanel: () => void
   setSettingsPanelVisible: (visible: boolean) => void
   setSettingsSection: (section: SettingsSection) => void
   toggleSettingsPanel: () => void
@@ -521,7 +519,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   statusBarVisible: true,
   editorViewMode: 'split',
   commandPaletteVisible: false,
-  searchPanelVisible: false,
   settingsPanelVisible: false,
   settingsSection: null,
   aiPanelVisible: false,
@@ -585,8 +582,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
   toggleCommandPalette: () =>
     set((state) => ({ commandPaletteVisible: !state.commandPaletteVisible })),
-  toggleSearchPanel: () =>
-    set((state) => ({ searchPanelVisible: !state.searchPanelVisible })),
   setSettingsPanelVisible: (visible) => set({ settingsPanelVisible: visible }),
   setSettingsSection: (section: SettingsSection) => set({ settingsSection: section }),
   toggleSettingsPanel: () =>

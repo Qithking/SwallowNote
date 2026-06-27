@@ -2,10 +2,15 @@ use futures::StreamExt;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
+// macOS 下用 pre_exec 调用 setsid() 让重启脚本脱离父进程会话
+#[cfg(target_os = "macos")]
+use std::os::unix::process::CommandExt;
 
 /// Get the current running app bundle path on macOS
 #[cfg(target_os = "macos")]
@@ -29,10 +34,17 @@ fn get_current_app_bundle_path() -> Option<PathBuf> {
 /// If a download is already in progress, subsequent calls are rejected.
 static IS_DOWNLOADING: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
+/// 取消标志：cancel_download 设置为 true 后，下载循环检测到即中止 HTTP 流。
+/// 每次 download_latest_release 开始时会重置为 false。
+static DOWNLOAD_CANCELLED: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReleaseAsset {
     pub name: String,
     pub browser_download_url: String,
+    /// GitHub release asset 的摘要（格式如 "sha256:<hex>"），可选
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -119,6 +131,9 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
         return Err("A download is already in progress".to_string());
     }
 
+    // 重置取消标志，确保本次下载不受上次 cancel 调用影响
+    DOWNLOAD_CANCELLED.store(false, Ordering::SeqCst);
+
     let result = download_latest_release_inner(&app).await;
 
     // Always release the lock when done (success or failure)
@@ -180,6 +195,9 @@ async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to create file: {}", e))?;
     let mut writer = std::io::BufWriter::new(file);
 
+    // 同时计算 SHA-256，下载完成后用于校验完整性
+    let mut hasher = Sha256::new();
+
     // Throttle progress events: only emit when integer percentage actually changes
     // and at least 500ms has passed since last emit. This prevents UI flickering
     // caused by too-frequent updates with minimal visual change.
@@ -188,9 +206,20 @@ async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
     let emit_interval = std::time::Duration::from_millis(500);
 
     while let Some(chunk_result) = stream.next().await {
+        // 检查取消标志：cancel_download 设置后中止 HTTP 流并清理临时文件
+        if DOWNLOAD_CANCELLED.load(Ordering::SeqCst) {
+            // 释放 writer 与 stream 以中止底层 HTTP 连接
+            drop(writer);
+            drop(stream);
+            // 清理未完成的下载文件
+            let _ = std::fs::remove_file(&file_path);
+            return Err("Download cancelled".to_string());
+        }
         let chunk = chunk_result.map_err(|e| format!("Download error: {}", e))?;
         std::io::Write::write_all(&mut writer, &chunk)
             .map_err(|e| format!("Failed to write file: {}", e))?;
+        // 边下载边更新哈希
+        hasher.update(&chunk);
         downloaded += chunk.len() as u64;
         let progress = if total_size > 0 {
             (downloaded as f64 / total_size as f64) * 100.0
@@ -211,6 +240,41 @@ async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
         }
     }
 
+    // 显式 flush 并 sync_all，确保数据落盘后再通知前端
+    writer.flush().map_err(|e| format!("Failed to flush file: {}", e))?;
+    let file = writer
+        .into_inner()
+        .map_err(|e| format!("Failed to flush buffer: {}", e))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync file: {}", e))?;
+
+    // 校验 SHA-256：release 提供 digest 则比对，否则仅记录计算出的哈希
+    let computed_hash = format!("{:x}", hasher.finalize());
+    if let Some(digest) = asset.digest.as_ref() {
+        // GitHub digest 格式："sha256:<hex>"
+        if let Some(expected) = digest.strip_prefix("sha256:") {
+            if !expected.eq_ignore_ascii_case(&computed_hash) {
+                // 哈希不匹配：文件可能损坏或被篡改，记录详情后清理已下载文件并中止，
+                // 避免向用户发出"下载完成"通知导致安装不可信的安装包。
+                eprintln!(
+                    "WARN: SHA-256 mismatch for {}: expected {}, got {}",
+                    asset.name, expected, computed_hash
+                );
+                let _ = std::fs::remove_file(&file_path);
+                return Err(format!(
+                    "SHA-256 mismatch for {}: expected {}, got {}",
+                    asset.name, expected, computed_hash
+                ));
+            }
+        }
+    } else {
+        // release 未提供 digest，无法校验完整性，仅记录计算出的哈希便于排查
+        eprintln!(
+            "INFO: Downloaded {} SHA-256: {}",
+            asset.name, computed_hash
+        );
+    }
+
     let _ = app.emit("download-complete", DownloadComplete {
         path: file_path.to_string_lossy().to_string().replace('\\', "/"),
     });
@@ -222,7 +286,10 @@ async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
 /// This is a safety valve – the main protection is on the frontend side.
 #[tauri::command]
 pub fn cancel_download() -> Result<(), String> {
-    IS_DOWNLOADING.store(false, Ordering::SeqCst);
+    // 仅设置取消标志，不在此处释放 IS_DOWNLOADING。
+    // 下载循环检测到取消标志后会退出，由 download_latest_release 的 finally 逻辑
+    // 释放 IS_DOWNLOADING，避免取消后立即重试时并发写入同一文件。
+    DOWNLOAD_CANCELLED.store(true, Ordering::SeqCst);
     Ok(())
 }
 
@@ -238,8 +305,8 @@ pub async fn open_installer(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        super::create_command("cmd")
-            .args(["/C", "start", "", &path])
+        // 直接 spawn 安装包路径，避免经 cmd /C 触发对整行的 shell 解析导致命令注入
+        std::process::Command::new(&path)
             .spawn()
             .map_err(|e| format!("Failed to open installer: {}", e))?;
         Ok(())
@@ -446,16 +513,29 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
                 .map_err(|e| format!("Failed to set script permissions: {}", e))?;
         }
 
-        // Execute the restart script as a fully detached process
-        // Using nohup with proper I/O redirection to ensure it survives parent termination
+        // Execute the restart script as a fully detached process.
+        // 关键：通过 pre_exec 调用 setsid() 创建新会话，脱离父进程的进程组/会话，
+        // 否则 Tauri 主进程 exit(0) 时 launchd 会连带终止本脚本子进程，
+        // 导致"应用替换成功但无法重启"的问题。
         let script_path_str = restart_script_path.to_string_lossy().to_string();
-        std::process::Command::new("bash")
-            .args(["-c", &format!(
-                "(nohup bash '{}' </dev/null >/dev/null 2>&1 &)",
-                script_path_str
-            )])
+        let mut restart_cmd = std::process::Command::new("bash");
+        restart_cmd
+            .arg(&script_path_str)
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        // pre_exec 是 unsafe 方法，需在 unsafe 块中调用
+        unsafe {
+            restart_cmd.pre_exec(|| {
+                // 创建新会话，让脚本成为会话 leader，完全脱离父进程组
+                // 闭包继承外部 unsafe 块上下文，无需重复 unsafe 标记
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        restart_cmd
             .spawn()
             .map_err(|e| format!("Failed to spawn restart helper: {}", e))?;
 
@@ -477,15 +557,26 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
     }
 }
 
+/// 对字符串做 bash 单引号转义，防止插值参数含 " 或 $(...) 导致命令注入。
+/// 结果用单引号包裹，内部单引号转义为 '\''（单引号在单引号字符串中无法直接表示）。
+#[cfg(target_os = "macos")]
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace("'", "'\\''"))
+}
+
 /// Build the restart helper script content
 /// `app_name` 是 Contents/MacOS/ 下的实际二进制文件名（如 "swallownote"）
 #[cfg(target_os = "macos")]
 fn build_restart_script(pid: u32, app_path: &str, app_name: &str) -> String {
+    // 对插值参数做 shell 转义，防止 app_path/app_name 含 " 或 $(...) 导致命令注入。
+    // 用单引号包裹，内部单引号转义为 '\''（单引号在单引号字符串中无法直接表示）。
+    let escaped_app_path = shell_escape(app_path);
+    let escaped_app_name = shell_escape(app_name);
     format!(r#"#!/bin/bash
 # SwallowNote restart helper script
-LOG_FILE="$TMPDIR/swallownote_restart_{pid}.log"
-APP_PATH="{app_path}"
-APP_NAME="{app_name}"
+LOG_FILE="${{TMPDIR:-/tmp}}/swallownote_restart.log"
+APP_PATH={app_path}
+APP_NAME={app_name}
 BIN_PATH="$APP_PATH/Contents/MacOS/$APP_NAME"
 
 exec >> "$LOG_FILE" 2>&1
@@ -583,6 +674,20 @@ if [ "$LAUNCH_SUCCESS" = false ]; then
     fi
 fi
 
+# Method 4: Final fallback - use launchctl asuser to launch via launchd
+# 通过 launchd 上下文拉起，绕过 detached 进程可能无法激活 LaunchServices 的限制
+if [ "$LAUNCH_SUCCESS" = false ]; then
+    echo "Method 4: Trying launchctl asuser..."
+    UID_NUM=$(id -u)
+    if launchctl asuser "$UID_NUM" open "$APP_PATH" 2>/dev/null; then
+        sleep 3
+        if check_app_running; then
+            echo "SUCCESS: App launched via launchctl asuser"
+            LAUNCH_SUCCESS=true
+        fi
+    fi
+fi
+
 if [ "$LAUNCH_SUCCESS" = false ]; then
     echo "FATAL ERROR: All launch methods failed!"
     echo "App path: $APP_PATH"
@@ -594,7 +699,7 @@ fi
 
 # Clean up this script
 rm -f "$0"
-"#, pid = pid, app_path = app_path, app_name = app_name)
+"#, pid = pid, app_path = escaped_app_path, app_name = escaped_app_name)
 }
 
 #[cfg(not(target_os = "macos"))]

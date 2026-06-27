@@ -8,7 +8,14 @@
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/lib/*": ["../../src/lib/*"],
+      "@/components/CodeEditor": ["../../src/components/CodeEditor/index.ts"],
+      "@/components/CodeEditor/*": ["../../src/components/CodeEditor/*"],
+      "@/components/Plugin/useDebounce": ["../../src/components/Plugin/useDebounce.ts"]
+    }
   },
   "include": ["src", "../../docs/plugin-sdk/src"]
 }

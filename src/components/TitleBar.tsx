@@ -26,9 +26,16 @@ function TitleBar() {
   const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode, sidebarVisible, setSidebarVisible, settingsPanelVisible, setSettingsPanelVisible, sidebarView } = useUIStore()
   const { switchMode } = useWorkspaceStore()
   const titleBarPlugins = usePluginStore((s) => s.registry.titleBar)
-  const activeTabId = useEditorStore((s) => s.activeTabId)
-  const tabs = useEditorStore((s) => s.tabs)
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  // Fine-grained selectors: only re-render when the active tab's content
+  // or path actually changes, not when other tabs' content changes.
+  // Previously subscribed to the entire `tabs` array which triggered a
+  // re-render on every keystroke in any tab.
+  const activeTabContent = useEditorStore(
+    (s) => s.tabs.find((t) => t.id === s.activeTabId)?.content ?? '',
+  )
+  const activeTabPath = useEditorStore(
+    (s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '',
+  )
   const { t } = useTranslation()
 
   const handleMinimize = async () => {
@@ -122,7 +129,7 @@ function TitleBar() {
                 usePluginStore.getState().setActivePlugin(null, 'fullPanel')
               }
             }
-            const toolbarProps = createToolbarButtonProps(plugin.id, isPluginActive, 14, activate, deactivate, activeTab?.content ?? '', activeTab?.path ?? '')
+            const toolbarProps = createToolbarButtonProps(plugin.id, isPluginActive, 14, activate, deactivate, activeTabContent, activeTabPath)
             return (
               <PluginErrorBoundary key={plugin.id} pluginId={plugin.id} resetKey={plugin.id}>
                 {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}

@@ -123,11 +123,15 @@ fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) 
     }
 
     // 用 jwalk 并行预取 metadata；max_depth(1)+sort 保证单层一致排序。
+    // jwalk 默认 skip_hidden=true 会过滤掉所有点开头的文件/目录，这会导致
+    // show_all_files=true 时隐藏文件仍然不显示。这里显式关闭 jwalk 的隐藏过滤，
+    // 交给下方应用层逻辑根据 show_all_files 统一处理。
     let mut nodes: Vec<FileNode> = Vec::new();
 
     for entry_result in jwalk::WalkDir::new(path)
         .max_depth(1)
         .sort(true)
+        .skip_hidden(false)
     {
         let entry = match entry_result {
             Ok(e) => e,
@@ -686,24 +690,27 @@ if ($files) { $files -join '|' } else { '' }
                 }
                 // Remove file:// prefix and decode URI
                 let path_str = if trimmed.starts_with("file://") {
-                    // Simple percent-decode for file URIs
+                    // percent-decode：收集原始字节后再 String::from_utf8，
+                    // 避免逐字节 `byte as char` 破坏多字节 UTF-8（如中文路径）。
                     let uri = &trimmed[7..];
-                    let mut decoded = String::with_capacity(uri.len());
-                    let mut chars = uri.chars();
-                    while let Some(c) = chars.next() {
-                        if c == '%' {
-                            let hex: String = chars.by_ref().take(2).collect();
-                            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                                decoded.push(byte as char);
-                            } else {
-                                decoded.push('%');
-                                decoded.push_str(&hex);
+                    let src = uri.as_bytes();
+                    let mut bytes: Vec<u8> = Vec::with_capacity(src.len());
+                    let mut i = 0;
+                    while i < src.len() {
+                        if src[i] == b'%' && i + 2 < src.len() {
+                            let hex = &src[i + 1..i + 3];
+                            if let Ok(s) = std::str::from_utf8(hex) {
+                                if let Ok(b) = u8::from_str_radix(s, 16) {
+                                    bytes.push(b);
+                                    i += 3;
+                                    continue;
+                                }
                             }
-                        } else {
-                            decoded.push(c);
                         }
+                        bytes.push(src[i]);
+                        i += 1;
                     }
-                    decoded
+                    String::from_utf8(bytes).unwrap_or_else(|_| trimmed.to_string())
                 } else {
                     trimmed.to_string()
                 };
@@ -733,53 +740,76 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
         return Err(format!("Path does not exist: {}", path.display()));
     }
 
-    // Determine the folder to open
-    let target = if path.is_dir() {
-        path.clone()
-    } else {
-        path.parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| path.clone())
-    };
+    // 每个平台块各自独立、自包含，避免跨 cfg 的变量引用导致未使用变量警告。
 
     #[cfg(target_os = "macos")]
     {
+        // open -R <file>  → 在 Finder 中定位并选中该文件
+        // open    <dir>   → 在 Finder 中打开该目录
+        let mut cmd = super::create_command("open");
         if path.is_file() {
-            // open -R opens Finder and selects the file
-            StdCommand::new("open")
-                .arg("-R")
-                .arg(&path)
-                .spawn()
-                .map_err(|e| format!("Failed to open folder: {}", e))?;
-        } else {
-            StdCommand::new("open")
-                .arg(&target)
-                .spawn()
-                .map_err(|e| format!("Failed to open folder: {}", e))?;
+            cmd.arg("-R");
         }
+        cmd.arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
     }
 
     #[cfg(target_os = "windows")]
     {
-        // explorer /select,<file> opens Explorer and selects the file
-        if path.is_file() {
-            super::create_command("explorer")
-                .arg(format!("/select,{}", path.display()))
-                .spawn()
-                .map_err(|e| format!("Failed to open folder: {}", e))?;
+        use std::os::windows::process::CommandExt;
+
+        // explorer /select,"<file>" → 在资源管理器中定位并选中该文件
+        // explorer "<dir>"          → 在资源管理器中打开该目录
+        //
+        // canonicalize 拿到带反斜杠的绝对路径并去除 \\?\ 扩展长度前缀，
+        // 用双引号包裹路径避免含空格时被 explorer 截断，
+        // 用 raw_arg 避免 Rust 对内嵌引号做额外转义。
+        let abs_path = std::fs::canonicalize(&path)
+            .map_err(|e| format!("Failed to get absolute path: {}", e))?;
+        let path_str = abs_path.to_string_lossy().to_string();
+        // 去掉 Windows canonicalize 产生的扩展长度前缀：
+        //   \\?\C:\...     →  C:\...
+        //   \\?\UNC\...    →  \\...
+        let clean_path = if let Some(rest) = path_str.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{}", rest)
+        } else if let Some(rest) = path_str.strip_prefix(r"\\?\") {
+            rest.to_string()
         } else {
-            super::create_command("explorer")
-                .arg(&target)
-                .spawn()
-                .map_err(|e| format!("Failed to open folder: {}", e))?;
+            path_str
+        };
+
+        let mut cmd = super::create_command("explorer");
+        if path.is_file() {
+            cmd.raw_arg(format!(r#"/select,"{}""#, clean_path));
+        } else {
+            cmd.raw_arg(format!(r#""{}""#, clean_path));
         }
+        cmd.spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
     }
 
     #[cfg(target_os = "linux")]
-    StdCommand::new("xdg-open")
-        .arg(&target)
-        .spawn()
-        .map_err(|e| format!("Failed to open folder: {}", e))?;
+    {
+        // xdg-open 只能打开目录，无法选中文件。
+        // 对于文件，打开其所在父目录；对于目录，直接打开。
+        let target = if path.is_dir() {
+            path.clone()
+        } else {
+            path.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| path.clone())
+        };
+        super::create_command("xdg-open")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        return Err("Unsupported platform: open in file explorer is only supported on macOS, Windows, and Linux".to_string());
+    }
 
     Ok(())
 }
@@ -874,7 +904,11 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
                 }
 
                 if !line_matches.is_empty() {
-                    let mut matches_map = file_matches_clone.lock().unwrap();
+                    // 锁中毒时恢复内部数据，避免 spawn_blocking 任务连锁 panic
+                    let mut matches_map = file_matches_clone.lock().unwrap_or_else(|e| {
+                        eprintln!("锁中毒: {}", e);
+                        e.into_inner()
+                    });
                     let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();
                     for m in line_matches {
                         line_map.entry(m.line_number).or_insert(m);
@@ -888,7 +922,7 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
         }
     }).await.map_err(|e| format!("Search task failed: {}", e))?;
 
-    let matches_map = file_matches.lock().unwrap();
+    let matches_map = file_matches.lock().map_err(|e| format!("DB lock error: {}", e))?;
     let results: Vec<SearchResult> = matches_map.iter()
         .map(|(path, line_matches)| {
             let file_name = PathBuf::from(path)

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { FileText, Loader2, RotateCcw, Download, Upload, RefreshCw } from 'lucide-react'
 import { useEditorStore } from '@/stores'
+import { useShallow } from 'zustand/react/shallow'
 import { gitFileLog, gitShowFileContent, gitPullFileLatest, gitForceUploadFile, GitFileLogEntry, writeFile } from '@/lib/tauri'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -19,8 +20,17 @@ import { useTranslation } from 'react-i18next'
 const PAGE_SIZE = 50
 
 const HistoryView = memo(function HistoryView({ visible }: { visible: boolean }) {
-  const { tabs, activeTabId, openDiffTab, updateTabContent } = useEditorStore()
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const { activeTabId, activeTabPath, openDiffTab, updateTabContent } = useEditorStore(
+    useShallow((s) => {
+      const tab = s.tabs.find((t) => t.id === s.activeTabId)
+      return {
+        activeTabId: s.activeTabId,
+        activeTabPath: tab?.path ?? '',
+        openDiffTab: s.openDiffTab,
+        updateTabContent: s.updateTabContent,
+      }
+    })
+  )
   const { t } = useTranslation()
 
   const [entries, setEntries] = useState<GitFileLogEntry[]>([])
@@ -76,41 +86,41 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
   }, [])
 
   useEffect(() => {
-    if (visible && activeTab?.path) {
+    if (visible && activeTabPath) {
       setEntries([])
       setHasMore(true)
       setNotInRepo(false)
       skipRef.current = 0
-      loadHistory(activeTab.path, 0)
+      loadHistory(activeTabPath, 0)
     }
-  }, [visible, activeTab?.path, loadHistory])
+  }, [visible, activeTabPath, loadHistory])
 
   // Listen for file-saved events to refresh history after save + auto commit
   useEffect(() => {
     const handleFileSaved = (e: Event) => {
       const { path } = (e as CustomEvent).detail
-      if (visible && activeTab?.path && path === activeTab.path) {
+      if (visible && activeTabPath && path === activeTabPath) {
         setEntries([])
         setHasMore(true)
         setNotInRepo(false)
         skipRef.current = 0
-        loadHistory(activeTab.path, 0)
+        loadHistory(activeTabPath, 0)
       }
     }
     window.addEventListener('file-saved', handleFileSaved)
     return () => window.removeEventListener('file-saved', handleFileSaved)
-  }, [visible, activeTab?.path, loadHistory])
+  }, [visible, activeTabPath, loadHistory])
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const target = e.currentTarget
       const isNearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 100
 
-      if (isNearBottom && hasMore && !loading && activeTab?.path) {
-        loadHistory(activeTab.path, skipRef.current)
+      if (isNearBottom && hasMore && !loading && activeTabPath) {
+        loadHistory(activeTabPath, skipRef.current)
       }
     },
-    [hasMore, loading, activeTab?.path, loadHistory]
+    [hasMore, loading, activeTabPath, loadHistory]
   )
 
   const handleRestoreClick = useCallback((e: React.MouseEvent, entry: GitFileLogEntry) => {
@@ -120,23 +130,23 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
   }, [])
 
   const handleRestoreConfirm = useCallback(async () => {
-    if (!restoreEntry || !activeTab?.path) return
+    if (!restoreEntry || !activeTabPath || !activeTabId) return
     setShowRestoreDialog(false)
     setRestoring(true)
 
     try {
-      const content = await gitShowFileContent(activeTab.path, restoreEntry.hash)
+      const content = await gitShowFileContent(activeTabPath, restoreEntry.hash)
       // Write content to file
-      await writeFile(activeTab.path, content)
+      await writeFile(activeTabPath, content)
       // Update the editor tab content
-      updateTabContent(activeTab.id, content)
+      updateTabContent(activeTabId, content)
     } catch (e) {
       console.error('Failed to restore file:', e)
     } finally {
       setRestoring(false)
       setRestoreEntry(null)
     }
-  }, [restoreEntry, activeTab, updateTabContent])
+  }, [restoreEntry, activeTabId, activeTabPath, updateTabContent])
 
   const handleRestoreCancel = useCallback(() => {
     setShowRestoreDialog(false)
@@ -148,32 +158,32 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
   }, [])
 
   const handlePullLatestConfirm = useCallback(async () => {
-    if (!activeTab?.path) return
+    if (!activeTabPath || !activeTabId) return
     setShowPullLatestDialog(false)
     setPullingLatest(true)
 
     try {
-      const content = await gitPullFileLatest(activeTab.path)
+      const content = await gitPullFileLatest(activeTabPath)
       // Mark path as saving to prevent file-watcher from closing the tab
       // (atomic write on macOS/Linux triggers a "removed" event during rename)
       useEditorStore.setState((state) => {
         const newSet = new Set(state.savingPaths)
-        newSet.add(activeTab.path)
+        newSet.add(activeTabPath)
         return { savingPaths: newSet }
       })
       // Write content to file
-      await writeFile(activeTab.path, content)
+      await writeFile(activeTabPath, content)
       // Update the editor tab content and mark as not dirty
       useEditorStore.setState((state) => ({
         tabs: state.tabs.map((t) =>
-          t.id === activeTab.id ? { ...t, content, isDirty: false, isEdited: false } : t
+          t.id === activeTabId ? { ...t, content, isDirty: false, isEdited: false } : t
         ),
       }))
       // Delay removing from savingPaths to allow file-watcher events to settle
       setTimeout(() => {
         useEditorStore.setState((state) => {
           const newSet = new Set(state.savingPaths)
-          newSet.delete(activeTab.path)
+          newSet.delete(activeTabPath)
           return { savingPaths: newSet }
         })
       }, 1000)
@@ -181,7 +191,7 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       setEntries([])
       setHasMore(true)
       skipRef.current = 0
-      loadHistory(activeTab.path, 0)
+      loadHistory(activeTabPath, 0)
     } catch (e) {
       console.error('Failed to pull latest:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)
@@ -193,7 +203,7 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
     } finally {
       setPullingLatest(false)
     }
-  }, [activeTab, loadHistory, t])
+  }, [activeTabId, activeTabPath, loadHistory, t])
 
   const handlePullLatestCancel = useCallback(() => {
     setShowPullLatestDialog(false)
@@ -204,17 +214,17 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
   }, [])
 
   const handleForceUploadConfirm = useCallback(async () => {
-    if (!activeTab?.path) return
+    if (!activeTabPath) return
     setShowForceUploadDialog(false)
     setForceUploading(true)
 
     try {
-      await gitForceUploadFile(activeTab.path)
+      await gitForceUploadFile(activeTabPath)
       // Refresh history list after upload
       setEntries([])
       setHasMore(true)
       skipRef.current = 0
-      loadHistory(activeTab.path, 0)
+      loadHistory(activeTabPath, 0)
     } catch (e) {
       console.error('Failed to force upload:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)
@@ -226,7 +236,7 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
     } finally {
       setForceUploading(false)
     }
-  }, [activeTab, loadHistory, t])
+  }, [activeTabPath, loadHistory, t])
 
   const handleForceUploadCancel = useCallback(() => {
     setShowForceUploadDialog(false)
@@ -234,13 +244,13 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
 
   // 手动刷新 git 记录
   const handleRefresh = useCallback(() => {
-    if (!activeTab?.path || loading) return
+    if (!activeTabPath || loading) return
     setEntries([])
     setHasMore(true)
     setNotInRepo(false)
     skipRef.current = 0
-    loadHistory(activeTab.path, 0)
-  }, [activeTab?.path, loading, loadHistory])
+    loadHistory(activeTabPath, 0)
+  }, [activeTabPath, loading, loadHistory])
 
   const formatDate = (dateStr: string) => {
     try {
@@ -269,7 +279,7 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
     }
   }
 
-  if (!activeTab) {
+  if (!activeTabId) {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center h-10 px-3 shrink-0" style={{ borderColor: 'var(--border-color)' }}>
@@ -409,8 +419,8 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
                       className={`flex items-start gap-2 p-2 rounded cursor-pointer overflow-hidden ${isSelected ? 'bg-primary/10 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
                       onClick={() => {
                         setSelectedHash(entry.hash)
-                        if (activeTab?.path) {
-                          openDiffTab(activeTab.path, entry.hash, entry.message)
+                        if (activeTabPath) {
+                          openDiffTab(activeTabPath, entry.hash, entry.message)
                         }
                       }}
                     >

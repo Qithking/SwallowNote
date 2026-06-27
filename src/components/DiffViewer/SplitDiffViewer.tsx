@@ -10,7 +10,7 @@ import { MergeView } from '@codemirror/merge'
 // CodeMirror core
 import { EditorView, keymap, drawSelection, highlightActiveLine, highlightSpecialChars, lineNumbers, ViewUpdate } from '@codemirror/view'
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands'
-import { EditorState, Extension } from '@codemirror/state'
+import { EditorState, Extension, Compartment } from '@codemirror/state'
 
 // Language support — all dynamically imported to reduce initial bundle size
 import { StreamLanguage } from '@codemirror/language'
@@ -275,13 +275,18 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
     }
 
     // Shared base extensions for both panes
+    // langExt() returns a Promise for most languages — a Promise is NOT a valid
+    // CodeMirror Extension and would be silently ignored (or could cause issues).
+    // Use a Compartment to load the language extension asynchronously after
+    // the MergeView is created.
+    const langCompartment = new Compartment()
     const baseExtensions: Extension[] = [
       lineNumbers(),
       highlightActiveLine(),
       highlightSpecialChars(),
       drawSelection(),
       EditorView.lineWrapping,
-      langExt(),
+      langCompartment.of([]),
       mergeEditorTheme,
     ]
 
@@ -376,6 +381,25 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
       })
 
       mergeViewRef.current = mv
+
+      // Asynchronously load and apply the language extension to both panes.
+      // langExt() returns a Promise<Extension[]> — we await it and then use
+      // Compartment.reconfigure to inject the result into each editor.
+      langExt().then((langResult: any) => {
+        const exts = Array.isArray(langResult) ? langResult : [langResult]
+        if (exts.length > 0 && mergeViewRef.current) {
+          try {
+            mergeViewRef.current.a.dispatch({
+              effects: langCompartment.reconfigure(exts as Extension),
+            })
+            mergeViewRef.current.b.dispatch({
+              effects: langCompartment.reconfigure(exts as Extension),
+            })
+          } catch {
+            // Language extension failed to apply — editor still works without syntax highlighting
+          }
+        }
+      })
 
       // Restore initial cursor position if specified
       if (initialCursorLine && initialCursorLine > 1) {

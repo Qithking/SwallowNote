@@ -6,27 +6,28 @@
  * 工具函数来自 @/lib/utils/treeUtils
  */
 import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
-import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, Pin, ArrowUpDown } from 'lucide-react'
+import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, Pin, ArrowUpDown, ClipboardPaste } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
-import { loadFileContent } from '@/lib/api'
-import { openFolderDialog } from '@/lib/tauri'
+import { loadFileContent, loadDirectory } from '@/lib/api'
+import { openFolderDialog, deleteFile } from '@/lib/tauri'
+import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
 import { useTranslation } from 'react-i18next'
-import { matchShortcut, getShortcutKey } from '@/lib/shortcuts'
+import { dispatchBuiltin } from '@/hooks/useKeyboardShortcuts'
 import { useFileTreeActions } from '@/hooks/useFileTreeActions'
 import { useFileTreeDragDrop } from '@/hooks/useFileTreeDragDrop'
-import { findNodeByPath, collectAllPaths } from '@/lib/utils/treeUtils'
+import { findNodeByPath, collectAllPaths, updateNodesWithChildren } from '@/lib/utils/treeUtils'
 import { countWords } from '@/lib/utils/wordCount'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
-import { ContextMenuContent } from '@/components/ui/context-menu'
+import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 import {
   DropdownMenu,
@@ -35,7 +36,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { getFileFrontmatter } from '@/lib/utils/searchQuery'
+import { getFileFrontmatter, getFileFrontmattersByPrefix } from '@/lib/utils/searchQuery'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 
 export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
@@ -98,35 +99,21 @@ function flattenNodes(
   // Sort nodes at this level
   const sortedNodes = sortFileNodes(nodes, sortMode, frontmatterCache)
 
-  // When sort mode is not default, group pinned files at the top within files
+  // Separate pinned files from the rest.
+  // In all sort modes (including 'default') we check frontmatterCache for
+  // pinned status so that pinned files are grouped at the top.
   const pinnedNodes: FileNode[] = []
   const unpinnedNodes: FileNode[] = []
 
-  if (sortMode !== 'default') {
-    for (const node of sortedNodes) {
-      if (node.isDirectory) {
-        unpinnedNodes.push(node)
+  for (const node of sortedNodes) {
+    if (node.isDirectory) {
+      unpinnedNodes.push(node)
+    } else {
+      const fm = frontmatterCache.get(node.path)
+      if (fm?.pinned === true) {
+        pinnedNodes.push(node)
       } else {
-        const fm = frontmatterCache.get(node.path)
-        if (fm?.pinned === true) {
-          pinnedNodes.push(node)
-        } else {
-          unpinnedNodes.push(node)
-        }
-      }
-    }
-  } else {
-    // In default mode, still check for pinned files
-    for (const node of sortedNodes) {
-      if (node.isDirectory) {
         unpinnedNodes.push(node)
-      } else {
-        const fm = frontmatterCache.get(node.path)
-        if (fm?.pinned === true) {
-          pinnedNodes.push(node)
-        } else {
-          unpinnedNodes.push(node)
-        }
       }
     }
   }
@@ -136,13 +123,22 @@ function flattenNodes(
     result.push({ node, depth, isPinned: true })
     if (node.isDirectory && expanded.has(node.path) && node.children) {
       result.push(...flattenNodes(node.children, expanded, newItem, sortMode, frontmatterCache, depth + 1))
+      // 在子节点末尾添加新增输入框虚拟节点（与 unpinned 段逻辑保持一致）
+      if (newItem && newItem.parentPath === node.path) {
+        result.push({
+          node: { id: 'new-item', name: newItem.name, path: 'new-item', isDirectory: false },
+          depth: depth + 1,
+          isLastInParent: true,
+        })
+      }
     }
   }
 
-  // Add separator if there are both pinned and unpinned files
+  // Add separator if there are both pinned and unpinned files.
+  // id/path 包含 depth，避免多个 depth 层级同时存在 pinned+unpinned 时 React key 冲突
   if (pinnedNodes.length > 0 && unpinnedNodes.length > 0) {
     result.push({
-      node: { id: 'pinned-separator', name: '', path: 'pinned-separator', isDirectory: false },
+      node: { id: `pinned-separator-${depth}`, name: '', path: `pinned-separator-${depth}`, isDirectory: false },
       depth,
       isPinnedSeparator: true,
     })
@@ -189,7 +185,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
   isDragOver,
   isDragging,
   isPinned,
-  expanded,
+  isExpanded,
   editingName,
   newItem,
   inputRef,
@@ -217,7 +213,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
   isDragOver: boolean
   isDragging: boolean
   isPinned?: boolean
-  expanded: Set<string>
+  isExpanded: boolean
   editingName: string
   newItem: { type: 'file' | 'folder' | 'mindmap'; parentPath: string; name: string } | null
   inputRef: React.RefObject<HTMLInputElement | null>
@@ -289,7 +285,7 @@ const TreeNodeItem = memo(function TreeNodeItem({
         ) : (
           <ChevronRight
             size={12}
-            className={`transition-transform shrink-0 ${expanded.has(node.path) ? 'rotate-90' : ''}`}
+            className={`transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
             onClick={(e) => { e.stopPropagation(); onToggle(node.path) }}
           />
         )
@@ -368,71 +364,208 @@ export const FileTreeView = memo(function FileTreeView() {
   const setMultiSelectedPaths = useFileTreeStore((s) => s.setMultiSelectedPaths)
   const lastClickedPath = useFileTreeStore((s) => s.lastClickedPath)
   const setLastClickedPath = useFileTreeStore((s) => s.setLastClickedPath)
-  const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
-  const customShortcuts = useUIStore((s) => s.customShortcuts)
-  const { t } = useTranslation()
+const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
+  const setNodes = useFileTreeStore((s) => s.setNodes)
+  const clipboardFiles = useUIStore((s) => s.clipboardFiles)
+  const clipboardIsCut = useUIStore((s) => s.clipboardIsCut)
+  const setClipboardFiles = useUIStore((s) => s.setClipboardFiles)
+  const showToast = useUIStore((s) => s.showToast)
+  const showAllFiles = useUIStore((s) => s.showAllFiles)
+  const markdownOnly = useUIStore((s) => s.markdownOnly)
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
+const { t } = useTranslation()
+
+  const hasClipboard = clipboardFiles.length > 0
+
+  // 空白区域粘贴的目标目录
+  const getEmptyAreaPasteTarget = useCallback((): string | null => {
+    if (workspaceMode === 'folder') return rootPath
+    // 工作区模式：优先用选中路径的根目录，否则用第一个根目录
+    if (selectedPath && workspaceFolders.length > 0) {
+      const folder = workspaceFolders.find(f => selectedPath.startsWith(f))
+      if (folder) return folder
+    }
+    return workspaceFolders[0] || null
+  }, [workspaceMode, rootPath, selectedPath, workspaceFolders])
+
+  // 空白区域粘贴处理
+  const handleEmptyAreaPaste = useCallback(async () => {
+    const targetDir = getEmptyAreaPasteTarget()
+    if (!targetDir || !hasClipboard) return
+
+    let successCount = 0
+    let failCount = 0
+    let skipCount = 0
+
+    for (const sourcePath of clipboardFiles) {
+      const fileName = sourcePath.split(/[\\/]/).pop() || sourcePath
+      const destPath = `${targetDir}/${fileName}`
+      if (sourcePath === destPath) { skipCount++; continue }
+      try {
+        await invoke('copy_file', { req: { old_path: sourcePath, new_path: destPath } })
+        successCount++
+        if (clipboardIsCut) {
+          await deleteFile(sourcePath)
+          const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
+          invalidateFrontmatterCache(sourcePath)
+          const editorStore = useEditorStore.getState()
+          editorStore.updateTabPath(sourcePath, destPath, fileName)
+        }
+      } catch (e) {
+        console.error('Failed to paste:', e)
+        failCount++
+      }
+    }
+
+    if (clipboardIsCut) {
+      setClipboardFiles([], false)
+    }
+
+    // 刷新目标目录
+    const currentNodes = useFileTreeStore.getState().nodes
+    const children = await loadDirectory(targetDir, showAllFiles, markdownOnly)
+    const updatedNodes = updateNodesWithChildren(currentNodes, targetDir, children)
+    setNodes(updatedNodes)
+
+    if (failCount === 0 && skipCount === 0) {
+      showToast(t('contextMenu.pastedSuccess', { count: successCount }))
+    } else if (failCount > 0) {
+      showToast(t('contextMenu.pastedPartial', { count: successCount, failCount }))
+    }
+  }, [getEmptyAreaPasteTarget, hasClipboard, clipboardFiles, clipboardIsCut, setClipboardFiles, showAllFiles, markdownOnly, setNodes, showToast, t])
 
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [sortMode, setSortMode] = useState<FileTreeSortMode>('default')
   const [frontmatterCache, setFrontmatterCache] = useState<Map<string, NoteFrontmatter>>(new Map())
+  // Ref to read the latest cache inside async without re-triggering the effect.
   const frontmatterCacheRef = useRef(frontmatterCache)
   frontmatterCacheRef.current = frontmatterCache
+  // Track the set of visible .md paths from the last run so we can skip
+  // the batch IPC query entirely when nothing changed (e.g. toggling
+  // loading state, expanding a dir with only subdirectories, collapsing).
+  const lastMdPathsRef = useRef<Set<string>>(new Set())
+  // Track which root paths have already been batch-queried. The batch
+  // query (query_frontmatter_by_prefix) returns ALL .md records under a
+  // root, including files in unexpanded directories. Re-running it on
+  // every directory expansion within the same root is wasteful — the
+  // result is identical. We only need to batch-query when a NEW root is
+  // added; for subsequent expansions we rely on the cache + individual
+  // fallback for any newly visible uncached files.
+  const queriedRootsRef = useRef<Set<string>>(new Set())
 
-  // Load frontmatter for all visible .md files when sort mode changes or tree refreshes
+  // Load frontmatter for all .md files when the tree changes.
+  //
+  // Performance strategy:
+  // 1. Collect visible .md paths; if unchanged from last run, skip entirely
+  //    (no IPC, no state update, no re-render).
+  // 2. If root paths changed (new root added), batch-query the new roots.
+  //    Skip batch query for existing roots — their data is already cached.
+  // 3. Fallback: individually load frontmatter for visible .md files not
+  //    yet in the cache (newly expanded directories, unindexed files).
+  // 4. Only call setFrontmatterCache if something actually changed.
   useEffect(() => {
     if (nodes.length === 0) return
+
+    // Collect visible .md file paths from the current tree
+    const collectMdPaths = (fileNodes: FileNode[]): string[] => {
+      const paths: string[] = []
+      for (const node of fileNodes) {
+        if (!node.isDirectory && node.name.toLowerCase().endsWith('.md')) {
+          paths.push(node.path)
+        }
+        if (node.children) {
+          paths.push(...collectMdPaths(node.children))
+        }
+      }
+      return paths
+    }
+
+    const mdPaths = collectMdPaths(nodes)
+    const mdPathSet = new Set(mdPaths)
+
+    // Early exit: if the set of visible .md paths hasn't changed since the
+    // last run, there's nothing to do. This covers:
+    //   - toggleNode setting isLoading (nodes ref changes, same .md paths)
+    //   - expanding a directory with only subdirectories
+    //   - collapsing a directory (children released, but paths were cached)
+    const prevSet = lastMdPathsRef.current
+    if (prevSet.size === mdPathSet.size) {
+      let same = true
+      for (const p of mdPathSet) {
+        if (!prevSet.has(p)) { same = false; break }
+      }
+      if (same) return
+    }
+    lastMdPathsRef.current = mdPathSet
+
+    const rootPaths = nodes.map((n) => n.path)
+    // Determine which roots need a fresh batch query.
+    // Only NEW roots (not previously queried) need it — existing roots'
+    // data is already in the cache and won't have changed.
+    const rootsToQuery = rootPaths.filter((p) => !queriedRootsRef.current.has(p))
+    // Clean up queriedRootsRef if a root was removed
+    if (rootsToQuery.length > 0 || rootPaths.length !== queriedRootsRef.current.size) {
+      const newRootSet = new Set(rootPaths)
+      for (const r of queriedRootsRef.current) {
+        if (!newRootSet.has(r)) queriedRootsRef.current.delete(r)
+      }
+      for (const r of rootsToQuery) queriedRootsRef.current.add(r)
+    }
 
     let cancelled = false
 
     const loadFrontmatter = async () => {
+      // Start from existing cache so we don't lose entries for paths
+      // that the batch query doesn't return (e.g. not yet indexed).
       const cache = new Map(frontmatterCacheRef.current)
       let changed = false
 
-      // 收集所有 .md 文件路径
-      const collectMdPaths = (fileNodes: FileNode[]): string[] => {
-        const paths: string[] = []
-        for (const node of fileNodes) {
-          if (!node.isDirectory && node.name.toLowerCase().endsWith('.md')) {
-            paths.push(node.path)
-          }
-          if (node.children) {
-            paths.push(...collectMdPaths(node.children))
-          }
-        }
-        return paths
-      }
-
-      const mdPaths = collectMdPaths(nodes)
-      // 清理不在当前树中的过期缓存条目
-      const mdPathSet = new Set(mdPaths)
-      for (const key of cache.keys()) {
-        if (!mdPathSet.has(key)) {
-          cache.delete(key)
-          changed = true
-        }
-      }
-      // 过滤出未缓存的路径
-      const uncachedPaths = mdPaths.filter((p) => !cache.has(p))
-      if (uncachedPaths.length === 0) return
-
-      // 分批并发加载，每批 5 个，避免 IPC 过载
-      const BATCH_SIZE = 5
-      for (let i = 0; i < uncachedPaths.length; i += BATCH_SIZE) {
-        if (cancelled) return
-        const batch = uncachedPaths.slice(i, i + BATCH_SIZE)
-        const results = await Promise.allSettled(
-          batch.map((path) => getFileFrontmatter(path))
+      // 1. Batch query: ONLY for new roots. One IPC call per new root
+      //    retrieves ALL indexed frontmatter records under that root.
+      if (rootsToQuery.length > 0) {
+        const batchResults = await Promise.all(
+          rootsToQuery.map((p) => getFileFrontmattersByPrefix(p)),
         )
         if (cancelled) return
-        for (let j = 0; j < results.length; j++) {
-          const result = results[j]
-          if (result.status === 'fulfilled') {
-            cache.set(batch[j], result.value)
+
+        for (const result of batchResults) {
+          for (const [path, fm] of result) {
+            cache.set(path, fm)
             changed = true
           }
         }
       }
 
+      // 2. Fallback: individually load frontmatter for visible .md files
+      //    not yet in the cache. This covers:
+      //    - Files in newly expanded directories (not in batch query scope
+      //      if the root was already queried but these files are new)
+      //    - Files not yet indexed by the backend
+      //    Usually very few (0-10).
+      const uncachedPaths = mdPaths.filter((p) => !cache.has(p))
+
+      if (uncachedPaths.length > 0) {
+        const FALLBACK_BATCH = 10
+        for (let i = 0; i < uncachedPaths.length; i += FALLBACK_BATCH) {
+          if (cancelled) return
+          const batch = uncachedPaths.slice(i, i + FALLBACK_BATCH)
+          const results = await Promise.allSettled(
+            batch.map((path) => getFileFrontmatter(path)),
+          )
+          if (cancelled) return
+          for (let j = 0; j < results.length; j++) {
+            const result = results[j]
+            if (result.status === 'fulfilled') {
+              cache.set(batch[j], result.value)
+              changed = true
+            }
+          }
+        }
+      }
+
+      // 3. Only update state if something actually changed — avoids
+      //    unnecessary re-renders when the cache content is identical.
       if (changed && !cancelled) {
         setFrontmatterCache(cache)
       }
@@ -516,11 +649,18 @@ export const FileTreeView = memo(function FileTreeView() {
     }
   }
 
+  // Refs to access latest values inside stable callbacks, avoiding
+  // unnecessary callback recreation when nodes/expanded change.
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
+
   const handleSelect = useCallback((node: FileNode, shiftKey: boolean) => {
     if (editingPath !== null) return
 
     if (shiftKey && lastClickedPath) {
-      const allPaths = collectAllPaths(nodes)
+      const allPaths = collectAllPaths(nodesRef.current, expandedRef.current)
       const startIdx = allPaths.indexOf(lastClickedPath)
       const endIdx = allPaths.indexOf(node.path)
       if (startIdx >= 0 && endIdx >= 0) {
@@ -555,7 +695,7 @@ export const FileTreeView = memo(function FileTreeView() {
         })
       })
       .catch(console.error)
-  }, [editingPath, lastClickedPath, nodes, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab, setMultiSelectedPaths])
+  }, [editingPath, lastClickedPath, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab, setMultiSelectedPaths])
 
   const handleOpenFolder = async () => {
     const path = await openFolderDialog()
@@ -569,6 +709,11 @@ export const FileTreeView = memo(function FileTreeView() {
   }
 
   // 键盘快捷键 (F2 重命名 / Delete 删除)
+  // Uses dispatchBuiltin so plugin-command conflicts are detected
+  // and surfaced to the user via toast (same as all other built-in
+  // shortcuts).  dispatchBuiltin reads the latest customShortcuts
+  // from the store internally, so we don't need customShortcuts in
+  // the dependency array.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement
@@ -576,26 +721,21 @@ export const FileTreeView = memo(function FileTreeView() {
         return
       }
 
-      const renameShortcut = getShortcutKey('renameFile', customShortcuts)
-      if (matchShortcut(e, renameShortcut)) {
-        e.preventDefault()
+      if (dispatchBuiltin(e, 'renameFile', () => {
         if (selectedPath) {
           const node = findNodeByPath(selectedPath, nodes)
           if (node) handleStartEdit(node.path, node.name, node.isDirectory)
         }
-        return
-      }
+      })) return
 
-      const deleteShortcut = getShortcutKey('deleteFile', customShortcuts)
-      if (matchShortcut(e, deleteShortcut)) {
-        e.preventDefault()
+      dispatchBuiltin(e, 'deleteFile', () => {
         handleDeleteSelected()
-      }
+      })
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedPath, nodes, customShortcuts, handleStartEdit, handleDeleteSelected])
+  }, [selectedPath, nodes, handleStartEdit, handleDeleteSelected])
 
   const isSelectedDirectory = selectedPath ? (findNodeByPath(selectedPath, nodes)?.isDirectory ?? false) : false
 
@@ -710,7 +850,7 @@ export const FileTreeView = memo(function FileTreeView() {
                     if (isPinnedSeparator) {
                       return (
                         <div
-                          key="pinned-separator"
+                          key={node.path}
                           style={{
                             position: 'absolute',
                             top: 0,
@@ -751,7 +891,7 @@ export const FileTreeView = memo(function FileTreeView() {
                           isDragOver={dragOverPath === node.path}
                           isDragging={dragSourcePaths.includes(node.path)}
                           isPinned={isPinned}
-                          expanded={expanded}
+                          isExpanded={expanded.has(node.path)}
                           editingName={editingName}
                           newItem={newItem}
                           inputRef={inputRef}
@@ -798,6 +938,16 @@ export const FileTreeView = memo(function FileTreeView() {
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
           }}
         >
+          {hasClipboard && (
+            <ContextMenuItem
+              onClick={handleEmptyAreaPaste}
+              style={{ color: 'var(--text-secondary)' }}
+              className="cursor-pointer"
+            >
+              <ClipboardPaste size={12} />
+              <span>{t('contextMenu.paste')}</span>
+            </ContextMenuItem>
+          )}
           <PluginContextMenuItems location="fileTreeEmpty" ctx={{}} />
         </ContextMenuContent>
       </ContextMenuPrimitive.Root>

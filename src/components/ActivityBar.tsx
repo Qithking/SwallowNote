@@ -40,9 +40,8 @@ function ActivityBar() {
   const showConflictBadge = useUIStore((s) => s.showConflictBadge)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
   const sidebarPlugins = usePluginStore((s) => s.registry.sidebar)
-  const activeTabId = useEditorStore((s) => s.activeTabId)
-  const tabs = useEditorStore((s) => s.tabs)
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const activeTabContent = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.content ?? '')
+  const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
   const { t } = useTranslation()
 
   const conflictCount = conflictRepos.length
@@ -161,7 +160,7 @@ function ActivityBar() {
               if (sidebarVisible) toggleSidebar()
               usePluginStore.getState().setActivePlugin(null, 'leftPanel')
             }
-          }, activeTab?.content ?? '', activeTab?.path ?? '')
+          }, activeTabContent, activeTabPath)
           return (
             <PluginErrorBoundary key={plugin.id} pluginId={plugin.id} resetKey={plugin.id}>
               {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}

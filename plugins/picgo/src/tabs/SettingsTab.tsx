@@ -115,64 +115,6 @@ function ProviderSummary({ settings }: { settings: AllSettings }): ReactNode {
           <Row k="Path" v={settings.githubPathPrefix || ''} />
         </>
       )
-    case 'tencent':
-      return (
-        <>
-          <Row k="SecretId" v={maskToken(settings.tencentSecretId)} />
-          <Row k="SecretKey" v={maskToken(settings.tencentSecretKey)} />
-          <Row k="Region" v={settings.tencentRegion || '未设置'} />
-          <Row k="Bucket" v={settings.tencentBucket || '未设置'} />
-          <Row k="Protocol" v={settings.tencentProtocol} />
-          <Row k="Path" v={settings.tencentKeyPrefix || ''} />
-        </>
-      )
-    case 'aliyun':
-      return (
-        <>
-          <Row k="AccessKey ID" v={maskToken(settings.aliyunAccessKeyId)} />
-          <Row k="AccessKey Secret" v={maskToken(settings.aliyunAccessKeySecret)} />
-          <Row k="Region" v={settings.aliyunRegion || '未设置'} />
-          <Row k="Bucket" v={settings.aliyunBucket || '未设置'} />
-          {settings.aliyunEndpoint ? (
-            <Row k="Endpoint" v={settings.aliyunEndpoint} />
-          ) : null}
-          <Row k="Path" v={settings.aliyunKeyPrefix || ''} />
-        </>
-      )
-    case 'qiniu':
-      return (
-        <>
-          <Row k="AccessKey" v={maskToken(settings.qiniuAccessKey)} />
-          <Row k="SecretKey" v={maskToken(settings.qiniuSecretKey)} />
-          <Row k="Bucket" v={settings.qiniuBucket || '未设置'} />
-          <Row k="Zone" v={settings.qiniuZone} />
-          <Row k="Domain" v={settings.qiniuDomain || '未设置'} />
-          <Row k="Path" v={settings.qiniuKeyPrefix || ''} />
-        </>
-      )
-    case 'upyun':
-      return (
-        <>
-          <Row k="Operator" v={settings.upyunOperator || '未设置'} />
-          <Row k="Password" v={maskToken(settings.upyunPassword)} />
-          <Row k="Service" v={settings.upyunBucket || '未设置'} />
-          <Row k="Domain" v={settings.upyunDomain || '未设置'} />
-          <Row k="Path" v={settings.upyunKeyPrefix || ''} />
-        </>
-      )
-    case 'minio':
-      return (
-        <>
-          <Row k="Endpoint" v={settings.minioEndpoint || '未设置'} />
-          <Row k="AccessKey" v={maskToken(settings.minioAccessKey)} />
-          <Row k="SecretKey" v={maskToken(settings.minioSecretKey)} />
-          <Row k="Bucket" v={settings.minioBucket || '未设置'} />
-          <Row k="Region" v={settings.minioRegion || 'us-east-1'} />
-          <Row k="HTTPS" v={settings.minioUseSsl ? '开' : '关'} />
-          <Row k="Path-Style" v={settings.minioPathStyle ? '开' : '关'} />
-          <Row k="Path" v={settings.minioKeyPrefix || ''} />
-        </>
-      )
     case 'custom':
       return (
         <>

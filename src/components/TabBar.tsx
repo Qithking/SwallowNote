@@ -2,7 +2,7 @@
  * TabBar Component - Editor tabs management
  * Shows file tabs with dirty/saved status indicators
  */
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal, Crosshair } from 'lucide-react'
 import {
   ContextMenu,
@@ -14,12 +14,54 @@ import {
 import { useEditorStore, useFileTreeStore, useWorkspaceStore, useUIStore } from '@/stores'
 import { invoke } from '@tauri-apps/api/core'
 import { cn } from '@/lib/utils'
-import type { EditorTab } from '@/stores/editor'
 import { useTranslation } from 'react-i18next'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 
+/** Fields from EditorTab that TabBar actually needs for rendering.
+ *  Excludes `content` (the only field that changes on every keystroke)
+ *  to prevent re-renders during editing. */
+type TabBarItem = {
+  id: string
+  name: string
+  isDirty: boolean
+  isEdited: boolean
+  path: string
+  isLoading: boolean
+  type: 'file' | 'diff' | 'conflict'
+  isContentLoaded: boolean
+}
+
 function TabBar() {
-  const { tabs, activeTabId, setActiveTab, removeTab } = useEditorStore()
+  // Subscribe to a string "fingerprint" of tab metadata (excluding
+  // `content`).  Because it's a primitive, Zustand's default Object.is
+  // equality correctly prevents re-renders when only `content` changes.
+  // The actual TabBarItem[] is derived via useMemo below.
+  const tabsFingerprint = useEditorStore((s) => {
+    let fp = ''
+    for (const t of s.tabs) {
+      fp += t.id + '\0' + t.name + '\0' + t.isDirty + '\0' + t.isEdited
+        + '\0' + t.path + '\0' + (t.isLoading ?? false) + '\0'
+        + (t.type ?? 'file') + '\0' + (t.content !== undefined) + '\n'
+    }
+    return fp
+  })
+  // Derive TabBarItem[] from the store's current state, only re-creating
+  // the array when the fingerprint changes (i.e. when tab metadata — not
+  // content — changes).
+  const tabs = useMemo<TabBarItem[]>(() =>
+    useEditorStore.getState().tabs.map((t) => ({
+      id: t.id,
+      name: t.name,
+      isDirty: t.isDirty,
+      isEdited: t.isEdited,
+      path: t.path,
+      isLoading: t.isLoading ?? false,
+      type: t.type ?? 'file',
+      isContentLoaded: t.content !== undefined,
+    })), [tabsFingerprint])
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const setActiveTab = useEditorStore((s) => s.setActiveTab)
+  const removeTab = useEditorStore((s) => s.removeTab)
   const { rootPath, workspaceFolders } = useWorkspaceStore()
   const workspaceMode = useUIStore((s) => s.workspaceMode)
   const showToast = useUIStore((s) => s.showToast)
@@ -46,18 +88,18 @@ function TabBar() {
     return path
   }
 
-  const confirmCloseDirty = (dirtyTabs: EditorTab[]): boolean => {
+  const confirmCloseDirty = (dirtyTabs: TabBarItem[]): boolean => {
     if (dirtyTabs.length === 0) return true
     const names = dirtyTabs.map(t => t.name).join(', ')
     return confirm(t('dialog.unsavedFiles', { count: dirtyTabs.length }) + '\n' + names)
   }
 
-  const handleClose = (tab: EditorTab) => {
+  const handleClose = (tab: TabBarItem) => {
     if (tab.isDirty && !confirmCloseDirty([tab])) return
     removeTab(tab.id)
   }
 
-  const handleCloseOthers = (tab: EditorTab) => {
+  const handleCloseOthers = (tab: TabBarItem) => {
     const others = tabs.filter(t => t.id !== tab.id)
     const dirtyOthers = others.filter(t => t.isDirty)
     if (dirtyOthers.length > 0 && !confirmCloseDirty(dirtyOthers)) return
@@ -65,7 +107,7 @@ function TabBar() {
     editorStore.removeTabs(others.map(t => t.id))
   }
 
-  const handleCloseRight = (tab: EditorTab) => {
+  const handleCloseRight = (tab: TabBarItem) => {
     const tabIndex = tabs.findIndex(t => t.id === tab.id)
     const rightTabs = tabs.slice(tabIndex + 1)
     const dirtyRight = rightTabs.filter(t => t.isDirty)
@@ -74,7 +116,7 @@ function TabBar() {
     editorStore.removeTabs(rightTabs.map(t => t.id))
   }
 
-  const handleCopyPath = async (tab: EditorTab) => {
+  const handleCopyPath = async (tab: TabBarItem) => {
     try {
       await navigator.clipboard.writeText(tab.path)
       showToast(t('tabBar.pathCopied'))
@@ -83,7 +125,7 @@ function TabBar() {
     }
   }
 
-  const handleCopyRelativePath = async (tab: EditorTab) => {
+  const handleCopyRelativePath = async (tab: TabBarItem) => {
     try {
       await navigator.clipboard.writeText(getRelativePath(tab.path))
       showToast(t('tabBar.relativePathCopied'))
@@ -92,7 +134,7 @@ function TabBar() {
     }
   }
 
-  const handleShowInFinder = async (tab: EditorTab) => {
+  const handleShowInFinder = async (tab: TabBarItem) => {
     try {
       await invoke('open_in_finder', { path: tab.path })
     } catch {
@@ -100,7 +142,7 @@ function TabBar() {
     }
   }
 
-  const handleRevealInTree = (tab: EditorTab) => {
+  const handleRevealInTree = (tab: TabBarItem) => {
     if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
       const folder = workspaceFolders.find(f => tab.path.startsWith(f))
       if (folder) {
@@ -271,7 +313,7 @@ function TabBar() {
     // Load content asynchronously after switching tab
     // This prevents blocking the UI and avoids race conditions
     // Check content === undefined to detect unloaded tabs (empty string is valid content)
-    if (tab.content === undefined && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
+    if (!tab.isContentLoaded && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
       // Use setTimeout to ensure tab switch happens first
       setTimeout(() => {
         useEditorStore.getState().loadTabContent(tabId)

@@ -131,6 +131,27 @@ export async function queryFrontmatterByPrefix(pathPrefix: string): Promise<Fron
 }
 
 /**
+ * 批量查询指定路径前缀下所有 .md 文件的 frontmatter。
+ * 使用后端 query_frontmatter_by_prefix 一次 IPC 调用获取全部记录，
+ * 避免对每个文件单独发起 IPC 调用（N+1 问题）。
+ *
+ * 返回 Map<filePath, NoteFrontmatter>，仅包含已被后端索引的文件。
+ * 未索引的文件不会出现在结果中，调用方需自行回退到 getFileFrontmatter。
+ */
+export async function getFileFrontmattersByPrefix(pathPrefix: string): Promise<Map<string, NoteFrontmatter>> {
+  const cache = new Map<string, NoteFrontmatter>()
+  try {
+    const records = await invoke<FrontmatterRecord[]>('query_frontmatter_by_prefix', { pathPrefix })
+    for (const record of records) {
+      cache.set(record.file_path, recordToFrontmatter(record))
+    }
+  } catch {
+    // 后端查询失败，返回空 cache
+  }
+  return cache
+}
+
+/**
  * 按标签查询 frontmatter 记录。
  */
 export async function queryFrontmatterByTag(tag: string): Promise<FrontmatterRecord[]> {

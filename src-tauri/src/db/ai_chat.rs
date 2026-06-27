@@ -12,19 +12,27 @@ pub struct AiMessage {
 }
 
 pub fn save_message(db: &Database, role: &str, content: &str, model_id: &str) -> Result<i64> {
-    let conn = db.conn.lock().unwrap();
-    conn.execute(
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
+    // 用事务包裹 INSERT + DELETE，保证原子性：避免插入成功但清理失败时
+    // 出现部分写入。任一步骤失败时 Transaction drop 会自动回滚。
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "INSERT INTO ai_messages (role, content, model_id) VALUES (?1, ?2, ?3)",
         [role, content, model_id],
     )?;
-    let id = conn.last_insert_rowid();
+    let id = tx.last_insert_rowid();
 
-    conn.execute(
+    tx.execute(
         "DELETE FROM ai_messages WHERE id NOT IN (
             SELECT id FROM ai_messages ORDER BY id DESC LIMIT 500
         )",
         [],
     )?;
+    tx.commit()?;
 
     Ok(id)
 }
@@ -34,7 +42,11 @@ pub fn load_messages(
     before_id: Option<i64>,
     limit: i64,
 ) -> Result<Vec<AiMessage>> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
 
     let mut messages = Vec::new();
 
@@ -79,7 +91,11 @@ pub fn load_messages(
 }
 
 pub fn clear_messages(db: &Database) -> Result<()> {
-    let conn = db.conn.lock().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
     conn.execute("DELETE FROM ai_messages", [])?;
     Ok(())
 }

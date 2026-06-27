@@ -400,7 +400,8 @@
     "contentLayout": "内容排版设置",
     "externalChange": "文件已被外部修改，点击重新加载",
     "conflictResolve": "文件存在冲突，点击处理",
-    "noteProperties": "笔记属性"
+    "noteProperties": "笔记属性",
+    "downloadRemoteImages": "下载远程图片到本地"
   },
   "editor": {
     "untitled": "未命名",

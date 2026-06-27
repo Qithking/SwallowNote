@@ -59,10 +59,11 @@ export function EditorContextMenu({
   const { t } = useTranslation()
   const setAiContextMenuRequest = useUIStore((s) => s.setAiContextMenuRequest)
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
-  const { tabs, activeTabId } = useEditorStore()
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
   const { rootPath } = useWorkspaceStore()
 
-  const activeTab = tabs.find((tab) => tab.id === activeTabId)
+  const activeTab = activeTabPath ? { id: activeTabId, path: activeTabPath } : undefined
 
   const handleAiAction = useCallback(
     async (roleKey: string, roleName: string) => {

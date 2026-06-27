@@ -400,7 +400,8 @@
     "contentLayout": "Content Layout Settings",
     "externalChange": "File modified externally, click to reload",
     "conflictResolve": "File has conflicts, click to resolve",
-    "noteProperties": "Note Properties"
+    "noteProperties": "Note Properties",
+    "downloadRemoteImages": "Download remote images"
   },
   "editor": {
     "untitled": "Untitled",

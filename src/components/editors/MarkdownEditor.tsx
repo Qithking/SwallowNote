@@ -7,18 +7,32 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { BlockNoteEditor, PartialBlock, createCodeBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
-import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react'
+import {
+  useCreateBlockNote,
+  SuggestionMenuController,
+  getDefaultReactSlashMenuItems,
+  LinkToolbarController,
+  EditLinkButton,
+  DeleteLinkButton,
+  useComponentsContext,
+  useDictionary,
+} from '@blocknote/react'
+import type { LinkToolbarProps } from '@blocknote/react'
 import { codeBlockOptions } from '@blocknote/code-block'
 import { TextSelection } from 'prosemirror-state'
 import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
+import { registerFlushFn } from '@/lib/editor-flush'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
 import { stripFrontmatter } from '@/lib/utils/frontmatter'
 import { buildTableOfContents } from '@/utils/tableOfContents'
-import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile } from '@/lib/tauri'
+import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, readFile, pathExists, getFileMetadata } from '@/lib/tauri'
+import { downloadCoordinator } from '@/lib/download-coordinator'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
-import { Network, Sigma } from 'lucide-react'
+import { toast } from 'sonner'
+import { Network, Sigma, ExternalLink } from 'lucide-react'
+import { countWords } from '@/lib/utils/wordCount'
 import { EditorContextMenu } from './EditorContextMenu'
 import { MermaidBlockSpec, transformMermaidBlocks, MERMAID_BLOCK_TYPE } from './mermaidBlockSpec'
 import {
@@ -32,6 +46,57 @@ import {
   MARKMAP_BLOCK_TYPE,
 } from './markmapBlockSpec'
 import '@blocknote/mantine/style.css'
+
+/** Check if a URL is an external protocol (http, https, mailto, etc.) */
+function isExternalUrl(url: string): boolean {
+  return /^(https?:|ftp:|mailto:|tel:|callto:|sms:)/i.test(url)
+}
+
+/** Resolve a relative URL to an absolute file path based on the current file's directory */
+function resolveFilePath(url: string, currentFilePath: string): string {
+  // Already an absolute path (Unix-style or Windows drive letter)
+  if (url.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(url)) {
+    return url
+  }
+  const fileDir = currentFilePath.split(/[\\/]/).slice(0, -1).join('/') || ''
+  // 统一将反斜杠转为正斜杠，兼容 Windows 路径写法
+  const normalizedUrl = url.replace(/^\.\//, '').replace(/\\/g, '/')
+  const urlParts = normalizedUrl.split('/')
+  const dirParts = fileDir.split('/')
+  for (const part of urlParts) {
+    if (part === '..') {
+      dirParts.pop()
+    } else if (part && part !== '.') {
+      dirParts.push(part)
+    }
+  }
+  return dirParts.join('/')
+}
+
+/**
+ * 递归遍历 blocks（包括嵌套的 block.children），对每个 block 调用 visitor。
+ * - visitor 返回非 undefined 值时，用返回值替换原 block（用于 block 转换）
+ * - visitor 返回 undefined 时，保留原 block（用于副作用收集，如收集符合条件的 block）
+ * 返回新数组（不修改原数组），children 也会被递归遍历。
+ */
+function walkBlocks(blocks: any[], visitor: (block: any) => any): any[] {
+  const result: any[] = []
+  for (const block of blocks) {
+    if (!block) {
+      result.push(block)
+      continue
+    }
+    const visited = visitor(block)
+    const current = visited !== undefined ? visited : block
+    if (Array.isArray(current.children) && current.children.length > 0) {
+      // 递归遍历 children，创建新对象避免修改原 block
+      result.push({ ...current, children: walkBlocks(current.children, visitor) })
+    } else {
+      result.push(current)
+    }
+  }
+  return result
+}
 
 interface MarkdownEditorProps {
   content: string
@@ -48,8 +113,10 @@ function BlockNoteInner({
 }) {
   const uploadPath = useUIStore((state) => state.uploadPath)
   const { rootPath } = useWorkspaceStore()
-  const { tabs, activeTabId } = useEditorStore()
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const activeTabId = useEditorStore((s) => s.activeTabId)
+  const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
+  const activeTabName = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.name ?? '')
+  const addTab = useEditorStore((s) => s.addTab)
   const { t } = useTranslation()
   const {
     widePaddingVertical,
@@ -60,6 +127,11 @@ function BlockNoteInner({
   const editorContainerRef = useRef<HTMLDivElement>(null)
   // Cache the last onChange result so getFullContent can return it synchronously
   const lastContentRef = useRef<string>('')
+  // Refs to access latest values inside stable callbacks (editor is created once)
+  const activeTabPathRef = useRef(activeTabPath)
+  activeTabPathRef.current = activeTabPath
+  const addTabRef = useRef(addTab)
+  addTabRef.current = addTab
 
   useEffect(() => {
     if (noteWidth !== 'wide') return
@@ -95,7 +167,7 @@ function BlockNoteInner({
   }), [])
 
   const resolveUploadDir = async (): Promise<string> => {
-    const filePath = activeTab?.path || ''
+    const filePath = activeTabPath || ''
     const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
     const root = rootPath || folder
     let userRoot = ''
@@ -112,7 +184,7 @@ function BlockNoteInner({
   }
 
   const uploadFile = async (file: File): Promise<string> => {
-    const filePath = activeTab?.path || ''
+    const filePath = activeTabPath || ''
     const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
     const uploadDir = await resolveUploadDir()
     const ext = file.name.split('.').pop() || 'bin'
@@ -164,7 +236,7 @@ function BlockNoteInner({
         absolutePath = url
       } else {
         // Resolve relative path based on the current file's directory
-        const filePath = activeTab?.path || ''
+        const filePath = activeTabPath || ''
         const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/') || rootPath || ''
 
         if (!fileDir) {
@@ -200,7 +272,7 @@ function BlockNoteInner({
    * Returns the relative URL for the copied file.
    */
   const uploadFileFromPath = async (sourcePath: string): Promise<string> => {
-    const filePath = activeTab?.path || ''
+    const filePath = activeTabPath || ''
     const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
     const uploadDir = await resolveUploadDir()
     const ext = sourcePath.split('.').pop() || 'bin'
@@ -281,10 +353,11 @@ function BlockNoteInner({
 
     // No Files in WebView clipboard — read system clipboard via Tauri.
     readClipboardFilePaths()
-      .then((filePaths) => {
+      .then(async (filePaths) => {
         if (filePaths.length > 0) {
           // System clipboard has file paths → insert as file blocks
-          filePaths.forEach((sourcePath) => {
+          // 使用 for...of + await 顺序插入，避免 forEach 并发导致顺序逆序（C,B,A）
+          for (const sourcePath of filePaths) {
             try {
               const fileBlockType = getFileBlockType(sourcePath)
               const fileName = sourcePath.split('/').pop() || 'file'
@@ -310,17 +383,17 @@ function BlockNoteInner({
                 )[0].id
               }
 
-              uploadFileFromPath(sourcePath).then((url) => {
-                if (insertedBlockId) {
-                  bnEditor.updateBlock(insertedBlockId, {
-                    props: { url },
-                  } as PartialBlock)
-                }
-              })
+              // await 上传完成，确保前一个文件插入完成后再处理下一个
+              const url = await uploadFileFromPath(sourcePath)
+              if (insertedBlockId) {
+                bnEditor.updateBlock(insertedBlockId, {
+                  props: { url },
+                } as PartialBlock)
+              }
             } catch (e) {
               console.error('Failed to paste file from clipboard:', sourcePath, e)
             }
-          })
+          }
         }
         // If no file paths found, do nothing — nothing to paste
       })
@@ -330,6 +403,87 @@ function BlockNoteInner({
     return undefined
   }
 
+  // 通过链接点击在应用内打开文件为新标签页
+  const openFileInApp = useCallback(async (filePath: string) => {
+    try {
+      // 先检查文件是否存在，给出更友好的提示
+      const exists = await pathExists(filePath)
+      if (!exists) {
+        toast.error(`文件不存在: ${filePath}`)
+        return
+      }
+      const [content, meta] = await Promise.all([
+        readFile(filePath),
+        getFileMetadata(filePath).catch(() => null),
+      ])
+      const fileName = filePath.split('/').pop() || filePath
+      addTabRef.current({
+        id: filePath,
+        path: filePath,
+        name: fileName,
+        content,
+        isDirty: false,
+        isEdited: false,
+        viewMode: 'preview',
+        // 使用文件元数据中的真实大小和修改时间，回退到近似值
+        fileSize: meta
+          ? meta.file_size > 1024
+            ? `${(meta.file_size / 1024).toFixed(1)}Kb`
+            : `${meta.file_size}B`
+          : content.length > 1024
+            ? `${(content.length / 1024).toFixed(1)}Kb`
+            : `${content.length}B`,
+        modifiedTime: meta?.modified_time || new Date().toLocaleString(),
+        wordCount: countWords(content),
+      })
+    } catch (e) {
+      console.error('Failed to open file from link:', e)
+      toast.error(`无法打开文件: ${filePath}`)
+    }
+  }, [])
+
+  // links.onClick 回调：处理链接点击跳转。
+  // 注意：capture-phase listener 作为拦截 Tauri webview 导航的第一道防线，
+  // 但它依赖 editorContainerRef，在某些场景下可能未注册成功。
+  // 因此 handleLinkClick 必须保留完整跳转逻辑作为兜底。
+  const handleLinkClick = useCallback((event: MouseEvent, _editor: BlockNoteEditor): boolean | void => {
+    const target = event.target as HTMLElement
+    const link = target.closest('a[data-inline-content-type="link"]') as HTMLAnchorElement | null
+    if (!link) return false
+
+    const href = link.getAttribute('href') || ''
+    if (!href) return false
+    if (href.startsWith('data:') || href.startsWith('asset://')) return false
+
+    // 阻止 <a> 的默认导航行为
+    event.preventDefault()
+
+    if (isExternalUrl(href)) {
+      window.open(href, '_blank')
+      return true
+    }
+
+    if (href.startsWith('#')) {
+      const anchor = href.substring(1)
+      const container = editorContainerRef.current
+      if (container) {
+        const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6')
+        for (const h of headings) {
+          const text = h.textContent?.trim().toLowerCase().replace(/\s+/g, '-') || ''
+          if (text === anchor.toLowerCase()) {
+            h.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            break
+          }
+        }
+      }
+      return true
+    }
+
+    const absolutePath = resolveFilePath(href, activeTabPathRef.current)
+    openFileInApp(absolutePath)
+    return true
+  }, [openFileInApp])
+
   const editor = useCreateBlockNote({
     initialContent: blocks,
     schema,
@@ -337,7 +491,72 @@ function BlockNoteInner({
     uploadFile,
     resolveFileUrl,
     pasteHandler,
+    links: {
+      onClick: handleLinkClick,
+      // 覆盖 BlockNote 默认的 target="_blank"。
+      // Tauri webview 会在 native 层拦截 target="_blank" 并在系统浏览器中打开，
+      // 这个过程早于 JS 事件处理，preventDefault() 无法阻止。
+      // 设置为 _self 后，即使 preventDefault 失败也只会在当前 webview 内导航，
+      // 不会泄漏到系统浏览器。
+      HTMLAttributes: { target: '_self' },
+    },
   })
+
+  // Capture-phase click listener: 在捕获阶段拦截链接点击，调用 preventDefault()
+  // 并执行跳转。此 listener 对预览模式必需——BlockNote 的 links.onClick 在只读模式
+  // 下不会被调用（clickHandler.ts 中 !view.editable 时直接 return false）。
+  // 外部链接跳转统一交给 handleLinkClick 处理（编辑模式下），capture listener 仅
+  // 负责 preventDefault 以避免双重 window.open；内部文件链接与锚点跳转仍由 capture
+  // listener 处理（预览模式下 handleLinkClick 不会被调用）。
+  useEffect(() => {
+    const container = editorContainerRef.current
+    if (!container) return
+
+    const handleClickCapture = (event: MouseEvent) => {
+      if (event.button !== 0) return
+
+      const target = event.target as HTMLElement
+      if (!target) return
+
+      const link = target.closest('a[data-inline-content-type="link"]') as HTMLAnchorElement | null
+      if (!link) return
+
+      const href = link.getAttribute('href') || ''
+      if (!href) return
+      if (href.startsWith('data:') || href.startsWith('asset://')) return
+
+      // 阻止 <a> 的默认导航（target 已改为 _self，但仍需 preventDefault 避免当前 webview 导航）
+      event.preventDefault()
+
+      if (isExternalUrl(href)) {
+        // 外部链接跳转交给 handleLinkClick 统一处理，避免双重 window.open。
+        // 这里仅 preventDefault 后 return，不执行 window.open。
+        return
+      }
+
+      if (href.startsWith('#')) {
+        const anchor = href.substring(1)
+        const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6')
+        for (const h of headings) {
+          const text = h.textContent?.trim().toLowerCase().replace(/\s+/g, '-') || ''
+          if (text === anchor.toLowerCase()) {
+            h.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            break
+          }
+        }
+        return
+      }
+
+      const absolutePath = resolveFilePath(href, activeTabPathRef.current)
+      openFileInApp(absolutePath)
+    }
+
+    container.addEventListener('click', handleClickCapture, true)
+
+    return () => {
+      container.removeEventListener('click', handleClickCapture, true)
+    }
+  }, [openFileInApp])
 
 
   // 滚动到指定行
@@ -415,6 +634,75 @@ function BlockNoteInner({
       window.removeEventListener('scroll-to-block-id', handler)
     }
   }, [editor])
+
+  // 监听下载远程图片事件（由 EditorToolbar 派发，带 tabId 防止多 tab 错处理）。
+  // 流程：仅当事件的 tabId 匹配当前 activeTab.id 时才处理；遍历 editor.document
+  // 收集 image/file blocks 中的 http(s) URL，统一交给全局 downloadCoordinator，
+  // 由协调器合并多文件进度并即时替换 block URL。
+  useEffect(() => {
+    let cancelled = false
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      // 事件携带 tabId 时只处理当前 tab；旧版事件无 tabId 时也接受（向后兼容）
+      if (detail.tabId && activeTabId && detail.tabId !== activeTabId) return
+      if (cancelled || !editor) return
+      try {
+        // 1. 收集远程图片 block（递归遍历 document，包含嵌套在列表/引用/表格等 children 中的图片）
+        const remoteBlocks: { blockId: string; url: string }[] = []
+        // 使用 walkBlocks 递归遍历，visitor 仅做副作用收集（返回 undefined 保留原 block）
+        walkBlocks(editor.document as any[], (block) => {
+          if (block.type === 'image' || block.type === 'file') {
+            const url = (block.props as any)?.url
+            if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+              remoteBlocks.push({ blockId: block.id, url })
+            }
+          }
+        })
+
+        if (remoteBlocks.length === 0) {
+          toast.info('当前文档无远程图片')
+          return
+        }
+
+        // 2. 解析上传目录与文件所在目录
+        const targetDir = await resolveUploadDir()
+        const filePath = activeTabPath || ''
+        const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/')
+
+        // 3. 构造 url → ApplyContext[] 映射（保留所有 block，支持一对多替换）
+        //    items 按 URL 去重：同一 URL 只发一个下载请求，由协调器跨批次去重
+        const blockContexts = new Map<string, { editor: any; blockId: string }[]>()
+        const seenUrls = new Set<string>()
+        const items: { url: string; blockId: string }[] = []
+        for (const b of remoteBlocks) {
+          // blockContexts 追加所有引用此 URL 的 block（一对多）
+          const existing = blockContexts.get(b.url) || []
+          existing.push({ editor, blockId: b.blockId })
+          blockContexts.set(b.url, existing)
+          // items 按 URL 去重（后端只下载一次）
+          if (!seenUrls.has(b.url)) {
+            seenUrls.add(b.url)
+            items.push({ url: b.url, blockId: b.blockId })
+          }
+        }
+
+        // 5. 交给协调器：合并 toast + 即时替换
+        downloadCoordinator.enqueueBatch(items, blockContexts, {
+          targetDir,
+          fileDir,
+          rootPath: rootPath || '',
+        })
+      } catch (err) {
+        console.error('Failed to enqueue download remote images:', err)
+        toast.error(`下载远程图片失败：${String(err)}`)
+      }
+    }
+    window.addEventListener('editor:download-remote-images', handler)
+    return () => {
+      cancelled = true
+      window.removeEventListener('editor:download-remote-images', handler)
+    }
+  }, [editor, activeTabId, activeTabPath, rootPath, uploadPath])
 
   // Insert text at cursor position in BlockNote
   // AI results are Markdown, so we need to parse them into BlockNote blocks
@@ -612,11 +900,18 @@ function BlockNoteInner({
     }
   }, [editor])
 
-  const handleChange = useCallback(async () => {
+  // Debounce timer ref — delays expensive serialization to avoid
+  // blocking the UI on every keystroke.
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // The actual serialization + notification logic (expensive).
+  // Also dispatches the TOC event so DirectoryView updates are debounced too.
+  const serializeAndNotify = useCallback(async () => {
     if (!onChange || !editor) return
     try {
-      // Custom serialization for mermaid blocks
-      const document = (editor.document as any[]).map((block: any) => {
+      // Custom serialization: 使用 walkBlocks 递归遍历 document（包含嵌套 block.children），
+      // 对 mermaid/katex/markmap 特殊 block 转换为 codeBlock，其他 block 保留原样。
+      const document = walkBlocks(editor.document as any[], (block: any) => {
         if (block.type === MERMAID_BLOCK_TYPE) {
           const props = block.props || {}
           const diagram = props.diagram || ''
@@ -669,29 +964,70 @@ function BlockNoteInner({
             content: [{ type: 'text', text: diagram }],
           }
         }
-        return block
+        // 返回 undefined，保留原 block（walkBlocks 会继续递归其 children）
       })
       const rawMd = await editor.blocksToMarkdownLossy(document as typeof editor.document)
       const md = compactMarkdown(rawMd)
       lastContentRef.current = md
       onChange(md)
+
+      // Update TOC (debounced with content change)
+      try {
+        const entryTitle = activeTabName.replace(/\.md$/i, '') || t('editor.untitled')
+        const toc = buildTableOfContents(entryTitle, editor.document)
+        window.dispatchEvent(new CustomEvent('block-editor-ready', {
+          detail: { toc, isBlockNote: true }
+        }))
+      } catch (error) {
+        console.error('Error building table of contents:', error)
+      }
     } catch (e) {
       console.error('[MarkdownEditor] Failed to convert blocks to markdown:', e)
       // Don't propagate error to avoid breaking the editor
     }
-  }, [onChange, editor])
+  }, [onChange, editor, activeTabName, t])
 
-  // 编辑器就绪后发送目录数据
-  // Use handleChange as the trigger: every content change should update the TOC.
-  // Relying on editor?.document?.length is unreliable because:
-  //   - It uses optional chaining which produces `undefined` when editor/document is not ready,
-  //     and React skips updates when the dependency value hasn't changed (undefined -> undefined).
-  //   - Document length doesn't change when text within existing blocks is modified.
+  // Debounced handleChange — coalesces rapid edits into a single
+  // serialization pass every 300ms, keeping the UI responsive.
+  const debouncedHandleChange = useCallback(() => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current)
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null
+      serializeAndNotify()
+    }, 300)
+  }, [serializeAndNotify])
+
+  // Flush pending content immediately (used before save operations).
+  const flushPendingContent = useCallback(async () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = null
+      await serializeAndNotify()
+    }
+  }, [serializeAndNotify])
+
+  // Register flush function so save handlers can flush before writing.
+  useEffect(() => {
+    return registerFlushFn(flushPendingContent)
+  }, [flushPendingContent])
+
+  // Cleanup debounce timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
+    }
+  }, [])
+
+  // Build initial TOC when editor mounts or tab switches.
+  // Subsequent TOC updates are handled by the debounced serializeAndNotify.
   useEffect(() => {
     if (!editor || !editor.document) return
 
     try {
-      const entryTitle = activeTab?.name.replace(/\.md$/i, '') || t('editor.untitled')
+      const entryTitle = activeTabName.replace(/\.md$/i, '') || t('editor.untitled')
       const toc = buildTableOfContents(entryTitle, editor.document)
 
       window.dispatchEvent(new CustomEvent('block-editor-ready', {
@@ -700,7 +1036,7 @@ function BlockNoteInner({
     } catch (error) {
       console.error('Error building table of contents:', error)
     }
-  }, [editor, handleChange, activeTab?.name, t])
+  }, [editor, activeTabName, t])
 
   const themeSetting = useUIStore((state) => state.theme)
   const [systemIsDark, setSystemIsDark] = useState(
@@ -1045,6 +1381,69 @@ function BlockNoteInner({
     })
   }, [editor])
 
+  // Custom link toolbar — replaces the default one to handle relative path links.
+  // useMemo with stable deps ensures the component type doesn't change across renders.
+  const customLinkToolbar = useMemo(() => {
+    return function CustomLinkToolbar(props: LinkToolbarProps) {
+      const Components = useComponentsContext()!
+      const dict = useDictionary()
+
+      const handleOpen = () => {
+        const url = props.url
+        if (isExternalUrl(url)) {
+          window.open(url, '_blank')
+          return
+        }
+        if (url.startsWith('#')) {
+          const anchor = url.substring(1)
+          const container = editorContainerRef.current
+          if (container) {
+            const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6')
+            for (const h of headings) {
+              const text = h.textContent?.trim().toLowerCase().replace(/\s+/g, '-') || ''
+              if (text === anchor.toLowerCase()) {
+                h.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                break
+              }
+            }
+          }
+          return
+        }
+        if (url.startsWith('data:') || url.startsWith('asset://')) {
+          window.open(url, '_blank')
+          return
+        }
+        // Relative or absolute file path — open in app
+        const absolutePath = resolveFilePath(url, activeTabPathRef.current)
+        openFileInApp(absolutePath)
+      }
+
+      return (
+        <Components.LinkToolbar.Root className="bn-toolbar bn-link-toolbar">
+          <EditLinkButton
+            url={props.url}
+            text={props.text}
+            range={props.range}
+            setToolbarOpen={props.setToolbarOpen}
+            setToolbarPositionFrozen={props.setToolbarPositionFrozen}
+          />
+          <Components.LinkToolbar.Button
+            className="bn-button"
+            mainTooltip={dict.link_toolbar.open.tooltip}
+            label={dict.link_toolbar.open.tooltip}
+            isSelected={false}
+            onClick={handleOpen}
+            icon={<ExternalLink size={16} />}
+          />
+          <DeleteLinkButton
+            range={props.range}
+            setToolbarOpen={props.setToolbarOpen}
+          />
+        </Components.LinkToolbar.Root>
+      )
+    }
+  }, [openFileInApp])
+
   return (
     <EditorContextMenu
       getSelectedText={getSelectedText}
@@ -1057,13 +1456,15 @@ function BlockNoteInner({
             <BlockNoteView
               editor={editor}
               theme={blocknoteTheme}
-              onChange={handleChange}
+              onChange={debouncedHandleChange}
               slashMenu={false}
+              linkToolbar={false}
             >
               <SuggestionMenuController
                 triggerCharacter="/"
                 getItems={getCustomSlashMenuItems}
               />
+              <LinkToolbarController linkToolbar={customLinkToolbar} />
             </BlockNoteView>
           </div>
         </ScrollArea>
@@ -1096,9 +1497,20 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
       return
     }
 
+    // content 未加载（undefined/null）时保持 loading 状态，不 mount BlockNoteInner
+    // 避免启动时 content 从 undefined 变成实际内容导致 BlockNoteInner 重复 mount
+    if (content == null) {
+      prevContentRef.current = content
+      return
+    }
+
     let cancelled = false
 
-    const wasEmpty = !prevContentRef.current
+    // 仅当之前是空字符串（''）时才认为"从空到有内容"，
+    // 排除 undefined（未加载状态），避免启动时触发 setBlocksKey
+    const wasEmpty = prevContentRef.current === ''
+    // 之前是否已加载过内容（用于判断是否需要重置 initialBlocks 触发 remount）
+    const hadContent = prevContentRef.current != null
     prevContentRef.current = content
 
     async function parseContent() {
@@ -1163,7 +1575,11 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
       }
     }
 
-    setInitialBlocks(null)
+    // 仅当之前已加载过内容时才重置 initialBlocks 为 null（用于外部修改场景触发 remount）
+    // 启动时 prevContentRef.current 为 undefined，不重置，避免 BlockNoteInner 重复 mount
+    if (hadContent) {
+      setInitialBlocks(null)
+    }
     parseContent()
     return () => { cancelled = true }
   }, [content])

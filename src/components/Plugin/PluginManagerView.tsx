@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { usePluginStore, useUIStore, usePluginMarketStore } from '@/stores'
+import { DEFAULT_SHORTCUTS, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { useShallow } from 'zustand/react/shallow'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
@@ -960,9 +961,27 @@ function ManageTab({
   const searchRef = useRef<HTMLInputElement>(null)
   // Cmd/Ctrl-K focuses the search input. We register on the
   // window so it works regardless of which element has focus.
+  // #11: This shortcut is NOT in the custom shortcut system
+  // (DEFAULT_SHORTCUTS) because it's specific to this view.  To
+  // avoid conflicts, we check whether any registered built-in or
+  // plugin-command shortcut matches the key event; if so, we defer
+  // to the global handler instead of also grabbing focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        const { customShortcuts, pluginCommandShortcuts } = useUIStore.getState()
+        // If a built-in shortcut is bound to this key, let the
+        // global handler process it exclusively.
+        const builtinMatch = DEFAULT_SHORTCUTS.some(def =>
+          matchShortcut(e, getShortcutKey(def.key, customShortcuts))
+        )
+        if (builtinMatch) return
+        // Same for plugin-command shortcuts.
+        const pluginMatch = Object.values(pluginCommandShortcuts).some(
+          v => v && matchShortcut(e, v)
+        )
+        if (pluginMatch) return
+
         e.preventDefault()
         searchRef.current?.focus()
       }

@@ -11,6 +11,7 @@ import { listPluginCommands } from '@/lib/plugin-commands'
 import { toast } from 'sonner'
 import i18n from 'i18next'
 import { findNodeByPath, generateUniqueName, updateNodesWithChildren } from '@/lib/utils/treeUtils'
+import { flushAllEditors } from '@/lib/editor-flush'
 
 function getShortcut(key: ShortcutKey): string {
   return getShortcutKey(key, useUIStore.getState().customShortcuts)
@@ -75,7 +76,7 @@ export function dispatchBuiltin(
   return true
 }
 
-async function handleNewFile() {
+export async function handleNewFile() {
   const { selectedPath, nodes } = useFileTreeStore.getState()
   const { rootPath } = useWorkspaceStore.getState()
   if (!rootPath) return
@@ -143,7 +144,7 @@ async function handleNewFolder() {
   }
 }
 
-async function handleOpenFile() {
+export async function handleOpenFile() {
   const { workspaceMode } = useUIStore.getState()
   try {
     if (workspaceMode === 'workspace') {
@@ -162,7 +163,9 @@ async function handleOpenFile() {
   }
 }
 
-async function handleSaveFile() {
+export async function handleSaveFile() {
+  // Flush any pending debounced editor content before reading from the store
+  await flushAllEditors()
   const { tabs, activeTabId } = useEditorStore.getState()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   if (!activeTab || (!activeTab.isDirty && !activeTab.frontmatterDirty)) return
@@ -236,6 +239,7 @@ async function handleSaveFile() {
 }
 
 async function handleSaveAll() {
+  await flushAllEditors()
   await useEditorStore.getState().saveAllDirtyTabs()
 }
 
@@ -283,11 +287,57 @@ async function handleOpenExplorer() {
   }
 }
 
+/**
+ * Toggle the search sidebar view.  Mirrors the ActivityBar click
+ * behaviour: if already on the search view, switch back to the
+ * explorer; otherwise switch to search and ensure the sidebar is
+ * visible.
+ */
+export function handleToggleSearch() {
+  const ui = useUIStore.getState()
+  if (ui.settingsPanelVisible) {
+    ui.setSettingsPanelVisible(false)
+  }
+  if (ui.sidebarView === 'search' && ui.sidebarVisible) {
+    ui.setSidebarView('explorer')
+  } else {
+    if (!ui.sidebarVisible) {
+      ui.setSidebarVisible(true)
+    }
+    ui.setSidebarView('search')
+  }
+}
+
+/**
+ * Toggle the settings panel.  Mirrors the ActivityBar settings-button
+ * behaviour: if already open, close it; otherwise open it in the main
+ * area (requires both `settingsPanelVisible=true` and
+ * `sidebarView='settings'`).
+ */
+export function handleToggleSettings() {
+  const ui = useUIStore.getState()
+  if (ui.settingsPanelVisible && ui.sidebarView === 'settings') {
+    ui.setSettingsPanelVisible(false)
+    ui.setSidebarView('explorer')
+  } else {
+    ui.setSettingsPanelVisible(true)
+    ui.setSidebarView('settings')
+    ui.setRightPanelType(null)
+  }
+}
+
+/** Refresh the file tree by reloading every expanded directory. */
+export async function handleRefreshFileTree() {
+  try {
+    await useFileTreeStore.getState().refreshExpanded()
+  } catch (e) {
+    console.error('Failed to refresh file tree:', e)
+  }
+}
+
 export function useKeyboardShortcuts() {
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette)
-  const toggleSearchPanel = useUIStore((s) => s.toggleSearchPanel)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
-  const setSidebarView = useUIStore((s) => s.setSidebarView)
 
   // Use refs for tabs to avoid re-binding the keydown listener on every tab change.
   // This prevents excessive listener teardown/setup which causes GC pressure.
@@ -329,12 +379,17 @@ export function useKeyboardShortcuts() {
       // Customizable global shortcuts (user can rebind in Settings)
 
       if (dispatchBuiltin(e, 'commandPalette', toggleCommandPalette)) return
-      if (dispatchBuiltin(e, 'searchPanel', toggleSearchPanel)) return
+
+      // #12: Don't intercept Ctrl+F when focus is inside a CodeMirror
+      // editor — let CodeMirror's built-in search (searchKeymap) handle
+      // it instead.  CodeMirror's keymap runs at the target phase; our
+      // window listener runs at the bubble phase, so skipping here lets
+      // the event reach CodeMirror's handler unimpeded.
+      const isInCodeMirror = !!(e.target as HTMLElement | null)?.closest?.('.cm-editor')
+      if (!isInCodeMirror && dispatchBuiltin(e, 'searchPanel', handleToggleSearch)) return
+
       if (dispatchBuiltin(e, 'toggleSidebar', toggleSidebar)) return
-      if (
-        dispatchBuiltin(e, 'settings', () => setSidebarView('settings'))
-      )
-        return
+      if (dispatchBuiltin(e, 'settings', handleToggleSettings)) return
 
       // 派发插件命令快捷键；每次 keypress 查最新绑定
       const bindings = useUIStore.getState().pluginCommandShortcuts
@@ -388,13 +443,9 @@ export function useKeyboardShortcuts() {
       // Only act when there's actually something to dismiss; never swallow Escape
       // that the editor might need (e.g., exiting a special mode)
       if (e.key === 'Escape') {
-        const { commandPaletteVisible, searchPanelVisible } = useUIStore.getState()
+        const { commandPaletteVisible } = useUIStore.getState()
         if (commandPaletteVisible) {
           toggleCommandPalette()
-          return
-        }
-        if (searchPanelVisible) {
-          toggleSearchPanel()
           return
         }
         // No overlay open — don't preventDefault, let editor/system handle it
@@ -405,8 +456,6 @@ export function useKeyboardShortcuts() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
     toggleCommandPalette,
-    toggleSearchPanel,
     toggleSidebar,
-    setSidebarView,
   ])
 }

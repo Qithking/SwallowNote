@@ -172,7 +172,10 @@ export const useGitStore = create<GitState>((set) => ({
                   if (credErrorMessage.startsWith('REBASE_CONFLICT:')) {
                     return { path: repo.path, name: repo.name, success: false, error: credErrorMessage, isConflict: true }
                   }
-                  // Saved credentials failed, fall through to return auth error
+                  // 凭证拉取失败（非冲突），直接返回凭证错误信息，
+                  // 不 fallthrough 到下方基于原始 errorMessage 的 REBASE_CONFLICT 检查，
+                  // 否则真实的凭证失败原因会丢失
+                  return { path: repo.path, name: repo.name, success: false, error: credErrorMessage }
                 }
               }
             } catch {

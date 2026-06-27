@@ -6,7 +6,14 @@ import type {
   PluginPermission,
 } from '@/types/plugin'
 import type { HostOverrides } from '@swallow-note/plugin-sdk'
-import { getPluginStorage, pluginEventBus, createPluginEventBus, runLifecycleHook } from './plugin-host'
+import {
+  getPluginStorage,
+  pluginEventBus,
+  createPluginEventBus,
+  runLifecycleHook,
+  markPluginTripped,
+  isPluginTripped,
+} from './plugin-host'
 import {
   registerContextMenu,
   unregisterContextMenu,
@@ -64,6 +71,12 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
     },
     // invokeBackend 经 SDK 路径调用。
     invokeBackend: async (cmd, args) => {
+      // 熔断插件拒绝 IPC 调用，防止超时后后台钩子继续触发后端副作用。
+      if (isPluginTripped(pluginId)) {
+        throw new Error(
+          `[plugin-host-takeover] invokeBackend refused: plugin "${pluginId}" is tripped (lifecycle hook timed out)`
+        )
+      }
       assertPermission(pluginId, 'backend', `invoke backend command "${cmd}"`)
       const { invoke } = await import('@tauri-apps/api/core')
       const start = performance.now()
@@ -187,7 +200,8 @@ export interface RunPluginLifecycleHookOptions {
 
 /**
  * 运行生命周期钩子并安装接管。Inline 插件跳过。
- * 超时后标记 unhealthy 并自动禁用。
+ * 超时后标记 unhealthy、自动禁用，并置位熔断标志以阻止超时后仍在后台运行的
+ * hookPromise 继续产生事件派发 / storage 写入 / IPC 调用等副作用。
  */
 export async function runPluginLifecycleHook(
   plugin: PluginDefinition,
@@ -197,6 +211,10 @@ export async function runPluginLifecycleHook(
   options: RunPluginLifecycleHookOptions = {}
 ): Promise<void> {
   if (!hook) return
+  // 注意：不在每轮钩子调用前清除熔断标志。上一轮超时的 hookPromise 仍在后台
+  // 运行（Promise.race 只让 await 提前返回，原 promise 不会中止），若在此清除，
+  // 旧 hookPromise 后续的 storage.set / invokeBackend 会绕过熔断检查（P0 NEW-4）。
+  // 熔断标志改由用户手动重新启用插件时清除（见 plugin store 的 setPluginEnabled）。
   const mod = (plugin as PluginWithModule).__pluginModule
   const restore = mod?.setHost ? mod.setHost(buildOverridesForPlugin(plugin)) : undefined
   const timeoutMs = options.timeoutMs ?? DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS
@@ -215,6 +233,8 @@ export async function runPluginLifecycleHook(
   try {
     await Promise.race([hookPromise, timeoutPromise])
     if (timedOut) {
+      // 同步标记熔断，立即阻止超时后仍在后台运行的 hookPromise 产生副作用。
+      markPluginTripped(plugin.id)
       await handleHookTimeout(plugin, hookName, timeoutMs)
     } else {
       // 同步更新 store 和 telemetry 健康状态。

@@ -3,11 +3,11 @@
  */
 import { create } from 'zustand'
 import { getLatestFolder, saveFolderHistory, getFolderHistory, scanGitRepos, watchDirectory, unwatchDirectory } from '@/lib/tauri'
+import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
 import { useEditorStore, EditorTab } from './editor'
 import { useGitStore, mapRepoInfosToRepositories } from './git'
-import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import i18n from '@/i18n'
 
 export interface WorkspaceState {
@@ -28,6 +28,7 @@ export interface WorkspaceState {
   loadWorkspaceFile: (workspacePath: string) => Promise<void>
   switchMode: (mode: WorkspaceMode) => Promise<void>
   initMode: () => Promise<void>
+  startBackgroundServices: () => void
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -42,31 +43,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   openFolder: async (path: string) => {
     set({ isLoading: true, error: null })
     try {
-      const { workspaceMode } = useUIStore.getState()
-      if (workspaceMode === 'folder') {
-        await saveFolderHistory(path)
-      }
       const fileTreeStore = useFileTreeStore.getState()
-      
-      // Load file tree first
+
       const loadSuccess = await fileTreeStore.loadRoot(path)
-      
-      // Only update state if file tree loaded successfully
+
       if (!loadSuccess) {
         throw new Error('File tree failed to load')
       }
-      
+
       set({ rootPath: path, isLoading: false })
-      
-      // Watch directory after successful load
-      await watchDirectory(path)
-      
-      // 触发 frontmatter 索引扫描（异步，不阻塞 UI）
-      triggerFrontmatterScan(path)
+
+      // 非阻塞：保存历史、启动文件监听和frontmatter扫描
+      saveFolderHistory(path).catch(err => console.warn('Failed to save folder history:', err))
+      watchDirectory(path).catch(err => console.warn(`Failed to watch directory ${path}:`, err))
+      triggerFrontmatterScan(path).catch(err => console.warn(`Failed to trigger frontmatter scan for ${path}:`, err))
     } catch (err) {
       console.error('Failed to open folder:', err)
       set({ error: `Failed to open folder: ${err}`, isLoading: false, rootPath: null })
-      // Clear file tree on error
       const fileTreeStore = useFileTreeStore.getState()
       fileTreeStore.clearAll()
     }
@@ -86,14 +79,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const history = await getFolderHistory()
       const { workspaceMode } = useUIStore.getState()
       const fileTreeStore = useFileTreeStore.getState()
-      
+
       if (workspaceMode === 'workspace') {
         const workspacePath = history.find(p => p.endsWith('.swallow-workspace'))
         if (workspacePath) {
-          // Add small delay to ensure UI is ready
-          await new Promise(resolve => setTimeout(resolve, 50))
           await get().loadWorkspaceFile(workspacePath)
-          await saveFolderHistory(workspacePath)
         } else {
           set({ workspaceFolders: [], currentWorkspacePath: null })
           fileTreeStore.clearAll()
@@ -101,8 +91,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       } else {
         const folderPath = history.find(p => !p.endsWith('.swallow-workspace'))
         if (folderPath) {
-          // Add small delay to ensure UI is ready
-          await new Promise(resolve => setTimeout(resolve, 50))
           await get().openFolder(folderPath)
         } else {
           set({ rootPath: null })
@@ -175,35 +163,32 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const { readFile } = await import('@/lib/tauri')
       const content = await readFile(workspacePath)
       const workspace = JSON.parse(content)
-      
+
       if (workspace.folders && Array.isArray(workspace.folders)) {
         const fileTreeStore = useFileTreeStore.getState()
         fileTreeStore.clearAll()
-        
+
         // Load file tree first before updating state
         const loadSuccess = await fileTreeStore.addRoots(workspace.folders)
-        
+
         // Verify file tree loaded successfully
         if (!loadSuccess) {
           throw new Error('File tree failed to load')
         }
-        
+
         fileTreeStore.clearExpanded()
-        
-        set({ 
+
+        set({
           workspaceFolders: workspace.folders,
           currentWorkspacePath: workspacePath,
-          isLoading: false 
+          isLoading: false
         })
-        
-        // Watch directories after successful load
+
+        // 非阻塞：保存历史、启动文件监听和frontmatter扫描
+        saveFolderHistory(workspacePath).catch(err => console.warn('Failed to save folder history:', err))
         for (const folder of workspace.folders) {
-          await watchDirectory(folder)
-        }
-        
-        // 触发 frontmatter 索引扫描（异步，不阻塞 UI）
-        for (const folder of workspace.folders) {
-          triggerFrontmatterScan(folder)
+          watchDirectory(folder).catch(err => console.warn(`Failed to watch directory ${folder}:`, err))
+          triggerFrontmatterScan(folder).catch(err => console.warn(`Failed to trigger frontmatter scan for ${folder}:`, err))
         }
       }
     } catch (err) {
@@ -254,6 +239,38 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
   initMode: async () => {
     await useUIStore.getState().initWorkspaceMode()
+  },
+  // 启动后台服务：文件监听、frontmatter 扫描、历史保存
+  // 必须在编辑器就绪后调用，避免占用后端资源阻塞关键路径
+  startBackgroundServices: () => {
+    const state = get()
+    const { workspaceMode } = useUIStore.getState()
+    const paths: string[] = workspaceMode === 'workspace'
+      ? state.workspaceFolders
+      : (state.rootPath ? [state.rootPath] : [])
+
+    // 保存当前路径到历史（fire-and-forget）
+    const currentPath = workspaceMode === 'workspace'
+      ? state.currentWorkspacePath
+      : state.rootPath
+    if (currentPath) {
+      saveFolderHistory(currentPath).catch((err) => {
+        console.warn('Failed to save folder history:', err)
+      })
+    }
+
+    // 启动文件监听 + frontmatter 扫描
+    // 错开执行避免瞬间发送过多 IPC 请求
+    paths.forEach((folder, index) => {
+      setTimeout(() => {
+        watchDirectory(folder).catch((err) => {
+          console.warn(`Failed to watch directory ${folder}:`, err)
+        })
+        triggerFrontmatterScan(folder).catch((err) => {
+          console.warn(`Failed to trigger frontmatter scan for ${folder}:`, err)
+        })
+      }, index * 200)
+    })
   },
 }))
 
