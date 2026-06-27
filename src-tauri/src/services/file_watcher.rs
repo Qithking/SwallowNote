@@ -98,57 +98,63 @@ pub fn init_watcher(app_handle: AppHandle) {
 }
 
 #[tauri::command]
-pub fn watch_directory(path: String) -> Result<(), String> {
-    // 锁中毒（持有锁的线程 panic）时恢复内部数据，避免当前线程连锁 panic
-    let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
-        eprintln!("锁中毒: {}", e);
-        e.into_inner()
-    });
-    let state = guard.as_mut().ok_or("File watcher not initialized")?;
+pub async fn watch_directory(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
+            eprintln!("锁中毒: {}", e);
+            e.into_inner()
+        });
+        let state = guard.as_mut().ok_or("File watcher not initialized")?;
 
-    let path_buf = PathBuf::from(&path);
+        let path_buf = PathBuf::from(&path);
 
-    if !path_buf.exists() {
-        return Err(format!("Path does not exist: {}", path));
-    }
+        if !path_buf.exists() {
+            return Err(format!("Path does not exist: {}", path));
+        }
 
-    if state.watched_paths.contains(&path_buf) {
-        return Ok(());
-    }
+        if state.watched_paths.contains(&path_buf) {
+            return Ok(());
+        }
 
-    if let Some(ref mut debouncer) = state.debouncer {
-        debouncer
-            .watch(&path_buf, RecursiveMode::Recursive)
-            .map_err(|e| format!("Failed to watch directory: {}", e))?;
+        if let Some(ref mut debouncer) = state.debouncer {
+            debouncer
+                .watch(&path_buf, RecursiveMode::Recursive)
+                .map_err(|e| format!("Failed to watch directory: {}", e))?;
 
-        state.watched_paths.push(path_buf);
-        Ok(())
-    } else {
-        Err("Watcher not available".to_string())
-    }
+            state.watched_paths.push(path_buf);
+            Ok(())
+        } else {
+            Err("Watcher not available".to_string())
+        }
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("watch_directory join error: {}", e)))
 }
 
 #[tauri::command]
-pub fn unwatch_directory(path: String) -> Result<(), String> {
-    // 锁中毒（持有锁的线程 panic）时恢复内部数据，避免当前线程连锁 panic
-    let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
-        eprintln!("锁中毒: {}", e);
-        e.into_inner()
-    });
-    let state = guard.as_mut().ok_or("File watcher not initialized")?;
+pub async fn unwatch_directory(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
+            eprintln!("锁中毒: {}", e);
+            e.into_inner()
+        });
+        let state = guard.as_mut().ok_or("File watcher not initialized")?;
 
-    let path_buf = PathBuf::from(&path);
+        let path_buf = PathBuf::from(&path);
 
-    if let Some(ref mut debouncer) = state.debouncer {
-        debouncer
-            .unwatch(&path_buf)
-            .map_err(|e| format!("Failed to unwatch directory: {}", e))?;
+        if let Some(ref mut debouncer) = state.debouncer {
+            debouncer
+                .unwatch(&path_buf)
+                .map_err(|e| format!("Failed to unwatch directory: {}", e))?;
 
-        state.watched_paths.retain(|p| p != &path_buf);
-        Ok(())
-    } else {
-        Err("Watcher not available".to_string())
-    }
+            state.watched_paths.retain(|p| p != &path_buf);
+            Ok(())
+        } else {
+            Err("Watcher not available".to_string())
+        }
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("unwatch_directory join error: {}", e)))
 }
 
 /// 监听 plugins 目录下 storage.json 变更，发射 plugin-storage-changed 事件供前端同步存储大小。幂等。

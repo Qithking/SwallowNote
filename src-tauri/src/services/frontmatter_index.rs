@@ -53,6 +53,8 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
             // 索引线程仅做写入，降低 mmap 到 16MB
             let _ = conn.pragma_update(None, "mmap_size", 16777216);
             let _ = conn.pragma_update(None, "cache_size", -1000);
+            // 与主线程保持一致，WAL 模式下 NORMAL 安全且性能更好
+            let _ = conn.pragma_update(None, "synchronous", "NORMAL");
 
             let db_instance = db::Database {
                 conn: std::sync::Mutex::new(conn),
@@ -60,6 +62,12 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
 
             // 启动后延迟，避免与 UI 初始化竞争
             std::thread::sleep(Duration::from_millis(STARTUP_DELAY_MS));
+
+            // 启动时同步分类：补全历史数据中缺失的父路径
+            // （从 setup 主线程迁移至此后台线程执行，避免阻塞应用启动）
+            if let Err(e) = db::md_frontmatter::sync_all_categories_from_frontmatter(&db_instance) {
+                eprintln!("[frontmatter-index] Failed to sync categories on startup: {}", e);
+            }
 
             while let Ok(task) = rx.recv() {
                 match task {

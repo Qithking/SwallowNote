@@ -395,109 +395,115 @@ fn flatten_single_top_dir(dest_dir: &Path) -> Result<(), PluginError> {
 }
 
 #[tauri::command]
-pub fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRust>, PluginError> {
+pub async fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMetadataRust>, PluginError> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
 
-    let plugins_root = plugins_dir(&app_data_dir);
+    // 将同步文件 I/O 移到 blocking 线程池，避免阻塞 Tauri runtime
+    let plugins = tokio::task::spawn_blocking(move || -> Result<Vec<PluginMetadataRust>, PluginError> {
+        let plugins_root = plugins_dir(&app_data_dir);
 
-    // Ensure plugins directory exists
-    fs::create_dir_all(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to create plugins dir: {}", e)))?;
+        // Ensure plugins directory exists
+        fs::create_dir_all(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to create plugins dir: {}", e)))?;
 
-    let mut plugins = Vec::new();
+        let mut plugins = Vec::new();
 
-    let entries = fs::read_dir(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to read plugins dir: {}", e)))?;
+        let entries = fs::read_dir(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to read plugins dir: {}", e)))?;
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        // Hidden bookkeeping directories under the plugin root — skip them
-        // if they show up as bare entries (e.g. an unversioned install).
-        if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
-            // Skip known internal directories: .versions, .installing-*
-            continue;
-        }
-
-        // Resolve through the `current` symlink / text marker. If the
-        // plugin has no version tree yet (e.g. partial install) we
-        // skip it — scan only reports healthy plugins.
-        let active_dir = match active_version_dir(&path) {
-            Some(d) => d,
-            None => continue,
-        };
-
-        let index_js = active_dir.join("index.js");
-        if !index_js.exists() {
-            continue;
-        }
-
-        // backend/ lives in the version directory so different
-        // versions can ship different native binaries.
-        let has_backend = active_dir.join("backend").exists();
-        // .disabled is a top-level marker, not version-scoped.
-        let enabled = !path.join(".disabled").exists();
-        // Detect a `settings.json` schema in the active version dir.
-        // The host uses this flag to decide whether to show the
-        // schema-driven settings button on the plugin card.
-        let has_settings_schema = active_dir.join("settings.json").exists();
-        // Read the `.source` file to recover the repo URL the plugin
-        // was installed from. Missing / unreadable → empty string.
-        let source = fs::read_to_string(active_dir.join(".source"))
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-
-        let parsed_manifest = parse_manifest_from_index_js(&index_js);
-
-        // Prefer the id declared in the manifest over the directory
-        // name — the directory may have been named after a versioned
-        // zip (e.g. "com.example.plugin-1.0.0").
-        let plugin_id = parsed_manifest
-            .as_ref()
-            .map(|m| m.id.clone())
-            .filter(|id| !id.is_empty())
-            .unwrap_or_else(|| {
-                path.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string()
-            });
-
-        let meta = if let Some(mut meta) = parsed_manifest {
-            // Persisted enabled state takes precedence over the manifest value.
-            meta.enabled = enabled;
-            meta.plugin_path = active_dir.to_string_lossy().to_string();
-            meta.has_backend = has_backend;
-            meta.has_settings_schema = has_settings_schema;
-            meta.source = source;
-            meta
-        } else {
-            // Fallback: create minimal metadata from directory name
-            PluginMetadataRust {
-                id: plugin_id.clone(),
-                name: plugin_id.clone(),
-                description: String::new(),
-                version: String::new(),
-                author: String::new(),
-                published_at: String::new(),
-                icon_position: Some(String::from("sidebar")),
-                content_position: Some(String::from("leftPanel")),
-                order: 100,
-                enabled,
-                plugin_path: active_dir.to_string_lossy().to_string(),
-                has_backend,
-                has_settings_schema,
-                source,
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
             }
-        };
-        plugins.push(meta);
-    }
 
+            // Hidden bookkeeping directories under the plugin root — skip them
+            // if they show up as bare entries (e.g. an unversioned install).
+            if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
+                // Skip known internal directories: .versions, .installing-*
+                continue;
+            }
+
+            // Resolve through the `current` symlink / text marker. If the
+            // plugin has no version tree yet (e.g. partial install) we
+            // skip it — scan only reports healthy plugins.
+            let active_dir = match active_version_dir(&path) {
+                Some(d) => d,
+                None => continue,
+            };
+
+            let index_js = active_dir.join("index.js");
+            if !index_js.exists() {
+                continue;
+            }
+
+            // backend/ lives in the version directory so different
+            // versions can ship different native binaries.
+            let has_backend = active_dir.join("backend").exists();
+            // .disabled is a top-level marker, not version-scoped.
+            let enabled = !path.join(".disabled").exists();
+            // Detect a `settings.json` schema in the active version dir.
+            // The host uses this flag to decide whether to show the
+            // schema-driven settings button on the plugin card.
+            let has_settings_schema = active_dir.join("settings.json").exists();
+            // Read the `.source` file to recover the repo URL the plugin
+            // was installed from. Missing / unreadable → empty string.
+            let source = fs::read_to_string(active_dir.join(".source"))
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+
+            let parsed_manifest = parse_manifest_from_index_js(&index_js);
+
+            // Prefer the id declared in the manifest over the directory
+            // name — the directory may have been named after a versioned
+            // zip (e.g. "com.example.plugin-1.0.0").
+            let plugin_id = parsed_manifest
+                .as_ref()
+                .map(|m| m.id.clone())
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| {
+                    path.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                });
+
+            let meta = if let Some(mut meta) = parsed_manifest {
+                // Persisted enabled state takes precedence over the manifest value.
+                meta.enabled = enabled;
+                meta.plugin_path = active_dir.to_string_lossy().to_string();
+                meta.has_backend = has_backend;
+                meta.has_settings_schema = has_settings_schema;
+                meta.source = source;
+                meta
+            } else {
+                // Fallback: create minimal metadata from directory name
+                PluginMetadataRust {
+                    id: plugin_id.clone(),
+                    name: plugin_id.clone(),
+                    description: String::new(),
+                    version: String::new(),
+                    author: String::new(),
+                    published_at: String::new(),
+                    icon_position: Some(String::from("sidebar")),
+                    content_position: Some(String::from("leftPanel")),
+                    order: 100,
+                    enabled,
+                    plugin_path: active_dir.to_string_lossy().to_string(),
+                    has_backend,
+                    has_settings_schema,
+                    source,
+                }
+            };
+            plugins.push(meta);
+        }
+
+        Ok(plugins)
+    })
+    .await
+    .map_err(|e| PluginError::Io(format!("scan_plugins join error: {}", e)))??;
     Ok(plugins)
 }
 

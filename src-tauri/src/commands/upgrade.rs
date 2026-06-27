@@ -8,6 +8,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
+// macOS 下用 pre_exec 调用 setsid() 让重启脚本脱离父进程会话
+#[cfg(target_os = "macos")]
+use std::os::unix::process::CommandExt;
 
 /// Get the current running app bundle path on macOS
 #[cfg(target_os = "macos")]
@@ -510,16 +513,29 @@ pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<()
                 .map_err(|e| format!("Failed to set script permissions: {}", e))?;
         }
 
-        // Execute the restart script as a fully detached process
-        // Using nohup with proper I/O redirection to ensure it survives parent termination
+        // Execute the restart script as a fully detached process.
+        // 关键：通过 pre_exec 调用 setsid() 创建新会话，脱离父进程的进程组/会话，
+        // 否则 Tauri 主进程 exit(0) 时 launchd 会连带终止本脚本子进程，
+        // 导致"应用替换成功但无法重启"的问题。
         let script_path_str = restart_script_path.to_string_lossy().to_string();
-        std::process::Command::new("bash")
-            .args(["-c", &format!(
-                "(nohup bash '{}' </dev/null >/dev/null 2>&1 &)",
-                script_path_str
-            )])
+        let mut restart_cmd = std::process::Command::new("bash");
+        restart_cmd
+            .arg(&script_path_str)
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        // pre_exec 是 unsafe 方法，需在 unsafe 块中调用
+        unsafe {
+            restart_cmd.pre_exec(|| {
+                // 创建新会话，让脚本成为会话 leader，完全脱离父进程组
+                // 闭包继承外部 unsafe 块上下文，无需重复 unsafe 标记
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        restart_cmd
             .spawn()
             .map_err(|e| format!("Failed to spawn restart helper: {}", e))?;
 
@@ -558,7 +574,7 @@ fn build_restart_script(pid: u32, app_path: &str, app_name: &str) -> String {
     let escaped_app_name = shell_escape(app_name);
     format!(r#"#!/bin/bash
 # SwallowNote restart helper script
-LOG_FILE="$TMPDIR/swallownote_restart_{pid}.log"
+LOG_FILE="${{TMPDIR:-/tmp}}/swallownote_restart.log"
 APP_PATH={app_path}
 APP_NAME={app_name}
 BIN_PATH="$APP_PATH/Contents/MacOS/$APP_NAME"
@@ -653,6 +669,20 @@ if [ "$LAUNCH_SUCCESS" = false ]; then
     if open -n "$APP_PATH" 2>/dev/null; then
         if check_app_running; then
             echo "SUCCESS: App launched with open -n"
+            LAUNCH_SUCCESS=true
+        fi
+    fi
+fi
+
+# Method 4: Final fallback - use launchctl asuser to launch via launchd
+# 通过 launchd 上下文拉起，绕过 detached 进程可能无法激活 LaunchServices 的限制
+if [ "$LAUNCH_SUCCESS" = false ]; then
+    echo "Method 4: Trying launchctl asuser..."
+    UID_NUM=$(id -u)
+    if launchctl asuser "$UID_NUM" open "$APP_PATH" 2>/dev/null; then
+        sleep 3
+        if check_app_running; then
+            echo "SUCCESS: App launched via launchctl asuser"
             LAUNCH_SUCCESS=true
         fi
     fi

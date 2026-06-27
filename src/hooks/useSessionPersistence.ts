@@ -8,6 +8,7 @@ import { useUIStore, useEditorStore, useFileTreeStore, useEditorSettingsStore, t
 import { useWorkspaceStore } from '@/stores'
 import { saveSessionState, getSessionState } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { LogicalSize, LogicalPosition } from '@tauri-apps/api/dpi'
 
 export function useSessionPersistence() {
   const { setSidebarWidth, setRightPanelWidth } = useUIStore()
@@ -108,16 +109,9 @@ export function useSessionPersistence() {
       const { workspaceMode } = useUIStore.getState()
       const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
       
-      // Wait for file tree to be ready (non-empty nodes)
-      let waitCount = 0
-      const maxWait = 50 // Max 5 seconds (50 * 100ms)
-      while (useFileTreeStore.getState().nodes.length === 0 && waitCount < maxWait) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        waitCount++
-      }
-      
+      // 文件树为空时跳过会话恢复（loadLatestByMode 已 await 完成文件树加载，无需轮询）
       if (useFileTreeStore.getState().nodes.length === 0) {
-        console.warn('File tree not loaded after waiting, skipping session restore')
+        console.warn('File tree not loaded, skipping session restore')
         return
       }
 
@@ -210,11 +204,13 @@ export function useSessionPersistence() {
         } else if (states.isFullscreen === 'true') {
           await win.setFullscreen(true)
         } else {
+          // 并行恢复窗口尺寸与位置，减少串行等待
+          const ops: Promise<unknown>[] = []
           if (states.windowWidth && states.windowHeight) {
             const width = Number(states.windowWidth)
             const height = Number(states.windowHeight)
             if (width > 0 && height > 0) {
-              await win.setSize(new (await import('@tauri-apps/api/dpi')).LogicalSize(width, height))
+              ops.push(win.setSize(new LogicalSize(width, height)))
             }
           }
           if (states.windowX && states.windowY) {
@@ -225,8 +221,11 @@ export function useSessionPersistence() {
               x >= -200 && x < screen.availWidth &&
               y >= -200 && y < screen.availHeight
             if (isValidPosition) {
-              await win.setPosition(new (await import('@tauri-apps/api/dpi')).LogicalPosition(x, y))
+              ops.push(win.setPosition(new LogicalPosition(x, y)))
             }
+          }
+          if (ops.length > 0) {
+            await Promise.all(ops)
           }
         }
       } catch (e) {

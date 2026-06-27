@@ -1497,9 +1497,20 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
       return
     }
 
+    // content 未加载（undefined/null）时保持 loading 状态，不 mount BlockNoteInner
+    // 避免启动时 content 从 undefined 变成实际内容导致 BlockNoteInner 重复 mount
+    if (content == null) {
+      prevContentRef.current = content
+      return
+    }
+
     let cancelled = false
 
-    const wasEmpty = !prevContentRef.current
+    // 仅当之前是空字符串（''）时才认为"从空到有内容"，
+    // 排除 undefined（未加载状态），避免启动时触发 setBlocksKey
+    const wasEmpty = prevContentRef.current === ''
+    // 之前是否已加载过内容（用于判断是否需要重置 initialBlocks 触发 remount）
+    const hadContent = prevContentRef.current != null
     prevContentRef.current = content
 
     async function parseContent() {
@@ -1564,7 +1575,11 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
       }
     }
 
-    setInitialBlocks(null)
+    // 仅当之前已加载过内容时才重置 initialBlocks 为 null（用于外部修改场景触发 remount）
+    // 启动时 prevContentRef.current 为 undefined，不重置，避免 BlockNoteInner 重复 mount
+    if (hadContent) {
+      setInitialBlocks(null)
+    }
     parseContent()
     return () => { cancelled = true }
   }, [content])

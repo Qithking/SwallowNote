@@ -18,7 +18,7 @@ pub struct Database {
 
 pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     let db_path = app_data_dir.join("swallownote.db");
-    let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)?;
+    let mut conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)?;
 
     // Enable WAL mode for better concurrent read performance and lower memory usage
     conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -28,6 +28,8 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     conn.pragma_update(None, "mmap_size", 67108864)?;
     // Reduce page cache size to limit memory usage (2MB)
     conn.pragma_update(None, "cache_size", -2000)?;
+    // WAL 模式下使用 NORMAL 同步级别，避免每次事务都 fsync（默认 FULL 极慢）
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
 
     // folder_history table
     conn.execute(
@@ -133,8 +135,10 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     // Insert built-in role prompts if they don't exist.
     // For existing rows with an empty prompt (e.g. from an older version),
     // fill in the default prompt so the role works correctly.
+    // 用单个事务包裹所有内置角色插入，避免 N 次独立 fsync
+    let tx = conn.transaction()?;
     for (key, name, prompt) in &builtin_roles {
-        conn.execute(
+        tx.execute(
             "INSERT INTO ai_role_prompts (role_key, name, prompt, is_builtin) VALUES (?1, ?2, ?3, 1)
              ON CONFLICT(role_key) DO UPDATE SET
                 prompt = CASE WHEN prompt = '' THEN excluded.prompt ELSE prompt END,
@@ -144,6 +148,7 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
             [key, name, prompt],
         )?;
     }
+    tx.commit()?;
 
     Ok(Database {
         conn: Mutex::new(conn),

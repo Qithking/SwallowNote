@@ -237,10 +237,6 @@ commands::upgrade::download_latest_release,
             if !app_data_dir.as_os_str().is_empty() {
                 match db::init_db(app_data_dir.clone()) {
                     Ok(db) => {
-                        // 启动时同步分类：补全历史数据中缺失的父路径
-                        if let Err(e) = db::md_frontmatter::sync_all_categories_from_frontmatter(&db) {
-                            eprintln!("Failed to sync categories on startup: {}", e);
-                        }
                         app.handle().manage(db);
                         // 启动 frontmatter 索引子线程（使用独立数据库连接）
                         let index_db_path = app_data_dir.join("swallownote.db");
