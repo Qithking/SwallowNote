@@ -5,12 +5,16 @@ export interface TocItem {
   title: string
   children: TocItem[]
   matchIndex?: number
+  /** 1-based line number in the source markdown (Source mode only) */
+  lineNumber?: number
 }
 
 export interface MarkdownHeading {
   blockId?: string
   level: number
   title: string
+  /** 1-based line number in the source markdown */
+  lineNumber?: number
 }
 
 function headingText(block: { content?: unknown[] }): string {
@@ -69,15 +73,50 @@ function stripInlineMarkdown(text: string): string {
 }
 
 function parseMarkdownHeadings(markdown: string): MarkdownHeading[] {
-  return stripFrontmatter(markdown)
-    .split('\n')
-    .map((line) => line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/))
-    .filter((match): match is RegExpMatchArray => match !== null)
-    .map((match) => ({
-      level: match[1].length,
-      title: stripInlineMarkdown(match[2]),
-    }))
-    .filter((heading) => heading.title.length > 0)
+  const lines = stripFrontmatter(markdown).split('\n')
+  const headings: MarkdownHeading[] = []
+  let inCodeBlock = false
+  let codeFenceChar = '' // '`' or '~'
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    // Detect fenced code block boundaries (``` or ~~~)
+    // A fence can have up to 3 leading spaces (CommonMark spec).
+    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+    if (fenceMatch) {
+      const fenceChar = fenceMatch[1][0]
+      if (!inCodeBlock) {
+        // Opening fence
+        inCodeBlock = true
+        codeFenceChar = fenceChar
+      } else if (fenceChar === codeFenceChar) {
+        // Closing fence must use the same character
+        inCodeBlock = false
+        codeFenceChar = ''
+      }
+      // A different fence character inside a code block is just content
+      continue
+    }
+
+    // Skip lines inside fenced code blocks — # at the start of a code
+    // line is a comment in many languages, not a Markdown heading.
+    if (inCodeBlock) continue
+
+    const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
+    if (match) {
+      const title = stripInlineMarkdown(match[2])
+      if (title.length > 0) {
+        headings.push({
+          level: match[1].length,
+          title,
+          lineNumber: i + 1, // 1-based
+        })
+      }
+    }
+  }
+
+  return headings
 }
 
 function nearestParent(stack: TocItem[], level: number): TocItem {
@@ -156,6 +195,7 @@ export function buildTableOfContentsFromMarkdown(entryTitle: string, markdown: s
       children: [],
       id: `toc-heading-${index}`,
       level: heading.level,
+      lineNumber: heading.lineNumber,
       matchIndex: index,
       title: normalizedTitle,
     }

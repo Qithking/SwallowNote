@@ -2,8 +2,9 @@
  * ActivityBar Component - Narrow left icon bar for view switching
  * Supports built-in views, sidebar plugins, plugin manager, and settings
  */
+import { useMemo, useEffect } from 'react'
 import { FolderTree, Search, GitBranch, Settings, Puzzle, Folders } from 'lucide-react'
-import { useUIStore, useGitStore, usePluginStore, useEditorStore, SidebarView } from '@/stores'
+import { useUIStore, useGitStore, usePluginStore, useEditorStore, usePluginMarketStore, SidebarView } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
 import { pluginSidebarView, pluginRightPanelType, isFullPanelPluginActive, renderPluginIcon, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
@@ -40,11 +41,74 @@ function ActivityBar() {
   const showConflictBadge = useUIStore((s) => s.showConflictBadge)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
   const sidebarPlugins = usePluginStore((s) => s.registry.sidebar)
+  // Fingerprint of installed plugin id→version pairs. Only changes
+  // when a plugin is installed / uninstalled / updated — not on
+  // every keystroke — so the ActivityBar avoids spurious re-renders.
+  const pluginVersionsFingerprint = usePluginStore((s) =>
+    s.plugins.map((p) => `${p.id}\t${p.version}`).join('\n'),
+  )
+  const marketUpdates = usePluginMarketStore((s) => s.updates)
+  const marketIndex = usePluginMarketStore((s) => s.index)
+  const refreshUpdates = usePluginMarketStore((s) => s.refreshUpdates)
+  const refreshIndex = usePluginMarketStore((s) => s.refreshIndex)
+  const marketRepoUrl = usePluginMarketStore((s) => s.repoUrl)
   const activeTabContent = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.content ?? '')
   const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
   const { t } = useTranslation()
 
   const conflictCount = conflictRepos.length
+
+  // Count installed plugins that have an update available.
+  // Uses the same logic as PluginManagerView's updateIdSet but
+  // filters to only installed plugins (the `updates` array from
+  // the Rust backend may include non-installed entries whose
+  // localVersion is an empty string).
+  const pluginUpdateCount = useMemo(() => {
+    const installed = new Map<string, string>()
+    for (const line of pluginVersionsFingerprint.split('\n')) {
+      if (!line) continue
+      const tabIdx = line.indexOf('\t')
+      if (tabIdx <= 0) continue
+      installed.set(line.slice(0, tabIdx), line.slice(tabIdx + 1))
+    }
+
+    const updatable = new Set<string>()
+
+    // Primary: compare installed version vs marketplace index version
+    if (marketIndex) {
+      for (const entry of marketIndex.plugins) {
+        const local = installed.get(entry.id)
+        if (local && local !== entry.version) {
+          updatable.add(entry.id)
+        }
+      }
+    }
+
+    // Supplement: checkPluginUpdates (semver comparison from Rust)
+    for (const u of marketUpdates) {
+      if (installed.has(u.id) && u.localVersion !== u.remoteVersion) {
+        updatable.add(u.id)
+      }
+    }
+
+    return updatable.size
+  }, [pluginVersionsFingerprint, marketIndex, marketUpdates])
+
+  // Re-check for updates when the installed plugin set changes
+  // (e.g. after install / uninstall / auto-update) so the badge
+  // stays accurate without requiring the user to open the plugin
+  // manager.  The 800 ms debounce coalesces rapid successive
+  // changes (e.g. bulk auto-update).  Caches on both the TS side
+  // (60 s index cache) and the Rust side (30 s update cache) make
+  // redundant calls cheap.
+  useEffect(() => {
+    if (!marketRepoUrl) return
+    const timer = setTimeout(() => {
+      void refreshIndex({ background: true })
+      void refreshUpdates({ background: true })
+    }, 800)
+    return () => clearTimeout(timer)
+  }, [pluginVersionsFingerprint, marketRepoUrl, refreshIndex, refreshUpdates])
 
   const isPluginActive = (plugin: PluginDefinition) => {
     const pluginViewId = pluginSidebarView(plugin.id)
@@ -212,6 +276,17 @@ function ActivityBar() {
             }}
           >
             <Puzzle size={18} />
+            {pluginUpdateCount > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] flex items-center justify-center rounded-full text-[9px] font-bold leading-none px-[3px]"
+                style={{
+                  background: '#f97316',
+                  color: '#fff',
+                }}
+              >
+                {pluginUpdateCount > 99 ? '99+' : pluginUpdateCount}
+              </span>
+            )}
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">{t('activityBar.plugins')}</TooltipContent>

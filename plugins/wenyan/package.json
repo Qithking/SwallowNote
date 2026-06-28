@@ -1,6 +1,6 @@
 {
   "name": "swallownote-plugin-wenyan",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Wenyan Markdown typesetting plugin for WeChat Official Accounts",
   "type": "module",
   "scripts": {

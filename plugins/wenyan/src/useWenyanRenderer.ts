@@ -12,6 +12,91 @@
  * spinners and error states.
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { convertFileSrc } from '@tauri-apps/api/core'
+
+/**
+ * Resolve a relative file path to an absolute path based on the note's
+ * directory, then convert to a `asset://` URL that Tauri's webview can
+ * load.  Mirrors the logic in MarkdownEditor.tsx's resolveFileUrl.
+ *
+ * - Absolute paths (Unix `/` or Windows `C:\`) are kept as-is.
+ * - Relative paths (`./foo.png`, `../bar.jpg`, `images/baz.gif`) are
+ *   resolved against the note's parent directory.
+ * - Already-qualified URLs (http, https, data, asset, mailto, #) are
+ *   returned unchanged.
+ */
+function resolveRelativePath(url: string, notePath: string): string {
+  if (
+    url.startsWith('http://') ||
+    url.startsWith('https://') ||
+    url.startsWith('data:') ||
+    url.startsWith('asset://') ||
+    url.startsWith('mailto:') ||
+    url.startsWith('#') ||
+    url.startsWith('ftp://')
+  ) {
+    return url
+  }
+
+  let absolutePath: string
+
+  if (url.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(url)) {
+    absolutePath = url
+  } else {
+    const fileDir = notePath.split(/[\\/]/).slice(0, -1).join('/') || ''
+    if (!fileDir) return url
+
+    const normalizedUrl = url.replace(/^\.\//, '').replace(/\\/g, '/')
+    const urlParts = normalizedUrl.split('/')
+    const dirParts = fileDir.split('/')
+
+    for (const part of urlParts) {
+      if (part === '..') {
+        dirParts.pop()
+      } else if (part && part !== '.') {
+        dirParts.push(part)
+      }
+    }
+    absolutePath = dirParts.join('/')
+  }
+
+  return convertFileSrc(absolutePath)
+}
+
+/**
+ * Post-process the rendered article DOM to resolve relative file
+ * paths to `asset://` URLs.
+ *
+ * Runs AFTER the wenyan engine has finished all its processing.
+ * At this point the article contains real DOM elements whose `src` /
+ * `href` attributes may still hold relative paths like
+ * `./images/foo.png` or `../bar.jpg`.  The browser cannot resolve
+ * these because the page is served from `tauri://localhost`, not
+ * from the note's directory on disk.
+ */
+function resolveArticlePaths(article: HTMLElement, notePath: string): void {
+  if (!notePath) return
+
+  const srcElements = article.querySelectorAll('[src]')
+  for (const el of srcElements) {
+    const src = el.getAttribute('src')
+    if (!src) continue
+    const resolved = resolveRelativePath(src, notePath)
+    if (resolved !== src) {
+      el.setAttribute('src', resolved)
+    }
+  }
+
+  const hrefElements = article.querySelectorAll('a[href], link[href]')
+  for (const el of hrefElements) {
+    const href = el.getAttribute('href')
+    if (!href) continue
+    const resolved = resolveRelativePath(href, notePath)
+    if (resolved !== href) {
+      el.setAttribute('href', resolved)
+    }
+  }
+}
 
 interface WenyanCoreInstance {
   handleFrontMatter: (markdown: string) => Promise<{
@@ -264,7 +349,7 @@ export function useWenyanRenderer() {
   }, [])
 
   const render = useCallback(
-    async (markdown: string, options: RenderOptions) => {
+    async (markdown: string, options: RenderOptions, notePath?: string) => {
       // Assign a unique ID to this render call. After each `await` we
       // check if a newer render has started; if so, this one is stale
       // and we bail out without touching state.
@@ -331,6 +416,9 @@ export function useWenyanRenderer() {
         // they ride along with the copied HTML.
         applyOverrides(article, options)
         if (renderId !== renderIdRef.current) return // stale
+        // Resolve relative file paths to asset:// URLs so images and
+        // other media load correctly in the preview.
+        resolveArticlePaths(article, notePath || '')
         setHtml(article.outerHTML)
       } catch (e) {
         if (renderId !== renderIdRef.current) return // stale

@@ -206,6 +206,21 @@ function App() {
             } catch (err) {
               console.warn('[App] failed to init plugin auto update:', err)
             }
+
+            // Background-check for plugin updates so the ActivityBar
+            // badge can show the update count without requiring the
+            // user to open the plugin manager.  loadRepoSources()
+            // populates repoUrl from SQLite; refreshIndex + refreshUpdates
+            // then fetch the marketplace index and compare versions.
+            try {
+              const { usePluginMarketStore } = await import('@/stores/plugin-market')
+              const marketStore = usePluginMarketStore.getState()
+              await marketStore.loadRepoSources()
+              void marketStore.refreshIndex({ background: true })
+              void marketStore.refreshUpdates({ background: true })
+            } catch (err) {
+              console.warn('[App] failed to check plugin updates on startup:', err)
+            }
           } catch (err) {
             console.error('[App] Failed to load plugins on startup:', err)
             usePluginStore.getState().setLoaded(true)
