@@ -37,6 +37,7 @@ interface WenyanDialogProps {
   open: boolean
   onClose: () => void
   activeNoteContent: string
+  activeNotePath: string
   store: PluginStorage
   /** Invoke the plugin's backend JSON-RPC command. */
   invokeBackend: (
@@ -55,7 +56,7 @@ const DEFAULT_OPTIONS: RenderOptions = {
 }
 
 export function WenyanDialog(props: WenyanDialogProps): ReactNode {
-  const { open, onClose, activeNoteContent, store, invokeBackend, getAllSettings } = props
+  const { open, onClose, activeNoteContent, activeNotePath, store, invokeBackend, getAllSettings } = props
   const { html, title, loading, error, render } = useWenyanRenderer()
   const [options, setOptions] = useState<RenderOptions>(DEFAULT_OPTIONS)
   const [gzhThemes, setGzhThemes] = useState<Array<{ id: string; name: string }>>([])
@@ -175,8 +176,8 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
   // Render on content / option changes.
   useEffect(() => {
     if (!open) return
-    render(debouncedContent, options)
-  }, [open, debouncedContent, options, render])
+    render(debouncedContent, options, activeNotePath)
+  }, [open, debouncedContent, options, activeNotePath, render])
 
   // Close on Escape.
   useEffect(() => {
@@ -949,6 +950,7 @@ export function WenyanDialog(props: WenyanDialogProps): ReactNode {
         onClose={() => setCustomDialogOpen(false)}
         selectedId={isCustomThemeActive ? options.themeId : null}
         markdown={activeNoteContent}
+notePath={activeNotePath}
         onSelect={(theme) => {
           setOptions((o) => ({
             ...o,

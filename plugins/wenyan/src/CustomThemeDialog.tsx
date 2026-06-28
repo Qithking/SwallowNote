@@ -91,6 +91,8 @@ interface CustomThemeDialogProps {
   selectedId: string | null
   /** Active note markdown content, used by the live preview. Optional. */
   markdown?: string
+  /** Absolute path of the active note, used to resolve relative image paths. */
+  notePath?: string
 }
 
 type EditMode = 'visual' | 'css'
@@ -180,7 +182,7 @@ function ThemeListItem({
 }
 
 export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
-  const { store, open, onClose, onSelect, selectedId, markdown } = props
+  const { store, open, onClose, onSelect, selectedId, markdown, notePath } = props
   const [themes, setThemes] = useState<CustomTheme[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
@@ -246,8 +248,8 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
     void render(debouncedMarkdown, {
       ...PREVIEW_OPTIONS,
       customThemeCss: debouncedCss,
-    })
-  }, [open, debouncedCss, debouncedMarkdown, render])
+    }, notePath)
+  }, [open, debouncedCss, debouncedMarkdown, notePath, render])
 
   const updateConfig = useCallback(
     (updater: (cfg: ThemeConfig) => ThemeConfig) => {

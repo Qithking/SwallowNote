@@ -21,6 +21,7 @@ export function WenyanToolbarButton(props: ToolbarButtonProps): ReactNode {
   const {
     size,
     activeNoteContent,
+    activeNotePath,
     activeNoteExt,
     store,
     invokeBackend,
@@ -59,6 +60,7 @@ export function WenyanToolbarButton(props: ToolbarButtonProps): ReactNode {
         open={dialogOpen}
         onClose={closeDialog}
         activeNoteContent={activeNoteContent}
+        activeNotePath={activeNotePath}
         store={store}
         invokeBackend={invokeBackend}
         getAllSettings={getAllSettings}
