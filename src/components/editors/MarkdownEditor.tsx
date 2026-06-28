@@ -582,21 +582,60 @@ function BlockNoteInner({
       const editorContainer = document.querySelector('.blocknote-editor-container')
       if (!editorContainer) return
 
-      let targetElement = editorContainer.querySelector(`[data-node-type="blockContainer"][data-id="${blockId}"]`)
+      let targetElement: Element | null = null
+
+      if (blockId) {
+        targetElement = editorContainer.querySelector(`[data-node-type="blockContainer"][data-id="${blockId}"]`)
+      }
 
       if (!targetElement && fallbackText) {
-        const allBlocks = editorContainer.querySelectorAll(`[data-node-type="blockContainer"]`)
-        for (const block of allBlocks) {
-          const textContent = block.textContent?.trim() || ''
-          if (textContent === fallbackText.trim()) {
-            targetElement = block as HTMLElement
+        // Normalise whitespace for comparison so that "A  B" matches "A B".
+        const normalise = (s: string) => s.trim().replace(/\s+/g, ' ')
+        const target = normalise(fallbackText)
+        // Search within heading elements only (<h1>-<h6>) to avoid
+        // false matches on paragraph blocks that happen to contain the
+        // heading text.  BlockNote renders each heading inside a
+        // [data-node-type="blockContainer"] wrapper.
+        const headings = editorContainer.querySelectorAll('h1, h2, h3, h4, h5, h6')
+        for (const h of headings) {
+          const text = normalise(h.textContent || '')
+          // Pass 1: exact match (handles plain headings).
+          if (text === target) {
+            targetElement = h.closest('[data-node-type="blockContainer"]')
             break
+          }
+        }
+        if (!targetElement) {
+          // Pass 2: contains match (handles headings with inline
+          // formatting where the DOM text has extra characters).
+          for (const h of headings) {
+            const text = normalise(h.textContent || '')
+            if (text && text.includes(target)) {
+              targetElement = h.closest('[data-node-type="blockContainer"]')
+              break
+            }
           }
         }
       }
 
       if (targetElement) {
-        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        // Manually scroll the Radix ScrollArea Viewport instead of using
+        // scrollIntoView.  scrollIntoView can scroll multiple ancestors
+        // and behaves inconsistently inside Radix ScrollArea (especially
+        // in Tauri WebKit), causing the heading to land off-centre.
+        const viewport = editorContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
+        if (viewport && targetElement instanceof HTMLElement) {
+          const viewportRect = viewport.getBoundingClientRect()
+          const targetRect = targetElement.getBoundingClientRect()
+          // Centre the target within the viewport.
+          const offset =
+            targetRect.top - viewportRect.top + viewport.scrollTop -
+            (viewportRect.height - targetRect.height) / 2
+          viewport.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' })
+        } else {
+          // Fallback: native scrollIntoView (e.g. if Radix viewport not found).
+          targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
       } else {
         console.warn('Block element not found:', blockId, 'fallback:', fallbackText)
       }
