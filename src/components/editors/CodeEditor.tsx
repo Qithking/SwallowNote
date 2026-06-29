@@ -12,9 +12,10 @@
  */
 import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, basicSetup } from 'codemirror'
-import { EditorView as CMView } from '@codemirror/view'
+import { EditorView as CMView, keymap } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { StreamLanguage } from '@codemirror/language'
+import { indentWithTab } from '@codemirror/commands'
 
 // Statically import commonly used native CodeMirror 6 language packages
 import { javascript } from '@codemirror/lang-javascript'
@@ -241,6 +242,7 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
         extensions: [
           basicSetup,
           langExt,
+          keymap.of([indentWithTab]),
           CMView.lineWrapping,
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
