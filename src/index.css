@@ -3122,9 +3122,9 @@ body, #root {
 .pa-batch-bar .pa-btn { height: 28px; padding: 0 10px; font-size: 11px; }
 
 /* ── CodeMirror gutter (line number column) ─────────────────
-   Use a light transparent overlay of the editor background to
-   visually separate the gutter from the content area without
-   introducing a hard color split. */
+Use a light transparent overlay of the editor background to
+visually separate the gutter from the content area without
+introducing a hard color split. */
 .cm-editor .cm-gutters {
   background-color: color-mix(in srgb, var(--bg-primary) 25%, transparent) !important;
   border-right-color: var(--border-color) !important;
@@ -3132,6 +3132,14 @@ body, #root {
 .dark .cm-editor .cm-gutters {
   background-color: color-mix(in srgb, var(--bg-primary) 25%, transparent) !important;
   border-right-color: var(--border) !important;
+}
+
+/* Remove the default dotted focus outline from CodeMirror.
+   basicSetup adds `outline: 1px dotted #212121` on .cm-focused,
+   which appears as a stray bottom line because the surrounding
+   ScrollArea clips the top/left/right sides. */
+.cm-editor.cm-focused {
+  outline: none !important;
 }
 
 /* ============================================================
