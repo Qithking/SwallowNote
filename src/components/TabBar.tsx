@@ -3,7 +3,7 @@
  * Shows file tabs with dirty/saved status indicators
  */
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
-import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal, Crosshair } from 'lucide-react'
+import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal, Crosshair, RefreshCw } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -140,6 +140,14 @@ function TabBar() {
     } catch {
       showToast(t('tabBar.openFailed'))
     }
+  }
+
+  const handleRefresh = (tab: TabBarItem) => {
+    // Don't refresh diff/conflict tabs — they don't have file content to reload
+    if (tab.type === 'diff' || tab.type === 'conflict') return
+    // Warn if there are unsaved changes — refresh will discard them
+    if (tab.isDirty && !confirm(t('tabBar.refreshConfirm'))) return
+    useEditorStore.getState().loadTabContent(tab.id, 0, true)
   }
 
   const handleRevealInTree = (tab: TabBarItem) => {
@@ -436,6 +444,16 @@ function TabBar() {
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
                 }}
               >
+                <ContextMenuItem
+                  onClick={() => handleRefresh(tab)}
+                  style={{ color: 'var(--text-secondary)' }}
+                  className="cursor-pointer"
+                  disabled={tab.type === 'diff' || tab.type === 'conflict'}
+                >
+                  <RefreshCw size={12} />
+                  <span>{t('tabBar.refresh')}</span>
+                </ContextMenuItem>
+                <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
                 <ContextMenuItem
                   onClick={() => handleClose(tab)}
                   style={{ color: 'var(--text-secondary)' }}

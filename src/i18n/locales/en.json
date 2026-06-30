@@ -338,8 +338,10 @@
     "copyPath": "Copy Path",
     "copyRelativePath": "Copy Relative Path",
     "showInExplorer": "Show in File Explorer",
-    "revealInTree": "Reveal in File Tree"
-  },
+"revealInTree": "Reveal in File Tree",
+"refresh": "Refresh",
+"refreshConfirm": "This file has unsaved changes. Refreshing will discard local changes and reload from disk. Continue?"
+},
   "fileTree": {
     "newFile": "New File",
     "newFolder": "New Folder",

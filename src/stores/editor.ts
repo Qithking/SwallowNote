@@ -352,6 +352,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
                 frontmatter,
                 isLoading: false,
                 hasExternalChange: false,
+                // force reload (refresh) discards local edits — reset dirty/edited state
+                isDirty: force ? false : t.isDirty,
+                isEdited: force ? false : t.isEdited,
                 fileSize: rawContent.length > 1024 ? `${(rawContent.length / 1024).toFixed(1)}Kb` : `${rawContent.length}B`,
                 modifiedTime,
                 wordCount: countWords(content),
