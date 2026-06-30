@@ -485,6 +485,33 @@ pub async fn git_force_push(path: String) -> Result<(), String> {
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
+            let err_lower = e.to_lowercase();
+            // detached HEAD 时 `git push --force` 没有上游分支，会报
+            // "fatal: You are not currently on a branch"。此时改为
+            // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
+            if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                if let Some(branch) = resolve_push_target_branch(&path) {
+                    eprintln!("[INFO] git_force_push: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    let retry = run_git(
+                        &path,
+                        &["push", "--force", "origin", &format!("HEAD:refs/heads/{}", branch)],
+                    );
+                    return match retry {
+                        Ok(_) => Ok(()),
+                        Err(retry_err) => {
+                            if is_auth_error(&retry_err) {
+                                Err(format!("AUTH_REQUIRED:{}", retry_err))
+                            } else {
+                                Err(format!("Failed to force push: {}", retry_err))
+                            }
+                        }
+                    };
+                }
+                return Err(format!(
+                    "Failed to force push: repository is in detached HEAD state and no target branch could be resolved: {}",
+                    e
+                ));
+            }
             if is_auth_error(&e) {
                 Err(format!("AUTH_REQUIRED:{}", e))
             } else {
@@ -547,7 +574,48 @@ pub async fn git_force_push_with_credentials(path: String, username: String, pas
 
     match result {
         Ok(_) => Ok(()),
-        Err(e) => Err(format!("Failed to force push: {}", e)),
+        Err(e) => {
+            let err_lower = e.to_lowercase();
+            // detached HEAD 时 `git push --force` 没有上游分支，会报
+            // "fatal: You are not currently on a branch"。此时改为
+            // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
+            if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                if let Some(branch) = resolve_push_target_branch(&path) {
+                    eprintln!("[INFO] git_force_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    // Recreate askpass script for the retry (it was deleted above)
+                    std::fs::write(&askpass_script, &script_content)
+                        .map_err(|e| format!("Failed to recreate askpass script: {}", e))?;
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut perms = std::fs::metadata(&askpass_script)
+                            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
+                            .permissions();
+                        perms.set_mode(0o600);
+                        std::fs::set_permissions(&askpass_script, perms)
+                            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+                    }
+                    let retry = run_git_with_env(
+                        &path,
+                        &["push", "--force", "origin", &format!("HEAD:refs/heads/{}", branch)],
+                        &[
+                            ("GIT_ASKPASS", askpass_path.as_str()),
+                            ("GIT_TERMINAL_PROMPT", "0"),
+                        ],
+                    );
+                    let _ = std::fs::remove_file(&askpass_script);
+                    return match retry {
+                        Ok(_) => Ok(()),
+                        Err(retry_err) => Err(format!("Failed to force push: {}", retry_err)),
+                    };
+                }
+                return Err(format!(
+                    "Failed to force push: repository is in detached HEAD state and no target branch could be resolved: {}",
+                    e
+                ));
+            }
+            Err(format!("Failed to force push: {}", e))
+        }
     }
 }
 
