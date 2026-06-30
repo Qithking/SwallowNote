@@ -87,6 +87,19 @@ export interface EditorState {
   removeCategoryFromTabs: (path: string) => void
 }
 
+/** Auto-close the noteProperties panel when all tabs are closed. */
+function autoCloseNoteProperties() {
+  if (useEditorStore.getState().activeTabId !== null) return
+  queueMicrotask(async () => {
+    try {
+      const { useUIStore } = await import('@/stores/ui')
+      if (useUIStore.getState().rightPanelType === 'noteProperties') {
+        useUIStore.getState().setRightPanelType(null)
+      }
+    } catch { /* ignore — may fail in test environment */ }
+  })
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   tabs: [],
   activeTabId: null,
@@ -238,20 +251,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { tabs: newTabs, activeTabId: newActiveId }
     })
     // Auto-close noteProperties panel when all tabs are closed
-    if (get().activeTabId === null) {
-      queueMicrotask(async () => {
-        try {
-          const { useUIStore } = await import('@/stores/ui')
-          if (useUIStore.getState().rightPanelType === 'noteProperties') {
-            useUIStore.getState().setRightPanelType(null)
-          }
-        } catch { /* ignore — may fail in test environment */ }
-      })
-    }
+    autoCloseNoteProperties()
   },
   removeTabs: (ids) => {
     const idSet = new Set(ids)
+    let removedTabs: EditorTab[] = []
     set((state) => {
+      removedTabs = state.tabs.filter((t) => idSet.has(t.id))
       const newTabs = state.tabs.filter((t) => !idSet.has(t.id))
       let newActiveId = state.activeTabId
       if (newActiveId && idSet.has(newActiveId)) {
@@ -259,6 +265,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
+    // Emit note:close for each removed tab (matching removeTab behavior)
+    for (const tab of removedTabs) {
+      queueMicrotask(() => emitNoteClosed(tab.id, tab.path))
+    }
+    // Auto-close noteProperties panel when all tabs are closed
+    autoCloseNoteProperties()
   },
   setActiveTab: (id) => {
     set((state) => {
@@ -535,20 +547,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   restoreTabs: (tabsData, activeTabId) =>
     set({ tabs: tabsData, activeTabId }),
-  filterTabs: (predicate) =>
+  filterTabs: (predicate) => {
+    let removedTabs: EditorTab[] = []
     set((state) => {
       const keptTabs = state.tabs.filter(predicate)
       if (keptTabs.length === state.tabs.length) return state
-      
+
+      removedTabs = state.tabs.filter(t => !predicate(t))
       const keptIds = new Set(keptTabs.map(t => t.id))
       let newActiveId = state.activeTabId
-      
+
       if (state.activeTabId && !keptIds.has(state.activeTabId)) {
         newActiveId = keptTabs.length > 0 ? keptTabs[0].id : null
       }
-      
+
       return { tabs: keptTabs, activeTabId: newActiveId }
-    }),
+    })
+    // Emit note:close for each filtered-out tab (matching removeTab behavior)
+    for (const tab of removedTabs) {
+      queueMicrotask(() => emitNoteClosed(tab.id, tab.path))
+    }
+  },
   saveAllDirtyTabs: async () => {
     const dirtyTabs = get().tabs.filter((t) => t.isDirty || t.frontmatterDirty)
     for (const tab of dirtyTabs) {
