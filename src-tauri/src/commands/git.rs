@@ -195,11 +195,24 @@ pub async fn git_diff(path: String, file_path: String) -> Result<String, String>
 /// Stage all changes and commit
 #[tauri::command]
 pub async fn git_commit(path: String, message: String) -> Result<(), String> {
+    // Auto-fix detached HEAD before committing
+    fix_detached_head(&path);
+
     // Stage all changes
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
 
     // Commit
-    run_git(&path, &["commit", "-m", &message]).map_err(|e| format!("Failed to commit: {}", e))?;
+    match run_git(&path, &["commit", "-m", &message]) {
+        Ok(_) => {}
+        Err(e) => {
+            let err_lower = e.to_lowercase();
+            if !err_lower.contains("nothing to commit")
+                && !err_lower.contains("working tree clean")
+                && !err_lower.contains("no changes added to commit") {
+                return Err(format!("Failed to commit: {}", e));
+            }
+        }
+    }
 
     Ok(())
 }
@@ -355,6 +368,10 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
                 // Restore conflicted files to local versions (remove conflict markers from working tree)
                 restore_conflicted_files_to_local(&path);
                 Err(format!("REBASE_CONFLICT:{}", e))
+            } else if is_auth_error(&e) {
+                // Auth failure — let the frontend prompt for credentials
+                cleanup_stale_rebase_state(&path);
+                Err(format!("AUTH_REQUIRED:{}", e))
             } else {
                 // Non-conflict error: clean up stale rebase state that pull --rebase may have left
                 cleanup_stale_rebase_state(&path);
@@ -474,7 +491,44 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
 
     match result {
         Ok(_) => Ok(()),
-        Err(e) => Err(format!("Failed to push: {}", e)),
+        Err(e) => {
+            let err_lower = e.to_lowercase();
+            // detached HEAD 时 `git push` 没有上游分支，会报
+            // "fatal: You are not currently on a branch"。此时改为
+            // `push origin HEAD:refs/heads/<branch>` 显式指定目标分支。
+            if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                if let Some(branch) = resolve_push_target_branch(&path) {
+                    eprintln!("[INFO] git_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    // Recreate askpass script for the retry (it was deleted above)
+                    std::fs::write(&askpass_script, &script_content)
+                        .map_err(|e| format!("Failed to recreate askpass script: {}", e))?;
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut perms = std::fs::metadata(&askpass_script)
+                            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
+                            .permissions();
+                        perms.set_mode(0o600);
+                        std::fs::set_permissions(&askpass_script, perms)
+                            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+                    }
+                    let retry = run_git_with_env(
+                        &path,
+                        &["push", "origin", &format!("HEAD:refs/heads/{}", branch)],
+                        &[
+                            ("GIT_ASKPASS", askpass_path.as_str()),
+                            ("GIT_TERMINAL_PROMPT", "0"),
+                        ],
+                    );
+                    let _ = std::fs::remove_file(&askpass_script);
+                    return match retry {
+                        Ok(_) => Ok(()),
+                        Err(retry_err) => Err(format!("Failed to push: {}", retry_err)),
+                    };
+                }
+            }
+            Err(format!("Failed to push: {}", e))
+        }
     }
 }
 
@@ -629,11 +683,104 @@ pub async fn git_force_pull(path: String) -> Result<(), String> {
         return Ok(()); // No remote, nothing to pull
     }
 
+    // Fix detached HEAD before proceeding
+    fix_detached_head(&path);
+
     // Get current branch
     let branch = get_branch(&path)?;
 
     // Fetch from remote
-    run_git(&path, &["fetch", "origin"]).map_err(|e| format!("Failed to fetch: {}", e))?;
+    let fetch_result = run_git(&path, &["fetch", "origin"]);
+    if let Err(e) = fetch_result {
+        if is_auth_error(&e) {
+            return Err(format!("AUTH_REQUIRED:{}", e));
+        }
+        return Err(format!("Failed to fetch: {}", e));
+    }
+
+    // Reset to remote branch, discarding all local changes
+    let remote_ref = format!("origin/{}", branch);
+    run_git(&path, &["reset", "--hard", &remote_ref])
+        .map_err(|e| format!("Failed to reset: {}", e))?;
+
+    // Clean untracked files and directories
+    run_git(&path, &["clean", "-fd"]).map_err(|e| format!("Failed to clean: {}", e))?;
+
+    Ok(())
+}
+
+/// Force pull (reset to remote) with provided credentials
+#[tauri::command]
+pub async fn git_force_pull_with_credentials(
+    path: String,
+    username: String,
+    password: String,
+) -> Result<(), String> {
+    // Check if remote exists
+    let remote_url = get_remote_url(&path);
+    if remote_url.is_err() {
+        return Ok(()); // No remote, nothing to pull
+    }
+
+    // Fix detached HEAD before proceeding
+    fix_detached_head(&path);
+
+    // Get current branch
+    let branch = get_branch(&path)?;
+
+    // Create askpass script for authenticated fetch
+    let temp_dir = std::env::temp_dir();
+    let unique_id = uuid::Uuid::new_v4().to_string();
+    let askpass_script = temp_dir.join(format!("swallownote_force_pull_askpass_{}.sh", unique_id));
+
+    #[cfg(not(target_os = "windows"))]
+    let script_content = format!(
+        "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
+        username.replace('\'', "'\\''"),
+        password.replace('\'', "'\\''")
+    );
+
+    #[cfg(target_os = "windows")]
+    let script_content = format!(
+        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
+        username.replace('"', "\"\""),
+        password.replace('"', "\"\"")
+    );
+
+    std::fs::write(&askpass_script, &script_content)
+        .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+    let _askpass_guard = TempScriptGuard(askpass_script.clone());
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&askpass_script)
+            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(&askpass_script, perms)
+            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+    }
+
+    let askpass_path = askpass_script.to_string_lossy().to_string();
+
+    // Fetch from remote with credentials
+    let fetch_result = run_git_with_env(
+        &path,
+        &["fetch", "origin"],
+        &[
+            ("GIT_ASKPASS", askpass_path.as_str()),
+            ("GIT_TERMINAL_PROMPT", "0"),
+        ],
+    );
+    let _ = std::fs::remove_file(&askpass_script);
+
+    if let Err(e) = fetch_result {
+        if is_auth_error(&e) {
+            return Err(format!("AUTH_REQUIRED:{}", e));
+        }
+        return Err(format!("Failed to fetch: {}", e));
+    }
 
     // Reset to remote branch, discarding all local changes
     let remote_ref = format!("origin/{}", branch);
@@ -734,6 +881,9 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             return Err(format!("Pull failed: {}", e));
         }
         
+        // Fix detached HEAD that rebase may have caused
+        fix_detached_head(&path);
+
         // Check again after pull - if we're now in a conflict state, don't push
         if is_rebase_or_merge_in_progress(&path) {
             if has_real_conflicts(&path) {
@@ -744,11 +894,38 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
         }
 
         let push_result = run_git(&path, &["push"]);
-        if let Err(e) = push_result {
-            if is_auth_error(&e) {
-                return Err(format!("AUTH_REQUIRED:{}", e));
+        match push_result {
+            Ok(_) => {}
+            Err(e) => {
+                let err_lower = e.to_lowercase();
+                // detached HEAD fallback
+                if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                    if let Some(branch) = resolve_push_target_branch(&path) {
+                        eprintln!("[INFO] git_commit_and_push: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                        let retry = run_git(&path, &["push", "origin", &format!("HEAD:refs/heads/{}", branch)]);
+                        if let Err(retry_err) = retry {
+                            let retry_lower = retry_err.to_lowercase();
+                            if retry_lower.contains("not currently on a branch") || retry_lower.contains("detached head") {
+                                // Still detached after retry — return original error
+                                return Err(format!("Failed to push: {}", e));
+                            }
+                            if is_auth_error(&retry_err) {
+                                return Err(format!("AUTH_REQUIRED:{}", retry_err));
+                            }
+                            return Err(format!("Failed to push: {}", retry_err));
+                        }
+                    } else {
+                        if is_auth_error(&e) {
+                            return Err(format!("AUTH_REQUIRED:{}", e));
+                        }
+                        return Err(format!("Failed to push: {}", e));
+                    }
+                } else if is_auth_error(&e) {
+                    return Err(format!("AUTH_REQUIRED:{}", e));
+                } else {
+                    return Err(format!("Failed to push: {}", e));
+                }
             }
-            return Err(format!("Failed to push: {}", e));
         }
     }
 

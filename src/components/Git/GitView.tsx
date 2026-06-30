@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, mapRepoInfosToRepositories, PullResult } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitForcePushWithCredentials, gitCredentialSave, gitCredentialGet, gitForcePush, gitForcePull } from '@/lib/tauri'
+import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitForcePushWithCredentials, gitCredentialSave, gitCredentialGet, gitForcePush, gitForcePull, gitForcePullWithCredentials } from '@/lib/tauri'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -424,7 +424,27 @@ function RepositoryItem({
       onRefresh()
     } catch (e) {
       const errorMessage = String(e).trim()
-      showToast(t('git.forcePullFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+        // Try saved credentials
+        try {
+          const savedCred = await gitCredentialGet(repo.path)
+          if (savedCred) {
+            try {
+              await gitForcePullWithCredentials(repo.path, savedCred.username, savedCred.password)
+              showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
+              onRefresh()
+              return
+            } catch {
+              // Saved credentials failed
+            }
+          }
+        } catch {
+          // Failed to get credentials
+        }
+        showToast(t('git.forcePullFailed', { repo: repo.name, error: t('git.credentialTitle') }), 'error')
+      } else {
+        showToast(t('git.forcePullFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      }
     } finally {
       setIsForceAction(false)
     }

@@ -454,6 +454,10 @@ export async function gitForcePull(path: string): Promise<void> {
   await invoke('git_force_pull', { path })
 }
 
+export async function gitForcePullWithCredentials(path: string, username: string, password: string): Promise<void> {
+  await invoke('git_force_pull_with_credentials', { path, username, password })
+}
+
 // Conflict resolution APIs
 export interface ConflictFile {
   path: string
