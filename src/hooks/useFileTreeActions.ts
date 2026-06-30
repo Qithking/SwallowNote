@@ -123,10 +123,12 @@ export function useFileTreeActions() {
 
       if (parent) {
         const children = await loadDirectory(parent.path, showAllFiles, markdownOnly)
-        setNodes(updateNodesWithChildren(nodes, parent.path, children))
+        const currentNodes = useFileTreeStore.getState().nodes
+        setNodes(updateNodesWithChildren(currentNodes, parent.path, children))
       } else {
         const children = await loadDirectory(rootPath || editingPath, showAllFiles, markdownOnly)
-        setNodes([{ id: 'root', name: rootPath?.split(/[\\/]/).pop() || rootPath || '', path: rootPath || '', isDirectory: true, children }])
+        const currentNodes = useFileTreeStore.getState().nodes
+        setNodes(updateNodesWithChildren(currentNodes, rootPath || editingPath, children))
       }
     } catch (e) {
       console.error('Failed to rename:', e)
@@ -199,7 +201,8 @@ export function useFileTreeActions() {
         }
       }
       const children = await loadDirectory(newItem.parentPath, showAllFiles, markdownOnly)
-      setNodes(updateNodesWithChildren(nodes, newItem.parentPath, children))
+      const currentNodes = useFileTreeStore.getState().nodes
+      setNodes(updateNodesWithChildren(currentNodes, newItem.parentPath, children))
     } catch (e) {
       console.error('Failed to create:', e)
     }

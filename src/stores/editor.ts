@@ -567,6 +567,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     for (const tab of removedTabs) {
       queueMicrotask(() => emitNoteClosed(tab.id, tab.path))
     }
+    // Auto-close noteProperties panel when all tabs are closed
+    autoCloseNoteProperties()
   },
   saveAllDirtyTabs: async () => {
     const dirtyTabs = get().tabs.filter((t) => t.isDirty || t.frontmatterDirty)

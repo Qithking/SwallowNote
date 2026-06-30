@@ -180,6 +180,9 @@ export async function handleSaveFile() {
     const { writeFile } = await import('@/lib/tauri')
     // For .md files, merge frontmatter with body before writing
     const isMarkdown = activeTab.path.toLowerCase().endsWith('.md')
+    // 记录保存前的正文基准，await 写入期间若用户再次编辑，content 会变化，
+    // 据此做 CAS 式判断，避免把用户新编辑误标为已保存导致内容丢失
+    const savingContent = activeTab.content
     let writeContent = activeTab.content
     let fm: NoteFrontmatter | undefined
     if (isMarkdown) {
@@ -202,11 +205,17 @@ export async function handleSaveFile() {
         console.error('Failed to index saved file:', activeTab.path, e)
       }
     }
-    useEditorStore.setState((state) => ({
-      tabs: state.tabs.map((t) =>
-        t.id === activeTab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
-      ),
-    }))
+    // CAS 式保护：await 写入期间用户可能再次编辑使 isDirty=true。
+    // 仅当 content 仍与保存前一致（期间无新编辑）时才清除脏标记，
+    // 否则保留 isDirty=true，待下次保存处理，避免用户新编辑被误标为已保存
+    const currentTab = useEditorStore.getState().tabs.find((t) => t.id === activeTab.id)
+    if (currentTab && currentTab.content === savingContent) {
+      useEditorStore.setState((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === activeTab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
+        ),
+      }))
+    }
     // Notify plugins: the note has been successfully persisted.
     // We emit after the store commit so the `isDirty=false` state
     // is observable by subscribers reading from the store.

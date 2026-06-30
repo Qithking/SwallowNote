@@ -6,8 +6,6 @@ import { useCategoryStore, type CategoryNode } from '@/stores'
 import { useEditorStore } from '@/stores'
 import { cn } from '@/lib/utils'
 import { getFileIcon } from '@/lib/utils/fileIcon'
-import { loadFileContent } from '@/lib/api'
-import { countWords } from '@/lib/utils/wordCount'
 import { FullPathTooltip } from '@/components/Search/FullPathTooltip'
 import {
   ContextMenu,
@@ -75,19 +73,15 @@ export function CategoryView() {
 
   const openFile = useCallback(async (filePath: string) => {
     try {
-      const content = await loadFileContent(filePath)
       const fileName = filePath.split('/').pop() || filePath
       addTab({
         id: filePath,
         path: filePath,
         name: fileName,
-        content,
+        content: undefined as unknown as string, // 延迟加载，由 loadTabContent 负责加载和解析
         isDirty: false,
         isEdited: false,
         viewMode: 'preview',
-        fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
-        modifiedTime: new Date().toLocaleString(),
-        wordCount: countWords(content),
       })
     } catch (e) {
       console.error('Failed to open file:', e)
