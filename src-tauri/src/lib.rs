@@ -135,6 +135,7 @@ pub fn run() {
             commands::git::git_clone_with_credentials,
             commands::git::git_clone_cancel,
             commands::git::git_clone_status,
+            commands::git::cleanup_askpass_scripts,
             commands::git::scan_git_repos,
             commands::git::git_get_conflict_files,
             commands::git::git_get_conflict_local_content,
@@ -230,6 +231,9 @@ commands::upgrade::download_latest_release,
                 }
             };
             std::fs::create_dir_all(&app_data_dir).ok();
+
+            // 应用启动时清理上次崩溃可能残留的 askpass 脚本，防止明文凭证泄露
+            commands::git::cleanup_stale_askpass_scripts();
 
             // Initialize backend i18n translations
             crate::i18n::init_translations();

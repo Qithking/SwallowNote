@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useGitStore, mapRepoInfoToRepository, mapRepoInfosToRepositories, type GitRepository, type GitRepositoryInfo, type RepoStatus } from '@/stores/git'
+import { gitPull } from '@/lib/tauri'
 
 vi.mock('@/lib/tauri', () => ({
   gitPull: vi.fn().mockResolvedValue(undefined),
@@ -38,7 +39,6 @@ describe('TC-030: Git状态查看测试', () => {
     hasUncommittedChanges: hasUncommitted,
     uncommittedCount: hasUncommitted ? 3 : 0,
     currentBranch: 'main',
-    branches: [],
     isSubmodule: false,
     parentPath: null,
     status: 'normal',
@@ -219,7 +219,6 @@ describe('TC-032: 冲突解决测试', () => {
       hasUncommittedChanges: false,
       uncommittedCount: 0,
       currentBranch: 'main',
-      branches: [],
       isSubmodule: false,
       parentPath: null,
       status: 'normal',
@@ -241,7 +240,6 @@ describe('TC-032: 冲突解决测试', () => {
       hasUncommittedChanges: false,
       uncommittedCount: 0,
       currentBranch: 'main',
-      branches: [],
       isSubmodule: false,
       parentPath: null,
       status: 'normal',
@@ -263,7 +261,6 @@ describe('TC-032: 冲突解决测试', () => {
       hasUncommittedChanges: false,
       uncommittedCount: 0,
       currentBranch: 'main',
-      branches: [],
       isSubmodule: false,
       parentPath: null,
       status: 'conflict' as RepoStatus,
@@ -290,5 +287,140 @@ describe('TC-032: 冲突解决测试', () => {
     
     const result2 = useGitStore.getState().isConflictFile('/workspace/repo1/normal.md')
     expect(result2).toBeNull()
+  })
+})
+
+describe('TC-033: pullAllRepos 并发限流与防重入测试', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useGitStore.setState({
+      repositories: [],
+      cachedRepositories: [],
+      activeRepository: null,
+      conflictRepos: [],
+      conflictFilesMap: {},
+      isGitLoading: false,
+      isPulling: false,
+      scanProgress: null,
+      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+    })
+  })
+
+  afterEach(() => {
+    vi.resetAllMocks()
+  })
+
+  const createTestRepo = (path: string, name: string): GitRepository => ({
+    name,
+    path,
+    remoteUrl: 'https://github.com/test/repo.git',
+    hasUncommittedChanges: false,
+    uncommittedCount: 0,
+    currentBranch: 'main',
+    isSubmodule: false,
+    parentPath: null,
+    status: 'normal',
+  })
+
+  it('TC-033-01: pullAllRepos 并发限流（最多 4 个并发）', async () => {
+    // 跟踪并发调用数和最大并发数
+    let concurrentCalls = 0
+    let maxConcurrent = 0
+    vi.mocked(gitPull).mockImplementation(async () => {
+      concurrentCalls++
+      maxConcurrent = Math.max(maxConcurrent, concurrentCalls)
+      // 模拟异步拉取延迟，确保批内并发可被观测
+      await new Promise(resolve => setTimeout(resolve, 20))
+      concurrentCalls--
+    })
+
+    // 创建 8 个仓库，验证最多 4 个并发
+    const repos = Array.from({ length: 8 }, (_, i) =>
+      createTestRepo(`/workspace/repo${i}`, `repo${i}`)
+    )
+
+    await useGitStore.getState().pullAllRepos(repos)
+
+    expect(maxConcurrent).toBeLessThanOrEqual(4)
+    expect(gitPull).toHaveBeenCalledTimes(8)
+  })
+
+  it('TC-033-02: pullAllRepos isPulling 防重入', async () => {
+    // 预设 isPulling 为 true，模拟正在拉取中
+    useGitStore.setState({ isPulling: true })
+
+    const repos = [createTestRepo('/workspace/repo1', 'repo1')]
+    const results = await useGitStore.getState().pullAllRepos(repos)
+
+    // 应直接返回空数组，不调用 gitPull
+    expect(results).toEqual([])
+    expect(gitPull).not.toHaveBeenCalled()
+  })
+})
+
+describe('TC-034: isConflictFile 边界场景测试', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useGitStore.setState({
+      repositories: [],
+      cachedRepositories: [],
+      activeRepository: null,
+      conflictRepos: [],
+      conflictFilesMap: {},
+      isGitLoading: false,
+      isPulling: false,
+      scanProgress: null,
+      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+    })
+  })
+
+  afterEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it('TC-034-01: 多冲突仓库场景下正确匹配', () => {
+    useGitStore.setState({
+      conflictRepos: [
+        { repo_path: '/workspace/repo1', repo_name: 'repo1', conflict_file_count: 1 },
+        { repo_path: '/workspace/repo2', repo_name: 'repo2', conflict_file_count: 1 },
+      ],
+      conflictFilesMap: {
+        '/workspace/repo1': ['/workspace/repo1/file1.md'],
+        '/workspace/repo2': ['/workspace/repo2/file2.md'],
+      },
+    })
+
+    // repo1 的冲突文件
+    const r1 = useGitStore.getState().isConflictFile('/workspace/repo1/file1.md')
+    expect(r1?.repoPath).toBe('/workspace/repo1')
+    expect(r1?.repoName).toBe('repo1')
+
+    // repo2 的冲突文件
+    const r2 = useGitStore.getState().isConflictFile('/workspace/repo2/file2.md')
+    expect(r2?.repoPath).toBe('/workspace/repo2')
+    expect(r2?.repoName).toBe('repo2')
+
+    // 不在任何冲突仓库中的文件
+    expect(useGitStore.getState().isConflictFile('/workspace/repo3/file.md')).toBeNull()
+  })
+
+  it('TC-034-02: 空冲突映射返回 null', () => {
+    useGitStore.setState({
+      conflictRepos: [],
+      conflictFilesMap: {},
+    })
+
+    expect(useGitStore.getState().isConflictFile('/workspace/repo1/file1.md')).toBeNull()
+  })
+
+  it('TC-034-03: 部分路径匹配不算冲突', () => {
+    useGitStore.setState({
+      conflictRepos: [{ repo_path: '/workspace/repo1', repo_name: 'repo1', conflict_file_count: 1 }],
+      conflictFilesMap: { '/workspace/repo1': ['/workspace/repo1/file1.md'] },
+    })
+
+    // 路径前缀相似但不是完整路径匹配
+    expect(useGitStore.getState().isConflictFile('/workspace/repo1/file1.md.bak')).toBeNull()
+    expect(useGitStore.getState().isConflictFile('/workspace/repo1/file1')).toBeNull()
   })
 })

@@ -4,11 +4,6 @@
 import { create } from 'zustand'
 import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, removeConflictRepoRecord, syncConflictRepoRecords, gitGetConflictFiles, type ConflictRepoRecord } from '@/lib/tauri'
 
-export interface GitBranch {
-  name: string
-  isCurrent: boolean
-}
-
 export type RepoStatus = 'normal' | 'conflict' | 'error'
 
 export interface GitRepository {
@@ -18,7 +13,6 @@ export interface GitRepository {
   hasUncommittedChanges: boolean
   uncommittedCount: number
   currentBranch: string
-  branches: GitBranch[]
   isSubmodule: boolean
   parentPath: string | null
   status: RepoStatus
@@ -32,7 +26,6 @@ export function mapRepoInfoToRepository(info: GitRepositoryInfo): GitRepository 
     hasUncommittedChanges: info.has_uncommitted_changes,
     uncommittedCount: info.uncommitted_count,
     currentBranch: info.current_branch,
-    branches: [],
     isSubmodule: info.is_submodule,
     parentPath: info.parent_path,
     status: 'normal',
@@ -149,48 +142,65 @@ export const useGitStore = create<GitState>((set) => ({
     const reposWithRemote = repos.filter(r => r.remoteUrl)
     if (reposWithRemote.length === 0) return []
 
+    // 防重入：如果正在拉取中，直接返回空数组
+    if (useGitStore.getState().isPulling) return []
+
     set({ isPulling: true })
     try {
-      // Execute all pull operations in parallel
-      const pullPromises = reposWithRemote.map(async (repo) => {
-        try {
-          await gitPull(repo.path)
-          return { path: repo.path, name: repo.name, success: true }
-        } catch (e) {
-          const errorMessage = String(e).trim()
-          // If auth required, try saved credentials from keyring
-          if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+      // 限制并发数为 4 的并行执行，避免同时发起过多 git 进程
+      const CONCURRENCY = 4
+      const results: PullResult[] = []
+      for (let i = 0; i < reposWithRemote.length; i += CONCURRENCY) {
+        const batch = reposWithRemote.slice(i, i + CONCURRENCY)
+        const batchResults = await Promise.allSettled(
+          batch.map(async (repo): Promise<PullResult> => {
             try {
-              const savedCred = await gitCredentialGet(repo.path)
-              if (savedCred) {
+              await gitPull(repo.path)
+              return { path: repo.path, name: repo.name, success: true }
+            } catch (e) {
+              const errorMessage = String(e).trim()
+              // If auth required, try saved credentials from keyring
+              if (errorMessage.startsWith('AUTH_REQUIRED:')) {
                 try {
-                  await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
-                  return { path: repo.path, name: repo.name, success: true }
-                } catch (credPullError) {
-                  // Check if conflict occurred with credentials pull
-                  const credErrorMessage = String(credPullError).trim()
-                  if (credErrorMessage.startsWith('REBASE_CONFLICT:')) {
-                    return { path: repo.path, name: repo.name, success: false, error: credErrorMessage, isConflict: true }
+                  const savedCred = await gitCredentialGet(repo.path)
+                  if (savedCred) {
+                    try {
+                      await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
+                      return { path: repo.path, name: repo.name, success: true }
+                    } catch (credPullError) {
+                      // Check if conflict occurred with credentials pull
+                      const credErrorMessage = String(credPullError).trim()
+                      if (credErrorMessage.startsWith('REBASE_CONFLICT:')) {
+                        return { path: repo.path, name: repo.name, success: false, error: credErrorMessage, isConflict: true }
+                      }
+                      // 凭证拉取失败（非冲突），直接返回凭证错误信息，
+                      // 不 fallthrough 到下方基于原始 errorMessage 的 REBASE_CONFLICT 检查，
+                      // 否则真实的凭证失败原因会丢失
+                      return { path: repo.path, name: repo.name, success: false, error: credErrorMessage }
+                    }
                   }
-                  // 凭证拉取失败（非冲突），直接返回凭证错误信息，
-                  // 不 fallthrough 到下方基于原始 errorMessage 的 REBASE_CONFLICT 检查，
-                  // 否则真实的凭证失败原因会丢失
-                  return { path: repo.path, name: repo.name, success: false, error: credErrorMessage }
+                } catch {
+                  // Failed to get saved credentials
                 }
               }
-            } catch {
-              // Failed to get saved credentials
+              // Check for rebase conflict
+              if (errorMessage.startsWith('REBASE_CONFLICT:')) {
+                return { path: repo.path, name: repo.name, success: false, error: errorMessage, isConflict: true }
+              }
+              return { path: repo.path, name: repo.name, success: false, error: errorMessage }
             }
+          })
+        )
+        // 将本批结果收集到总结果数组中
+        for (const r of batchResults) {
+          if (r.status === 'fulfilled') {
+            results.push(r.value)
+          } else {
+            // 理论上不会走到这里（内部已 try/catch），兜底处理
+            results.push({ path: '', name: '', success: false, error: String(r.reason) })
           }
-          // Check for rebase conflict
-          if (errorMessage.startsWith('REBASE_CONFLICT:')) {
-            return { path: repo.path, name: repo.name, success: false, error: errorMessage, isConflict: true }
-          }
-          return { path: repo.path, name: repo.name, success: false, error: errorMessage }
         }
-      })
-
-      const results = await Promise.all(pullPromises)
+      }
       return results
     } finally {
       set({ isPulling: false })

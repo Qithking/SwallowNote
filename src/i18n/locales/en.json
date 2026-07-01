@@ -530,7 +530,12 @@
     "passwordOrToken": "Password / Access Token",
     "passwordPlaceholder": "Enter password or Personal Access Token",
     "pushWithCredential": "Authenticate & Push",
+    "pullWithCredential": "Authenticate & Pull",
     "rememberCredential": "Remember credentials",
+    "forgetCredential": "Forget Credential",
+    "forgetCredentialConfirm": "Are you sure you want to forget the saved credentials for {{repo}}?",
+    "forgetCredentialSuccess": "Credentials cleared",
+    "forgetCredentialFailed": "Failed to forget credentials: {{error}}",
     "scanning": "Scanning...",
     "scanningPath": "Scanning {{path}}...",
     "pullSuccess": "Pulled {{count}} repo(s)",
@@ -727,7 +732,14 @@
       "cloneCompleted": "Clone completed",
       "cloneFailed": "Clone failed",
       "targetPathExists": "Target path already exists",
-      "submoduleUncommitted": "Submodule has uncommitted changes, please commit inside submodule first"
+      "submoduleUncommitted": "Submodule has uncommitted changes, please commit inside submodule first",
+      "invalidRepoPath": "Invalid repo path",
+      "invalidPathEncoding": "Invalid path encoding",
+      "invalidRelativePath": "Invalid relative path",
+      "fetchFailed": "Failed to fetch",
+      "checkLocalChangesFailed": "Failed to check local changes",
+      "checkoutFileFailed": "Failed to checkout file",
+      "terminatedBySignal": "terminated by signal"
     }
   },
   "tray": {
