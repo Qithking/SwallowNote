@@ -743,15 +743,48 @@ const { t } = useTranslation()
   const flattenedNodes = useMemo(() => flattenNodes(nodes, expanded, newItem, sortMode, frontmatterCache), [nodes, expanded, newItem, sortMode, frontmatterCache])
 
   // 虚拟化配置
+  // 让 useVirtualizer 直接使用外层 ScrollArea 的 Viewport 作为滚动元素，
+  // 这样 virtualizer 滚动的是真正的可见容器，ScrollBar 也会同步。
   const parentRef = useRef<HTMLDivElement>(null)
+  const scrollViewportRef = useRef<HTMLElement | null>(null)
+  // 首次渲染时（commit 后）从 parentRef 向上找到 ScrollArea 的 Viewport
+  if (!scrollViewportRef.current && parentRef.current) {
+    scrollViewportRef.current = parentRef.current.closest('[data-radix-scroll-area-viewport]') as HTMLElement | null
+  }
   const virtualizer = useVirtualizer({
     count: flattenedNodes.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => scrollViewportRef.current,
     estimateSize: () => 22,
     overscan: 10,
   })
 
   const virtualItems = virtualizer.getVirtualItems()
+
+  // 选中节点变化时，滚动虚拟列表到可视范围
+  // 仅当目标节点不在视口内时滚动，避免用户手动滚动查看其他位置时被强制拉回
+  useEffect(() => {
+    if (!selectedPath) return
+    // 等到下帧执行，确保 expanded/nodes/selectedPath 三者都已同步到 React 状态
+    const rafId = requestAnimationFrame(() => {
+      const vz = virtualizer
+      if (!vz) return
+      // 通过 flattenedNodes 查找目标 index（依赖项变化时 effect 自动重跑）
+      const index = flattenedNodes.findIndex((n) => n.node.path === selectedPath)
+      if (index < 0) return
+      // 用 DOM rect 直接判断目标节点是否在容器视口内
+      const viewport = scrollViewportRef.current
+      const el = parentRef.current?.querySelector(`[data-path="${CSS.escape(selectedPath)}"]`) as HTMLElement | null
+      if (el && viewport) {
+        const elRect = el.getBoundingClientRect()
+        const viewportRect = viewport.getBoundingClientRect()
+        const inView = elRect.top >= viewportRect.top && elRect.bottom <= viewportRect.bottom
+        if (inView) return
+      }
+      // 节点不在 DOM 中（不在 overscan 范围）或不在视口内，强制滚动到目标位置
+      vz.scrollToIndex(index, { align: 'center' })
+    })
+    return () => cancelAnimationFrame(rafId)
+  }, [selectedPath, flattenedNodes, virtualizer])
 
   return (
     <div className="flex flex-col h-full">

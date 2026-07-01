@@ -263,11 +263,10 @@ function TabBar() {
     fileTreeStore.clearMultiSelection()
     fileTreeStore.setLastClickedPath(tab.path)
 
-    // 工作区模式下折叠非活动文件夹，单文件夹模式仅 revealPath
+    // 切换 tab 时不折叠其他已展开目录，仅展开目标文件路径并选中
     if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
       const folder = workspaceFolders.find(f => tab.path.startsWith(f))
       if (folder) {
-        fileTreeStore.collapseAllExceptPath(tab.path, folder)
         fileTreeStore.revealPath(tab.path, folder)
       }
     } else if (rootPath) {
