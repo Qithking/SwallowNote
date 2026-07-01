@@ -88,6 +88,15 @@ function TabBar() {
     return path
   }
 
+  /**
+   * 路径左省略：保留末尾 max 字符（覆盖文件名 + 末级目录），过长时前缀用 … 代替。
+   * 纯 JS 截断，不依赖浏览器 bidi 行为，避免与中英文/数字混合时被重排隐藏。
+   */
+  const truncatePath = (path: string, max: number = 40): string => {
+    if (path.length <= max) return path
+    return '…' + path.slice(path.length - max + 1)
+  }
+
   const confirmCloseDirty = (dirtyTabs: TabBarItem[]): boolean => {
     if (dirtyTabs.length === 0) return true
     const names = dirtyTabs.map(t => t.name).join(', ')
@@ -561,7 +570,7 @@ function TabBar() {
           <div
             className={cn(
               "absolute top-full right-0 z-50 mt-1",
-              "min-w-[180px] max-h-[300px] overflow-y-auto",
+              "min-w-[260px] max-w-[480px] max-h-[300px] overflow-y-auto",
               "bg-[var(--bg-secondary)] border border-[var(--border-color)]",
               "shadow-lg rounded-md py-1"
             )}
@@ -575,40 +584,54 @@ function TabBar() {
                     handleTabClick(tab.id)
                     setShowMoreMenu(false)
                   }}
+                  title={tab.path}
                   className={cn(
-                    "group flex items-center h-8 px-3 cursor-pointer select-none",
+                    "group flex items-start py-1.5 px-3 cursor-pointer select-none",
                     "text-sm",
                     isActive
                       ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
                       : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                   )}
                 >
-                  {/* Status dot */}
-                  {tab.isEdited && (
-                    tab.isDirty ? (
-                      <span className="w-2 h-2 rounded-full bg-red-500 mr-2 shrink-0" />
-                    ) : (
-                      <span className="w-2 h-2 rounded-full bg-green-500 mr-2 shrink-0" />
-                    )
-                  )}
-
-                  <FileText size={14} className="shrink-0 mr-2" />
-                  <span className="truncate max-w-[200px]">{tab.name}</span>
-
-                  {/* Close button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleTabClose(e, tab.id)
-                    }}
-                    className={cn(
-                      "ml-2 h-4 w-4 flex items-center justify-center rounded-sm shrink-0",
-                      "opacity-0 group-hover:opacity-100",
-                      "hover:bg-[rgba(255,255,255,0.1)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  {/* 状态圆点 */}
+                  <span className="shrink-0 mt-0.5 mr-2 w-2 h-2 flex items-center justify-center">
+                    {tab.isEdited && (
+                      tab.isDirty ? (
+                        <span className="w-2 h-2 rounded-full bg-red-500" />
+                      ) : (
+                        <span className="w-2 h-2 rounded-full bg-green-500" />
+                      )
                     )}
-                  >
-                    <X size={12} />
-                  </button>
+                  </span>
+
+                  <div className="flex-1 min-w-0">
+                    {/* 文件名行 */}
+                    <div className="flex items-center">
+                      <FileText size={14} className="shrink-0 mr-1.5" />
+                      <span className="truncate">{tab.name}</span>
+                      {/* 关闭按钮 */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTabClose(e, tab.id)
+                        }}
+                        className={cn(
+                          "ml-auto pl-2 h-5 w-5 flex items-center justify-center rounded-sm shrink-0",
+                          "opacity-0 group-hover:opacity-100",
+                          "hover:bg-[rgba(255,255,255,0.1)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                        )}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    {/* 全路径行：JS 截断保留末尾路径 + 文件名 */}
+                    <div
+                      className="text-xs mt-0.5 truncate"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      {truncatePath(tab.path)}
+                    </div>
+                  </div>
                 </div>
               )
             })}
