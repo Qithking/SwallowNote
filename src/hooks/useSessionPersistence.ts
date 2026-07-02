@@ -73,12 +73,15 @@ export function useSessionPersistence() {
         sidebarWidth: String(uiState.sidebarWidth),
         rightPanelWidth: String(uiState.rightPanelWidth),
         editorViewMode: uiState.editorViewMode,
-        windowWidth,
-        windowHeight,
-        windowX,
-        windowY,
         isMaximized,
         isFullscreen,
+        // 最大化/全屏时不覆盖已保存的正常窗口尺寸，避免恢复后丢失原始大小
+        ...(isMaximized !== 'true' && isFullscreen !== 'true' ? {
+          windowWidth,
+          windowHeight,
+          windowX,
+          windowY,
+        } : {}),
         editor_h1Size: String(editorSettingsState.h1Size),
         editor_h2Size: String(editorSettingsState.h2Size),
         editor_h3Size: String(editorSettingsState.h3Size),
@@ -190,10 +193,15 @@ export function useSessionPersistence() {
       // 文件树定位由 TabBar 的 useEffect 监听 activeTabId 统一处理，
       // restoreTabs 设置 activeTabId 后会自动触发 revealPath，无需在此重复调用。
 
-      if (states.sidebarWidth) setSidebarWidth(Number(states.sidebarWidth))
-      if (states.rightPanelWidth) setRightPanelWidth(Number(states.rightPanelWidth))
+      const sbWidth = Number(states.sidebarWidth)
+      if (states.sidebarWidth && !isNaN(sbWidth)) setSidebarWidth(sbWidth)
+      const rpWidth = Number(states.rightPanelWidth)
+      if (states.rightPanelWidth && !isNaN(rpWidth)) setRightPanelWidth(rpWidth)
       if (states.editorViewMode) {
-        useUIStore.getState().setEditorViewMode(states.editorViewMode as EditorViewMode)
+        const mode = states.editorViewMode as EditorViewMode
+        if (mode === 'edit' || mode === 'preview' || mode === 'split') {
+          useUIStore.getState().setEditorViewMode(mode)
+        }
       }
 
       // 恢复窗口尺寸和位置
@@ -216,12 +224,30 @@ export function useSessionPersistence() {
           if (states.windowX && states.windowY) {
             const x = Number(states.windowX)
             const y = Number(states.windowY)
-            const screen = window.screen
-            const isValidPosition = !isNaN(x) && !isNaN(y) &&
-              x >= -200 && x < screen.availWidth &&
-              y >= -200 && y < screen.availHeight
-            if (isValidPosition) {
-              ops.push(win.setPosition(new LogicalPosition(x, y)))
+            if (!isNaN(x) && !isNaN(y)) {
+              // 使用 Tauri 显示器 API 校验位置，支持多显示器场景
+              let positionValid = false
+              try {
+                const monitors = await win.availableMonitors()
+                const sf = await win.scaleFactor()
+                positionValid = monitors.some(m => {
+                  const mx = m.position.x / sf
+                  const my = m.position.y / sf
+                  const mw = m.size.width / sf
+                  const mh = m.size.height / sf
+                  return x >= mx - 200 && x < mx + mw &&
+                         y >= my - 200 && y < my + mh
+                })
+              } catch {
+                // 显示器 API 不可用时退化为基本范围检查
+                // 上限使用宽松倍数以兼容多显示器横向/纵向排列
+                positionValid = x >= -200 && y >= -200 &&
+                  x < window.screen.width * 4 &&
+                  y < window.screen.height * 4
+              }
+              if (positionValid) {
+                ops.push(win.setPosition(new LogicalPosition(x, y)))
+              }
             }
           }
           if (ops.length > 0) {

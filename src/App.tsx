@@ -366,29 +366,38 @@ function App() {
 
   useEffect(() => {
     let saveTimer: ReturnType<typeof setTimeout> | null = null
-    
-    const handleTabsChange = () => {
+
+    const scheduleSave = () => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => {
         saveSessionStateNow().catch(console.error)
         saveTimer = null
       }, 500)
     }
-    
-    const unsubscribe = useEditorStore.subscribe(handleTabsChange)
-    
+
+    const unsubscribeTabs = useEditorStore.subscribe(scheduleSave)
+
+    // 面板宽度变化时也触发保存（拖拽缩放后即使无标签变化也能持久化）
+    const unsubscribeUI = useUIStore.subscribe((state, prevState) => {
+      if (state.sidebarWidth !== prevState.sidebarWidth ||
+          state.rightPanelWidth !== prevState.rightPanelWidth) {
+        scheduleSave()
+      }
+    })
+
     // Listen for save-session-now events (e.g., before install & restart)
     const handleSaveSessionNow = () => {
       saveSessionStateNow().catch(console.error)
     }
     window.addEventListener('save-session-now', handleSaveSessionNow)
-    
+
     return () => {
-      unsubscribe()
+      unsubscribeTabs()
+      unsubscribeUI()
       window.removeEventListener('save-session-now', handleSaveSessionNow)
       if (saveTimer) clearTimeout(saveTimer)
     }
-  }, [])
+  }, [saveSessionStateNow])
 
   // Auto sync: periodically pull all git repositories based on syncInterval setting
   const syncIntervalRef = useRef(syncInterval)
@@ -646,7 +655,9 @@ function App() {
     }
     setIsDraggingLeft(false)
     setIsDraggingRight(false)
-  }, [])
+    // 拖拽结束后保存会话状态（面板宽度等），避免崩溃或强制关闭后丢失
+    saveSessionStateNow().catch(console.error)
+  }, [saveSessionStateNow])
 
   // Disable text selection while dragging to prevent content being selected
   useEffect(() => {
