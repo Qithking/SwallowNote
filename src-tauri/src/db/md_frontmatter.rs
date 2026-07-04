@@ -730,13 +730,17 @@ pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<
         }
     }
 
-    // Phase 3: 批量 UPDATE（与 Phase 1 同一锁持有，确保读-写原子）
+    // Phase 3: 批量 UPDATE（事务内，原子提交，参考 delete_category 的事务用法）
+    // 用 unchecked_transaction 包裹批量 UPDATE，保证所有分类路径重命名要么全部成功，要么全部回滚，
+    // 避免部分记录更新成功导致分类路径不一致。
+    let tx = conn.unchecked_transaction()?;
     for (new_categories_str, id) in &updates {
-        conn.execute(
+        tx.execute(
             "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
             params![new_categories_str, id],
         )?;
     }
+    tx.commit()?;
     Ok(updates.len())
 }
 

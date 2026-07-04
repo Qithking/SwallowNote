@@ -5,7 +5,8 @@
  */
 import { useEffect, useId, useMemo, useState, useRef, useLayoutEffect } from 'react'
 import { Maximize2 } from 'lucide-react'
-import { useTranslation } from 'react-i18next'  
+import { useTranslation } from 'react-i18next'
+import DOMPurify from 'dompurify'
 import {
   Dialog,
   DialogContent,
@@ -55,6 +56,8 @@ function initializeMermaid(mermaid: MermaidApi) {
 
   mermaid.initialize({
     startOnLoad: false,
+    // loose 模式保留 HTML 标签，用于控制图表大小长宽；
+    // 渲染后由 SafeSvgDiv 中的 DOMPurify 净化危险内容（script/onerror 等）
     securityLevel: 'loose',
     theme: 'default',
     suppressErrorRendering: false,
@@ -118,7 +121,14 @@ function SafeSvgDiv({ svg, className, responsive }: { svg: string; className?: s
 
   useLayoutEffect(() => {
     if (!ref.current) return
-    const parsed = new DOMParser().parseFromString(svg, 'text/html')
+    // 用 DOMPurify 净化 mermaid（loose 模式）渲染出的 SVG，
+    // 保留 width/height/style/viewBox 等安全属性用于控制图表大小，
+    // 过滤 <script>、onerror 等危险内容，消除 XSS 风险
+    const sanitized = DOMPurify.sanitize(svg, {
+      USE_PROFILES: { svg: true, svgFilters: true, html: true },
+      ADD_ATTR: ['width', 'height', 'style', 'viewBox', 'preserveAspectRatio'],
+    })
+    const parsed = new DOMParser().parseFromString(sanitized, 'text/html')
     const svgNode = parsed.body.querySelector('svg')
     if (svgNode) {
       const imported = document.importNode(svgNode, true) as SVGElement

@@ -46,7 +46,7 @@ pub async fn start_ai_proxy_cmd(
     let server = start_ai_proxy(settings).await?;
 
     let actual_port = server.port;
-    let mut guard = holder.server.lock().unwrap();
+    let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(server);
 
     Ok(actual_port)
@@ -54,7 +54,7 @@ pub async fn start_ai_proxy_cmd(
 
 #[tauri::command]
 pub fn stop_ai_proxy(holder: State<'_, SharedAiProxyState>) -> Result<(), String> {
-    let mut guard = holder.server.lock().unwrap();
+    let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(server) = guard.take() {
         let _ = server.shutdown_tx.send(());
     }
@@ -71,7 +71,7 @@ pub async fn restart_ai_proxy_cmd(
     port: u16,
 ) -> Result<u16, String> {
     let old_server = {
-        let mut guard = holder.server.lock().unwrap();
+        let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
         guard.take()
     };
     if let Some(server) = old_server {
@@ -90,7 +90,7 @@ pub async fn restart_ai_proxy_cmd(
     let server = start_ai_proxy(settings).await?;
 
     let actual_port = server.port;
-    let mut guard = holder.server.lock().unwrap();
+    let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(server);
 
     Ok(actual_port)

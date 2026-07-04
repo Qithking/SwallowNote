@@ -30,7 +30,8 @@ pub fn get_locale() -> String {
 /// Initialize translations by parsing the embedded JSON files.
 /// This should be called once during app setup.
 pub fn init_translations() {
-    let mut translations = TRANSLATIONS.write().unwrap();
+    // 优雅降级：mutex 中毒时不 panic，复用内部 guard，与 t_with_locale 保持一致
+    let mut translations = TRANSLATIONS.write().unwrap_or_else(|e| e.into_inner());
 
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(ZH_CN_JSON) {
         translations.insert("zh-CN".to_string(), value);

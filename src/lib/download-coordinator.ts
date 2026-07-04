@@ -60,6 +60,10 @@ class DownloadCoordinator {
   private listenersRegistered = false
   /** 当前正在飞行的后端 invoke 任务数。 */
   private inFlight = 0
+  /** busy 状态变更订阅者集合（事件驱动，替代轮询）。 */
+  private busyListeners: Set<() => void> = new Set()
+  /** 上一次的 busy 状态，用于检测变化避免重复通知。 */
+  private wasBusy = false
 
   constructor() {
     // 应用启动即注册全局事件监听，避免第一次点击时监听器尚未就绪导致事件丢失。
@@ -69,6 +73,31 @@ class DownloadCoordinator {
   /** 是否有正在飞行的下载任务（用于 Toolbar 禁用按钮）。 */
   get isBusy(): boolean {
     return this.inFlight > 0
+  }
+
+  /**
+   * 订阅 busy 状态变化。状态从空闲↔忙碌切换时触发回调。
+   * @returns 取消订阅函数
+   */
+  onBusyChange(callback: () => void): () => void {
+    this.busyListeners.add(callback)
+    return () => {
+      this.busyListeners.delete(callback)
+    }
+  }
+
+  /** 检测 busy 状态是否变化，变化时通知所有订阅者。 */
+  private notifyBusyChange() {
+    const isBusy = this.inFlight > 0
+    if (isBusy === this.wasBusy) return
+    this.wasBusy = isBusy
+    for (const cb of this.busyListeners) {
+      try {
+        cb()
+      } catch (err) {
+        console.error('[DownloadCoordinator] busy listener failed:', err)
+      }
+    }
   }
 
   /** 将已下载字节数与耗时格式化为速度字符串。 */
@@ -193,6 +222,7 @@ class DownloadCoordinator {
 
     // 3. 启动后端调用（fire-and-forget）
     this.inFlight++
+    this.notifyBusyChange()
     this.runBatch(itemsToDownload, ctx)
   }
 
@@ -236,6 +266,7 @@ class DownloadCoordinator {
       }
 
       this.inFlight--
+      this.notifyBusyChange()
       this.updateToast()
       this.maybeFinish()
     })()

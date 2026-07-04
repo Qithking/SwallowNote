@@ -18,7 +18,36 @@ import {
   RefreshCw,
   Zap,
   Puzzle,
+  Trash2,
+  Edit3,
+  Copy,
+  Scissors,
+  ClipboardPaste,
+  Download,
+  Upload,
+  Search,
+  Eye,
+  Code,
+  Terminal,
+  Play,
+  Square,
+  Pause,
+  FolderPlus,
+  FilePlus,
+  GitBranch,
+  GitCommit,
+  GitMerge,
+  Star,
+  Heart,
+  Bookmark,
+  Link,
+  ExternalLink,
+  Plus,
+  Minus,
+  Check,
+  X,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useUIStore } from '@/stores'
 import { usePluginCommands } from '@/lib/plugin-hooks'
 import {
@@ -53,14 +82,47 @@ interface CommandItem {
   action: () => void
 }
 
+/** 插件 iconName → lucide 图标的映射表。
+ *  与 PluginContextMenuItems 的 ICON_MAP 保持一致，
+ *  缺失时回退到 Zap（命令面板默认图标）。 */
+const PLUGIN_ICON_MAP: Record<string, LucideIcon> = {
+  FileText,
+  Settings,
+  Trash2,
+  Edit3,
+  Copy,
+  Scissors,
+  ClipboardPaste,
+  Save,
+  Download,
+  Upload,
+  Search,
+  Eye,
+  Code,
+  Terminal,
+  Play,
+  Square,
+  Pause,
+  RefreshCw,
+  FolderPlus,
+  FilePlus,
+  GitBranch,
+  GitCommit,
+  GitMerge,
+  Star,
+  Heart,
+  Bookmark,
+  Link,
+  ExternalLink,
+  Plus,
+  Minus,
+  Check,
+  X,
+}
+
 function pluginIconFor(command: PluginCommand): typeof Zap {
-  // We don't bundle every lucide icon by name; fall back to a
-  // generic "zap" glyph when the plugin asked for an icon the
-  // host doesn't recognise. The iconName field is a hint, not a
-  // contract — a future iteration can add a real name→component
-  // map if the UX warrants it.
-  void command.iconName
-  return Zap
+  // 通过映射表解析插件声明的 iconName，未命中时回退到 Zap
+  return PLUGIN_ICON_MAP[command.iconName ?? ''] ?? Zap
 }
 
 function CommandPalette() {

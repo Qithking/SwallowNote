@@ -94,6 +94,8 @@ function StatusBar() {
   const [fmIndexCurrent, setFmIndexCurrent] = useState<number>(0)
   const [fmIndexTotal, setFmIndexTotal] = useState<number>(0)
   const [fmIndexDone, setFmIndexDone] = useState<boolean>(false)
+  // 跟踪"索引完成"自动清除的定时器，便于在卸载时清理避免内存泄漏
+  const fmIndexDoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     checkDownloadedInstaller()
@@ -106,6 +108,15 @@ function StatusBar() {
           setFmIndexDone(true)
           setFmIndexCurrent(0)
           setFmIndexTotal(0)
+          // 清除上一次遗留的定时器，避免叠加触发
+          if (fmIndexDoneTimerRef.current) {
+            clearTimeout(fmIndexDoneTimerRef.current)
+          }
+          // 5 秒后自动清除"索引完成"状态
+          fmIndexDoneTimerRef.current = setTimeout(() => {
+            setFmIndexDone(false)
+            fmIndexDoneTimerRef.current = null
+          }, 5000)
         } else {
           setFmIndexCurrent(event.payload.current)
           setFmIndexTotal(event.payload.total)
@@ -116,6 +127,10 @@ function StatusBar() {
 
     return () => {
       cancelDownloadRef.current?.()
+      // 清理定时器避免组件卸载后仍触发 setState（内存泄漏）
+      if (fmIndexDoneTimerRef.current) {
+        clearTimeout(fmIndexDoneTimerRef.current)
+      }
       unlisten.then((fn) => fn())
     }
   }, [])

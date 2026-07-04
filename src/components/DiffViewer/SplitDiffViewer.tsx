@@ -235,6 +235,8 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
   }, [filename])
 
   // Detect dark mode
+  // 注：isDark 为一次性计算（const），不触发 MergeView 重建，
+  // 主题切换通过 CSS 变量自动适配，避免重建丢失用户编辑内容与滚动位置
   const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
 
   // ── Create / recreate MergeView when content changes ──

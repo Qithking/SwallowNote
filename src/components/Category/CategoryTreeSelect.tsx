@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { ChevronRight, Folder, FolderOpen, Check, X, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useCategoryStore, type CategoryNode } from '@/stores'
 
@@ -44,7 +45,7 @@ export function CategoryTreeSelect({ value, onChange }: CategoryTreeSelectProps)
     onChange(value.filter((v) => v !== path))
   }, [value, onChange])
 
-  const addNewCategory = useCallback(() => {
+  const addNewCategory = useCallback(async () => {
     const trimmed = newCategory.trim()
     if (trimmed && !value.includes(trimmed)) {
       onChange([...value, trimmed])
@@ -57,7 +58,12 @@ export function CategoryTreeSelect({ value, onChange }: CategoryTreeSelectProps)
         return false
       }
       if (!categoryExists(tree, trimmed)) {
-        invoke('create_category', { path: trimmed }).catch((e) => console.error('Failed to create category:', trimmed, e))
+        try {
+          await invoke('create_category', { path: trimmed })
+        } catch (e) {
+          console.error('Failed to create category:', trimmed, e)
+          toast.error(`创建分类失败: ${trimmed}`)
+        }
       }
       setNewCategory('')
       setShowNewInput(false)

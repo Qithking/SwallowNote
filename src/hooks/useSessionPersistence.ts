@@ -7,7 +7,7 @@ import { useCallback } from 'react'
 import { useUIStore, useEditorStore, useFileTreeStore, useEditorSettingsStore, type EditorTab, type EditorViewMode } from '@/stores'
 import { useWorkspaceStore } from '@/stores'
 import { saveSessionState, getSessionState } from '@/lib/tauri'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getCurrentWindow, availableMonitors } from '@tauri-apps/api/window'
 import { LogicalSize, LogicalPosition } from '@tauri-apps/api/dpi'
 
 export function useSessionPersistence() {
@@ -228,7 +228,8 @@ export function useSessionPersistence() {
               // 使用 Tauri 显示器 API 校验位置，支持多显示器场景
               let positionValid = false
               try {
-                const monitors = await win.availableMonitors()
+                // availableMonitors 是 Tauri v2 独立导出函数，而非 Window 方法
+                const monitors = await availableMonitors()
                 const sf = await win.scaleFactor()
                 positionValid = monitors.some(m => {
                   const mx = m.position.x / sf

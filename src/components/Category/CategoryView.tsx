@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { ChevronRight, Folder, FolderOpen, RefreshCw, Plus, Pencil, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { useCategoryStore, type CategoryNode } from '@/stores'
 import { useEditorStore } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -163,10 +164,13 @@ export function CategoryView() {
     const trimmed = newItem.name.trim()
     const fullPath = newItem.parentPath ? `${newItem.parentPath}/${trimmed}` : trimmed
 
-    // 持久化空分类到 categories 表，等待完成后再刷新
-    await invoke('create_category', { path: fullPath }).catch((e) => {
+    // 持久化空分类到 categories 表，失败时提示用户；成功后再刷新树
+    try {
+      await invoke('create_category', { path: fullPath })
+    } catch (e) {
       console.error('Failed to create category:', fullPath, e)
-    })
+      toast.error(`创建分类失败: ${fullPath}`)
+    }
 
     await useCategoryStore.getState().loadTree()
     setNewItem(null)

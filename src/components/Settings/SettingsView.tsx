@@ -219,7 +219,8 @@ function SettingsView() {
       )
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      toast.error(t('settings.plugins.configs.exportSuccess', { count: 0 }) + ' · ' + message)
+      // 导出失败分支应使用失败文案 key，避免误报"导出成功"
+      toast.error(t('settings.plugins.configs.exportFailed') + ' · ' + message)
     } finally {
       setPluginConfigsExporting(false)
     }

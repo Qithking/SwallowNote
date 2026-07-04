@@ -66,6 +66,7 @@
     "plugins.configs.export": "Export plugin configs",
     "plugins.configs.import": "Import plugin configs",
     "plugins.configs.exportSuccess": "Exported {{count}} plugin config(s)",
+    "plugins.configs.exportFailed": "Failed to export plugin configs",
     "plugins.configs.importSuccess": "Imported {{imported}} of {{total}} plugin config(s); skipped {{skipped}}",
     "plugins.configs.importNone": "Bundle contains no importable entries",
     "plugins.configs.versionMismatch": "Bundle is for SwallowNote v{{bundleVersion}} (schema v{{bundleSchema}}); this build expects schema v{{expected}}",

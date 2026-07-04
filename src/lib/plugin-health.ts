@@ -95,14 +95,12 @@ function disablePlugin(pluginId: string): void {
 }
 
 /**
- * Subscribe to plugin disable events to clean up crash records.
+ * 初始化插件健康监控。
+ *
+ * 注：原监听的 'plugin:disable' 事件全项目无任何 dispatchEvent 触发源，
+ * 属死监听器故移除以避免无效代码。如后续实现插件禁用功能，可在此重新
+ * 订阅并在禁用时调用 resetPluginCrashCount 清理崩溃记录。
  */
 export function initHealthMonitor(): void {
-  // Listen for plugin disable events to clean up crash records
-  window.addEventListener('plugin:disable', (event) => {
-    const detail = (event as CustomEvent<{ pluginId: string }>).detail
-    if (detail?.pluginId) {
-      resetPluginCrashCount(detail.pluginId)
-    }
-  })
+  // 目前无订阅项，保留为后续插件禁用/健康监控的初始化入口
 }

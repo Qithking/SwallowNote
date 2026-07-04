@@ -3,8 +3,8 @@
  * Shows file path, size, modified time, word count, and view toggles
  */
 import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2, DownloadCloud, Loader2 } from 'lucide-react'
-import { useState, useRef, useEffect } from 'react'
-import { useEditorStore, useUIStore, useWorkspaceStore, useEditorSettingsStore, useGitStore, usePluginStore } from '@/stores'
+import { useState, useEffect, useMemo } from 'react'
+import { useEditorStore, useUIStore, useWorkspaceStore, useGitStore, usePluginStore } from '@/stores'
 import { useShallow } from 'zustand/react/shallow'
 import type { ConflictRepoRecord } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
@@ -19,16 +19,13 @@ function EditorToolbar() {
   const rightPanelType = useUIStore((s) => s.rightPanelType)
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
   const noteWidth = useUIStore((s) => s.noteWidth)
+  const setNoteWidth = useUIStore((s) => s.setNoteWidth)
   const sidebarView = useUIStore((s) => s.sidebarView)
   const sidebarVisible = useUIStore((s) => s.sidebarVisible)
   const settingsPanelVisible = useUIStore((s) => s.settingsPanelVisible)
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
   const workspaceMode = useUIStore((s) => s.workspaceMode)
-  const normalPaddingVertical = useEditorSettingsStore((s) => s.normalPaddingVertical)
-  const normalPaddingHorizontal = useEditorSettingsStore((s) => s.normalPaddingHorizontal)
-  const widePaddingVertical = useEditorSettingsStore((s) => s.widePaddingVertical)
-  const widePaddingHorizontal = useEditorSettingsStore((s) => s.widePaddingHorizontal)
   const conflictFilesMap = useGitStore((s) => s.conflictFilesMap)
   const conflictRepos = useGitStore((s) => s.conflictRepos)
   const editorToolbarPlugins = usePluginStore((s) => s.registry.editorToolbar)
@@ -55,26 +52,34 @@ function EditorToolbar() {
     })
   )
   const [copied, setCopied] = useState(false)
-  const [isWide, setIsWide] = useState(noteWidth === 'wide')
+  // isWide 直接派生自 store，保持与 noteWidth 单一数据源同步
+  const isWide = noteWidth === 'wide'
   const [downloading, setDownloading] = useState(false)
-  const savedPaddingRef = useRef({ vertical: normalPaddingVertical, horizontal: normalPaddingHorizontal })
   const { t } = useTranslation()
 
-  // Listen for padding changes from settings panel
+  // 订阅下载协调器 busy 状态变化（事件驱动，替代轮询），在下载期间禁用下载按钮
   useEffect(() => {
-    savedPaddingRef.current = { vertical: normalPaddingVertical, horizontal: normalPaddingHorizontal }
-  }, [normalPaddingVertical, normalPaddingHorizontal])
-
-  // 轮询下载协调器 busy 状态，在下载期间禁用下载按钮
-  useEffect(() => {
-    let rafId: number
-    const check = () => {
+    // 初始化为当前状态，避免错过订阅前已发生的变化
+    setDownloading(downloadCoordinator.isBusy)
+    const unsubscribe = downloadCoordinator.onBusyChange(() => {
       setDownloading(downloadCoordinator.isBusy)
-      rafId = window.setTimeout(check, 120)
-    }
-    check()
-    return () => window.clearTimeout(rafId)
+    })
+    return unsubscribe
   }, [])
+
+  // 冲突文件判定与关联仓库信息（memo 化，避免每次渲染重算 filter/flatMap/includes）。
+  // 因 hook 不能在条件 return 之后调用，这里用 activeTab?.path 兼容 activeTab 为 null 的场景。
+  const conflictInfo = useMemo(() => {
+    const p = activeTab?.path
+    if (!p) return { isConflict: false, conflictRepo: null as ConflictRepoRecord | null, relativeFilePath: undefined as string | undefined }
+    const conflictFiles = conflictRepos
+      .filter((r: ConflictRepoRecord) => p.startsWith(r.repo_path))
+      .flatMap((r: ConflictRepoRecord) => conflictFilesMap[r.repo_path] || [])
+    const isConflict = conflictFiles.includes(p)
+    const conflictRepo = conflictRepos.find((r: ConflictRepoRecord) => p.startsWith(r.repo_path)) ?? null
+    const relativeFilePath = conflictRepo ? p.substring(conflictRepo.repo_path.length + 1) : undefined
+    return { isConflict, conflictRepo, relativeFilePath }
+  }, [conflictRepos, conflictFilesMap, activeTab?.path])
 
   if (!activeTab) return null
 
@@ -129,31 +134,10 @@ function EditorToolbar() {
     }
   }
 
+  // 切换宽窄模式：仅更新 store，排版 padding 由 MarkdownEditor 订阅 noteWidth 自行应用，
+  // 避免直接操作 DOM 在 tab 切换后丢失样式的脆弱问题
   const handleToggleWidth = () => {
-    const container = document.querySelector('.blocknote-editor-container')
-    if (!container) return
-
-    const scrollArea = container.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
-    if (!scrollArea) return
-
-    const newWide = !isWide
-    if (isWide) {
-      scrollArea.style.paddingTop = `${savedPaddingRef.current.vertical}px`
-      scrollArea.style.paddingBottom = `${savedPaddingRef.current.vertical}px`
-      scrollArea.style.paddingLeft = `${savedPaddingRef.current.horizontal}px`
-      scrollArea.style.paddingRight = `${savedPaddingRef.current.horizontal}px`
-    } else {
-      savedPaddingRef.current = {
-        vertical: parseInt(scrollArea.style.paddingTop) || normalPaddingVertical,
-        horizontal: parseInt(scrollArea.style.paddingLeft) || normalPaddingHorizontal
-      }
-      scrollArea.style.paddingTop = `${widePaddingVertical}px`
-      scrollArea.style.paddingBottom = `${widePaddingVertical}px`
-      scrollArea.style.paddingLeft = `${widePaddingHorizontal}px`
-      scrollArea.style.paddingRight = `${widePaddingHorizontal}px`
-    }
-    setIsWide(newWide)
-    useUIStore.getState().setNoteWidth(newWide ? 'wide' : 'normal')
+    setNoteWidth(isWide ? 'normal' : 'wide')
   }
 
   // Helper: compute activate/deactivate callbacks for a plugin
@@ -233,30 +217,20 @@ function EditorToolbar() {
       {/* Right: Icons */}
       <div className="flex items-center shrink-0 ml-4">
         {/* Conflict indicator - only shown when the file is actually a conflict file */}
-        {(() => {
-          const conflictFiles = conflictRepos
-            .filter((r: ConflictRepoRecord) => path.startsWith(r.repo_path))
-            .flatMap((r: ConflictRepoRecord) => conflictFilesMap[r.repo_path] || [])
-          const isConflict = conflictFiles.includes(path)
-          if (!isConflict) return null
-          const conflictRepo = conflictRepos.find((r: ConflictRepoRecord) => path.startsWith(r.repo_path))
-          // Compute the relative file path within the repo for auto-selection
-          const relativeFilePath = conflictRepo ? path.substring(conflictRepo.repo_path.length + 1) : undefined
-          return conflictRepo ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => { useEditorStore.getState().openConflictTab(conflictRepo.repo_path, conflictRepo.repo_name, { autoSelectFile: relativeFilePath, autoHideTree: true }) }}
-                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                  style={{ color: 'var(--color-error)' }}
-                >
-                  <GitMerge size={14} style={{ color: 'inherit' }} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t('editorToolbar.conflictResolve')}</TooltipContent>
-            </Tooltip>
-          ) : null
-        })()}
+        {conflictInfo.isConflict && conflictInfo.conflictRepo && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => { useEditorStore.getState().openConflictTab(conflictInfo.conflictRepo!.repo_path, conflictInfo.conflictRepo!.repo_name, { autoSelectFile: conflictInfo.relativeFilePath, autoHideTree: true }) }}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: 'var(--color-error)' }}
+              >
+                <GitMerge size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.conflictResolve')}</TooltipContent>
+          </Tooltip>
+        )}
         {isMarkdown && (<>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -398,9 +372,9 @@ function EditorToolbar() {
                   {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}
                 </PluginErrorBoundary>
               )
-            } catch {
-              // If toolbarButton throws synchronously during render,
-              // fall through to the default icon rendering below
+            } catch (e) {
+              // toolbarButton 同步渲染抛错：记录日志并降级为下方默认图标渲染
+              console.error('[EditorToolbar] Plugin toolbarButton render failed:', e)
             }
           }
 

@@ -56,6 +56,11 @@ function App() {
   useTheme()
   useKeyboardShortcuts()
   const { t } = useTranslation()
+  // 用 ref 跟踪最新的 t，避免同步定时器 effect 依赖 t 导致语言切换时重建定时器
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
   const settingsPanelVisible = useUIStore((s: UIState) => s.settingsPanelVisible)
   const rightPanelType = useUIStore((s: UIState) => s.rightPanelType)
   const sidebarWidth = useUIStore((s: UIState) => s.sidebarWidth)
@@ -249,6 +254,15 @@ function App() {
         const { emitAppExit } = await import('@/lib/plugin-host')
         emitAppExit()
       } catch { /* ignore */ }
+
+      // 先 flush 所有编辑器的防抖内容，避免 300ms 防抖窗口内的编辑
+      // 因 isDirty 未更新而被 close 流程跳过导致丢失
+      try {
+        const { flushAllEditors } = await import('@/lib/editor-flush')
+        await flushAllEditors()
+      } catch (e) {
+        console.warn('[App] flushAllEditors on close failed', e)
+      }
 
       const { closeWithoutExit } = useUIStore.getState()
       const dirtyCount = useEditorStore.getState().getDirtyTabsCount()
@@ -529,7 +543,7 @@ function App() {
         // Only show one consolidated toast for conflicts
         if (conflicted > 0) {
           const repoNames = results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.name).join(', ')
-          toast.warning(t('git.pullConflict', { repos: repoNames }))
+          toast.warning(tRef.current('git.pullConflict', { repos: repoNames }))
 
           // Do NOT auto-open conflict tabs — user must click conflict icon or repo to open
           // Sync conflict repos to database for persistence
@@ -556,7 +570,7 @@ function App() {
       clearTimeout(initialTimer)
       clearInterval(intervalId)
     }
-  }, [syncInterval, t])
+  }, [syncInterval])
 
   const handleSaveAndClose = async () => {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose

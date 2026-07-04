@@ -16,6 +16,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
+import { flushAllEditors } from '@/lib/editor-flush'
 
 /** Fields from EditorTab that TabBar actually needs for rendering.
  *  Excludes `content` (the only field that changes on every keystroke)
@@ -318,10 +319,12 @@ function TabBar() {
     }
   }
 
-  const handleTabClick = (tabId: string) => {
+  const handleTabClick = async (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId)
     if (!tab) return
 
+    // 切换前 flush 旧编辑器防抖内容，防止 300ms 窗口内未序列化的编辑丢失
+    await flushAllEditors()
     // Switch tab immediately for better UX
     setActiveTab(tabId)
     scrollToTab(tabId)

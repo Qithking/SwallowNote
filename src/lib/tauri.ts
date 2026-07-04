@@ -824,23 +824,31 @@ export function downloadLatestRelease(
     unlistenComplete?.()
   }
 
-  listen<DownloadProgress>('download-progress', (event) => {
-    onProgress(event.payload)
-  }).then((fn) => {
-    if (cleanedUp) { fn() } else { unlistenProgress = fn }
-  })
+  // 使用 async IIFE 保证两个监听器注册完成后再 invoke，
+  // 避免后端在监听器注册前发送事件导致丢失；仍同步返回 cleanup 供调用方随时取消。
+  void (async () => {
+    try {
+      const fnProgress = await listen<DownloadProgress>('download-progress', (event) => {
+        onProgress(event.payload)
+      })
+      // 注册期间可能已被调用方取消：立即卸载并放弃后续流程
+      if (cleanedUp) { fnProgress(); return }
+      unlistenProgress = fnProgress
 
-  listen<DownloadComplete>('download-complete', (event) => {
-    onComplete(event.payload.path)
-    cleanup()
-  }).then((fn) => {
-    if (cleanedUp) { fn() } else { unlistenComplete = fn }
-  })
+      const fnComplete = await listen<DownloadComplete>('download-complete', (event) => {
+        onComplete(event.payload.path)
+        cleanup()
+      })
+      if (cleanedUp) { fnComplete(); return }
+      unlistenComplete = fnComplete
 
-  invoke('download_latest_release').catch((e) => {
-    onError(String(e))
-    cleanup()
-  })
+      // 两个监听器均已注册，安全地触发后端下载
+      await invoke('download_latest_release')
+    } catch (e) {
+      onError(String(e))
+      cleanup()
+    }
+  })()
 
   return cleanup
 }

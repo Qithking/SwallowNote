@@ -435,6 +435,8 @@ export function useKeyboardShortcuts() {
         const index = parseInt(e.key) - 1
         if (tabsRef.current[index]) {
           const tab = tabsRef.current[index]
+          // 切换前 flush 旧编辑器防抖内容，防止 300ms 窗口内未序列化的编辑丢失
+          await flushAllEditors()
           // Switch tab immediately for better UX
           useEditorStore.getState().setActiveTab(tab.id)
           // Load content asynchronously after switching tab

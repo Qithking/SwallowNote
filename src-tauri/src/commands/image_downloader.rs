@@ -28,6 +28,11 @@ fn get_url_lock(url: &str) -> Arc<TokioMutex<()>> {
     let locks = URL_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
     // 锁中毒时直接恢复（不会发生在正常流程中），避免 panic 影响下载主流程
     let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
+    // 清理策略：map 超过阈值时移除无持有者的旧 entry，避免无限增长。
+    // strong_count == 1 表示仅 map 自身持有，无其他下载任务在用，可安全回收。
+    if map.len() > 1000 {
+        map.retain(|_, arc| Arc::strong_count(arc) > 1);
+    }
     map.entry(url.to_string())
         .or_insert_with(|| Arc::new(TokioMutex::new(())))
         .clone()

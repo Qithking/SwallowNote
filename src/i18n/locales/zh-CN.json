@@ -66,6 +66,7 @@
     "plugins.configs.export": "导出插件配置",
     "plugins.configs.import": "导入插件配置",
     "plugins.configs.exportSuccess": "已导出 {{count}} 个插件配置",
+    "plugins.configs.exportFailed": "导出插件配置失败",
     "plugins.configs.importSuccess": "已导入 {{imported}}/{{total}} 个插件配置；跳过 {{skipped}} 个",
     "plugins.configs.importNone": "压缩包中没有可导入的条目",
     "plugins.configs.versionMismatch": "压缩包来自 SwallowNote v{{bundleVersion}}（schema v{{bundleSchema}}），当前构建期望 schema v{{expected}}",

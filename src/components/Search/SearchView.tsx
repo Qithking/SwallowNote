@@ -158,6 +158,8 @@ const SearchView = memo(function SearchView() {
   const workspaceMode = useUIStore((s) => s.workspaceMode)
   const addTab = useEditorStore((s) => s.addTab)
   const inputRef = useRef<HTMLInputElement>(null)
+  // 为 yaml 筛选条件生成稳定唯一 id，避免用 index 作 key 在删除/重排时输入状态错位
+  const filterIdRef = useRef(0)
   const { t } = useTranslation()
 
   const [query, setQuery] = useState('')
@@ -170,7 +172,7 @@ const SearchView = memo(function SearchView() {
 
   // YAML 筛选状态
   const [showYamlFilter, setShowYamlFilter] = useState(false)
-  const [yamlFilters, setYamlFilters] = useState<Array<{ key: string; value: string }>>([])
+  const [yamlFilters, setYamlFilters] = useState<Array<{ id: number; key: string; value: string }>>([])
   const [yamlResults, setYamlResults] = useState<Array<{ file_path: string; title: string | null }>>([])
   const [isYamlSearching, setIsYamlSearching] = useState(false)
   const [selectedYamlPath, setSelectedYamlPath] = useState<string | null>(null)
@@ -335,6 +337,13 @@ const SearchView = memo(function SearchView() {
     getScrollElement: () => parentRef.current,
     estimateSize: (index) => flattenedItems[index]?.type === 'file' ? 24 : 20,
     overscan: 10,
+    // 提供稳定 key，避免展开/折叠时按 index 复用导致渲染错位
+    getItemKey: (index) => {
+      const it = flattenedItems[index]
+      return it?.type === 'file'
+        ? `f-${it.file.file_path}`
+        : `m-${it.file.file_path}-${it.match.line_number}`
+    },
   })
 
   const virtualItems = virtualizer.getVirtualItems()
@@ -366,6 +375,7 @@ const SearchView = memo(function SearchView() {
           
           {query && (
             <button
+              // 清空关键词：保留 yaml 筛选器（原业务逻辑），仅清空关键词与结果
               onClick={() => { setQuery(''); setYamlResults([]) }}
               className="flex items-center justify-center w-6 h-full shrink-0 cursor-pointer"
               style={{ color: 'var(--text-muted)' }}
@@ -441,7 +451,7 @@ const SearchView = memo(function SearchView() {
           <div className="mt-1 w-full space-y-1.5 p-2 rounded border border-border/50 bg-background/50">
             {/* 动态键值对条件 */}
             {yamlFilters.map((filter, idx) => (
-              <div key={idx} className="flex items-center gap-1 w-full">
+              <div key={filter.id} className="flex items-center gap-1 w-full">
                 <input
                   type="text"
                   value={filter.key}
@@ -481,7 +491,7 @@ const SearchView = memo(function SearchView() {
             ))}
             {/* 添加条件按钮 */}
             <button
-              onClick={() => setYamlFilters([...yamlFilters, { key: '', value: '' }])}
+              onClick={() => setYamlFilters([...yamlFilters, { id: filterIdRef.current++, key: '', value: '' }])}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground w-full"
             >
               <Plus size={11} />

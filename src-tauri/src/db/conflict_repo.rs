@@ -131,16 +131,20 @@ pub fn sync_conflict_repos(
 
     let current_paths: std::collections::HashSet<&str> = current_conflicts.iter().map(|(p, _, _)| p.as_str()).collect();
 
+    // 用 unchecked_transaction 包裹循环中的 DELETE/UPSERT，保证“移除已解决 + upsert 当前”原子提交，
+    // 避免中途失败导致 conflict_repos 表与实际冲突状态不一致。
+    let tx = conn.unchecked_transaction()?;
+
     // Remove records for repos that are no longer in conflict
     for existing in &existing_paths {
         if !current_paths.contains(existing.as_str()) {
-            conn.execute("DELETE FROM conflict_repos WHERE repo_path = ?1", [existing])?;
+            tx.execute("DELETE FROM conflict_repos WHERE repo_path = ?1", [existing])?;
         }
     }
 
     // Upsert current conflict repos
     for (repo_path, repo_name, file_count) in current_conflicts {
-        conn.execute(
+        tx.execute(
             "INSERT INTO conflict_repos (repo_path, repo_name, conflict_file_count, updated_at)
              VALUES (?1, ?2, ?3, datetime('now','localtime'))
              ON CONFLICT(repo_path) DO UPDATE SET
@@ -151,6 +155,7 @@ pub fn sync_conflict_repos(
         )?;
     }
 
+    tx.commit()?;
     drop(conn);
 
     // Return the updated list

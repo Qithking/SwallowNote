@@ -15,6 +15,8 @@ import {
 import { getPermissionAuditLogs, type PermissionAuditLogEntry } from './plugin-permissions'
 import { getPluginCrashCount } from './plugin-health'
 import { usePluginStore } from '@/stores'
+// 从 package.json 导入版本号，避免硬编码（resolveJsonModule 已启用）
+import { version } from '../../package.json'
 
 // ─── Diagnostic bundle types ─────────────────────────────────────────────────
 
@@ -77,7 +79,7 @@ export async function generateDiagnosticBundle(): Promise<DiagnosticBundle> {
   return {
     version: '1.0.0',
     generatedAt: new Date().toISOString(),
-    appVersion: '0.1.0', // Could be imported from package.json
+    appVersion: version,
     userAgent: navigator.userAgent,
     platform: navigator.platform,
 

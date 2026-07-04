@@ -45,7 +45,7 @@ interface CodeEditorProps {
   filename: string
   onChange?: (content: string) => void
   className?: string
-  scrollToLine?: (lineNumber: number) => void
+  scrollToLine?: number
 }
 
 // Helper to wrap a legacy StreamParser into a CodeMirror extension
@@ -158,11 +158,12 @@ function resolveLanguageExtension(lang: string): any | Promise<any> {
   return result
 }
 
-export function CodeEditor({ content, filename, onChange, className = '' }: CodeEditorProps) {
+export function CodeEditor({ content, filename, onChange, className = '', scrollToLine }: CodeEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
 
-  const scrollToLine = (lineNumber: number) => {
+  // 实际执行行定位的内部函数：把光标移到目标行并滚动到视口中央
+  const doScrollToLine = (lineNumber: number) => {
     if (!viewRef.current) return
     try {
       const line = viewRef.current.state.doc.line(Math.min(lineNumber, viewRef.current.state.doc.lines))
@@ -175,14 +176,22 @@ export function CodeEditor({ content, filename, onChange, className = '' }: Code
     }
   }
 
+  // 响应外部通过 window 事件触发的行定位请求
   useEffect(() => {
     const handler = (e: Event) => {
       const line = (e as CustomEvent).detail.line
-      scrollToLine(line)
+      doScrollToLine(line)
     }
     window.addEventListener('scroll-to-line', handler)
     return () => window.removeEventListener('scroll-to-line', handler)
   }, [])
+
+  // 响应 scrollToLine prop 变化：父组件传入行号时滚动到目标行
+  useEffect(() => {
+    if (scrollToLine != null) {
+      doScrollToLine(scrollToLine)
+    }
+  }, [scrollToLine])
 
   // Insert text at cursor position
   useEffect(() => {

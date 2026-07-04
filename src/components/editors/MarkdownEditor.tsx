@@ -119,6 +119,8 @@ function BlockNoteInner({
   const addTab = useEditorStore((s) => s.addTab)
   const { t } = useTranslation()
   const {
+    normalPaddingVertical,
+    normalPaddingHorizontal,
     widePaddingVertical,
     widePaddingHorizontal,
   } = useEditorSettingsStore()
@@ -134,20 +136,28 @@ function BlockNoteInner({
   addTabRef.current = addTab
 
   useEffect(() => {
-    if (noteWidth !== 'wide') return
     const apply = () => {
       const container = editorContainerRef.current
       if (!container) return
       const scrollArea = container.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
       if (!scrollArea) return
-      scrollArea.style.paddingTop = `${widePaddingVertical}px`
-      scrollArea.style.paddingBottom = `${widePaddingVertical}px`
-      scrollArea.style.paddingLeft = `${widePaddingHorizontal}px`
-      scrollArea.style.paddingRight = `${widePaddingHorizontal}px`
+      if (noteWidth === 'wide') {
+        // 宽模式：应用 wide padding 内联样式
+        scrollArea.style.paddingTop = `${widePaddingVertical}px`
+        scrollArea.style.paddingBottom = `${widePaddingVertical}px`
+        scrollArea.style.paddingLeft = `${widePaddingHorizontal}px`
+        scrollArea.style.paddingRight = `${widePaddingHorizontal}px`
+      } else {
+        // 普通模式：应用用户配置的 normalPadding（保留原业务逻辑）
+        scrollArea.style.paddingTop = `${normalPaddingVertical}px`
+        scrollArea.style.paddingBottom = `${normalPaddingVertical}px`
+        scrollArea.style.paddingLeft = `${normalPaddingHorizontal}px`
+        scrollArea.style.paddingRight = `${normalPaddingHorizontal}px`
+      }
     }
     const timer = setTimeout(apply, 100)
     return () => clearTimeout(timer)
-  }, [noteWidth, widePaddingVertical, widePaddingHorizontal])
+  }, [noteWidth, normalPaddingVertical, normalPaddingHorizontal, widePaddingVertical, widePaddingHorizontal])
 
   // codeBlock from @blocknote/code-block provides syntax highlighting via Shiki
   // In newer versions, we need to create the code block spec using createCodeBlockSpec
@@ -1050,15 +1060,20 @@ function BlockNoteInner({
     return registerFlushFn(flushPendingContent)
   }, [flushPendingContent])
 
-  // Cleanup debounce timer on unmount.
+  // Cleanup debounce timer on unmount — flush pending content to avoid data loss on tab switch.
+  // 注：serializeAndNotify 是 async，cleanup 无法 await，此处为 fire-and-forget。
+  // tab 切换主路径已由 flushAllEditors()（在 setActiveTab 前 await）保护；
+  // app 退出场景由 App.tsx 的 close-requested 监听器调用 flushAllEditors() 兜底。
   useEffect(() => {
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
         debounceTimerRef.current = null
+        // 兜底：触发序列化（async，不阻塞 cleanup）
+        serializeAndNotify()
       }
     }
-  }, [])
+  }, [serializeAndNotify])
 
   // Build initial TOC when editor mounts or tab switches.
   // Subsequent TOC updates are handled by the debounced serializeAndNotify.

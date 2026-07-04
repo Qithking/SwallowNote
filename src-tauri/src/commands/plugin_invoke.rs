@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
@@ -78,6 +78,9 @@ pub(crate) struct PluginProcess {
     child: Arc<Mutex<Option<Child>>>,
     /// JSON-RPC id counter (monotonic, per-process).
     next_id: AtomicU64,
+    /// 连续超时计数：达到阈值后熔断该插件后端，避免僵尸进程长期占用 CPU/内存。
+    /// 调用成功时会归零，因此统计的是「连续超时」次数。
+    timeout_count: AtomicU32,
     /// Pending requests keyed by id.
     pending: PendingMap,
     /// Background reader task. Aborted on shutdown.
@@ -241,6 +244,7 @@ async fn spawn_plugin_process(
         stdin: Arc::new(Mutex::new(Some(stdin))),
         child: Arc::new(Mutex::new(Some(child))),
         next_id: AtomicU64::new(1),
+        timeout_count: AtomicU32::new(0),
         pending,
         _reader: reader,
         _stderr: stderr_task,
@@ -360,7 +364,11 @@ pub async fn invoke_plugin(
     // Await the response, with timeout. We use tokio::select! so the
     // timeout fires even if the child is hung.
     let response = match tokio::time::timeout(INVOKE_TIMEOUT, rx).await {
-        Ok(Ok(resp)) => resp,
+        Ok(Ok(resp)) => {
+            // 调用成功，重置连续超时计数，保证统计的是「连续」超时而非历史累计。
+            proc.timeout_count.store(0, Ordering::Relaxed);
+            resp
+        }
         Ok(Err(_canceled)) => {
             // The reader task sent and the channel was consumed; this
             // branch is unreachable in practice because we own the
@@ -373,6 +381,27 @@ pub async fn invoke_plugin(
             // will fail silently when (if) a late response arrives.
             let mut pending = proc.pending.lock().await;
             pending.remove(&id);
+            drop(pending);
+            // 超时诊断日志：便于定位是哪个插件/命令卡住。
+            let prev = proc.timeout_count.fetch_add(1, Ordering::Relaxed);
+            eprintln!(
+                "[plugin_invoke] plugin '{}' command '{}' timed out after {}s (consecutive timeout #{})",
+                proc.plugin_id,
+                command,
+                INVOKE_TIMEOUT.as_secs(),
+                prev + 1
+            );
+            // 熔断策略：连续超时达到阈值时主动 kill 后端进程，回收 CPU/内存，
+            // 避免频繁超时的插件累积僵尸进程；下一次调用会由 get_or_spawn 重新拉起。
+            const TIMEOUT_THRESHOLD: u32 = 3;
+            if prev + 1 >= TIMEOUT_THRESHOLD {
+                eprintln!(
+                    "[plugin_invoke] plugin '{}' reached consecutive timeout threshold ({}), killing backend to reclaim resources",
+                    proc.plugin_id, TIMEOUT_THRESHOLD
+                );
+                proc.timeout_count.store(0, Ordering::Relaxed);
+                let _ = kill_plugin_backend(state.inner(), &proc.plugin_id).await;
+            }
             return Err(PluginError::Timeout {
                 secs: INVOKE_TIMEOUT.as_secs(),
                 plugin_id: proc.plugin_id.clone(),
