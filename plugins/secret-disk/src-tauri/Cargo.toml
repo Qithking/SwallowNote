@@ -1,0 +1,18 @@
+[package]
+name = "swallownote-plugin-secret-disk"
+version = "0.1.0"
+description = "SwallowNote secret-disk plugin backend — encrypted private notes via SQLCipher"
+authors = ["SwallowNote"]
+edition = "2021"
+
+[[bin]]
+name = "plugin_com_swallownote_secret_disk"
+path = "src/main.rs"
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled-sqlcipher-vendored-openssl"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zeroize = { version = "1", features = ["alloc"] }
+libc = "0.2"
+uuid = { version = "1", features = ["v4"] }

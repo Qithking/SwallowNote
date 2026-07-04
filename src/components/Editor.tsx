@@ -327,7 +327,8 @@ export function EditorView() {
 
     // Check if content needs to be loaded
     // content === undefined means not loaded yet (empty string is valid content)
-    const needsLoad = activeTab.content === undefined && !activeTab.isLoading
+    // 插件 tab 的内容由插件通过 openEditorTab 提供，不走文件系统加载流程
+    const needsLoad = activeTab.content === undefined && !activeTab.isLoading && activeTab.type !== 'plugin'
 
     if (needsLoad) {
       // Small delay to ensure UI is ready
@@ -404,7 +405,12 @@ export function EditorView() {
     )
   }
 
-  const fileType = detectFileType(activeTab.name, activeTab.content, pluginEditorRegistry.getActivePluginExtensions())
+  // 插件 tab：内容由插件通过 openEditorTab 提供，强制按 markdown 类型渲染，
+  // 复用下方 markdown 分支的 CodeEditor/MarkdownEditor 切换逻辑。
+  // updateTabContent 在 store 层已处理 plugin tab 的 onChange 回调通知插件保存。
+  const fileType = activeTab.type === 'plugin'
+    ? 'markdown'
+    : detectFileType(activeTab.name, activeTab.content, pluginEditorRegistry.getActivePluginExtensions())
   const viewMode = activeTab.viewMode
 
   const handleContentChange = (content: string) => {

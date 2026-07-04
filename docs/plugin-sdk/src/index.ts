@@ -27,7 +27,7 @@
  * is small and side-effect-free.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ComponentType } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Types – mirror src/types/plugin.ts. Keep in sync with the host.
@@ -216,6 +216,60 @@ export interface PluginPanelProps {
    *  callback fires whenever the active note's frontmatter
    *  object changes. Returns an unsubscribe function. */
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
+}
+
+/**
+ * 编辑器工具栏配置：控制各工具栏项的显示/隐藏。
+ * 未设置的字段默认显示（保持向后兼容）。插件 tab 通过此配置隐藏不适用的功能。
+ */
+export interface EditorToolbarConfig {
+  /** 复制完整路径按钮（默认 true） */
+  copyPath?: boolean
+  /** 在文件夹中显示按钮（默认 true） */
+  openLocation?: boolean
+  /** 打开历史记录按钮（默认 true） */
+  openHistory?: boolean
+  /** 笔记属性面板按钮（默认 true） */
+  noteProperties?: boolean
+  /** 大纲/目录按钮（默认 true） */
+  directory?: boolean
+  /** 源码视图切换按钮（默认 true） */
+  sourceView?: boolean
+  /** 宽窄模式切换按钮（默认 true） */
+  noteWidth?: boolean
+  /** 内容布局按钮（默认 true） */
+  contentLayout?: boolean
+  /** 下载远程图片按钮（默认 true） */
+  downloadRemoteImages?: boolean
+  /** 左侧文件路径显示（默认 true） */
+  showFilePath?: boolean
+  /** 外部变更警告（默认 true） */
+  externalChangeWarning?: boolean
+  /** 冲突指示器（默认 true） */
+  conflictIndicator?: boolean
+}
+
+/**
+ * `openEditorTab` API 的参数：让插件在主编辑区打开一个 tab。
+ *
+ * 插件调用此 API 后，宿主会在主编辑区创建（或复用同 id 的）tab，
+ * 用内置 MarkdownEditor 渲染 content，tab 标题显示插件提供的 icon。
+ * 用户编辑内容时，宿主通过 onChange 回调将新内容传回插件，
+ * 插件负责保存到自己的存储（如加密数据库）。
+ */
+export interface OpenEditorTabProps {
+  /** tab 唯一标识（用于去重，相同 id 复用已有 tab） */
+  id: string
+  /** tab 标题文字 */
+  name: string
+  /** tab 标题图标（替换默认 FileText 图标） */
+  icon?: ReactNode
+  /** 初始内容（markdown 字符串） */
+  content: string
+  /** 内容变化回调：用户编辑后宿主调用此函数传回新内容 */
+  onChange?: (content: string) => void
+  /** 工具栏显示配置（控制各按钮的显示/隐藏） */
+  toolbarConfig?: EditorToolbarConfig
 }
 
 /**
@@ -1200,6 +1254,32 @@ export function getActivePluginExtensions(): Set<string> {
     stubEditorRegistry.extensions()
 }
 
+/**
+ * 让插件在主编辑区打开一个 tab。
+ *
+ * 插件调用此 API 后，宿主会在主编辑区创建（或复用同 id 的）tab，
+ * 用内置 MarkdownEditor 渲染 content，tab 标题显示插件提供的 icon。
+ * 用户编辑内容时，宿主通过 onChange 回调将新内容传回插件，
+ * 插件负责保存到自己的存储（如加密数据库）。
+ *
+ * 在宿主模式下转发到 `plugin-host-takeover` 的 bridge 实现；
+ * 在独立预览模式下（npm run dev）打印警告并 no-op，
+ * 因为没有主编辑区可以打开。
+ */
+export function openEditorTab(pluginId: string, props: OpenEditorTabProps): void {
+  const host = currentHostOverrides().openEditorTab
+  if (host) {
+    host(pluginId, props)
+  } else {
+    // 独立预览模式：没有主编辑区，打印警告帮助开发者排查
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[plugin-sdk] openEditorTab called for plugin "${pluginId}" but no host override is installed. ` +
+        `This is expected in standalone preview mode (npm run dev); in host mode the host installs the override via setHost().`,
+    )
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  PluginContext + lifecycle helpers
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1396,6 +1476,16 @@ export interface HostOverrides {
     }>
   } | null
   getActivePluginExtensions?: () => Set<string>
+  /**
+   * Bridge for `openEditorTab`: lets a plugin open a tab in the
+   * host's main editor area. The host installs this via setHost()
+   * so plugin calls to `openEditorTab(pluginId, props)` are
+   * forwarded into `src/lib/plugin-host-takeover.ts`, which
+   * creates/reuses an EditorTab with `type: 'plugin'` and
+   * registers the non-serializable runtime data (icon, onChange)
+   * via `registerPluginTabRuntime`.
+   */
+  openEditorTab?: (pluginId: string, props: OpenEditorTabProps) => void
 }
 
 /**

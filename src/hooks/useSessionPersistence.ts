@@ -21,7 +21,10 @@ export function useSessionPersistence() {
       const editorSettingsState = useEditorSettingsStore.getState()
 
       const fileTabs = editorState.tabs
-      const tabsData = fileTabs.map(tab => {
+      // 插件 tab 不参与会话持久化：恢复时插件 tab 需要重新通过插件 API 打开
+      // （内容在加密数据库中，且 icon/onChange 回调为运行时数据不可序列化）
+      const persistableTabs = fileTabs.filter(tab => tab.type !== 'plugin')
+      const tabsData = persistableTabs.map(tab => {
         if (tab.type === 'conflict') {
           return {
             id: tab.id,
@@ -45,7 +48,11 @@ export function useSessionPersistence() {
         }
       })
 
-      const activeTabId = fileTabs.find(t => t.id === editorState.activeTabId)?.id || (fileTabs.length > 0 ? fileTabs[0].id : '')
+      const activeTab = fileTabs.find(t => t.id === editorState.activeTabId)
+      // 插件 tab 为活动 tab 时，恢复后切换到第一个可持久化 tab（或 null）
+      const activeTabId = (activeTab && activeTab.type !== 'plugin')
+        ? activeTab.id
+        : (persistableTabs.length > 0 ? persistableTabs[0].id : '')
 
       let windowWidth = '', windowHeight = '', windowX = '', windowY = '', isMaximized = '', isFullscreen = ''
       try {

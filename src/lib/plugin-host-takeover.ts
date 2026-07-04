@@ -31,6 +31,7 @@ import {
   getEditorForExtension,
   getActivePluginExtensions,
 } from '@/stores/pluginEditor'
+import { useEditorStore, registerPluginTabRuntime } from '@/stores/editor'
 import { assertPermission } from './plugin-permission-guard'
 import { writePluginSettings } from './tauri'
 import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
@@ -166,6 +167,40 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
         : null
     },
     getActivePluginExtensions: () => getActivePluginExtensions(),
+    /**
+     * openEditorTab 桥接：让插件在主编辑区打开一个 tab。
+     *
+     * 插件调用 openEditorTab(pluginId, props) 后，SDK 通过 HostOverrides
+     * 转发到此实现。我们：
+     * 1. 注册运行时数据（icon、onChange 回调）到 pluginTabRuntime Map——
+     *    每次调用都刷新，因为插件可能传入新的函数实例（闭包捕获了最新状态）。
+     * 2. 调用 addTab 创建或复用 tab：addTab 按 path 去重，已存在则切换
+     *    activeTabId（不覆盖已有内容，避免丢失用户未保存的编辑），不存在
+     *    则新建 plugin tab。
+     *
+     * 注意：忽略插件传入的 id 参数，使用闭包中可信的 pluginId，防止恶意
+     * 插件冒用其他插件 id。path 使用 `plugin://` 前缀标识非文件系统路径。
+     */
+    openEditorTab: (id, props) => {
+      void id // 忽略插件传入的 id，使用闭包中可信的 pluginId
+      registerPluginTabRuntime(props.id, {
+        icon: props.icon,
+        onChange: props.onChange,
+      })
+      useEditorStore.getState().addTab({
+        id: props.id,
+        // 虚拟路径：用于 addTab 去重，不指向真实文件系统
+        path: `plugin://${pluginId}/${props.id}`,
+        name: props.name,
+        content: props.content,
+        isDirty: false,
+        isEdited: false,
+        viewMode: 'preview',
+        type: 'plugin',
+        pluginId,
+        toolbarConfig: props.toolbarConfig,
+      })
+    },
     /**
      * Permission gate for the editor registry. The SDK's
      * `registerEditor` calls this before any mutation; we

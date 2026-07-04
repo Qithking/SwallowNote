@@ -2,12 +2,73 @@
  * Editor Store - Manages editor state
  */
 import { create } from 'zustand'
+import type { ReactNode } from 'react'
 import { loadFileContent } from '@/lib/api'
 import { writeFile, gitAutoCommit } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
 import { countWords } from '@/lib/utils/wordCount'
 import { parseFrontmatter, serializeFrontmatter, stripFrontmatter } from '@/lib/utils/frontmatter'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
+
+/**
+ * 编辑器工具栏配置：控制各工具栏项的显示/隐藏。
+ * 未设置的字段默认显示（保持向后兼容）。插件 tab 通过此配置隐藏不适用的功能。
+ */
+export interface EditorToolbarConfig {
+  /** 复制完整路径按钮（默认 true） */
+  copyPath?: boolean
+  /** 在文件夹中显示按钮（默认 true） */
+  openLocation?: boolean
+  /** 打开历史记录按钮（默认 true） */
+  openHistory?: boolean
+  /** 笔记属性面板按钮（默认 true） */
+  noteProperties?: boolean
+  /** 大纲/目录按钮（默认 true） */
+  directory?: boolean
+  /** 源码视图切换按钮（默认 true） */
+  sourceView?: boolean
+  /** 宽窄模式切换按钮（默认 true） */
+  noteWidth?: boolean
+  /** 内容布局按钮（默认 true） */
+  contentLayout?: boolean
+  /** 下载远程图片按钮（默认 true） */
+  downloadRemoteImages?: boolean
+  /** 左侧文件路径显示（默认 true） */
+  showFilePath?: boolean
+  /** 外部变更警告（默认 true） */
+  externalChangeWarning?: boolean
+  /** 冲突指示器（默认 true） */
+  conflictIndicator?: boolean
+}
+
+/**
+ * 插件 tab 运行时数据：不参与序列化，进程内有效。
+ * 存储 icon（ReactNode）和 onChange 回调等不可序列化的数据。
+ */
+export interface PluginTabRuntime {
+  /** tab 标题图标（替换默认 FileText） */
+  icon?: ReactNode
+  /** 内容变化回调：宿主通过此回调将编辑器内容传回插件 */
+  onChange?: (content: string) => void
+}
+
+/** 插件 tab 运行时数据注册表：tabId → 运行时数据 */
+const pluginTabRuntime = new Map<string, PluginTabRuntime>()
+
+/** 注册插件 tab 运行时数据（icon、onChange 回调） */
+export function registerPluginTabRuntime(tabId: string, runtime: PluginTabRuntime) {
+  pluginTabRuntime.set(tabId, runtime)
+}
+
+/** 注销插件 tab 运行时数据（tab 关闭时调用） */
+export function unregisterPluginTabRuntime(tabId: string) {
+  pluginTabRuntime.delete(tabId)
+}
+
+/** 获取插件 tab 运行时数据（供 TabBar/EditorToolbar/Editor 使用） */
+export function getPluginTabRuntime(tabId: string): PluginTabRuntime | undefined {
+  return pluginTabRuntime.get(tabId)
+}
 
 export interface EditorTab {
   id: string
@@ -27,8 +88,8 @@ export interface EditorTab {
   }
   // View mode for markdown files: 'preview' (BlockNote) or 'source' (CodeMirror)
   viewMode: 'preview' | 'source'
-  // Tab type: 'file' for normal files, 'diff' for git diff view, 'conflict' for conflict resolution
-  type?: 'file' | 'diff' | 'conflict'
+  // Tab type: 'file' for normal files, 'diff' for git diff view, 'conflict' for conflict resolution, 'plugin' for plugin-provided tabs
+  type?: 'file' | 'diff' | 'conflict' | 'plugin'
   // For diff tabs: commit hash and diff content
   commitHash?: string
   diffContent?: string
@@ -45,6 +106,10 @@ export interface EditorTab {
   frontmatter?: NoteFrontmatter
   /** 属性面板编辑导致的脏状态，与编辑器内容脏状态独立 */
   frontmatterDirty?: boolean
+  /** 插件 tab：标识来源插件 ID（如 'com.swallownote.secret-disk'） */
+  pluginId?: string
+  /** 插件 tab：工具栏显示配置（未设置的字段默认显示） */
+  toolbarConfig?: EditorToolbarConfig
 }
 
 export interface EditorState {
@@ -250,6 +315,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
+    // 清理插件 tab 运行时数据（icon、onChange 回调）
+    unregisterPluginTabRuntime(id)
     // Auto-close noteProperties panel when all tabs are closed
     autoCloseNoteProperties()
   },
@@ -265,6 +332,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
+    // 清理插件 tab 运行时数据
+    for (const id of ids) {
+      unregisterPluginTabRuntime(id)
+    }
     // Emit note:close for each removed tab (matching removeTab behavior)
     for (const tab of removedTabs) {
       queueMicrotask(() => emitNoteClosed(tab.id, tab.path))
@@ -413,11 +484,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // object so Zustand skips notifying all subscribers. This prevents
       // unnecessary re-renders of every component subscribed to `tabs`.
       if (currentNormalized === newNormalized) return state
+      // 插件 tab：不标记 isDirty（插件自己负责保存，不走宿主文件保存机制）
+      // 仍更新 content，并通过 onChange 回调通知插件
+      const isPluginTab = tab.type === 'plugin'
       const tabs = state.tabs.map((t) =>
-        t.id === id ? { ...t, content, isDirty: true, isEdited: true } : t
+        t.id === id ? {
+          ...t,
+          content,
+          isDirty: isPluginTab ? t.isDirty : true,
+          isEdited: isPluginTab ? t.isEdited : true,
+        } : t
       )
       // Emit note:changed only on a real content transition
       queueMicrotask(() => emitNoteChanged(id, tab.path, content ?? ''))
+      // 插件 tab：调用 onChange 回调通知插件保存
+      if (isPluginTab) {
+        const runtime = pluginTabRuntime.get(id)
+        runtime?.onChange?.(content ?? '')
+      }
       return { tabs }
     })
   },

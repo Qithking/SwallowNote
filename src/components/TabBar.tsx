@@ -3,6 +3,7 @@
  * Shows file tabs with dirty/saved status indicators
  */
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
+import type { ReactNode } from 'react'
 import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal, Crosshair, RefreshCw } from 'lucide-react'
 import {
   ContextMenu,
@@ -12,6 +13,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { useEditorStore, useFileTreeStore, useWorkspaceStore, useUIStore } from '@/stores'
+import { getPluginTabRuntime } from '@/stores/editor'
 import { invoke } from '@tauri-apps/api/core'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
@@ -28,8 +30,20 @@ type TabBarItem = {
   isEdited: boolean
   path: string
   isLoading: boolean
-  type: 'file' | 'diff' | 'conflict'
+  type: 'file' | 'diff' | 'conflict' | 'plugin'
   isContentLoaded: boolean
+}
+
+/** 渲染 tab 图标：插件 tab 使用 pluginTabRuntime 中注册的 icon，其他使用默认 FileText。
+ *  插件 icon 由插件提供（ReactNode），用 span 包裹以应用间距和尺寸约束。 */
+function renderTabIcon(tab: TabBarItem, iconClassName: string): ReactNode {
+  if (tab.type === 'plugin') {
+    const icon = getPluginTabRuntime(tab.id)?.icon
+    if (icon) {
+      return <span className={cn('shrink-0 inline-flex items-center', iconClassName)}>{icon}</span>
+    }
+  }
+  return <FileText size={14} className={cn('shrink-0', iconClassName)} />
 }
 
 function TabBar() {
@@ -431,7 +445,7 @@ function TabBar() {
                   )}
 
                   {/* File icon + name */}
-                  <FileText size={14} className="shrink-0 mr-1" />
+                  {renderTabIcon(tab, 'mr-1')}
                   <span className="truncate max-w-[120px]">{tab.name}</span>
 
                   {/* Close button */}
@@ -459,7 +473,7 @@ function TabBar() {
                   onClick={() => handleRefresh(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
-                  disabled={tab.type === 'diff' || tab.type === 'conflict'}
+                  disabled={tab.type === 'diff' || tab.type === 'conflict' || tab.type === 'plugin'}
                 >
                   <RefreshCw size={12} />
                   <span>{t('tabBar.refresh')}</span>
@@ -500,6 +514,7 @@ function TabBar() {
                   onClick={() => handleCopyPath(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
+                  disabled={tab.type === 'plugin'}
                 >
                   <FileText size={12} />
                   <span>{t('tabBar.copyPath')}</span>
@@ -508,6 +523,7 @@ function TabBar() {
                   onClick={() => handleCopyRelativePath(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
+                  disabled={tab.type === 'plugin'}
                 >
                   <FileText size={12} />
                   <span>{t('tabBar.copyRelativePath')}</span>
@@ -517,6 +533,7 @@ function TabBar() {
                   onClick={() => handleRevealInTree(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
+                  disabled={tab.type === 'plugin'}
                 >
                   <Crosshair size={12} />
                   <span>{t('tabBar.revealInTree')}</span>
@@ -525,6 +542,7 @@ function TabBar() {
                   onClick={() => handleShowInFinder(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
+                  disabled={tab.type === 'plugin'}
                 >
                   <FileText size={12} />
                   <span>{t('tabBar.showInExplorer')}</span>
@@ -609,7 +627,7 @@ function TabBar() {
                   <div className="flex-1 min-w-0">
                     {/* 文件名行 */}
                     <div className="flex items-center">
-                      <FileText size={14} className="shrink-0 mr-1.5" />
+                      {renderTabIcon(tab, 'mr-1.5')}
                       <span className="truncate">{tab.name}</span>
                       {/* 关闭按钮 */}
                       <button

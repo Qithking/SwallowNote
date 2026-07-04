@@ -5,6 +5,7 @@
 import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2, DownloadCloud, Loader2 } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useGitStore, usePluginStore } from '@/stores'
+import type { EditorToolbarConfig } from '@/stores/editor'
 import { useShallow } from 'zustand/react/shallow'
 import type { ConflictRepoRecord } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
@@ -48,6 +49,7 @@ function EditorToolbar() {
         wordCount: tab.wordCount,
         cursorPosition: tab.cursorPosition,
         hasExternalChange: tab.hasExternalChange ?? false,
+        toolbarConfig: tab.toolbarConfig,
       }
     })
   )
@@ -87,7 +89,10 @@ function EditorToolbar() {
   if (activeTab.type === 'diff' || activeTab.type === 'conflict') return null
 
   const { path, viewMode } = activeTab
-  const isMarkdown = /\.(md|markdown)$/i.test(path)
+  // 插件 tab 的内容为 markdown，无论 path 扩展名如何
+  const isMarkdown = activeTab.type === 'plugin' || /\.(md|markdown)$/i.test(path)
+  // 工具栏项可见性：toolbarConfig 中设置为 false 的隐藏，未设置或 true 的显示（默认显示）
+  const show = (key: keyof EditorToolbarConfig): boolean => !(activeTab.toolbarConfig?.[key] === false)
 
   // Get path relative to workspace root directory, starting with /rootDir/
   const getRelativePath = (absolutePath: string): string => {
@@ -195,8 +200,10 @@ function EditorToolbar() {
     <div className="flex items-center justify-between h-[25px] pl-3 pr-1 text-[11px]   select-none">
       {/* Left: File path - display relative path from root */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
-        <span className="truncate" title={path}>{getRelativePath(path)}</span>
-        {activeTab.hasExternalChange && (
+        {show('showFilePath') && (
+          <span className="truncate" title={path}>{getRelativePath(path)}</span>
+        )}
+        {show('externalChangeWarning') && activeTab.hasExternalChange && (
           <span
             className="flex items-center gap-1 ml-2 shrink-0 px-1.5 py-0.5 rounded text-[10px] cursor-pointer hover:opacity-80"
             style={{ background: 'var(--bg-warning)', color: 'var(--text-warning)' }}
@@ -217,7 +224,7 @@ function EditorToolbar() {
       {/* Right: Icons */}
       <div className="flex items-center shrink-0 ml-4">
         {/* Conflict indicator - only shown when the file is actually a conflict file */}
-        {conflictInfo.isConflict && conflictInfo.conflictRepo && (
+        {show('conflictIndicator') && conflictInfo.isConflict && conflictInfo.conflictRepo && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -232,67 +239,77 @@ function EditorToolbar() {
           </Tooltip>
         )}
         {isMarkdown && (<>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setRightPanelType(rightPanelType === 'noteProperties' ? null : 'noteProperties')}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: rightPanelType === 'noteProperties' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-              >
-                <Settings2 size={14} style={{ color: 'inherit' }} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('editorToolbar.noteProperties')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setRightPanelType(rightPanelType === 'directory' ? null : 'directory')}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: rightPanelType === 'directory' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-              >
-                <BookOpen size={14} style={{ color: 'inherit' }} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('editorToolbar.openMarkdownFolder')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={toggleViewMode}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: viewMode === 'source' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-              >
-                <Code size={14} style={{ color: 'inherit' }} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('editorToolbar.toggleSourceView')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleToggleWidth}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
-              >
-                {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('editorToolbar.toggleWidth')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-                style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-              >
-                <Type size={14} style={{ color: 'inherit' }} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
-          </Tooltip>
-          {viewMode !== 'source' && (
+          {show('noteProperties') && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setRightPanelType(rightPanelType === 'noteProperties' ? null : 'noteProperties')}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: rightPanelType === 'noteProperties' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  <Settings2 size={14} style={{ color: 'inherit' }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('editorToolbar.noteProperties')}</TooltipContent>
+            </Tooltip>
+          )}
+          {show('directory') && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setRightPanelType(rightPanelType === 'directory' ? null : 'directory')}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: rightPanelType === 'directory' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  <BookOpen size={14} style={{ color: 'inherit' }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('editorToolbar.openMarkdownFolder')}</TooltipContent>
+            </Tooltip>
+          )}
+          {show('sourceView') && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={toggleViewMode}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: viewMode === 'source' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  <Code size={14} style={{ color: 'inherit' }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('editorToolbar.toggleSourceView')}</TooltipContent>
+            </Tooltip>
+          )}
+          {show('noteWidth') && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleToggleWidth}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: isWide ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  {isWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('editorToolbar.toggleWidth')}</TooltipContent>
+            </Tooltip>
+          )}
+          {show('contentLayout') && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
+                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                  style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                >
+                  <Type size={14} style={{ color: 'inherit' }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
+            </Tooltip>
+          )}
+          {show('downloadRemoteImages') && viewMode !== 'source' && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -314,42 +331,48 @@ function EditorToolbar() {
           )}
         </>)}
         {/* History, Open Folder, Copy - available for all file types */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setRightPanelType(rightPanelType === 'history' ? null : 'history')}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: rightPanelType === 'history' ? 'var(--theme-color)' : 'var(--text-primary)' }}
-            >
-              <History size={14} style={{ color: 'inherit' }} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{t('editorToolbar.openHistory')}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={handleOpenFolder}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: 'var(--text-primary)' }}
-            >
-              <FolderOpen size={14} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{t('editorToolbar.openLocation')}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={handleCopyPath}
-              className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
-              style={{ color: copied ? 'var(--theme-color)' : 'var(--text-primary)' }}
-            >
-              <Clipboard size={14} style={{ color: 'inherit' }} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{t('editorToolbar.copyFullPath')}</TooltipContent>
-        </Tooltip>
+        {show('openHistory') && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setRightPanelType(rightPanelType === 'history' ? null : 'history')}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: rightPanelType === 'history' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                <History size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.openHistory')}</TooltipContent>
+          </Tooltip>
+        )}
+        {show('openLocation') && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleOpenFolder}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <FolderOpen size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.openLocation')}</TooltipContent>
+          </Tooltip>
+        )}
+        {show('copyPath') && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleCopyPath}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: copied ? 'var(--theme-color)' : 'var(--text-primary)' }}
+              >
+                <Clipboard size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.copyFullPath')}</TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Plugin icons with iconPosition === 'editorToolbar' */}
         {editorToolbarPlugins.map((plugin) => {
