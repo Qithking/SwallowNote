@@ -683,6 +683,7 @@ pub async fn uninstall_plugin(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, crate::commands::plugin_invoke::SharedPluginProcessState>,
     plugin_id: String,
+    delete_data: Option<bool>,
 ) -> Result<(), PluginError> {
     // Reject path-traversal ids before we touch the filesystem. The
     // canonicalize + starts_with check below would also catch it, but
@@ -724,6 +725,28 @@ pub async fn uninstall_plugin(
     }
 
     fs::remove_dir_all(&plugin_dir).map_err(|e| PluginError::Io(format!("Failed to remove plugin: {}", e)))?;
+
+    // If user chose to delete plugin data, remove the data directory as well.
+    if delete_data == Some(true) {
+        let data_dir = app_data_dir.join("plugin-data").join(&plugin_id);
+        if data_dir.exists() {
+            // Security check: ensure we're only deleting within the plugin-data directory
+            let canonical_app_data = app_data_dir
+                .canonicalize()
+                .map_err(|e| PluginError::Io(format!("Failed to resolve app data path: {}", e)))?;
+            let canonical_data_dir = data_dir
+                .canonicalize()
+                .map_err(|e| PluginError::Io(format!("Failed to resolve plugin data path: {}", e)))?;
+            let plugin_data_root = canonical_app_data.join("plugin-data");
+            if canonical_data_dir.starts_with(&plugin_data_root) {
+                if let Err(e) = fs::remove_dir_all(&data_dir) {
+                    eprintln!("[plugin] failed to remove plugin data dir for '{}': {}", plugin_id, e);
+                }
+            } else {
+                eprintln!("[plugin] security: plugin data dir for '{}' is outside plugin-data root, skipping deletion", plugin_id);
+            }
+        }
+    }
 
     // Drop the settings table for this plugin. Best-effort: if the
     // DB is locked, a stray row is harmless (the next install with

@@ -1,6 +1,6 @@
 [package]
 name = "swallownote-plugin-secret-disk"
-version = "0.1.0"
+version = "0.1.5"
 description = "SwallowNote secret-disk plugin backend — encrypted private notes via SQLCipher"
 authors = ["SwallowNote"]
 edition = "2021"

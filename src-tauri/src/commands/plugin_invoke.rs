@@ -144,6 +144,7 @@ fn resolve_backend_binary(plugin_id: &str, plugin_path: &str) -> Option<PathBuf>
 async fn spawn_plugin_process(
     plugin_id: String,
     plugin_path: String,
+    app_data_dir: &std::path::Path,
 ) -> Result<Arc<PluginProcess>, PluginError> {
     let binary = resolve_backend_binary(&plugin_id, &plugin_path)
         .ok_or_else(|| PluginError::NotFound(format!("plugin backend not found (plugin_id={})", plugin_id)))?;
@@ -153,6 +154,10 @@ async fn spawn_plugin_process(
     // check it's running for the right plugin. Plugin authors can
     // ignore it.
     cmd.arg(&plugin_id);
+    // Pass the app data directory via env var so the plugin backend can
+    // store persistent data in a location separate from the plugin
+    // installation directory (which gets deleted on uninstall).
+    cmd.env("SWALLOWNOTE_APP_DATA_DIR", app_data_dir);
 
     let mut child: Child = cmd
         .spawn()
@@ -283,7 +288,7 @@ async fn get_or_spawn(
     let plugin_path = super::plugin::active_version_dir(&plugin_root)
         .ok_or_else(|| PluginError::NotFound(format!("plugin version directory not found (plugin_id={})", plugin_id)))?;
     let plugin_path_str = plugin_path.to_string_lossy().to_string();
-    let proc = spawn_plugin_process(plugin_id.to_string(), plugin_path_str).await?;
+    let proc = spawn_plugin_process(plugin_id.to_string(), plugin_path_str, app_data_dir).await?;
     guard.insert(plugin_id.to_string(), Arc::clone(&proc));
     Ok(proc)
 }

@@ -1,10 +1,13 @@
 //! 全局状态管理：当前数据库连接、数据库文件路径解析。
 //!
-//! 后端通过 `std::env::current_exe()` 推导插件根目录：
-//!   `<plugin_root>/<version>/backend/plugin_<id>`
-//!   → `<plugin_root>/secret.swl`
+//! 数据库优先存放在应用数据目录中：
+//!   `<app_data_dir>/plugin-data/<plugin_id>/secret.swl`
 //!
-//! 数据库存放在插件根目录（版本目录的上一级），升级插件版本时数据库不丢失。
+//! 通过环境变量 `SWALLOWNOTE_APP_DATA_DIR` 获取应用数据目录，
+//! 由宿主在启动后端子进程时设置。这样插件卸载时不会误删数据库。
+//!
+//! 如果环境变量不存在（向后兼容/独立测试模式），回退到通过
+//! `current_exe()` 推导旧路径。
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -24,9 +27,23 @@ pub struct State {
 }
 
 impl State {
-    /// 创建状态实例，解析数据库路径并清理 `.swl.bak` 残留。
+    /// 创建状态实例，解析数据库路径。
+    /// 如果新路径没有数据库但旧路径有，自动迁移数据。
     pub fn new() -> Result<Self, String> {
         let db_path = resolve_db_path()?;
+
+        // 数据迁移：如果新路径没有数据库但旧路径有，自动迁移
+        if !db_path.exists() {
+            if let Ok(old_path) = resolve_legacy_db_path() {
+                if old_path.exists() {
+                    std::fs::copy(&old_path, &db_path)
+                        .map_err(|e| format!("迁移数据库失败: {}", e))?;
+                    eprintln!("[secret-disk] 数据库已自动迁移到: {}", db_path.display());
+                    // 保留旧文件作为备份，暂不删除
+                }
+            }
+        }
+
         Ok(Self {
             db: Mutex::new(None),
             db_path,
@@ -75,14 +92,38 @@ impl State {
     }
 }
 
-/// 推导数据库文件路径：`<plugin_root>/secret.swl`。
+/// 推导数据库文件路径。
 ///
+/// 优先通过环境变量 `SWALLOWNOTE_APP_DATA_DIR`（由宿主设置）计算：
+///   `<app_data_dir>/plugin-data/<plugin_id>/secret.swl`
+///
+/// 如果环境变量不存在，回退到通过 `current_exe()` 推导旧路径。
+fn resolve_db_path() -> Result<PathBuf, String> {
+    // 优先使用环境变量指定的应用数据目录
+    if let Ok(app_data_dir) = std::env::var("SWALLOWNOTE_APP_DATA_DIR") {
+        // 从命令行参数获取 plugin_id（宿主启动时传递的第一个参数）
+        let plugin_id = std::env::args()
+            .nth(1)
+            .ok_or_else(|| "无法获取 plugin_id（命令行参数）".to_string())?;
+        let data_dir = PathBuf::from(app_data_dir)
+            .join("plugin-data")
+            .join(&plugin_id);
+        // 自动创建数据目录
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| format!("无法创建数据目录: {}", e))?;
+        return Ok(data_dir.join(DB_FILENAME));
+    }
+
+    // 回退：通过 current_exe() 推导旧路径（向后兼容）
+    resolve_legacy_db_path()
+}
+
+/// 旧版路径推导：`<plugin_root>/secret.swl`。
 /// 通过 `current_exe` 推导：
 ///   `<plugin_root>/<version>/backend/plugin_<id>`
 ///   → `parent() × 3` 得到 `<plugin_root>`
-fn resolve_db_path() -> Result<PathBuf, String> {
+fn resolve_legacy_db_path() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("无法获取可执行文件路径: {}", e))?;
-    // exe = <plugin_root>/<version>/backend/plugin_<id>
     let backend_dir = exe
         .parent()
         .ok_or_else(|| "无法解析 backend 目录".to_string())?;

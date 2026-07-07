@@ -350,7 +350,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       // 注意：必须同时检查 !t.frontmatterDirty，否则 frontmatterDirty=true 但 isDirty=false
       // 的 tab 内容会被释放，后续保存时会用空内容覆盖原文件（saveAllDirtyTabs 防御的兜底场景）。
       const tabs = state.tabs.map((t) => {
-        if (t.id === prevActiveId && t.id !== id && !t.isDirty && !t.frontmatterDirty && t.type !== 'diff' && t.type !== 'conflict' && t.content !== undefined) {
+        if (t.id === prevActiveId && t.id !== id && !t.isDirty && !t.frontmatterDirty && t.type !== 'diff' && t.type !== 'conflict' && t.type !== 'plugin' && t.content !== undefined) {
           return { ...t, content: undefined as unknown as string, frontmatter: undefined, isLoading: false }
         }
         return t
@@ -376,8 +376,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // force=true bypasses the content check to support reload (e.g. external changes)
     if (!tab || tab.isLoading) return
     if (!force && tab.content !== undefined) return
-    // Conflict and diff tabs don't have file content to load
-    if (tab.type === 'conflict' || tab.type === 'diff') return
+    // Conflict, diff, and plugin tabs don't have file content to load from disk
+    if (tab.type === 'conflict' || tab.type === 'diff' || tab.type === 'plugin') return
 
     set((state) => ({
       tabs: state.tabs.map((t) =>

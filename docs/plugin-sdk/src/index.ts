@@ -1280,6 +1280,46 @@ export function openEditorTab(pluginId: string, props: OpenEditorTabProps): void
   }
 }
 
+/**
+ * 关闭指定插件打开的某个 tab。
+ *
+ * 插件调用此 API 后，宿主会精确关闭该插件创建的、id 匹配的 tab。
+ * 适用于删除单个笔记等场景，不影响该插件打开的其他 tab。
+ */
+export function closeEditorTab(pluginId: string, tabId: string): void {
+  const host = currentHostOverrides().closeEditorTab
+  if (host) {
+    host(pluginId, tabId)
+  } else {
+    // 独立预览模式：没有主编辑区，打印警告帮助开发者排查
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[plugin-sdk] closeEditorTab called for plugin "${pluginId}" tab "${tabId}" but no host override is installed. ` +
+        `This is expected in standalone preview mode (npm run dev); in host mode the host installs the override via setHost().`,
+    )
+  }
+}
+
+/**
+ * 关闭指定插件打开的所有 tab。
+ *
+ * 插件调用此 API 后，宿主会过滤掉所有由该插件打开的 tab。
+ * 适用于插件锁定、卸载等场景，确保清理所有相关的编辑器 tab。
+ */
+export function closePluginTabs(pluginId: string): void {
+  const host = currentHostOverrides().closePluginTabs
+  if (host) {
+    host(pluginId)
+  } else {
+    // 独立预览模式：没有主编辑区，打印警告帮助开发者排查
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[plugin-sdk] closePluginTabs called for plugin "${pluginId}" but no host override is installed. ` +
+        `This is expected in standalone preview mode (npm run dev); in host mode the host installs the override via setHost().`,
+    )
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  PluginContext + lifecycle helpers
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1486,6 +1526,20 @@ export interface HostOverrides {
    * via `registerPluginTabRuntime`.
    */
   openEditorTab?: (pluginId: string, props: OpenEditorTabProps) => void
+  /**
+   * Bridge for `closePluginTabs`: closes all tabs opened by the specified plugin.
+   * The host installs this via setHost() so plugin calls to `closePluginTabs(pluginId)`
+   * are forwarded into `src/lib/plugin-host-takeover.ts`, which calls filterTabs
+   * to remove all tabs with matching pluginId.
+   */
+  closePluginTabs?: (pluginId: string) => void
+  /**
+   * Bridge for `closeEditorTab`: closes a single tab opened by the specified plugin.
+   * The host installs this via setHost() so plugin calls to `closeEditorTab(pluginId, tabId)`
+   * are forwarded into `src/lib/plugin-host-takeover.ts`, which calls removeTab
+   * for the matching tab id (after verifying it belongs to the plugin).
+   */
+  closeEditorTab?: (pluginId: string, tabId: string) => void
 }
 
 /**

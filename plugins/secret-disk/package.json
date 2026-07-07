@@ -1,6 +1,6 @@
 {
   "name": "swallownote-plugin-secret-disk",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "Encrypted private notes plugin for SwallowNote (SQLCipher-backed .swl database)",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.18",
     "@swallow-note/plugin-sdk": "file:../../docs/plugin-sdk",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",

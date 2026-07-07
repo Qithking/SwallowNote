@@ -12,7 +12,7 @@ import type {
 import { emptyRegistry } from '@/types/plugin'
 import { useUIStore } from './ui'
 import { dropPluginStorage, pluginEventBus, buildPluginContext, clearPluginTripped } from '@/lib/plugin-host'
-import { runPluginLifecycleHook, type PluginWithModule } from '@/lib/plugin-host-takeover'
+import { runPluginLifecycleHook, installHostTakeover, uninstallHostTakeover, type PluginWithModule } from '@/lib/plugin-host-takeover'
 import { clearPluginMenuItems } from '@/lib/plugin-menu'
 import { clearPluginCommands } from '@/lib/plugin-commands'
 import { clearGranted } from '@/lib/plugin-permission-guard'
@@ -240,7 +240,9 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         pluginConflicts: buildConflictMap(plugins),
       }
     })
-    // 注册后异步触发 onLoad，安装 SDK host 接管。
+    // 注册后：先安装持久化 host takeover，再触发 onLoad。
+    // setHost 需要在 onLoad 之前安装，以便 onLoad 中就能使用 SDK 顶层 API。
+    installHostTakeover(plugin)
     void runPluginLifecycleHook(
       plugin,
       plugin.hooks?.onLoad,
@@ -266,6 +268,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       })
     }
     for (const plugin of added) {
+      installHostTakeover(plugin)
       void runPluginLifecycleHook(
         plugin,
         plugin.hooks?.onLoad,
@@ -365,6 +368,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         'onUnload'
       )
     }
+    // 卸载持久化 host takeover（必须在 onUnload 之后，onUnload 中可能仍需 SDK API）
+    uninstallHostTakeover(id)
     dropPluginStorage(id)
     // Remove all event handlers registered by this plugin so stale
     // subscriptions don't fire after the plugin is gone (especially
@@ -445,6 +450,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         // 运行，入口清除会让旧 promise 的 storage.set / invokeBackend 绕过熔断检查
         // （P0 NEW-4 时序竞态）。
         clearPluginTripped(id)
+        // 禁用期间 host takeover 被卸载（见 setPlugins），重新启用时重新安装
+        installHostTakeover(target)
         void runPluginLifecycleHook(target, target.hooks?.onLoad, buildPluginContext(target), 'onLoad')
       }
       const hook = enabled ? target.hooks?.onEnable : target.hooks?.onDisable
@@ -563,6 +570,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         buildPluginContext(target),
         'onUnload'
       )
+      // 卸载持久化 host takeover（onUnload 之后）
+      uninstallHostTakeover(target.id)
       dropPluginStorage(target.id)
       pluginEventBus.removeAllListenersForPlugin(target.id)
       clearPluginMenuItems(target.id)
@@ -608,6 +617,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       if (target.enabled === false) {
         continue
       }
+      installHostTakeover(target)
       void runPluginLifecycleHook(
         target,
         target.hooks?.onLoad,

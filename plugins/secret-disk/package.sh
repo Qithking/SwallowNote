@@ -237,9 +237,13 @@ mkdir -p "$DIST_DIR/backend"
 cp "$BIN_PATH" "$DIST_DIR/backend/plugin_$PLUGIN_ID"
 chmod +x "$DIST_DIR/backend/plugin_$PLUGIN_ID"
 
-# 复制 manifest + settings 到 dist，确保 zip 内文件一致
+# 复制 manifest 到 dist；settings.json 为可选项（存在才复制）
 cp "$MANIFEST" "$DIST_DIR/manifest.json"
-cp "$SETTINGS" "$DIST_DIR/settings.json"
+ZIP_FILES="index.js manifest.json backend/"
+if [ -f "$SETTINGS" ]; then
+  cp "$SETTINGS" "$DIST_DIR/settings.json"
+  ZIP_FILES="index.js manifest.json settings.json backend/"
+fi
 
 # ─── 打包 zip ────────────────────────────────────────────────────────────────
 echo "==> Creating zip package..."
@@ -248,14 +252,16 @@ ZIP_NAME="${PLUGIN_ID}.zip"
 rm -f "$SCRIPT_DIR/$PLUGIN_ID"*.zip
 
 # 确定性 zip：固定 mtime，使用 -X 剥离额外属性，保证两次构建产物哈希一致
+TOUCH_FILES="$DIST_DIR/index.js $DIST_DIR/manifest.json"
+if [ -f "$DIST_DIR/settings.json" ]; then
+  TOUCH_FILES="$TOUCH_FILES $DIST_DIR/settings.json"
+fi
 touch -d '2020-01-01T00:00:00Z' \
-  "$DIST_DIR/index.js" \
-  "$DIST_DIR/manifest.json" \
-  "$DIST_DIR/settings.json" \
+  $TOUCH_FILES \
   "$DIST_DIR/backend/plugin_$PLUGIN_ID" \
   "$DIST_DIR" \
   "$DIST_DIR/backend"
-zip -X -r "$SCRIPT_DIR/$ZIP_NAME" index.js manifest.json settings.json backend/ > /dev/null
+zip -X -r "$SCRIPT_DIR/$ZIP_NAME" $ZIP_FILES > /dev/null
 
 echo ""
 echo "✓ Plugin package created: $SCRIPT_DIR/$ZIP_NAME"

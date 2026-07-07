@@ -58,10 +58,14 @@ export async function loadPluginModule(pluginPath: string): Promise<PluginManife
  * the raw dynamic-import result. The raw module is needed by
  * `loadAllPlugins` so it can attach `__pluginModule` to the
  * definition (used by the host takeover layer to call `setHost`).
+ *
+ * Returns an optional `error` string that callers can surface to the
+ * user so manifest failures are easier to diagnose (instead of the
+ * generic "package may be incomplete" message).
  */
 async function loadPluginModuleWithRef(
   pluginPath: string
-): Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null }> {
+): Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null; error?: string }> {
   let code = ''
   try {
     const indexJsPath = `${pluginPath}/index.js`
@@ -102,8 +106,9 @@ async function loadPluginModuleWithRef(
       (code.includes('__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED') &&
        !hasReactExternalImport)
     if (hasBundledReact) {
+      const errMsg = `Plugin bundles its own copy of React (react/react-dom must be externalized). Please rebuild the plugin with react/react-dom as external dependencies.`
       console.error(`[PluginLoader] Plugin at ${pluginPath} bundles its own React, which causes hook crashes. The plugin must be rebuilt with react/react-dom as external dependencies.`)
-      return { manifest: null, module: null }
+      return { manifest: null, module: null, error: errMsg }
     }
 
     // Plugins built with Vite may reference `process.env.NODE_ENV` which
@@ -126,7 +131,7 @@ async function loadPluginModuleWithRef(
     code = code
       .replace(
         // Match: import X, { ... } from "react";
-        /import\s+(\w+)\s*,\s*\{([^}]*)\}\s*from\s*["']react["'];?/g,
+        /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s*,\s*\{([^}]*)\}\s*from\s*["']react["'];?/g,
         (_match, defaultName, named: string) => {
           const names = named.split(',').map((s: string) => s.trim().split(/\s+as\s+/).map((x: string) => x.trim()))
           const lines = [`const ${defaultName} = window.React;`]
@@ -148,12 +153,12 @@ async function loadPluginModuleWithRef(
       )
       .replace(
         // Match: import X from "react";
-        /import\s+(\w+)\s+from\s+["']react["'];?/g,
+        /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react["'];?/g,
         'const $1 = window.React;'
       )
       .replace(
         // Match: import * as X from "react";
-        /import\s*\*\s*as\s+(\w+)\s+from\s+["']react["'];?/g,
+        /import\s*\*\s*as\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react["'];?/g,
         'const $1 = window.React;'
       )
       .replace(
@@ -170,21 +175,21 @@ async function loadPluginModuleWithRef(
         }
       )
       .replace(
-        /import\s+(\w+)\s+from\s+["']react-dom\/client["'];?/g,
+        /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react-dom\/client["'];?/g,
         'const $1 = window.ReactDOM;'
       )
       .replace(
-        /import\s+(\w+)\s+from\s+["']react-dom["'];?/g,
+        /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react-dom["'];?/g,
         'const $1 = window.ReactDOM;'
       )
       .replace(
         // Match: import * as X from "react-dom/client";
-        /import\s*\*\s*as\s+(\w+)\s+from\s+["']react-dom\/client["'];?/g,
+        /import\s*\*\s*as\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react-dom\/client["'];?/g,
         'const $1 = window.ReactDOM;'
       )
       .replace(
         // Match: import * as X from "react-dom";
-        /import\s*\*\s*as\s+(\w+)\s+from\s+["']react-dom["'];?/g,
+        /import\s*\*\s*as\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react-dom["'];?/g,
         'const $1 = window.ReactDOM;'
       )
       .replace(
@@ -223,12 +228,12 @@ async function loadPluginModuleWithRef(
       )
       .replace(
         // Match: import X from "react/jsx-runtime";
-        /import\s+(\w+)\s+from\s+["']react\/jsx-runtime["'];?/g,
+        /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react\/jsx-runtime["'];?/g,
         'const $1 = window.ReactJSXRuntime;'
       )
       .replace(
         // Match: import * as X from "react/jsx-runtime";
-        /import\s*\*\s*as\s+(\w+)\s+from\s+["']react\/jsx-runtime["'];?/g,
+        /import\s*\*\s*as\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react\/jsx-runtime["'];?/g,
         'const $1 = window.ReactJSXRuntime;'
       )
       .replace(
@@ -243,7 +248,7 @@ async function loadPluginModuleWithRef(
       )
       .replace(
         // Match: import X from "react/jsx-dev-runtime";
-        /import\s+(\w+)\s+from\s+["']react\/jsx-dev-runtime["'];?/g,
+        /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react\/jsx-dev-runtime["'];?/g,
         'const $1 = window.ReactJSXRuntime;'
       )
       .replace(
@@ -269,12 +274,12 @@ async function loadPluginModuleWithRef(
       )
       .replace(
         // Match: import X from "react-i18next";
-        /import\s+(\w+)\s+from\s+["']react-i18next["'];?/g,
+        /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s+["']react-i18next["'];?/g,
         'const $1 = window.ReactI18Next;'
       )
       .replace(
         // Match: import X from "i18next";
-        /import\s+(\w+)\s+from\s*["']i18next["'];?/g,
+        /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s*["']i18next["'];?/g,
         'const $1 = window.ReactI18Next;'
       )
 
@@ -321,6 +326,8 @@ async function loadPluginModuleWithRef(
     // sees the generic "manifest missing" placeholder, which is
     // hard to debug.
     const remainingImports = code.match(/^import\s.*$/gm)
+    const errMsg = err instanceof Error ? err.message : String(err)
+    let detailMsg = errMsg
     if (remainingImports && remainingImports.length > 0) {
       console.error(
         `[PluginLoader] Failed to load plugin from ${pluginPath}.`,
@@ -329,10 +336,11 @@ async function loadPluginModuleWithRef(
         'Underlying error:',
         err,
       )
+      detailMsg = `Residual import statement(s) after rewrite: ${remainingImports.join(', ')}\nUnderlying error: ${errMsg}`
     } else {
       console.error(`[PluginLoader] Failed to load plugin from ${pluginPath}:`, err)
     }
-    return { manifest: null, module: null }
+    return { manifest: null, module: null, error: detailMsg }
   }
 }
 
@@ -499,7 +507,7 @@ export async function loadAllPlugins(
       // async errors and returns `{ manifest: null, module: null }`
       // — we still treat that as a "load failure" so the banner
       // and a placeholder entry are produced.
-      const { manifest, module } = await loadPluginModuleWithRef(meta.plugin_path)
+      const { manifest, module, error } = await loadPluginModuleWithRef(meta.plugin_path)
 
       if (manifest) {
         const def = {
@@ -622,14 +630,16 @@ export async function loadAllPlugins(
       // The placeholder def is returned so the user can see and
       // uninstall the broken package from the main grid. The
       // failure record is what the banner surfaces.
+      const baseReason =
+        'manifest missing or invalid: index.js did not export a valid `manifest` object. ' +
+        'The plugin package may be incomplete or corrupted.'
+      const reason = error ? `${baseReason}\n\n底层错误: ${error}` : baseReason
       return {
         definition: def,
         failure: {
           id: meta.id,
           name: meta.name,
-          reason:
-            'manifest missing or invalid: index.js did not export a valid `manifest` object. ' +
-            'The plugin package may be incomplete or corrupted.',
+          reason,
           ts: Date.now(),
           pluginPath: meta.plugin_path,
         },

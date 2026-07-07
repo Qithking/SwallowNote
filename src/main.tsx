@@ -1,5 +1,5 @@
 import React from 'react'
-import ReactDOM from 'react-dom'
+import * as ReactDOM from 'react-dom'
 import * as ReactJSXRuntime from 'react/jsx-runtime'
 import { createRoot } from 'react-dom/client'
 import { toast } from 'sonner'

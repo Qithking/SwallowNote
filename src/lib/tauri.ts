@@ -1033,8 +1033,8 @@ export async function installPlugin(
 }
 
 /** Uninstall a plugin by id */
-export async function uninstallPlugin(pluginId: string): Promise<void> {
-  return await invoke('uninstall_plugin', { pluginId })
+export async function uninstallPlugin(pluginId: string, deleteData?: boolean): Promise<void> {
+  return await invoke('uninstall_plugin', { pluginId, deleteData })
 }
 
 /** Enable or disable a plugin */

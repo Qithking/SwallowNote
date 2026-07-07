@@ -46,6 +46,32 @@ export interface PluginWithModule extends PluginDefinition {
   __pluginModule?: { setHost?: (overrides: HostOverrides) => () => void }
 }
 
+/** 每个插件的持久化 setHost restore 函数映射。
+ *  setHost 应在插件加载时安装，卸载时移除，
+ *  而不是只在生命周期 hook 执行期间临时安装（后者会导致
+ *  openEditorTab 等 SDK 顶层 API 在 hook 执行完后失效）。 */
+const hostTakeoverRestoreMap = new Map<string, () => void>()
+
+/** 为插件安装持久化 host takeover（setHost）。
+ *  插件加载完成后调用一次，保持到插件卸载。 */
+export function installHostTakeover(plugin: PluginDefinition): void {
+  const mod = (plugin as PluginWithModule).__pluginModule
+  if (!mod?.setHost) return
+  // 避免重复安装
+  if (hostTakeoverRestoreMap.has(plugin.id)) return
+  const restore = mod.setHost(buildOverridesForPlugin(plugin))
+  hostTakeoverRestoreMap.set(plugin.id, restore)
+}
+
+/** 卸载插件的持久化 host takeover。插件卸载时调用。 */
+export function uninstallHostTakeover(pluginId: string): void {
+  const restore = hostTakeoverRestoreMap.get(pluginId)
+  if (restore) {
+    restore()
+    hostTakeoverRestoreMap.delete(pluginId)
+  }
+}
+
 /** 构建 SDK 用的 HostOverrides。 */
 function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
   const pluginId = plugin.id
@@ -202,6 +228,27 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       })
     },
     /**
+     * closePluginTabs 桥接：关闭指定插件打开的所有 tab。
+     * 插件调用 closePluginTabs(pluginId) 后，SDK 通过 HostOverrides
+     * 转发到此实现。我们调用 filterTabs 过滤掉 pluginId 匹配的 tab。
+     */
+    closePluginTabs: (id) => {
+      void id // 忽略插件传入的 id，使用闭包中可信的 pluginId
+      useEditorStore.getState().filterTabs((tab) => tab.pluginId !== pluginId)
+    },
+    /**
+     * closeEditorTab 桥接：关闭指定插件打开的某个 tab。
+     * 插件调用 closeEditorTab(pluginId, tabId) 后，SDK 通过 HostOverrides
+     * 转发到此实现。我们先校验该 tab 确实属于当前插件，再调用 removeTab。
+     */
+    closeEditorTab: (id, tabId) => {
+      void id // 忽略插件传入的 id，使用闭包中可信的 pluginId
+      const tab = useEditorStore.getState().tabs.find((t) => t.id === tabId)
+      if (tab && tab.pluginId === pluginId) {
+        useEditorStore.getState().removeTab(tabId)
+      }
+    },
+    /**
      * Permission gate for the editor registry. The SDK's
      * `registerEditor` calls this before any mutation; we
      * delegate to the host's `assertPermission` so the
@@ -250,11 +297,9 @@ export async function runPluginLifecycleHook(
   // 运行（Promise.race 只让 await 提前返回，原 promise 不会中止），若在此清除，
   // 旧 hookPromise 后续的 storage.set / invokeBackend 会绕过熔断检查（P0 NEW-4）。
   // 熔断标志改由用户手动重新启用插件时清除（见 plugin store 的 setPluginEnabled）。
-  const mod = (plugin as PluginWithModule).__pluginModule
-  const restore = mod?.setHost ? mod.setHost(buildOverridesForPlugin(plugin)) : undefined
+  // setHost 已由 installHostTakeover 持久化安装，不再在每次 hook 中临时安装/卸载。
   const timeoutMs = options.timeoutMs ?? DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS
 
-  // 用 timedOut 标志而非 rejection，确保 finally 中的 restore 执行。
   let timeoutId: ReturnType<typeof setTimeout> | undefined
   let timedOut = false
   const hookPromise = runLifecycleHook(hook, context, hookName)
@@ -285,7 +330,6 @@ export async function runPluginLifecycleHook(
     }
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId)
-    restore?.()
   }
 }
 
