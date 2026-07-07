@@ -19,7 +19,7 @@ export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' |
  * `SettingsSection` type in `Settings/SettingsView.tsx`.
  * `null` means "no specific section requested" (default first paint).
  */
-export type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | null
+export type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | 'development' | null
 
 /** Request from editor context menu to trigger an AI action */
 export interface AiContextMenuRequest {
@@ -506,6 +506,8 @@ export interface UIState {
   deleteCustomTheme: (id: string) => void
   renameCustomTheme: (id: string, name: string) => void
   updateCustomThemeColor: (id: string, themeType: 'light' | 'dark', key: keyof CustomThemeColors, value: string) => void
+  developerMode: boolean
+  setDeveloperMode: (enabled: boolean) => void
   loadSettings: () => Promise<void>
 }
 
@@ -552,6 +554,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   customThemes: [...BUILT_IN_THEMES],
   activeLightCustomThemeId: 'builtin-light',
   activeDarkCustomThemeId: 'builtin-dark',
+  developerMode: false,
   setTheme: (theme) => {
     set({ theme })
     saveAppSettings({ theme })
@@ -926,6 +929,11 @@ export const useUIStore = create<UIState>((set, get) => ({
     }))
     saveAppSettings({ customThemes: JSON.stringify(useUIStore.getState().customThemes) })
   },
+  setDeveloperMode: (value) => {
+    set({ developerMode: value })
+    saveAppSettings({ developerMode: String(value) })
+    queueMicrotask(() => emitSettingChanged('developerMode', value))
+  },
   loadSettings: async () => {
     try {
       const s = await getAppSettings()
@@ -1063,6 +1071,7 @@ export const useUIStore = create<UIState>((set, get) => ({
         customThemes,
         activeLightCustomThemeId: s.activeLightCustomThemeId || 'builtin-light',
         activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',
+        developerMode: s.developerMode === 'true',
       })
     } catch {
       // DB not ready, use defaults

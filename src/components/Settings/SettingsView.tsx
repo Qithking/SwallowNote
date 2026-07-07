@@ -14,6 +14,7 @@ import {
   Puzzle,
   Download,
   Upload,
+  Code,
 } from 'lucide-react'
 import { useUIStore, Theme, NoteWidth, CustomThemeColors } from '@/stores'
 import { cn } from '@/lib/utils'
@@ -52,7 +53,7 @@ import {
   AlertDialogAction,
 } from '@/components/ui/alert-dialog'
 
-type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins'
+type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | 'development'
 
 function SettingRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
   return (
@@ -89,6 +90,7 @@ function SettingsView() {
     addAiModel, removeAiModel, setActiveAiModel, setDefaultAiModel, updateAiModelApiKey,
     customThemes, activeLightCustomThemeId, activeDarkCustomThemeId,
     setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
+    developerMode, setDeveloperMode,
   } = useUIStore()
 
   const [customThemeTab, setCustomThemeTab] = useState<'light' | 'dark'>('light')
@@ -154,6 +156,7 @@ function SettingsView() {
     { id: 'ai', icon: Bot, labelKey: 'settings.ai' },
     { id: 'shortcuts', icon: Keyboard, labelKey: 'settings.shortcuts' },
     { id: 'plugins', icon: Puzzle, labelKey: 'settings.plugins' },
+    { id: 'development', icon: Code, labelKey: 'settings.development' },
   ]
 
   const scrollToSection = useCallback((sectionId: SettingsSection) => {
@@ -1164,6 +1167,19 @@ function SettingsView() {
                         </Button>
                       </div>
                     </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+
+            <section id="section-development" className="space-y-4">
+              <h2 className="text-base font-semibold">{t('settings.development')}</h2>
+              <Card>
+                <CardContent className="p-0 divide-y divide-border">
+                  <div className="px-4">
+                    <SettingRow label={t('settings.development.developerMode')} desc={t('settings.development.developerMode.desc')}>
+                      <Switch checked={developerMode} onCheckedChange={setDeveloperMode} />
+                    </SettingRow>
                   </div>
                 </CardContent>
               </Card>

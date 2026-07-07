@@ -721,11 +721,15 @@ function App() {
   // Check if the plugin manager is active
   const isPluginManagerActive = settingsPanelVisible && sidebarView === 'plugin:__plugin_manager'
 
+  const developerMode = useUIStore((s: UIState) => s.developerMode)
+
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
   const handleContextMenu = useCallback((_e: React.MouseEvent) => {
-    //_e.preventDefault()
-  }, [])
+    if (!developerMode) {
+      _e.preventDefault()
+    }
+  }, [developerMode])
 
   return (
     <TooltipProvider>
