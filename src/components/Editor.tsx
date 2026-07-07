@@ -9,6 +9,7 @@ import { usePluginEditors, pluginEditorRegistry, getEditorForExtension } from '@
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
 import { serializeFrontmatter, parseFrontmatter } from '@/lib/utils/frontmatter'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 const MindMapEditor = lazy(() => import('./editors/MindMapEditor').then(m => ({ default: m.MindMapEditor })))
 const DiffViewer = lazy(() => import('./DiffViewer/DiffViewer'))
 const ConflictResolver = lazy(() => import('./DiffViewer/ConflictResolver'))
@@ -428,38 +429,45 @@ export function EditorView() {
       {fileType === 'markdown' && (
         <div className="flex-1 overflow-hidden">
           {viewMode === 'source' ? (
-            <CodeEditor
-              content={sourceContent ?? ''}
-              filename={activeTab.name}
-              onChange={handleSourceContentChange}
-              className="flex-1"
-            />
+            <ErrorBoundary>
+              <CodeEditor
+                content={sourceContent ?? ''}
+                filename={activeTab.name}
+                onChange={handleSourceContentChange}
+                className="flex-1"
+              />
+            </ErrorBoundary>
           ) : (
-            <MarkdownEditor
-              key={activeTab.id}
-              content={activeTab.content}
-              onChange={handleContentChange}
-            />
+            <ErrorBoundary key={activeTab.id}>
+              <MarkdownEditor
+                content={activeTab.content}
+                onChange={handleContentChange}
+              />
+            </ErrorBoundary>
           )}
         </div>
       )}
 
       {fileType === 'code' && (
         <div className="flex-1 flex overflow-hidden">
-          <CodeEditor
-            content={activeTab.content}
-            filename={activeTab.name}
-            onChange={handleContentChange}
-            className="flex-1"
-          />
+          <ErrorBoundary>
+            <CodeEditor
+              content={activeTab.content}
+              filename={activeTab.name}
+              onChange={handleContentChange}
+              className="flex-1"
+            />
+          </ErrorBoundary>
         </div>
       )}
 
       {fileType === 'binary' && (
-        <UnsupportedEditor
-          filename={activeTab.name}
-          reason={t('editor.binaryFile')}
-        />
+        <ErrorBoundary>
+          <UnsupportedEditor
+            filename={activeTab.name}
+            reason={t('editor.binaryFile')}
+          />
+        </ErrorBoundary>
       )}
 
       {fileType === 'mindmap' && (() => {
@@ -496,12 +504,13 @@ export function EditorView() {
         return (
           <div className="flex-1 flex overflow-hidden">
             <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-              <Editor
-                key={`${activeTab.id}:${isShim ? 'shim' : 'plugin'}:${editorRegistryRev}`}
-                content={activeTab.content}
-                onChange={handleContentChange}
-                {...(isShim ? { filename: activeTab.name } : {})}
-              />
+              <ErrorBoundary key={`${activeTab.id}:${isShim ? 'shim' : 'plugin'}:${editorRegistryRev}`}>
+                <Editor
+                  content={activeTab.content}
+                  onChange={handleContentChange}
+                  {...(isShim ? { filename: activeTab.name } : {})}
+                />
+              </ErrorBoundary>
             </Suspense>
           </div>
         )

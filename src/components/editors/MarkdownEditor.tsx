@@ -1147,8 +1147,9 @@ function BlockNoteInner({
       if (tiptapEditor) {
         return tiptapEditor.state.doc.textContent || ''
       }
-    // eslint-disable-next-line no-empty
-    } catch {}
+    } catch (e) {
+      console.warn('[MarkdownEditor] Failed to get editor text content:', e)
+    }
     return ''
   }, [editor])
 

@@ -118,7 +118,9 @@ function App() {
       // Step 3: 设置加载完成后立即显示窗口，避免用户等待文件树加载
       try {
         await getCurrentWindow().show()
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.warn('[App] Failed to show window:', e)
+      }
 
       // 显示窗口后立即应用 macOS 圆角窗口样式
       // （从独立 useEffect 迁移至此，避免与 init 的 IPC 调用竞争后端主线程）
@@ -136,8 +138,8 @@ function App() {
           document.documentElement.style.borderRadius = '8px'
           document.body.style.borderRadius = '8px'
         }
-      } catch {
-        // ignore errors
+      } catch (e) {
+        console.warn('[App] Failed to set window style:', e)
       }
 
       // Step 4: 窗口可见后加载文件树与恢复会话

@@ -92,7 +92,10 @@ async function renderMermaidDiagram({
       removeMermaidRenderArtifacts(renderId, renderHost)
     }
   }
-  const nextRender = renderQueue.then(render, render)
+  const nextRender = renderQueue.then(render, render).catch((e) => {
+    console.warn('[MermaidBlock] Render queue error:', e)
+    return ''
+  })
   renderQueue = nextRender.then(() => undefined, () => undefined)
   return nextRender
 }

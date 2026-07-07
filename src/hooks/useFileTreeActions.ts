@@ -58,7 +58,7 @@ export function useFileTreeActions() {
 
   // 自动聚焦并选中输入框内容
   useEffect(() => {
-    requestAnimationFrame(() => {
+    const rafId = requestAnimationFrame(() => {
       if (!inputRef.current) return
       if (editingPath !== null) {
         inputRef.current.focus()
@@ -84,6 +84,7 @@ export function useFileTreeActions() {
         }
       }
     })
+    return () => cancelAnimationFrame(rafId)
   }, [editingPath, newItem, editingName, nodes, isFirstEdit, isNewItemFirstEdit])
 
   const handleStartEdit = (path: string, name: string, isDirectory: boolean) => {

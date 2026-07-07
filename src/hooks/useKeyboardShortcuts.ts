@@ -229,8 +229,8 @@ export async function handleSaveFile() {
     const { gitAutoCommit } = await import('@/lib/tauri')
     try {
       await gitAutoCommit(activeTab.path)
-    } catch {
-      // git auto-commit is best-effort; failures (no git repo, no identity) are non-fatal
+    } catch (e) {
+      console.debug('[useKeyboardShortcuts] Git auto-commit skipped:', e)
     }
   } catch (e) {
     console.error('Failed to save file:', e)

@@ -397,10 +397,12 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
             mergeViewRef.current.b.dispatch({
               effects: langCompartment.reconfigure(exts as Extension),
             })
-          } catch {
-            // Language extension failed to apply — editor still works without syntax highlighting
+          } catch (e) {
+            console.warn('[SplitDiffViewer] Failed to apply language extension:', e)
           }
         }
+      }).catch((e: unknown) => {
+        console.warn('[SplitDiffViewer] Failed to load language extension:', e)
       })
 
       // Restore initial cursor position if specified
