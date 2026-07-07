@@ -186,8 +186,8 @@ function SettingsView() {
   ]
 
   const languages = [
-    { value: 'en', labelKey: 'English' },
-    { value: 'zh-CN', labelKey: '中文' },
+    { value: 'en', labelKey: 'settings.general.language.en' },
+    { value: 'zh-CN', labelKey: 'settings.general.language.zhCN' },
   ]
 
   const noteWidthOptions: { value: NoteWidth; labelKey: string }[] = [
@@ -358,7 +358,7 @@ function SettingsView() {
                         <SelectContent>
                           {languages.map((lang) => (
                             <SelectItem key={lang.value} value={lang.value}>
-                              {lang.labelKey}
+                              {t(lang.labelKey)}
                             </SelectItem>
                           ))}
                         </SelectContent>

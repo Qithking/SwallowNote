@@ -789,7 +789,7 @@ function App() {
                 )}
                 <ErrorBoundary fallback={
                   <div className="flex items-center justify-center flex-1 text-sm text-[var(--text-muted)]">
-                    编辑器加载失败，请关闭标签页重试
+                    {t('editor.loadFailed')}
                   </div>
                 }>
                   <EditorView />

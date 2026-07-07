@@ -18,7 +18,8 @@
   "editor": {
     "untitled": "Untitled",
     "preview": "Preview",
-    "split": "Split View"
+    "split": "Split View",
+    "loadFailed": "Editor failed to load. Please close the tab and retry."
   },
   "fileTree": {
     "newFile": "New File",
@@ -79,6 +80,8 @@
     "general.closeWithoutExit.desc": "App continues running in background after closing the window, exit via tray icon",
     "general.language": "Language",
     "general.language.desc": "Switch interface display language, restart required to take effect",
+    "general.language.en": "English",
+    "general.language.zhCN": "Chinese (Simplified)",
     "general.noteWidth": "Default Note Width",
     "general.noteWidth.desc": "Choose default content area width layout for the editor",
     "general.noteWidth.normal": "Normal",
@@ -297,7 +300,8 @@
     "success": "Success",
     "no": "No",
     "yes": "Yes",
-    "settings": "Settings"
+    "settings": "Settings",
+    "retry": "Retry"
   },
   "activityBar": {
     "explorer": "Explorer",

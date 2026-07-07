@@ -18,7 +18,8 @@
   "editor": {
     "untitled": "未命名",
     "preview": "预览",
-    "split": "分屏视图"
+    "split": "分屏视图",
+    "loadFailed": "编辑器加载失败，请关闭标签页重试"
   },
   "fileTree": {
     "newFile": "新建文件",
@@ -79,6 +80,8 @@
     "general.closeWithoutExit.desc": "关闭窗口后应用继续在后台运行，可通过托盘图标退出",
     "general.language": "语言设置",
     "general.language.desc": "切换界面显示语言，重启后生效",
+    "general.language.en": "English",
+    "general.language.zhCN": "中文（简体）",
     "general.noteWidth": "默认笔记宽度",
     "general.noteWidth.desc": "选择编辑器默认内容区域宽度布局",
     "general.noteWidth.normal": "正常",
@@ -297,7 +300,8 @@
     "success": "成功",
     "no": "否",
     "yes": "是",
-    "settings": "设置"
+    "settings": "设置",
+    "retry": "重试"
   },
   "activityBar": {
     "explorer": "资源管理器",
