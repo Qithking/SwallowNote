@@ -269,7 +269,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               <button
                 type="button"
                 className="pa-icon-btn"
-                title={t('plugin.schemaSettings', { defaultValue: 'Plugin settings' })}
+                title={t('plugin.settings', { defaultValue: 'Plugin settings' })}
                 onClick={onOpenSchemaSettings}
               >
                 <SettingsIcon />
@@ -279,7 +279,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               <button
                 type="button"
                 className="pa-icon-btn"
-                title={t('plugin.pa.btn.storage', { defaultValue: 'Storage' })}
+                title={t('plugin.pa.dialog.storage', { defaultValue: 'Storage' })}
                 onClick={onStorage}
               >
                 <Database />
@@ -299,7 +299,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               <button
                 type="button"
                 className="pa-icon-btn is-danger"
-                title={t('plugin.uninstallSuccess', { defaultValue: 'Uninstall' })}
+                title={t('plugin.pa.uninstall.confirm', { defaultValue: '卸载' })}
                 onClick={onUninstall}
               >
                 <Trash2 />
