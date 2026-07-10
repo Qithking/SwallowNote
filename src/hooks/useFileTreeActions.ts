@@ -1,7 +1,4 @@
-/**
- * useFileTreeActions — 文件树操作逻辑 hook
- * 负责：重命名、新建文件/文件夹/思维导图、删除
- */
+/** 文件树操作 hook：重命名、新建、删除 */
 import { useState, useRef, useEffect } from 'react'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
@@ -143,11 +140,7 @@ export function useFileTreeActions() {
     setEditingPath(null); setEditingName(''); setEditingType(null)
   }
 
-  /**
-   * Unified handler for creating new files, folders, and mind maps.
-   * All three creation flows share identical logic — only the type and
-   * default name differ.
-   */
+  /** 文件/文件夹/思维导图创建的统一入口 */
   const handleNewItem = async (type: 'file' | 'folder' | 'mindmap', dirPath?: string) => {
     const targetPath = dirPath || selectedPath
     if (!targetPath) return

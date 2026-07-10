@@ -3,20 +3,19 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 
-// 密盘插件通过 window.* 全局变量共享宿主的 BlockNote / CodeMirror 实例，
-// 避免插件重复打包 ~1.5MB 依赖。所有相关包均需在 rollupOptions.external 中声明。
+// 通过 window.* 共享宿主依赖，避免重复打包
 const SHARED_EXTERNALS = [
   'react',
   'react-dom',
   'react-dom/client',
   'react/jsx-runtime',
   'react/jsx-dev-runtime',
-  // BlockNote 全家桶（宿主暴露 window.BlockNote / BlockNoteReact / BlockNoteMantine / BlockNoteCodeBlock）
+  // BlockNote 全家桶
   '@blocknote/core',
   '@blocknote/react',
   '@blocknote/mantine',
   '@blocknote/code-block',
-  // CodeMirror 全家桶（宿主暴露 window.CodeMirror / CodeMirrorState / CodeMirrorView 等）
+  // CodeMirror 全家桶
   'codemirror',
   '@codemirror/state',
   '@codemirror/view',
@@ -32,7 +31,7 @@ export default defineConfig(({ mode }) => {
       plugins: [
         react(),
         {
-          // 在产物顶部注入 manifest 元数据注释，供 Rust 端解析。
+          // 在产物顶部注入 manifest 注释，供 Rust 端解析
           name: 'inject-manifest-comment',
           closeBundle() {
             if (!existsSync('dist')) mkdirSync('dist', { recursive: true })

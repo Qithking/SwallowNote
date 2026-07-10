@@ -71,9 +71,7 @@ function App() {
   const syncInterval = useUIStore((s: UIState) => s.syncInterval)
   const autoSyncPush = useUIStore((s: UIState) => s.autoSyncPush)
   const sidebarView = useUIStore((s: UIState) => s.sidebarView)
-  // Boolean selector — only re-renders App when a tab is added or removed,
-  // not when tab content changes (the previous `tabs` subscription caused
-  // the entire component tree to re-render on every keystroke).
+  // 布尔 selector：仅在 tab 增删时重渲染
   const hasTabs = useEditorStore((s) => s.tabs.length > 0)
   const cachedRepositories = useGitStore((s: GitState) => s.cachedRepositories)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
@@ -90,9 +88,7 @@ function App() {
   const actionTakenRef = useRef(false)
   // rAF 节流：拖拽面板宽度时每帧最多更新一次
   const rafRef = useRef<number | null>(null)
-  // 防止 StrictMode 双调用导致 init() 重复执行
-  // 开发模式下 StrictMode 会调用 effect 两次，导致 restoreSessionState、
-  // scanPlugins 等副作用并发执行，引发 MarkdownEditor 重复 mount
+  // StrictMode 双调用导致副作用重复执行
   const initRef = useRef(false)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
@@ -133,8 +129,7 @@ function App() {
           await enableModernWindowStyle({ cornerRadius: 12 })
         } else if (platform === 'windows') {
           await enableModernWindowStyle({ cornerRadius: 12 })
-          // Windows 11 provides rounded corners via DWM, but the web content
-          // also needs matching border-radius to prevent black corner artifacts
+          // Windows 11 圆角需匹配 border-radius 避免黑角
           document.documentElement.style.borderRadius = '8px'
           document.body.style.borderRadius = '8px'
         }
@@ -214,11 +209,7 @@ function App() {
               console.warn('[App] failed to init plugin auto update:', err)
             }
 
-            // Background-check for plugin updates so the ActivityBar
-            // badge can show the update count without requiring the
-            // user to open the plugin manager.  loadRepoSources()
-            // populates repoUrl from SQLite; refreshIndex + refreshUpdates
-            // then fetch the marketplace index and compare versions.
+            // 后台检查插件更新以显示角标
             try {
               const { usePluginMarketStore } = await import('@/stores/plugin-market')
               const marketStore = usePluginMarketStore.getState()
@@ -257,8 +248,15 @@ function App() {
         emitAppExit()
       } catch { /* ignore */ }
 
-      // 先 flush 所有编辑器的防抖内容，避免 300ms 防抖窗口内的编辑
-      // 因 isDirty 未更新而被 close 流程跳过导致丢失
+      // 退出前刷新所有插件 storage 缓存到磁盘，避免防抖/飞行中写入丢失
+      try {
+        const { flushAllPluginStorage } = await import('@/lib/plugin-host')
+        await flushAllPluginStorage()
+      } catch (e) {
+        console.warn('[App] flushAllPluginStorage on close failed', e)
+      }
+
+      // 先 flush 编辑器防抖内容避免丢失
       try {
         const { flushAllEditors } = await import('@/lib/editor-flush')
         await flushAllEditors()
@@ -279,8 +277,7 @@ function App() {
         await saveSessionStateNow()
         await win.hide()
         const { setDockIconVisibility } = await import('@/lib/tauri')
-        // Cosmetic side effect — a failure here doesn't block close,
-        // but log it so the silent loss isn't completely invisible.
+        // 次要副作用，失败不阻塞退出
         setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
       } else {
         await saveSessionStateNow()
@@ -313,7 +310,7 @@ function App() {
     const unlisten = listen('file-watcher-event', (event) => {
       const { type, path } = event.payload as { type: string; path: string }
 
-      // Skip file events during Git sync to avoid interference with git pull/push operations
+      // Git sync 期间跳过文件事件避免干扰
       const gitStore = useGitStore.getState()
       if (gitStore.isPulling || gitStore.syncStatus.isSyncing) {
         return
@@ -328,8 +325,7 @@ function App() {
           if (tab.isDirty) {
             editorStore.markExternalChange(tab.id)
           } else {
-            // Force reload: loadTabContent skips when content !== undefined,
-            // but external modifications need to overwrite the cached content.
+            // 强制重载覆盖缓存内容
             editorStore.loadTabContent(tab.id, 0, true)
           }
         }
@@ -337,8 +333,7 @@ function App() {
         // Close tabs for removed files
         if (type === 'removed') {
           const editorStore = useEditorStore.getState()
-          // Skip if this path is currently being saved
-          // (atomic write: write to .tmp then rename can trigger a remove event on the original file)
+          // 原子写 .tmp→rename 可能触发 remove 事件
           if (editorStore.isPathSaving(path)) return
           // Check if the removed path matches any open tab (file) or is a parent of any tab (directory)
           const tabsToClose = editorStore.tabs.filter(tab =>
@@ -391,7 +386,8 @@ function App() {
       }, 500)
     }
 
-    const unsubscribeTabs = useEditorStore.subscribe(scheduleSave)
+    // 仅在 tabs 切片变化时触发保存，避免 cursorPosition 等无关状态变更无谓触发防抖保存
+    const unsubscribeTabs = useEditorStore.subscribe(s => s.tabs, scheduleSave)
 
     // 面板宽度变化时也触发保存（拖拽缩放后即使无标签变化也能持久化）
     const unsubscribeUI = useUIStore.subscribe((state, prevState) => {
@@ -589,8 +585,7 @@ function App() {
     if (closeWithoutExit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
-      // Cosmetic side effect — a failure here doesn't block close,
-      // but log it so the silent loss isn't completely invisible.
+      // 次要副作用，失败不阻塞退出
       setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
     } else {
       await win.destroy()
@@ -612,8 +607,7 @@ function App() {
     if (closeWithoutExit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
-      // Cosmetic side effect — a failure here doesn't block close,
-      // but log it so the silent loss isn't completely invisible.
+      // 次要副作用，失败不阻塞退出
       setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
     } else {
       await win.destroy()

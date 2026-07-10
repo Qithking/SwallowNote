@@ -58,7 +58,7 @@ function pickProviderId(
   fallback: AllSettings['defaultProvider']
 ): AllSettings['defaultProvider'] {
   const v = pickString(value, fallback)
-  // 仅接受已实现上传逻辑的 4 个提供商；其余 id 一律回退到默认值。
+  // 仅接受已实现的 4 个提供商，其余回退默认值
   if (v === 'smms' || v === 'imgur' || v === 'github' || v === 'custom') {
     return v
   }
@@ -156,8 +156,7 @@ export function isProviderConfigured(
 ): boolean {
   switch (id) {
     case 'smms':
-      // SM.MS supports anonymous uploads, so always considered
-      // "configured". The user can still paste a token in.
+      // SM.MS 支持匿名上传，始终视为已配置
       return true
     case 'imgur':
       return s.imgurClientId.trim().length > 0

@@ -1,10 +1,7 @@
-/**
- * Plugin permission enforcement — runtime sandbox for event/storage/IPC.
- * Grants eagerly hydrated from localStorage at module load (sync) to avoid race.
- */
+/** 插件权限执行：事件/存储/IPC 沙箱 */
 import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
 
-/** Thrown by assertPermission; subclass Error for instanceof-check. */
+/** assertPermission 抛出 */
 export class PluginPermissionDeniedError extends Error {
   public readonly pluginId: string
   public readonly permission: PluginPermission
@@ -18,25 +15,20 @@ export class PluginPermissionDeniedError extends Error {
     this.pluginId = pluginId
     this.permission = permission
     this.operation = operation
-    // Preserve the V8 prototype chain across the transpiled class
-    // so `instanceof` still works after TS down-leveling.
+    // 保留原型链以支持 instanceof
     Object.setPrototypeOf(this, PluginPermissionDeniedError.prototype)
   }
 }
 
-// ─── In-memory cache ──────────────────────────────────────────────────────────
+// 内存缓存
 
-/**
- * Per-plugin grant set. The outer Map is keyed by pluginId so we
- * can answer "is permission X granted to plugin Y" in O(1) and
- * update grants for one plugin without disturbing the others.
- */
+/** 按插件 id 缓存授权集 */
 const grants = new Map<string, Set<PluginPermission>>()
 
-// Hardcoded prefix to avoid module-load cycle.
+// 硬编码前缀避免循环依赖
 const PERMISSIONS_KEY_PREFIX = 'plugin_permissions_'
 
-/** Eagerly hydrate grants cache from localStorage at module load. */
+/** 模块加载时从 localStorage 填充缓存 */
 function eagerHydrateFromLocalStorage(): void {
   if (typeof window === 'undefined' || !window.localStorage) return
   const prefix = PERMISSIONS_KEY_PREFIX
@@ -49,16 +41,14 @@ function eagerHydrateFromLocalStorage(): void {
     try {
       raw = localStorage.getItem(key)
     } catch {
-      // localStorage can throw in private-browsing / quota
-      // edge cases. A missing entry for one plugin must not
-      // prevent the rest of the cache from materialising.
+      // localStorage 异常时跳过当前项
       continue
     }
     if (!raw) continue
     let status: PluginPermissionStatus[]
     try {
       const parsed = JSON.parse(raw) as unknown
-      // Defensive: skip non-array entries.
+      // 防御：跳过非数组项
       if (!Array.isArray(parsed)) {
         console.warn(
           `[plugin-permission-guard] ignoring non-array permission entry for ${pluginId}`,
@@ -67,8 +57,7 @@ function eagerHydrateFromLocalStorage(): void {
       }
       status = parsed
     } catch {
-      // Corrupt entry – log once and skip. The next save
-      // through the UI will overwrite it with a clean record.
+      // 损坏项跳过，下次保存覆盖
       console.warn(
         `[plugin-permission-guard] ignoring corrupt permission entry for ${pluginId}`,
       )
@@ -83,22 +72,22 @@ function eagerHydrateFromLocalStorage(): void {
 
 eagerHydrateFromLocalStorage()
 
-/** Replace the grant set for one plugin. Used after a UI save. */
+/** 替换插件授权集 */
 export function setGranted(pluginId: string, perms: PluginPermission[]): void {
   grants.set(pluginId, new Set(perms))
 }
 
-/** Drop a plugin from the cache (called on uninstall). */
+/** 卸载时移除插件缓存 */
 export function clearGranted(pluginId: string): void {
   grants.delete(pluginId)
 }
 
-/** Drop every plugin from the cache (tests / dev reset). */
+/** 清空全部缓存（测试用） */
 export function clearAll(): void {
   grants.clear()
 }
 
-/** Sync hot-path check; throws to prevent silent security bypass. */
+/** 同步热路径检查，拒绝时抛错 */
 export function assertPermission(
   pluginId: string,
   permission: PluginPermission,
@@ -109,12 +98,7 @@ export function assertPermission(
   throw new PluginPermissionDeniedError(pluginId, permission, operation)
 }
 
-/**
- * Non-throwing variant for UI display (e.g. greying out a menu
- * item when the plugin lacks the permission). Returns `false` for
- * plugins that have never been seen – that's the safe default
- * because we want a "no" answer to be loud, not a "yes".
- */
+/** 非抛错变体，用于 UI 灰显 */
 export function hasPermission(pluginId: string, permission: PluginPermission): boolean {
   return grants.get(pluginId)?.has(permission) ?? false
 }

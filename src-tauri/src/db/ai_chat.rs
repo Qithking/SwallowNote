@@ -17,8 +17,7 @@ pub fn save_message(db: &Database, role: &str, content: &str, model_id: &str) ->
         eprintln!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
-    // 用事务包裹 INSERT + DELETE，保证原子性：避免插入成功但清理失败时
-    // 出现部分写入。任一步骤失败时 Transaction drop 会自动回滚。
+    // 事务包裹 INSERT+DELETE，drop 自动回滚
     let tx = conn.unchecked_transaction()?;
     tx.execute(
         "INSERT INTO ai_messages (role, content, model_id) VALUES (?1, ?2, ?3)",

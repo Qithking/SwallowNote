@@ -65,27 +65,10 @@ export function PluginCommandRecorder({ bindingKey, command }: PluginCommandReco
     if (!recording) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // M14 (Wave D review): the previous implementation called
-      // `e.preventDefault()` + `e.stopPropagation()` *unconditionally*
-      // and only then branched on Escape / `parseKeyEvent`. That
-      // meant a bare modifier press (Ctrl / Shift / Alt / Meta) —
-      // which `parseKeyEvent` returns `null` for — still had the
-      // event swallowed, breaking any subsequent `Ctrl+S` /
-      // `Cmd+Shift+P` / etc. the user wanted to fire while the
-      // recorder badge was active.
-      //
-      // The fix is to gate the consume: first decide whether we
-      // are *going* to do something with the key, and only then
-      // call `preventDefault` + `stopPropagation`. Pure modifier
-      // presses fall through to the bottom of the function (and
-      // out to the window), so the user's chain of `Ctrl`-then-`K`
-      // keystrokes still reaches the rest of the app.
+      // 仅在实际处理按键时调用 preventDefault
 
       if (e.key === 'Escape') {
-        // Escape is the explicit "cancel recording" signal; we
-        // do consume it (the user pressed Esc inside our dialog
-        // chrome), and we use the same preventDefault contract
-        // we always had.
+        // Escape 取消录制并消费事件
         e.preventDefault()
         e.stopPropagation()
         handleStopRecording()
@@ -94,35 +77,16 @@ export function PluginCommandRecorder({ bindingKey, command }: PluginCommandReco
 
       const parsed = parseKeyEvent(e)
       if (!parsed) {
-        // Modifier-only key (Ctrl / Shift / Alt / Meta) or any
-        // other event `parseKeyEvent` declines to interpret. Do
-        // *not* preventDefault or stopPropagation — let the
-        // event bubble so e.g. `Ctrl+S` (which the user might
-        // have already started composing before the recorder
-        // was clicked) still reaches the global handler.
+        // 纯修饰键放行，不阻止默认行为
         return
       }
 
-      // We have a real chord and we are going to commit it.
-      // From here on the event is ours; preventDefault +
-      // stopPropagation mirrors the original behaviour and
-      // stops the chord from also firing its built-in
-      // command (e.g. committing a Ctrl+P while also opening
-      // the command palette).
+      // 确认 chord 后消费事件并阻止冒泡
       e.preventDefault()
       e.stopPropagation()
 
-      // Build a quick label map so the conflict banner can show
-      // *which* other command clashes. The conflict detector only
-      // needs the *other* commands' labels, not our own.
+      // 构建标签映射供冲突提示显示
       const labels: Record<string, string> = {}
-      // For now we don't have a registry snapshot here; the labels
-      // are read from `command.label` for the current command and
-      // the conflict detector's built-in map covers the rest.
-      // Cross-plugin labels would require plumbing the
-      // `usePluginCommands()` snapshot down; we accept the
-      // limitation (a conflict still shows the binding key, which
-      // is unique) to keep this component self-contained.
       labels[bindingKey] = command.label
 
       const found = findShortcutConflictDetailed(

@@ -8,21 +8,11 @@ import { App } from './App'
 import './index.css'
 import { initHealthMonitor } from '@/lib/plugin-health'
 
-// Expose React and ReactDOM as globals so external plugins can share
-// the host's React instance instead of bundling their own copy.
-// Without this, plugins that use hooks crash with
-// "null is not an object (evaluating 'React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.current.useState')"
-// because two separate React instances cannot share hook state.
-// NOTE: We expose the full `react-dom` (not `react-dom/client`) because
-// plugins may use ReactDOM.createPortal, ReactDOM.flushSync, etc.
+// 暴露 React 全局变量供插件共享宿主实例
 ;(window as unknown as Window).React = React
 ;(window as unknown as Window).ReactDOM = ReactDOM
-// Expose react/jsx-runtime so plugins using the automatic JSX transform
-// can reference the host's runtime instead of bundling their own copy.
+// 暴露 jsx-runtime/sonner/i18next 供插件复用
 ;(window as unknown as Window).ReactJSXRuntime = ReactJSXRuntime
-// Expose sonner and react-i18next so plugins can share the host's
-// instances instead of bundling their own copies (which would create
-// separate toast containers / i18n instances that don't work correctly).
 ;(window as unknown as Window).SonnerToast = toast
 ;(window as unknown as Window).ReactI18Next = { useTranslation }
 

@@ -454,6 +454,13 @@ const { t } = useTranslation()
   // fallback for any newly visible uncached files.
   const queriedRootsRef = useRef<Set<string>>(new Set())
 
+  // 工作区切换（rootPath 变化）时清空缓存，避免旧工作区数据残留
+  useEffect(() => {
+    setFrontmatterCache(new Map())
+    queriedRootsRef.current = new Set()
+    lastMdPathsRef.current = new Set()
+  }, [rootPath])
+
   // Load frontmatter for all .md files when the tree changes.
   //
   // Performance strategy:

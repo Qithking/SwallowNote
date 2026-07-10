@@ -107,6 +107,25 @@ fn lookup_nested(value: &serde_json::Value, key: &str) -> Option<String> {
 /// Tauri command to set the locale from the frontend
 #[tauri::command]
 pub fn set_app_locale(locale: String) -> Result<(), String> {
+    // 空字符串 locale 会导致 retain 后只保留 "" 和 "en"，误清 zh-CN 翻译，需拦截
+    if locale.is_empty() {
+        return Err("locale cannot be empty".into());
+    }
     set_locale(&locale);
+    // 清理 TRANSLATIONS：仅保留当前 locale 与 fallback(en)，移除其他 locale 数据，避免无上限增长。
+    // 若目标 locale 不在已加载集合中（例如曾被 retain 清理过），先重新加载编译期嵌入的翻译，
+    // 保证切回该 locale 时数据可用，不会因为清理导致翻译丢失。
+    if let Ok(mut translations) = TRANSLATIONS.write() {
+        if !translations.contains_key(&locale) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(ZH_CN_JSON) {
+                translations.insert("zh-CN".to_string(), value);
+            }
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(EN_JSON) {
+                translations.insert("en".to_string(), value);
+            }
+        }
+        // 仅保留当前 locale 与 en 兜底，其余 locale 数据移除
+        translations.retain(|key, _| key == &locale || key == "en");
+    }
     Ok(())
 }

@@ -1,15 +1,4 @@
-/**
- * Plugin Loader - Responsible for loading plugin packages from disk
- *
- * Each plugin package is a directory under <app_data_dir>/plugins/<plugin-id>/
- * containing at minimum an index.js that exports:
- *   - manifest: PluginManifest metadata
- *   - icon: React component or ReactNode
- *   - panel: React component or ReactNode
- *
- * The index.js may also contain a special comment for Rust-side parsing:
- *   // @swallow-manifest { "id": "...", "name": "...", ... }
- */
+/** 插件加载器：从磁盘加载插件包。 */
 import type {
   PluginDefinition,
   PluginLoadFailure,
@@ -21,9 +10,7 @@ import type { PluginMetadataRust } from '@/lib/tauri'
 import { createElement, type ReactNode } from 'react'
 import { PlugZap } from 'lucide-react'
 
-/**
- * Convert Rust PluginMetadata to frontend PluginMetadata
- */
+/** Rust 元数据转前端元数据 */
 export function rustMetaToPluginMeta(meta: PluginMetadataRust): PluginMetadata {
   return {
     id: meta.id,
@@ -42,61 +29,84 @@ export function rustMetaToPluginMeta(meta: PluginMetadataRust): PluginMetadata {
   }
 }
 
-/**
- * Dynamically load a plugin's index.js module.
- *
- * In a Tauri app, plugin index.js files are located in the app data directory.
- * We use a dynamic import with the Tauri asset protocol to load them.
- */
+/** Blob URL 缓存：mtime 未变则复用，避免重复加载。 */
+const pluginBlobUrlCache = new Map<string, { blobUrl: string; mtime: string }>()
+/** 并发加载去重：同一 pluginPath 的并发调用复用同一个 Promise，避免竞态 */
+const pluginLoadInFlight = new Map<string, Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null; error?: string }>>()
+
+/** 释放插件 blob URL 并移除缓存 */
+export function dropPluginBlobUrl(pluginPath: string): void {
+  const cached = pluginBlobUrlCache.get(pluginPath)
+  if (!cached) return
+  // 先 revoke 释放底层 Blob 内存，再删除缓存条目
+  URL.revokeObjectURL(cached.blobUrl)
+  pluginBlobUrlCache.delete(pluginPath)
+}
+
+/** 通过 Tauri asset 协议动态加载插件 index.js。 */
 export async function loadPluginModule(pluginPath: string): Promise<PluginManifest | null> {
   const { manifest } = await loadPluginModuleWithRef(pluginPath)
   return manifest
 }
 
-/**
- * Internal: load a plugin module and return both the manifest and
- * the raw dynamic-import result. The raw module is needed by
- * `loadAllPlugins` so it can attach `__pluginModule` to the
- * definition (used by the host takeover layer to call `setHost`).
- *
- * Returns an optional `error` string that callers can surface to the
- * user so manifest failures are easier to diagnose (instead of the
- * generic "package may be incomplete" message).
- */
+/** 返回 manifest 与模块引用，供 host takeover 调用 setHost。 */
 async function loadPluginModuleWithRef(
+  pluginPath: string
+): Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null; error?: string }> {
+  // 并发去重：同一 pluginPath 的并发调用复用同一个 Promise
+  const inFlight = pluginLoadInFlight.get(pluginPath)
+  if (inFlight) return inFlight
+  const promise = loadPluginModuleWithRefInner(pluginPath).finally(() => {
+    pluginLoadInFlight.delete(pluginPath)
+  })
+  pluginLoadInFlight.set(pluginPath, promise)
+  return promise
+}
+
+async function loadPluginModuleWithRefInner(
   pluginPath: string
 ): Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null; error?: string }> {
   let code = ''
   try {
     const indexJsPath = `${pluginPath}/index.js`
 
-    // Tauri's asset protocol (convertFileSrc) may reject requests to
-    // hidden directories like `.versions/` with 403. Instead, read
-    // the file content via a Rust command (which has unrestricted FS
-    // access) and create a blob URL for `import()`.
-    const { readFile } = await import('@/lib/tauri')
+    // hidden 目录走 Rust 命令读取后转 blob URL
+    const { readFile, getFileMetadata } = await import('@/lib/tauri')
+
+    // 获取 mtime 判断是否复用缓存，失败降级新建
+    let currentMtime: string | undefined
+    try {
+      currentMtime = (await getFileMetadata(indexJsPath)).modified_time
+    } catch {
+      // mtime 不可用时跳过缓存复用
+    }
+
+    const cached = currentMtime ? pluginBlobUrlCache.get(pluginPath) : undefined
+    if (cached && currentMtime && cached.mtime === currentMtime) {
+      try {
+        const module = (await import(/* @vite-ignore */ cached.blobUrl)) as Record<string, unknown>
+        const manifest = (module.default || module.manifest || null) as PluginManifest | null
+        if (import.meta.env.DEV) {
+          console.log(`[PluginLoader] Reused cached blob URL for ${pluginPath} (mtime unchanged)`)
+        }
+        if (!manifest) {
+          console.warn(`[PluginLoader] No manifest found in module from ${pluginPath}`)
+        }
+        return { manifest, module }
+      } catch {
+        URL.revokeObjectURL(cached.blobUrl)
+        pluginBlobUrlCache.delete(pluginPath)
+        // 落入下方完整加载流程
+      }
+    }
+
     code = await readFile(indexJsPath)
 
     if (import.meta.env.DEV) {
       console.log(`[PluginLoader] Read ${indexJsPath}: ${code.length} chars, hasReactImport: ${code.includes('from "react"')}, hasBundledReact: ${code.includes('__SECRET_INTERNALS')}`)
     }
 
-    // If the plugin bundles its own React copy (not just references
-    // window.React's internals), it will crash at runtime with
-    // "multiple React instances" errors. We detect this by checking
-    // for the React source code pattern. A bundled React always
-    // contains the version check preamble.
-    //
-    // react/jsx-runtime is a thin wrapper that delegates to the
-    // external React, so having `from "react/jsx-runtime"` is fine
-    // (it's an external import, not a bundled copy). But if the
-    // bundle contains `__SECRET_INTERNALS` WITHOUT any React import
-    // (meaning the React source was inlined), that's a problem.
-    // We also check for `from "react/jsx-runtime"` and
-    // `from "react/jsx-dev-runtime"` — if `__SECRET_INTERNALS`
-    // appears alongside those imports, the jsx-runtime was bundled
-    // (not externalized) and its internal React reference will
-    // conflict with the host's React.
+    // 检测插件是否打包独立 React 实例，避免运行时冲突
     const hasReactExternalImport =
       code.includes('from "react"') || code.includes("from 'react'") ||
       code.includes('from "react/jsx-runtime"') || code.includes("from 'react/jsx-runtime'") ||
@@ -111,23 +121,12 @@ async function loadPluginModuleWithRef(
       return { manifest: null, module: null, error: errMsg }
     }
 
-    // Plugins built with Vite may reference `process.env.NODE_ENV` which
-    // doesn't exist in the browser/webview. If the build didn't replace
-    // these references (e.g. missing `define` in vite.config), inject a
-    // minimal polyfill at the top of the code so the module can execute.
+    // Vite 未替换 process.env.NODE_ENV 时注入 polyfill
     if (code.includes('process.env')) {
       code = 'var process=process||{env:{NODE_ENV:"production"}};\n' + code
     }
 
-    // External plugins mark react/react-dom as external in their Vite
-    // config, so the bundle contains bare `import` statements like:
-    //   import React, { useState, useEffect } from "react";
-    //   import ReactDOM from "react-dom/client";
-    //   import { jsx, jsxs } from "react/jsx-runtime";
-    // These can't be resolved at runtime because the blob URL has no
-    // package resolver. Replace them with reads from the host's globals
-    // (window.React / window.ReactDOM / window.ReactJSXRuntime) which
-    // are set in main.tsx.
+    // 将 react/react-dom/jsx-runtime 的 import 替换为 window 全局
     code = code
       .replace(
         // Match: import X, { ... } from "react";
@@ -162,10 +161,7 @@ async function loadPluginModuleWithRef(
         'const $1 = window.React;'
       )
       .replace(
-        // Match: import { ... } from "react";
-        // (Covers the { X as Y } form that the preceding X, { ... } /
-        // { ... } / X / * as rules above don't cover. Vite can emit
-        // `import { useState as useX }` in some tree-shaking paths.)
+        // 覆盖 { X as Y } 别名导入
         /import\s*\{([^}]*)\}\s*from\s+["']react["'];?/g,
         (_match, named: string) => {
           const names = named.split(',').map((s: string) => s.trim().split(/\s+as\s+/).map((x: string) => x.trim()))
@@ -193,11 +189,7 @@ async function loadPluginModuleWithRef(
         'const $1 = window.ReactDOM;'
       )
       .replace(
-        // Match: import { X, X as Y, ... } from "react-dom";
-        // (Covers `import { createPortal as FS } from "react-dom"`,
-        // which the preceding X / * rules don't match. Triggered by
-        // any plugin that uses react-dom named exports such as
-        // `createPortal` — e.g. com.swallownote.mindmap.)
+        // 覆盖 react-dom 命名导出（如 createPortal）
         /import\s*\{([^}]*)\}\s*from\s+["']react-dom["'];?/g,
         (_match, named: string) => {
           const names = named.split(',').map((s: string) => s.trim().split(/\s+as\s+/).map((x: string) => x.trim()))
@@ -290,10 +282,24 @@ async function loadPluginModuleWithRef(
     const blob = new Blob([code], { type: 'application/javascript' })
     const blobUrl = URL.createObjectURL(blob)
 
+    // 缓存新 blobUrl，revoke 旧缓存
+    if (currentMtime) {
+      const old = pluginBlobUrlCache.get(pluginPath)
+      if (old) URL.revokeObjectURL(old.blobUrl)
+      pluginBlobUrlCache.set(pluginPath, { blobUrl, mtime: currentMtime })
+    }
+
     let module: Record<string, unknown>
     try {
       module = (await import(/* @vite-ignore */ blobUrl)) as Record<string, unknown>
-    } finally {
+    } catch (err) {
+      // import 失败时清除缓存
+      if (currentMtime) pluginBlobUrlCache.delete(pluginPath)
+      URL.revokeObjectURL(blobUrl)
+      throw err
+    }
+    // mtime 不可用时未缓存，import 成功后立即 revoke 释放内存
+    if (!currentMtime) {
       URL.revokeObjectURL(blobUrl)
     }
 
@@ -320,11 +326,7 @@ async function loadPluginModuleWithRef(
     }
     return { manifest, module }
   } catch (err) {
-    // Surface a more useful diagnostic when the failure was caused
-    // by an unrewritten `import` statement surviving the
-    // import-to-const transforms above. Otherwise the user just
-    // sees the generic "manifest missing" placeholder, which is
-    // hard to debug.
+    // 未重写的 import 失败时给出更明确的诊断
     const remainingImports = code.match(/^import\s.*$/gm)
     const errMsg = err instanceof Error ? err.message : String(err)
     let detailMsg = errMsg
@@ -344,20 +346,7 @@ async function loadPluginModuleWithRef(
   }
 }
 
-/**
- * Stash the dynamic-import result on a definition as a non-
- * enumerable field. The host takeover layer uses this to call
- * `setHost` on the plugin's bundled SDK at hook-fire time
- * (see `plugin-host-takeover.ts`).
- *
- * We use `Object.defineProperty` with `enumerable: false` so
- * the field doesn't show up in JSON.stringify(definition) or
- * spread-copies that consumers might take. Vite's IIFE bundle
- * exposes the plugin's SDK `setHost` as a top-level property
- * only if the entry file re-exports it; without the re-export
- * the takeover is silently skipped and the hook runs against
- * the SDK's in-process stubs.
- */
+/** 以 non-enumerable 字段保存模块引用供 host takeover 调用 setHost。 */
 function attachPluginModule(
   def: PluginDefinition,
   module: Record<string, unknown> | null
@@ -371,25 +360,7 @@ function attachPluginModule(
   })
 }
 
-/**
- * Load all plugins: scan metadata from Rust, then load JS modules.
- * Returns PluginDefinition[] ready for the plugin store.
- *
-/**
- * Plugins are loaded with bounded concurrency to avoid overwhelming
- * the browser's module loader with too many simultaneous `import()`
- * calls from blob URLs. Each import triggers parse → link →
- * evaluate, which is CPU-bound and benefits from not running
- * dozens in parallel.
- *
- * The base concurrency (`LOAD_CONCURRENCY_BASE = 4`) is tuned for
- * a typical mix of small and medium plugins. We scale up slightly
- * for larger install sets because the same wall-clock time can
- * absorb more work in parallel; we cap at 8 because going past
- * that point starts to thrash the V8 module cache and balloon
- * memory. The lower bound is `min(2, items.length)` so we never
- * spin up more workers than there are plugins to load.
- */
+/** 扫描元数据并有限并发加载所有插件。 */
 const LOAD_CONCURRENCY_BASE = 4
 const LOAD_CONCURRENCY_MAX = 8
 const LOAD_CONCURRENCY_LARGE_SET = 50
@@ -408,14 +379,7 @@ async function loadWithConcurrency(
   let nextIdx = 0
   const failureSlots: (PluginLoadFailure | null)[] = new Array(items.length).fill(null)
 
-  // Per-worker loop. Each worker pulls the next index off the
-  // shared counter and processes it with the loader function.
-  // We use an "allSettled" pattern (per-item try/catch + index
-  // slot) so a single broken manifest cannot abort the rest of
-  // the batch. The previous implementation was a `Promise.all`
-  // over a single `fn` per item; any thrown error would reject
-  // the whole batch and the user would see "no plugins" instead
-  // of "1 plugin failed, 49 loaded".
+  // allSettled 模式：单个失败不影响其他
   async function worker() {
     while (nextIdx < items.length) {
       const idx = nextIdx++
@@ -428,10 +392,7 @@ async function loadWithConcurrency(
           failureSlots[idx] = outcome.failure
         }
       } catch (err) {
-        // Defensive net: a synchronous throw inside the loader
-        // body (e.g. building the placeholder def with a bad
-        // iconPosition cast) is treated as a load failure for
-        // that plugin only, not for the whole batch.
+        // 同步 throw 视为单插件失败
         const meta = items[idx]
         const reason = err instanceof Error ? `${err.message}` : String(err)
         console.error(`[PluginLoader] Unexpected throw loading plugin ${meta.id}:`, err)
@@ -452,10 +413,7 @@ async function loadWithConcurrency(
   )
   await Promise.all(workers)
 
-  // Compact the per-index slots into dense arrays. We use the
-  // dedicated counters (instead of `filter(Boolean)`) so the
-  // result preserves the original load order — useful for log
-  // readability and stable failure keys across re-scans.
+  // 用计数器收集结果以保持原始顺序
   const densePlugins: PluginDefinition[] = []
   for (let i = 0; i < items.length; i++) {
     const def = plugins[i]
@@ -469,33 +427,13 @@ async function loadWithConcurrency(
   return { plugins: densePlugins, failures: denseFailures }
 }
 
-/**
- * The result of attempting to load a single plugin. Either
- * `definition` is set (with or without `failure`), or the loader
- * decided to omit the def (rare; reserved for future "skip"
- * optimizations). We keep both fields on the same struct so the
- * caller doesn't have to merge two parallel arrays.
- */
+/** 单插件加载结果 */
 interface PluginLoadOutcome {
   definition: PluginDefinition | null
   failure: PluginLoadFailure | null
 }
 
-/**
- * Load all plugins: scan metadata from Rust, then load JS modules.
- *
- * Returns a `PluginLoadResult` with both the successfully hydrated
- * `PluginDefinition[]` (including a placeholder "broken plugin"
- * entry for any plugin that failed to load, so the user can still
- * see and uninstall it from the main grid) and a parallel
- * `PluginLoadFailure[]` keyed by plugin id.
- *
- * The implementation uses an "allSettled" pattern internally: a
- * single broken manifest no longer aborts the rest of the batch.
- * The other 49 plugins load normally and the failure surfaces in
- * the top-of-manager warning banner. This is the G2 fix from
- * `.trae/specs/plugin-management-gap-analysis/spec.md`.
- */
+/** 加载全部插件：扫描元数据并加载 JS 模块 */
 export async function loadAllPlugins(
   rustMetas: PluginMetadataRust[]
 ): Promise<PluginLoadResult> {
@@ -503,10 +441,7 @@ export async function loadAllPlugins(
     console.log(`[PluginLoader] loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
   }
   return loadWithConcurrency(rustMetas, async (meta) => {
-      // loadPluginModuleWithRef already catches synchronous and
-      // async errors and returns `{ manifest: null, module: null }`
-      // — we still treat that as a "load failure" so the banner
-      // and a placeholder entry are produced.
+      // manifest 为 null 时按加载失败处理
       const { manifest, module, error } = await loadPluginModuleWithRef(meta.plugin_path)
 
       if (manifest) {
@@ -520,35 +455,20 @@ export async function loadAllPlugins(
           iconPosition: (manifest.iconPosition ?? meta.icon_position ?? undefined) as PluginDefinition['iconPosition'],
           contentPosition: (manifest.contentPosition ?? meta.content_position ?? undefined) as PluginDefinition['contentPosition'],
           order: manifest.order ?? meta.order,
-          // Persisted enabled state (.disabled marker) takes precedence
-          // over the manifest's declared enabled value.
+          // .disabled 标记优先于 manifest
           enabled: meta.enabled,
           icon: manifest.icon,
           panel: manifest.panel,
-          // Custom toolbar button component. When provided, the host
-          // renders this component instead of the default icon + button
-          // pattern. Allows plugins to implement dropdown menus, direct
-          // actions, etc.
+          // 自定义工具栏按钮，覆盖默认图标
           toolbarButton: manifest.toolbarButton,
-          // Settings dialog component. Carried over from the manifest
-          // verbatim; if the plugin doesn't declare one, the field is
-          // `undefined` and the plugin manager hides the Settings
-          // button for that plugin.
+          // 设置对话框组件，未声明时为 undefined
           settings: manifest.settings,
           pluginPath: meta.plugin_path,
           hasBackend: meta.has_backend,
-          // True when the installed plugin ships a `settings.json`
-          // schema. The card renders a second Settings button (→
-          // PluginSettingsDialog) only when this is set, so the user
-          // can edit schema-driven settings even if the plugin
-          // author didn't ship a React `settings` component.
+          // 是否随附 settings.json schema
           hasSettingsSchema: meta.has_settings_schema,
           permissions: manifest.permissions ?? [],
-          // Carry lifecycle hooks from the manifest onto the runtime
-          // definition. The store invokes these at register /
-          // unregister / enable / disable time. If a plugin author
-          // didn't define any hooks this stays undefined, which is
-          // fine – runLifecycleHook treats undefined as a no-op.
+          // 挂载生命周期钩子，未定义时为 undefined
           hooks: {
             onLoad: manifest.onLoad,
             onUnload: manifest.onUnload,
@@ -559,23 +479,14 @@ export async function loadAllPlugins(
             onActivate: manifest.onActivate,
             onDeactivate: manifest.onDeactivate,
           },
-          // Task 13 / G13: command-palette ids contribute to
-          // the conflict detector (see `plugin-conflicts.ts`).
-          // Pass-through verbatim from the manifest; omitted
-          // when the plugin author didn't declare any entries.
+          // 命令面板 id 透传给冲突检测器
           commandPalette: manifest.commandPalette,
           source: meta.source,
         } satisfies PluginDefinition
         attachPluginModule(def, module)
         return { definition: def, failure: null }
       }
-      // Plugin without a valid manifest - create a placeholder that
-      // surfaces a clear, visible icon (PlugZap) and a short panel
-      // explaining the failure. The previous `() => null` produced
-      // an *invisible* sidebar entry that the user could click but
-      // not see, making it impossible to debug a missing manifest.
-      // We use `createElement` instead of JSX so this file stays a
-      // plain `.ts` module (no tsx transform needed for the loader).
+      // 无效 manifest 时返回占位组件
       const fallbackIcon: ReactNode = createElement(PlugZap, { size: 18 })
       const fallbackPanel: ReactNode = createElement(
         'div',
@@ -627,9 +538,7 @@ export async function loadAllPlugins(
         permissions: [],
         source: meta.source,
       } satisfies PluginDefinition
-      // The placeholder def is returned so the user can see and
-      // uninstall the broken package from the main grid. The
-      // failure record is what the banner surfaces.
+      // 返回占位定义，便于卸载损坏插件
       const baseReason =
         'manifest missing or invalid: index.js did not export a valid `manifest` object. ' +
         'The plugin package may be incomplete or corrupted.'

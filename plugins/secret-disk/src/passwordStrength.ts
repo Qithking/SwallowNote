@@ -1,38 +1,25 @@
-/**
- * 密码强度校验工具。
- *
- * 规则（spec）：
- * - 最少 8 个字符，最多 256 个字符
- * - 至少包含一个字母（a-z, A-Z）
- * - 至少包含一个数字（0-9）
- * - 不满足全部条件时禁止提交
- *
- * 强度等级：
- * - weak：仅满足最小长度（8-11 字符，仅字母或仅数字）
- * - medium：满足最小长度 + 字母 + 数字（≥12 字符）
- * - strong：满足最小长度 + 字母 + 数字 + 特殊字符（≥12 字符），或 ≥16 字符任意组合
- */
+/** 密码强度校验工具：长度+字母+数字，分 weak/medium/strong 三级 */
 
-/** 密码长度限制。 */
+/** 密码长度限制 */
 export const PASSWORD_MIN_LEN = 8
 export const PASSWORD_MAX_LEN = 256
 
-/** 校验结果：包含是否通过、错误信息、强度等级。 */
+/** 校验结果 */
 export interface PasswordValidation {
-  /** 是否满足最低提交要求（长度 + 字母 + 数字）。 */
+  /** 是否满足最低提交要求 */
   valid: boolean
-  /** 错误信息（valid=false 时有值）。 */
+  /** 错误信息（valid=false 时有值） */
   error?: string
-  /** 强度等级（valid=true 时有值）。 */
+  /** 强度等级（valid=true 时有值） */
   strength?: PasswordStrength
 }
 
 type PasswordStrength = 'weak' | 'medium' | 'strong'
 
-/** 特殊字符正则：非字母非数字的可打印字符。 */
+/** 特殊字符正则 */
 const SPECIAL_CHAR_RE = /[^a-zA-Z0-9\s]/
 
-/** 校验密码并返回详细结果。 */
+/** 校验密码并返回详细结果 */
 export function validatePassword(password: string): PasswordValidation {
   const len = password.length
 
@@ -69,7 +56,7 @@ export function validatePassword(password: string): PasswordValidation {
   return { valid: true, strength }
 }
 
-/** 强度等级对应的中文标签。 */
+/** 强度等级对应的中文标签 */
 export function strengthLabel(strength: PasswordStrength): string {
   switch (strength) {
     case 'weak':
@@ -81,7 +68,7 @@ export function strengthLabel(strength: PasswordStrength): string {
   }
 }
 
-/** 强度等级对应的颜色（用于指示器）。 */
+/** 强度等级对应的颜色 */
 export function strengthColor(strength: PasswordStrength): string {
   switch (strength) {
     case 'weak':

@@ -54,7 +54,22 @@ function streamLang(parser: any): any {
 }
 
 // Cache for dynamically loaded language extensions to avoid re-importing
+// 设置 LRU 上限，避免无界增长占用内存
+const DYNAMIC_EXTENSION_CACHE_LIMIT = 10
 const dynamicExtensionCache = new Map<string, any>()
+
+// 统一的写入入口：超过上限时淘汰最旧条目（Map 保持插入顺序），更新已存在 key 时移到末尾（LRU）
+function setDynamicExtension(key: string, value: any): void {
+  if (dynamicExtensionCache.has(key)) {
+    dynamicExtensionCache.delete(key)
+  } else if (dynamicExtensionCache.size >= DYNAMIC_EXTENSION_CACHE_LIMIT) {
+    const oldestKey = dynamicExtensionCache.keys().next().value
+    if (oldestKey !== undefined) {
+      dynamicExtensionCache.delete(oldestKey)
+    }
+  }
+  dynamicExtensionCache.set(key, value)
+}
 
 /**
  * Language extension registry.
@@ -148,7 +163,7 @@ function resolveLanguageExtension(lang: string): any | Promise<any> {
   // If the result is a Promise (dynamic import), cache it when resolved
   if (result instanceof Promise) {
     result.then((ext: any) => {
-      dynamicExtensionCache.set(lang, ext)
+      setDynamicExtension(lang, ext)
     }).catch(() => {
       // Remove from cache if import failed so it can be retried
       dynamicExtensionCache.delete(lang)

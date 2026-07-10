@@ -2,6 +2,7 @@
  * useTheme Hook - Theme management
  */
 import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useUIStore } from '@/stores'
 
 function hexToHSL(hex: string): { h: number; s: number; l: number } {
@@ -101,7 +102,7 @@ function persistTheme(theme: string, darkCssVars: Record<string, string>, lightC
   try {
     localStorage.setItem('sn-theme', JSON.stringify({ theme, darkCssVars, lightCssVars }))
   } catch {
-    // localStorage may be unavailable (private mode, quota); ignore
+    // localStorage 不可用时忽略
   }
 }
 
@@ -114,15 +115,22 @@ function clearCustomVars() {
 }
 
 export function useTheme() {
-  const { theme, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId } = useUIStore()
+  const { theme, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId } = useUIStore(
+    useShallow((s) => ({
+      theme: s.theme,
+      themeColor: s.themeColor,
+      customThemes: s.customThemes,
+      activeLightCustomThemeId: s.activeLightCustomThemeId,
+      activeDarkCustomThemeId: s.activeDarkCustomThemeId,
+    })),
+  )
 
-  // Track system dark mode preference so the second useEffect re-runs
-  // when system preference changes (needed for theme === 'system')
+  // 跟踪系统暗色偏好，供 system 主题重渲染
   const [systemIsDark, setSystemIsDark] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches
   )
 
-  // Effect 1: Apply dark class based on theme setting and system preference
+  // Effect 1：按主题与系统偏好应用 dark 类
   useEffect(() => {
     const root = document.documentElement
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -145,8 +153,7 @@ export function useTheme() {
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [theme])
 
-  // Effect 2: Apply custom theme CSS variables and persist to localStorage
-  // systemIsDark is a dependency so this re-runs when system preference changes
+  // Effect 2：应用自定义主题变量并持久化
   useEffect(() => {
     const root = document.documentElement
     const isDark = root.classList.contains('dark')
@@ -173,7 +180,7 @@ export function useTheme() {
       root.style.setProperty('--text-primary', colors.textColor)
       root.style.setProperty('--border-color', colors.borderColor)
       root.style.setProperty('--popover', hexToHSLString(colors.tooltipColor))
-      // Tab colors: tab bar bg is transparent, matches content bg
+      // tab 颜色：tab 栏背景透明，匹配内容背景
       root.style.setProperty('--tab-bg', 'transparent')
       root.style.setProperty('--tab-active-bg', 'transparent')
       root.style.setProperty('--tab-activeBorder', 'transparent')
@@ -191,8 +198,7 @@ export function useTheme() {
       clearCustomVars()
     }
 
-    // Cache both dark and light CSS var sets so the inline script picks
-    // the right one based on LIVE matchMedia at boot time
+    // 缓存 dark/light CSS 变量集，供启动时内联脚本选用
     const darkCssVars = buildCssVars(true, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId)
     const lightCssVars = buildCssVars(false, themeColor, customThemes, activeLightCustomThemeId, activeDarkCustomThemeId)
     persistTheme(theme, darkCssVars, lightCssVars)

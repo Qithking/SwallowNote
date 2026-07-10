@@ -1,23 +1,4 @@
-/**
- * Plugin command-palette registry.
- *
- * Mirrors `src/lib/plugin-menu.ts` (the context-menu registry) but
- * holds entries for the global command palette (Ctrl/Cmd+P)
- * rather than per-surface context menus. Plugins call
- * `registerCommand` from their `onLoad` (or any lifecycle hook)
- * with a stable id and a trigger callback; the host:
- *
- *   - lists the entries in the command palette, grouped by
- *     `category` (falls back to the plugin's display name)
- *   - dispatches keyboard shortcuts configured in
- *     `useUIStore().pluginCommandShortcuts[<pluginId>:<id>]`
- *   - surfaces the binding UI in the settings panel
- *
- * Lifecycle ownership is symmetric with the context-menu registry:
- * `clearPluginCommands(pluginId)` is called from the plugin store
- * on unregister / `setPlugins` diff, so plugin authors do not have
- * to remember to clean up their contributions in `onUnload`.
- */
+/** 插件命令面板注册表 */
 import type {
   PluginCommand,
   PluginCommandRegistry,
@@ -25,39 +6,20 @@ import type {
 } from '@/types/plugin'
 import { assertPermission } from './plugin-permission-guard'
 
-/**
- * Per-plugin entry stamped on registration so a later
- * unregister / clear can find the entry without scanning by id
- * (which is plugin-id-scoped but a registry-wide snapshot is what
- * `list()` returns).
- *
- * We also keep the plugin id on the entry because `list()` filters
- * by `when()` and we want the snapshot returned to include the
- * plugin attribution for the command palette / settings UI.
- */
+/** 注册时标记插件 id 的命令条目 */
 export interface RegisteredPluginCommand extends PluginCommand {
-  /** Owning plugin id; stamped on register. */
+  /** 所属插件 id */
   __pluginId: string
 }
 
 class PluginCommandRegistryImpl implements PluginCommandRegistry {
-  /**
-   * Internal storage: per-plugin array of entries. Iterated on
-   * `list()` to keep ordering deterministic (registration order).
-   * `subscribe` listeners are notified after every mutation so
-   * React components re-render in the same tick.
-   */
+  /** 内部存储：按插件数组，保持注册序 */
   private readonly byPlugin = new Map<string, RegisteredPluginCommand[]>()
   private readonly listeners = new Set<PluginCommandsListener>()
 
   register(pluginId: string, command: PluginCommand): void {
     assertPermission(pluginId, 'events', `register command "${command.id}"`)
-    // Replace any prior entry with the same id from the same plugin
-    // so a re-register (e.g. after a manifest reload) doesn't
-    // duplicate. Cross-plugin duplicate ids are allowed and indexed
-    // independently — the command palette surfaces them as separate
-    // entries and the settings panel keys bindings by
-    // `<pluginId>:<id>` to keep them distinct.
+    // 同插件同 id 重复注册时替换
     this.unregister(pluginId, command.id)
     const owned: RegisteredPluginCommand = { ...command, __pluginId: pluginId }
     let list = this.byPlugin.get(pluginId)
@@ -86,9 +48,7 @@ class PluginCommandRegistryImpl implements PluginCommandRegistry {
   }
 
   list(): PluginCommand[] {
-    // Flatten in registration order. The command palette
-    // re-sorts by category / label after the `when()` filter
-    // runs, so we don't need to sort here.
+    // 按注册序展平
     const out: PluginCommand[] = []
     for (const list of this.byPlugin.values()) {
       for (const entry of list) {
@@ -110,43 +70,37 @@ class PluginCommandRegistryImpl implements PluginCommandRegistry {
       try {
         listener()
       } catch (err) {
-        // Listener errors must not break the registry's mutation
-        // path. Log and keep going — the next mutation will give
-        // them another chance.
+        // 监听器异常不阻断变更
         console.error('[plugin-commands] listener threw:', err)
       }
     }
   }
 }
 
-/** Host singleton. Mirrors the per-plugin context-menu singleton. */
+/** 宿主单例 */
 export const pluginCommandRegistry = new PluginCommandRegistryImpl()
 
-/** Register a single command-palette entry. */
+/** 注册单个命令 */
 export function registerCommand(pluginId: string, command: PluginCommand): void {
   pluginCommandRegistry.register(pluginId, command)
 }
 
-/** Unregister a specific command by id. */
+/** 按 id 注销命令 */
 export function unregisterCommand(pluginId: string, commandId: string): void {
   pluginCommandRegistry.unregister(pluginId, commandId)
 }
 
-/** Drop every contribution owned by a given plugin. */
+/** 清除插件全部命令 */
 export function clearPluginCommands(pluginId: string): void {
   pluginCommandRegistry.clearPlugin(pluginId)
 }
 
-/**
- * Read-only snapshot of all currently-registered commands. The
- * command palette and the settings panel both call this inside a
- * subscription callback so they re-render on every change.
- */
+/** 已注册命令只读快照 */
 export function listPluginCommands(): PluginCommand[] {
   return pluginCommandRegistry.list()
 }
 
-/** Subscribe to registry mutations. Returns an unsubscribe fn. */
+/** 订阅注册表变更 */
 export function subscribePluginCommands(listener: PluginCommandsListener): () => void {
   return pluginCommandRegistry.subscribe(listener)
 }

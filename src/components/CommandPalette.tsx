@@ -49,6 +49,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useUIStore } from '@/stores'
+import { useShallow } from 'zustand/react/shallow'
 import { usePluginCommands } from '@/lib/plugin-hooks'
 import {
   Dialog,
@@ -128,13 +129,18 @@ function pluginIconFor(command: PluginCommand): typeof Zap {
 function CommandPalette() {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const { commandPaletteVisible, toggleCommandPalette, pluginCommandShortcuts, customShortcuts } = useUIStore()
+  // useShallow 选择性订阅，避免全量订阅 useUIStore 导致的重渲染
+  const { commandPaletteVisible, toggleCommandPalette, pluginCommandShortcuts, customShortcuts } = useUIStore(
+    useShallow((s) => ({
+      commandPaletteVisible: s.commandPaletteVisible,
+      toggleCommandPalette: s.toggleCommandPalette,
+      pluginCommandShortcuts: s.pluginCommandShortcuts,
+      customShortcuts: s.customShortcuts,
+    })),
+  )
   const pluginCommands = usePluginCommands()
 
-  // Lookup plugin id by command id so we can show the bound
-  // shortcut. The list snapshot from `usePluginCommands` already
-  // filters by `when()`, so we just need to project the
-  // `<pluginId>:<commandId>` key.
+  // 通过 command id 查找 plugin id 以显示绑定快捷键
   const pluginCommandItems = useMemo<CommandItem[]>(() => {
     return pluginCommands.map((cmd) => {
       const pluginCmd = cmd as PluginCommand & { __pluginId: string }
@@ -234,9 +240,7 @@ function CommandPalette() {
     }
   }
 
-  // Group helpers. We render one CommandGroup per category so
-  // plugins that share a category cluster together; built-ins
-  // keep their original Navigation/Edit/View layout.
+  // 按分组渲染 CommandGroup，同类插件聚合
   const navigation = commands.filter((c) => c.group === 'navigation')
   const edit = commands.filter((c) => c.group === 'edit')
   const view = commands.filter((c) => c.group === 'view')

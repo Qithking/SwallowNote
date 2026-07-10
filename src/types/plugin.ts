@@ -3,44 +3,36 @@
 import type { ReactNode, ComponentType } from 'react'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 
-// ─── Enum-like types ───────────────────────────────────────────────────────────
+// 枚举类型
 
-/** Where the plugin icon (trigger) is displayed */
+/** 插件图标显示位置 */
 export type IconPosition = 'sidebar' | 'editorToolbar' | 'titleBar'
 
-/** Where the plugin panel (content) is displayed */
+/** 插件面板显示位置 */
 export type ContentPosition = 'leftPanel' | 'rightPanel' | 'fullPanel' | 'editorArea'
 
-// ─── Permission types ───────────────────────────────────────────────────────────
+// 权限类型
 
-/**
- * Plugin permission types. Plugins declare what permissions they need
- * in their manifest, and users grant/revoke them during installation
- * or later in settings.
- */
+/** 插件权限类型，清单中声明，安装或设置时授权 */
 export type PluginPermission =
-  | 'storage'           // Access to persistent storage
-  | 'events'            // Subscribe to host events
-  | 'context-menu'      // Register context menu items
-  | 'backend'           // Access to Rust backend IPC
-  | 'filesystem-read'   // Read files from filesystem
-  | 'filesystem-write'  // Write files to filesystem
-  | 'network'           // Make network requests
-  | 'clipboard'         // Access clipboard
-  | 'notifications'     // Show notifications
-  | 'editor'            // Register a custom file editor (editorFileExtensions)
+  | 'storage'           // 持久化存储
+  | 'events'            // 订阅宿主事件
+  | 'context-menu'      // 注册右键菜单项
+  | 'backend'           // Rust 后端 IPC
+  | 'filesystem-read'   // 读文件系统
+  | 'filesystem-write'  // 写文件系统
+  | 'network'           // 网络请求
+  | 'clipboard'         // 访问剪贴板
+  | 'notifications'     // 显示通知
+  | 'editor'            // 注册自定义编辑器
 
-/**
- * Permission metadata for display in UI
- */
+/** 权限元数据（UI 展示用） */
 export interface PermissionInfo {
   permission: PluginPermission
   icon?: string
 }
 
-/**
- * Permission status for a plugin
- */
+/** 插件权限状态 */
 export interface PluginPermissionStatus {
   permission: PluginPermission
   granted: boolean
@@ -61,12 +53,9 @@ export const PLUGIN_PERMISSIONS: PermissionInfo[] = [
   { permission: 'editor' },
 ]
 
-// ─── Event bus types ───────────────────────────────────────────────────────────
+// 事件总线类型
 
-/**
- * Host-emitted events that plugins can subscribe to. Each event has a
- * strongly typed payload so subscribers can read the shape without casting.
- */
+/** 宿主事件，每个事件有强类型 payload */
 export type PluginEvent =
   | 'note:open'
   | 'note:close'
@@ -81,7 +70,7 @@ export type PluginEvent =
   | 'editor:registered'
   | 'editor:unregistered'
 
-/** Payload shape for each event. Add a new branch when introducing a new event. */
+/** 各事件 payload 类型，新增事件时添加分支 */
 export interface PluginEventPayloadMap {
   'note:open': { noteId: string; path: string }
   'note:close': { noteId: string; path: string }
@@ -97,147 +86,84 @@ export interface PluginEventPayloadMap {
   'editor:unregistered': { pluginId: string; extension: string }
 }
 
-/** Handler signature for an event subscription. */
+/** 事件订阅 handler 签名 */
 export type PluginEventHandler<E extends PluginEvent = PluginEvent> = (
   payload: PluginEventPayloadMap[E]
 ) => void
 
-// ─── Plugin manifest (from index.js) ──────────────────────────────────────────
+// 插件清单（来自 index.js）
 
-/**
- * The runtime context provided to lifecycle hooks and stored on the
- * PluginPanelProps. It carries the plugin's identity, its on-disk path,
- * a typed backend call, and a logger.
- */
+/** 运行时上下文，传递给生命周期 hook */
 export interface PluginContext {
   pluginId: string
   pluginPath: string
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
 }
 
-/**
- * A lifecycle hook signature. Hooks can be sync or async; the host awaits
- * async ones and catches any rejection so a buggy plugin never blocks the
- * main thread.
- */
+/** 生命周期 hook 签名，可同步或异步 */
 export type PluginLifecycleHook = (context: PluginContext) => void | Promise<void>
 
-/**
- * Persistent storage API for plugins. Backed by a JSON file in
- * `<app_data>/plugins/<pluginId>/storage.json`. The host scopes keys to
- * the plugin id so two plugins cannot collide on `theme`/`view`/etc.
- */
+/** 插件持久化存储，按插件 id 隔离键空间 */
 export interface PluginStorage {
   get<T = unknown>(key: string): Promise<T | null>
   set<T = unknown>(key: string, value: T): Promise<void>
   delete(key: string): Promise<void>
   clear(): Promise<void>
-  /** List all keys in this plugin's namespace. Useful for debug
-   *  tooling and "export all" features. */
+  /** 列出键，用于调试和导出 */
   keys(): Promise<string[]>
   /** keys(): 列出键。entries(): 返回 [{key, size}] 按 size 降序。 */
   entries(): Promise<Array<{ key: string; size: number }>>
 }
 
-/**
- * Event subscription API exposed on the panel. `on` returns an
- * unsubscribe function so consumers can clean up in a `useEffect`
- * return callback without holding a reference to the bus.
- */
+/** 面板事件订阅 API，on 返回取消函数 */
 export interface PluginEventBus {
   on<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): () => void
   off<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void
-  /** Remove all handlers belonging to a specific plugin (called on uninstall). */
+  /** 移除该插件的所有监听器（卸载时调用） */
   removeAllListenersForPlugin(pluginId: string): void
 }
 
 /** 插件间依赖声明。version 为 npm 风格 semver 范围。 */
 export interface PluginDependency {
-  /** Unique plugin identifier, e.g. "com.example.other-plugin". */
+  /** 唯一插件标识符 */
   id: string
-  /** Semver range string. Empty / "*" matches any version. */
+  /** semver 范围，空或 * 匹配任意版本 */
   version: string
 }
 
 /** 插件 index.js 导出的原始清单。 */
 export interface PluginManifest {
-  /** Unique plugin identifier (e.g. "com.example.my-plugin") */
+  /** 唯一插件标识符 */
   id: string
-  /** Display name */
+  /** 显示名 */
   name: string
-  /** Plugin description */
+  /** 插件描述 */
   description?: string
-  /** Version string (semver recommended) */
+  /** 版本号（建议 semver） */
   version?: string
-  /** Author name */
+  /** 作者名 */
   author?: string
-  /** ISO-8601 published date */
+  /** ISO-8601 发布日期 */
   publishedAt?: string
-  /**
-   * Where to show the icon. Optional: a plugin that does not
-   * provide a UI surface (e.g. a file-format editor that's
-   * only triggered by opening the matching file) can omit
-   * this field. When omitted, the host's
-   * `buildRegistry` simply skips the plugin (no icon is
-   * rendered anywhere, no panel mount is attempted) but the
-   * plugin's other capabilities (`editorFileExtensions`,
-   * lifecycle hooks, settings, …) are still honoured.
-   */
+  /** 图标位置，无 UI 的插件可省略 */
   iconPosition?: IconPosition
-  /**
-   * Where to show the panel. Optional for the same reason as
-   * `iconPosition`: a plugin that only contributes an
-   * `editorComponent` (e.g. mind map) has no standalone
-   * panel to mount, so this field can be omitted.
-   */
+  /** 面板位置，仅贡献编辑器组件时可省略 */
   contentPosition?: ContentPosition
-  /** Sort order in the icon bar (lower = higher), default 100 */
+  /** 图标栏排序（小者靠前），默认 100 */
   order?: number
-  /** Whether the plugin is enabled, default true */
+  /** 是否启用，默认 true */
   enabled?: boolean
-  /**
-   * Icon – can be a React component or ReactNode.
-   * For component type, it will receive { size?: number } props.
-   * Optional: omit when the plugin does not provide a UI
-   * surface. A plugin that omits both `icon` and `iconPosition`
-   * will not be rendered in any of the host's chrome surfaces
-   * (title bar / activity bar / editor toolbar). It can
-   * still contribute `editorFileExtensions`, lifecycle hooks,
-   * and settings.
-   */
+  /** 图标，可为组件或 ReactNode，省略则不渲染 */
   icon?: ComponentType<{ size?: number }> | ReactNode
-  /**
-   * Panel content – can be a React component or ReactNode.
-   * For component type, it will receive PluginContext as props.
-   * Optional: omit when the plugin does not provide a
-   * standalone panel. The host will not try to mount a panel
-   * for the plugin.
-   */
+  /** 面板内容，可为组件或 ReactNode，省略则不挂载 */
   panel?: ComponentType<PluginPanelProps> | ReactNode
   /** 可选自定义工具栏按钮组件。 */
   toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
-  /**
-   * Optional settings UI component. Renders inside a modal opened from
-   * the plugin manager. Same props as `panel`; use `close` to dismiss.
-   */
+  /** 设置 UI 组件，在弹窗中渲染，用 close 关闭 */
   settings?: ComponentType<PluginPanelProps> | ReactNode
-  /**
-   * Optional file extensions (with leading dot, lower-cased, e.g.
-   * `['.smm']`) this plugin can render. When the host opens a file
-   * whose extension is listed here, it delegates rendering to
-   * {@link editorComponent} instead of using the built-in Markdown
-   * / code editor. Multiple plugins cannot claim the same extension;
-   * the host rejects the second installer with a toast. The plugin
-   * must also declare `'editor'` in {@link permissions}.
-   */
+  /** 可渲染的文件扩展名（带点小写），同一扩展名仅允许一个插件注册 */
   editorFileExtensions?: string[]
-  /**
-   * Optional React component used to render files whose extension
-   * matches one of {@link editorFileExtensions}. The host passes
-   * `{ content, onChange }`: the plugin reads the initial `content`
-   * and pushes the new content back via `onChange` so the host can
-   * persist it through the same pipeline as Markdown / code edits.
-   */
+  /** 编辑器组件，接收 content/onChange */
   editorComponent?: ComponentType<{
     content: string
     onChange: (content: string) => void
@@ -250,31 +176,28 @@ export interface PluginManifest {
   commandPalette?: string[]
   /** 用户 opt-in 的自动更新标志，持久化在 localStorage。 */
   autoUpdate?: boolean
-  // ── Lifecycle hooks (all optional) ────────────────────────────────────────
-  /** Called once after the plugin module has been loaded. */
+  // 生命周期 hook（均可选）
+  /** 插件模块加载后调用一次 */
   onLoad?: PluginLifecycleHook
-  /** Called once before the plugin is unregistered. */
+  /** 插件注销前调用一次 */
   onUnload?: PluginLifecycleHook
-  /** Called once when the plugin transitions to enabled. */
+  /** 插件切换为启用时调用一次 */
   onEnable?: PluginLifecycleHook
-  /** Called once when the plugin transitions to disabled. */
+  /** 插件切换为禁用时调用一次 */
   onDisable?: PluginLifecycleHook
-  /** Called each time the panel component is mounted. */
+  /** 面板组件挂载时调用 */
   onMount?: PluginLifecycleHook
-  /** Called each time the panel component is unmounted. */
+  /** 面板组件卸载时调用 */
   onUnmount?: PluginLifecycleHook
-  /** Called when the panel becomes the active/visible one. */
+  /** 面板变为活动/可见时调用 */
   onActivate?: PluginLifecycleHook
-  /** Called when the panel stops being the active/visible one. */
+  /** 面板不再活动/可见时调用 */
   onDeactivate?: PluginLifecycleHook
 }
 
-// ─── Runtime plugin definition (stored in plugin store) ────────────────────────
+// 运行时插件定义（存储在 plugin store 中）
 
-/**
- * The runtime representation stored in the plugin store.
- * This is the "hydrated" version where icon/panel are guaranteed to be usable.
- */
+/** 运行时表示，icon/panel 已解析为可用 */
 export interface PluginDefinition {
   id: string
   name: string
@@ -282,94 +205,44 @@ export interface PluginDefinition {
   version: string
   author: string
   publishedAt: string
-  /**
-   * Where to show the icon. Optional: a plugin that does not
-   * provide a UI surface (e.g. a file-format editor) can
-   * omit this field. The host's `buildRegistry` skips
-   * plugins whose `iconPosition` is undefined so they never
-   * appear in the title bar / activity bar / editor toolbar.
-   */
+  /** 图标位置，未定义时不出现在任何工具栏 */
   iconPosition?: IconPosition
-  /**
-   * Where to show the panel. Optional for the same reason as
-   * `iconPosition`.
-   */
+  /** 面板位置，同 iconPosition 可省略 */
   contentPosition?: ContentPosition
   order: number
   enabled: boolean
-  /**
-   * Resolved icon component or ReactNode. Optional: omitted
-   * when the manifest does not declare a UI surface. A
-   * plugin without `icon` and `iconPosition` does not render
-   * anywhere in the host's chrome but can still register
-   * `editorFileExtensions`, lifecycle hooks, etc.
-   */
+  /** 已解析的图标组件或 ReactNode，无 UI 时省略 */
   icon?: ComponentType<{ size?: number }> | ReactNode
-  /**
-   * Resolved panel component or ReactNode. Optional: omitted
-   * when the manifest does not declare a standalone panel.
-   */
+  /** 已解析的面板组件或 ReactNode */
   panel?: ComponentType<PluginPanelProps> | ReactNode
-  /**
-   * Optional custom toolbar button component. When provided, the host
-   * renders this component instead of the default icon + button pattern.
-   * The component receives ToolbarButtonProps and can implement custom
-   * interactions (dropdown menus, direct actions, etc.).
-   */
+  /** 自定义工具栏按钮组件，接收 ToolbarButtonProps */
   toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
   /** 可选设置 UI 组件。 */
   settings?: ComponentType<PluginPanelProps> | ReactNode
-  /** File extensions (with leading dot, lower-cased) the plugin can
-   *  render. Mirrors {@link PluginManifest.editorFileExtensions};
-   *  the host uses the runtime value when wiring up file-open
-   *  dispatch. */
+  /** 可渲染的文件扩展名，镜像清单中的字段 */
   editorFileExtensions?: string[]
-  /** Editor component the host mounts for files whose extension
-   *  matches one of {@link editorFileExtensions}. Mirrors
-   *  {@link PluginManifest.editorComponent}. */
+  /** 编辑器组件，镜像清单中的字段 */
   editorComponent?: ComponentType<{
     content: string
     onChange: (content: string) => void
   }> | ReactNode
-  /** Absolute path to the plugin package directory on disk */
+  /** 插件包目录的绝对路径 */
   pluginPath: string
-  /** Whether the plugin has a Rust backend */
+  /** 是否有 Rust 后端 */
   hasBackend: boolean
-  /**
-   * Whether the plugin ships a `settings.json` schema. When true,
-   * the card shows the schema-driven settings button next to the
-   * plugin-built-in `settings` component button.
-   */
+  /** 是否包含 settings.json schema */
   hasSettingsSchema?: boolean
-  /** Permissions declared by the plugin. These are requested during installation. */
+  /** 插件声明的权限，安装时请求 */
   permissions: PluginPermission[]
-  /** Plugin-to-plugin dependencies, normalised from the manifest
-   *  (or merged from the marketplace index entry's `dependencies`
-   *  string list). Consumed by `resolveDependencies` at install time
-   *  to block installs that would otherwise crash on a missing
-   *  peer plugin. See `src/lib/plugin-dependencies.ts`. */
+  /** 插件间依赖，安装时由 resolveDependencies 消费 */
   dependencies?: PluginDependency[]
-  /** Command palette ids contributed by this plugin. Carried
-   *  over from the manifest; consumed by `detectPluginConflicts`
-   *  (Task 13 / G13) to flag two plugins fighting over the same
-   *  palette id. Omitted when the plugin doesn't speak to the
-   *  command palette. */
+  /** 贡献的命令面板 id，由 detectPluginConflicts 消费 */
   commandPalette?: string[]
-  /**
-   * Mirror of the user-managed "auto-update" opt-in (Task 11 /
-   * G11). The store keeps the authoritative value (persisted to
-   * localStorage) but copies it onto the runtime definition so
-   * the installed-card toggle can render synchronously without
-   * re-querying the store on every keystroke. A plugin whose
-   * store record is missing or `false` reads as `false` here as
-   * well — the flag is opt-in, never opt-out by default.
-   */
+  /** 自动更新标志的镜像，store 持有权威值 */
   autoUpdate?: boolean
-  /** The repo URL this plugin was installed from. Empty for local zip uploads. */
+  /** 安装来源 URL，本地 zip 上传时为空 */
   source: string
-  /** Lifecycle hooks carried over from the original manifest. The store
-   *  invokes these at register / unregister / enable / disable. All are
-   *  optional; missing hooks are simply skipped. */
+  /** 生命周期 hook，注册/注销/启用/禁用时调用 */
   hooks?: {
     onLoad?: PluginLifecycleHook
     onUnload?: PluginLifecycleHook
@@ -382,13 +255,9 @@ export interface PluginDefinition {
   }
 }
 
-// ─── Plugin metadata (stored / returned by Rust backend) ──────────────────────
+// 插件元数据（Rust 后端存储/返回）
 
-/**
- * Metadata about a plugin that the Rust backend knows about.
- * This is what Rust returns when scanning the plugins directory.
- * It does NOT contain icon/panel (those are JS-only).
- */
+/** Rust 后端扫描插件目录返回的元数据，不含 icon/panel */
 export interface PluginMetadata {
   id: string
   name: string
@@ -396,45 +265,37 @@ export interface PluginMetadata {
   version: string
   author: string
   publishedAt: string
-  /**
-   * Where the icon should be shown. Optional: a plugin that
-   * does not provide a UI surface (e.g. a file-format editor)
-   * can omit this field. The host's `buildRegistry` skips
-   * plugins whose `iconPosition` is undefined.
-   */
+  /** 图标位置，未定义时跳过渲染 */
   iconPosition?: IconPosition
-  /**
-   * Where the panel should be shown. Optional for the same
-   * reason as `iconPosition`.
-   */
+  /** 面板位置，同 iconPosition 可省略 */
   contentPosition?: ContentPosition
   order: number
   enabled: boolean
-  /** Absolute path to the plugin package directory */
+  /** 插件包目录的绝对路径 */
   pluginPath: string
-  /** Whether a backend/ directory exists */
+  /** 是否有 backend 目录 */
   hasBackend: boolean
-  /** The repo URL this plugin was installed from. Empty for local zip uploads. */
+  /** 安装来源 URL，本地 zip 上传时为空 */
   source: string
 }
 
-// ─── Plugin load failures (per-plugin bypass) ───────────────────────────────
+// 插件加载失败记录
 
 /** 单个加载失败的插件记录。 */
 export interface PluginLoadFailure {
-  /** Plugin id (from Rust metadata, since the manifest may be unreadable). */
+  /** 插件 id（来自 Rust 元数据） */
   id: string
-  /** Display name (from Rust metadata fallback). */
+  /** 显示名（来自 Rust 元数据回退） */
   name: string
-  /** Human-readable reason for the failure. */
+  /** 可读的失败原因 */
   reason: string
-  /** Unix epoch milliseconds when the failure was recorded. */
+  /** 记录时间（Unix 毫秒） */
   ts: number
-  /** Absolute on-disk path of the plugin package, for diagnostics. */
+  /** 插件包绝对路径，用于诊断 */
   pluginPath: string
 }
 
-// ─── Plugin load result (loader → caller) ───────────────────────────────────
+// 插件加载结果（loader → 调用方）
 
 /** loadAllPlugins 的结果。 */
 export interface PluginLoadResult {
@@ -442,13 +303,9 @@ export interface PluginLoadResult {
   failures: PluginLoadFailure[]
 }
 
-// ─── Plugin marketplace / Phase 9.2 ───────────────────────────────────────────
+// 插件市场
 
-/**
- * One row in a remote plugin repository index. Shape mirrors
- * `src-tauri/src/commands/plugin.rs::PluginIndexEntry`. See
- * `docs/plugin-marketplace/README.md` for the protocol spec.
- */
+/** 远程仓库索引中的一行，镜像 Rust 的 PluginIndexEntry */
 export interface PluginIndexEntry {
   id: string
   name: string
@@ -460,11 +317,11 @@ export interface PluginIndexEntry {
   downloadUrl: string
   sha256: string
   signatureB64: string
-  /** Override the repo-level key (optional). */
+  /** 可选的仓库级 key 覆盖 */
   pubkeyB64: string
   /** 最新版本的可选 changelog。 */
   changelog?: string
-  /** Optional ISO-8601 release timestamp for the latest version. */
+  /** 可选 ISO-8601 发布时间 */
   publishedAt?: string
   /** 可选历史版本记录。 */
   versions?: PluginIndexEntryVersion[]
@@ -477,22 +334,13 @@ export interface PluginIndexEntryVersion {
   sha256: string
   /** 每版本 ed25519 签名，缺失时回退到 entry 级签名。 */
   signatureB64?: string
-  /**
-   * Optional per-version pubkey override. Falls back to
-   * `PluginIndexEntry.pubkeyB64`, then `PluginIndex.pubkeyB64`,
-   * via `effectivePubkey` at the install call site.
-   */
+  /** 可选每版本 pubkey 覆盖，回退到 entry 或 index 级 */
   pubkeyB64?: string
   changelog: string
   publishedAt: string
 }
 
-/**
- * Alias kept for the marketplace detail UI / Task 5 spec; the
- * canonical name in the wire format is `PluginIndexEntryVersion`.
- * Both refer to the same per-version record carried in the
- * `versions` array of a `PluginIndexEntry`.
- */
+/** 市场详情 UI 的别名，规范名为 PluginIndexEntryVersion */
 export type PluginIndexVersion = PluginIndexEntryVersion
 
 export interface PluginIndex {
@@ -502,7 +350,7 @@ export interface PluginIndex {
   plugins: PluginIndexEntry[]
 }
 
-/** Returned by the `check_plugin_updates` Tauri command. */
+/** check_plugin_updates 命令的返回类型 */
 export interface PluginUpdateInfo {
   id: string
   localVersion: string
@@ -510,7 +358,7 @@ export interface PluginUpdateInfo {
   sha256: string
 }
 
-/** Returned by the `list_plugin_versions` Tauri command. */
+/** list_plugin_versions 命令的返回类型 */
 export interface PluginVersionInfo {
   version: string
   isActive: boolean
@@ -518,38 +366,31 @@ export interface PluginVersionInfo {
   installedAt: string
 }
 
-// ─── Plugin context ───────────────────────────────────────────────────────────
+// 插件上下文
 
-/** Props passed to plugin panel components */
+/** 插件面板组件的 Props */
 export interface PluginPanelProps {
-  /** Close the current plugin panel */
+  /** 关闭当前插件面板 */
   close: () => void
-  /** Whether this plugin panel is currently active/visible */
+  /** 当前面板是否活动/可见 */
   isActive: boolean
-  /** Plugin ID */
+  /** 插件 ID */
   pluginId: string
-  /**
-   * Call a backend command provided by this plugin.
-   * The command name is relative to the plugin's backend namespace.
-   */
+  /** 调用该插件的后端命令，命令名相对于插件后端命名空间 */
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
-  /** Persistent key/value store scoped to this plugin. */
+  /** 插件隔离的持久化键值存储 */
   store: PluginStorage
-  /** Host event bus. Subscribe to theme / note / locale / settings changes. */
+  /** 宿主事件总线，订阅主题/笔记/语言/设置变更 */
   events: PluginEventBus
-  /** Current active note content (markdown string). Empty string if no note is active. */
+  /** 当前活动笔记内容（markdown），无活动笔记时为空 */
   activeNoteContent: string
-  /** Current active note file path. Empty string if no note is active. */
+  /** 当前活动笔记路径，无活动笔记时为空 */
   activeNotePath: string
   /** 读取单个设置值。 */
   getSetting<T = unknown>(key: string): Promise<T | null>
   /** 持久化单个设置键。 */
   setSetting<T = unknown>(key: string, value: T): Promise<void>
-  /**
-   * Read every stored setting for this plugin. Useful for seeding
-   * local state on mount. Returns the stored values map, falling
-   * back to schema defaults for missing keys.
-   */
+  /** 读取所有设置，缺失键回退到 schema 默认值 */
   getAllSettings(): Promise<Record<string, unknown>>
   /** 订阅设置变化。 */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
@@ -563,55 +404,39 @@ export interface PluginPanelProps {
 
 /** 自定义工具栏按钮 props。size 为推荐 icon 尺寸。 */
 export interface ToolbarButtonProps {
-  /** Recommended icon size for the current toolbar context */
+  /** 推荐 icon 尺寸 */
   size: number
-  /** Whether this plugin's panel is currently active */
+  /** 插件面板是否活动 */
   isActive: boolean
-  /** Plugin ID */
+  /** 插件 ID */
   pluginId: string
-  /** Invoke the plugin's backend command */
+  /** 调用插件后端命令 */
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
-  /** Persistent key/value store scoped to this plugin */
+  /** 插件隔离的持久化存储 */
   store: PluginStorage
-  /** Host event bus */
+  /** 宿主事件总线 */
   events: PluginEventBus
-  /** Activate the plugin (show panel based on contentPosition) */
+  /** 激活插件（按 contentPosition 显示面板） */
   activate: () => void
-  /** Deactivate the plugin (hide panel) */
+  /** 停用插件（隐藏面板） */
   deactivate: () => void
-  /** Current active note content (markdown string). Empty string if no note is active. */
+  /** 当前活动笔记内容，无活动笔记时为空 */
   activeNoteContent: string
-  /** Current active note file path. Empty string if no note is active. */
+  /** 当前活动笔记路径，无活动笔记时为空 */
   activeNotePath: string
-  /**
-   * Current active note file name (last path segment, e.g.
-   * `note.md`). Empty string when no note is active. Plugins use
-   * this for UI hints without re-parsing `activeNotePath`.
-   */
+  /** 活动笔记文件名（末段），无活动笔记时为空 */
   activeNoteName: string
-  /**
-   * Lower-cased file extension of the active note (without the
-   * leading dot, e.g. `"md"`, `"markdown"`, `"json"`). Empty string
-   * when no note is active or the file has no extension. Plugins
-   * gate behaviour on this value (or `isActiveNoteMarkdown`) instead
-   * of re-deriving a regex from the path.
-   */
+  /** 活动笔记扩展名（小写无点），无活动笔记时为空 */
   activeNoteExt: string
-  /**
-   * `true` when the host has detected that the active note is a
-   * Markdown file (i.e. `activeNoteExt` is `md` or `markdown`).
-   * Plugins that only make sense for Markdown use this to disable
-   * their toolbar button (set `aria-disabled`, skip the click
-   * handler) instead of relying on the host to hide the icon.
-   */
+  /** 活动笔记是否为 Markdown 文件 */
   isActiveNoteMarkdown: boolean
-  /** Read a single setting key. See {@link PluginPanelProps.getSetting}. */
+  /** 读取单个设置键，参见 PluginPanelProps.getSetting */
   getSetting<T = unknown>(key: string): Promise<T | null>
-  /** Persist a single setting key. See {@link PluginPanelProps.setSetting}. */
+  /** 持久化单个设置键，参见 PluginPanelProps.setSetting */
   setSetting<T = unknown>(key: string, value: T): Promise<void>
-  /** Read every stored setting. See {@link PluginPanelProps.getAllSettings}. */
+  /** 读取所有设置，参见 PluginPanelProps.getAllSettings */
   getAllSettings(): Promise<Record<string, unknown>>
-  /** Subscribe to settings changes. See {@link PluginPanelProps.onSettingsChange}. */
+  /** 订阅设置变化，参见 PluginPanelProps.onSettingsChange */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
   /** 获取当前笔记的 frontmatter 对象。参见 {@link PluginPanelProps.getActiveNoteFrontmatter}。 */
   getActiveNoteFrontmatter(): Record<string, unknown> | null
@@ -621,54 +446,54 @@ export interface ToolbarButtonProps {
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
 }
 
-// ─── Plugin registry ──────────────────────────────────────────────────────────
+// 插件注册表
 
-/** Registry that indexes plugins by iconPosition for efficient lookup */
+/** 按 iconPosition 索引的插件注册表 */
 export interface PluginRegistry {
   sidebar: PluginDefinition[]
   editorToolbar: PluginDefinition[]
   titleBar: PluginDefinition[]
 }
 
-/** Empty registry helper */
+/** 空注册表辅助函数 */
 export const emptyRegistry: PluginRegistry = {
   sidebar: [],
   editorToolbar: [],
   titleBar: [],
 }
 
-// ─── Context menu contributions ────────────────────────────────────────────────
+// 右键菜单贡献
 
-/** Surface where a plugin can contribute a context menu item. */
+/** 插件可贡献右键菜单项的位置 */
 export type ContextMenuLocation =
-  | 'fileTree'        // Right-click on a file/folder in the explorer
-  | 'fileTreeEmpty'   // Right-click on the empty area below files
-  | 'editor'          // Right-click inside an open editor
-  | 'tab'             // Right-click on a tab
-  | 'tabBarEmpty'     // Right-click on the tab bar's empty area
+  | 'fileTree'        // 文件树中右键文件/文件夹
+  | 'fileTreeEmpty'   // 文件树空白处右键
+  | 'editor'          // 编辑器内右键
+  | 'tab'             // 右键 tab
+  | 'tabBarEmpty'     // tab 栏空白处右键
 
 /** 传给 when 谓词的上下文。 */
 export interface ContextMenuContext {
   location: ContextMenuLocation
-  /** Path under the cursor, if any (file tree, tab, editor). */
+  /** 光标下的路径（文件树、tab、编辑器） */
   path?: string
-  /** Whether the cursor is on a directory. */
+  /** 光标是否在目录上 */
   isDirectory?: boolean
-  /** The currently active tab's path, if any. */
+  /** 当前活动 tab 的路径 */
   activePath?: string
-  /** Selected text in the editor, if any. */
+  /** 编辑器中选中的文本 */
   selection?: string
 }
 
-/** A single menu entry contributed by a plugin. */
+/** 插件贡献的单个菜单项 */
 export interface ContextMenuItem {
-  /** Stable id; required for deduping and updates. */
+  /** 稳定 id，用于去重和更新 */
   id: string
-  /** Display label, also used as i18n key prefix in the future. */
+  /** 显示标签，未来也用作 i18n key 前缀 */
   label: string
-  /** Optional lucide-react icon name, mapped by the host. */
+  /** 可选 lucide-react 图标名，由宿主映射 */
   iconName?: string
-  /** Locations this item should appear in. Omit to appear in all. */
+  /** 出现位置，省略则在所有位置出现 */
   locations?: ContextMenuLocation[]
   /** 谓词，返回 false 隐藏该项。 */
   when?: (ctx: ContextMenuContext) => boolean
@@ -676,16 +501,16 @@ export interface ContextMenuItem {
   onClick: (ctx: ContextMenuContext) => void | Promise<void>
 }
 
-/** Registry of menu items by location, indexed for O(1) lookup. */
+/** 按位置索引的菜单项注册表 */
 export type ContextMenuRegistry = Record<ContextMenuLocation, ContextMenuItem[]>
 
-// ─── Command palette contributions ─────────────────────────────────────────────
+// 命令面板贡献
 
 /** 插件贡献的命令条目，id 必须跨重载稳定。 */
 export interface PluginCommand {
-  /** Stable id; required for deduping, settings keying, and updates. */
+  /** 稳定 id，用于去重、设置键和更新 */
   id: string
-  /** Display label, also used as the search term in the command palette. */
+  /** 显示标签，也用作命令面板搜索词 */
   label: string
   /** 可选 lucide-react 图标名，默认 "zap"。 */
   iconName?: string
@@ -705,7 +530,7 @@ export interface PluginCommandRegistry {
   register(pluginId: string, command: PluginCommand): void
   unregister(pluginId: string, commandId: string): void
   clearPlugin(pluginId: string): void
-  /** Read-only snapshot. Callers must not mutate the array. */
+  /** 只读快照，调用方不可修改 */
   list(): PluginCommand[]
   subscribe(listener: PluginCommandsListener): () => void
 }

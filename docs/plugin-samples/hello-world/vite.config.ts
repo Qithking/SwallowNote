@@ -31,20 +31,14 @@ export default defineConfig(({ mode }) => {
           fileName: () => 'index.js',
         },
         rollupOptions: {
-          // React and ReactDOM must be external so the plugin uses the
-          // host's React instance (exposed as window.React / window.ReactDOM).
-          // Bundling a second copy causes "multiple React instances" crashes
-          // because hooks rely on a shared internal dispatcher.
-          // sonner / react-i18next / i18next are also provided by the host
-          // as window.SonnerToast / window.ReactI18Next.
+          // React 等需 external，使用宿主实例避免多实例冲突
           external: [
             'react', 'react-dom', 'react-dom/client',
             'react/jsx-runtime', 'react/jsx-dev-runtime',
             'sonner', 'react-i18next', 'i18next',
           ],
           output: {
-            // Disable code splitting — the plugin loader uses blob URLs
-            // which cannot resolve relative chunk imports.
+            // 禁用代码分割，blob URL 无法解析分块
             inlineDynamicImports: true,
           },
         },

@@ -1,8 +1,4 @@
-/**
- * Toolbar button — toggles the right-panel visibility for the
- * picgo plugin. The host owns the `isActive` / `activate` /
- * `deactivate` wiring; we just render a styled button.
- */
+/** 工具栏按钮：切换 picgo 右侧面板可见性 */
 import { useCallback } from 'react'
 import type { ReactNode } from 'react'
 import type { ToolbarButtonProps } from '@swallow-note/plugin-sdk'

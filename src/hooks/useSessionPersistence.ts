@@ -11,7 +11,9 @@ import { getCurrentWindow, availableMonitors } from '@tauri-apps/api/window'
 import { LogicalSize, LogicalPosition } from '@tauri-apps/api/dpi'
 
 export function useSessionPersistence() {
-  const { setSidebarWidth, setRightPanelWidth } = useUIStore()
+  // 独立 selector 订阅，避免全量订阅 useUIStore 导致不必要的重渲染
+  const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
+  const setRightPanelWidth = useUIStore((s) => s.setRightPanelWidth)
 
   const saveSessionStateNow = useCallback(async () => {
     try {
@@ -21,8 +23,7 @@ export function useSessionPersistence() {
       const editorSettingsState = useEditorSettingsStore.getState()
 
       const fileTabs = editorState.tabs
-      // 插件 tab 不参与会话持久化：恢复时插件 tab 需要重新通过插件 API 打开
-      // （内容在加密数据库中，且 icon/onChange 回调为运行时数据不可序列化）
+      // 插件 tab 不参与持久化（需通过插件 API 重新打开）
       const persistableTabs = fileTabs.filter(tab => tab.type !== 'plugin')
       const tabsData = persistableTabs.map(tab => {
         if (tab.type === 'conflict') {
@@ -119,7 +120,7 @@ export function useSessionPersistence() {
       const { workspaceMode } = useUIStore.getState()
       const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
       
-      // 文件树为空时跳过会话恢复（loadLatestByMode 已 await 完成文件树加载，无需轮询）
+      // 文件树为空时跳过会话恢复
       if (useFileTreeStore.getState().nodes.length === 0) {
         console.warn('File tree not loaded, skipping session restore')
         return
@@ -129,7 +130,7 @@ export function useSessionPersistence() {
         const tabsData = JSON.parse(states.tabs) as Partial<EditorTab>[]
         const validTabs = tabsData.filter((tab): tab is Partial<EditorTab> => {
           if (!tab.path) return false
-          // Conflict tabs are validated against the conflict repo database later
+          // 冲突 tab 稍后与冲突仓库数据库校验
           if (tab.type === 'conflict') return true
           if (workspaceMode === 'workspace') {
             return workspaceFolders.some((f: string) => tab.path!.startsWith(f))
@@ -157,8 +158,7 @@ export function useSessionPersistence() {
           }))
           const activeTabId = states.activeTabId || null
 
-          // Load conflict repos into the git store BEFORE restoring tabs,
-          // so ConflictResolver can find conflict data when it mounts
+          // 恢复 tabs 前先加载冲突仓库到 git store
           try {
             const { useGitStore } = await import('@/stores')
             await useGitStore.getState().loadConflictRepos()
@@ -171,7 +171,7 @@ export function useSessionPersistence() {
           // Delay loading tab content to ensure UI is ready
           if (activeTabId) {
             const activeTab = restoredTabs.find(t => t.id === activeTabId)
-            // Only load content for file tabs, not for conflict/diff tabs
+            // 仅加载文件 tab 内容，不加载冲突/diff tab
             if (activeTab?.type === 'file' || !activeTab?.type) {
               setTimeout(() => {
                 useEditorStore.getState().loadTabContent(activeTabId)
@@ -179,7 +179,7 @@ export function useSessionPersistence() {
             }
           }
 
-          // Validate conflict tabs: remove those whose repos no longer have conflicts
+          // 校验冲突 tab：移除仓库已无冲突的 tab
           try {
             const { getConflictRepoRecords } = await import('@/lib/tauri')
             const conflictRecords = await getConflictRepoRecords()
@@ -197,8 +197,7 @@ export function useSessionPersistence() {
         }
       }
 
-      // 文件树定位由 TabBar 的 useEffect 监听 activeTabId 统一处理，
-      // restoreTabs 设置 activeTabId 后会自动触发 revealPath，无需在此重复调用。
+      // revealPath 由 TabBar 监听 activeTabId 触发，无需重复调用
 
       const sbWidth = Number(states.sidebarWidth)
       if (states.sidebarWidth && !isNaN(sbWidth)) setSidebarWidth(sbWidth)

@@ -47,10 +47,7 @@ function renderTabIcon(tab: TabBarItem, iconClassName: string): ReactNode {
 }
 
 function TabBar() {
-  // Subscribe to a string "fingerprint" of tab metadata (excluding
-  // `content`).  Because it's a primitive, Zustand's default Object.is
-  // equality correctly prevents re-renders when only `content` changes.
-  // The actual TabBarItem[] is derived via useMemo below.
+  // 订阅 tab 元数据指纹，content 变化不重渲染
   const tabsFingerprint = useEditorStore((s) => {
     let fp = ''
     for (const t of s.tabs) {
@@ -60,9 +57,7 @@ function TabBar() {
     }
     return fp
   })
-  // Derive TabBarItem[] from the store's current state, only re-creating
-  // the array when the fingerprint changes (i.e. when tab metadata — not
-  // content — changes).
+  // 由指纹派生 TabBarItem[]，仅元数据变化时重建
   const tabs = useMemo<TabBarItem[]>(() =>
     useEditorStore.getState().tabs.map((t) => ({
       id: t.id,
@@ -167,9 +162,9 @@ function TabBar() {
   }
 
   const handleRefresh = (tab: TabBarItem) => {
-    // Don't refresh diff/conflict tabs — they don't have file content to reload
+    // diff/conflict tab 无文件内容，不刷新
     if (tab.type === 'diff' || tab.type === 'conflict') return
-    // Warn if there are unsaved changes — refresh will discard them
+    // 有未保存改动时提示，刷新会丢弃
     if (tab.isDirty && !confirm(t('tabBar.refreshConfirm'))) return
     useEditorStore.getState().loadTabContent(tab.id, 0, true)
   }
@@ -343,9 +338,7 @@ function TabBar() {
     setActiveTab(tabId)
     scrollToTab(tabId)
 
-    // Load content asynchronously after switching tab
-    // This prevents blocking the UI and avoids race conditions
-    // Check content === undefined to detect unloaded tabs (empty string is valid content)
+    // 切换 tab 后异步加载内容，避免阻塞 UI
     if (!tab.isContentLoaded && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
       // Use setTimeout to ensure tab switch happens first
       setTimeout(() => {

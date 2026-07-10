@@ -1,17 +1,10 @@
-/**
- * Editor content flush registry.
- *
- * When MarkdownEditor debounces its handleChange (blocksToMarkdownLossy),
- * the store content may lag behind the editor's internal state by up to
- * 300ms. Before any save operation, call `flushAllEditors()` to ensure
- * the latest content is written to the store.
- */
+/** 编辑器内容刷新注册表 */
 
 type FlushFn = () => Promise<void>
 
 const flushFns = new Set<FlushFn>()
 
-/** Register a flush function. Returns an unsubscribe callback. */
+/** 注册刷新函数，返回取消订阅 */
 export function registerFlushFn(fn: FlushFn): () => void {
   flushFns.add(fn)
   return () => {
@@ -19,7 +12,7 @@ export function registerFlushFn(fn: FlushFn): () => void {
   }
 }
 
-/** Flush all registered editors. Call before save operations. */
+/** 保存前刷新所有编辑器 */
 export async function flushAllEditors(): Promise<void> {
   const fns = Array.from(flushFns)
   if (fns.length === 0) return

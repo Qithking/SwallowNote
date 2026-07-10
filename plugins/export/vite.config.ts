@@ -3,44 +3,31 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 
-/**
- * Export plugin build configuration.
- *
- * Two modes:
- *  - `vite` (dev): runs the standalone preview at http://localhost:5173
- *  - `vite build`: emits `dist/index.js` (ES module) + `dist/manifest.json`
- *    that can be zipped and installed into SwallowNote.
- *
- * Uses ES module format so that the host's `import()` can resolve
- * `module.default` as the plugin manifest object.
- * The host's scan_plugins reads a special comment from index.js to
- * extract plugin metadata (iconPosition, contentPosition, etc.).
- * We inject this comment at the top of the bundle after build.
- */
+/** export 插件构建配置：dev 预览 + 生产构建（ES 模块） */
 export default defineConfig(({ mode }) => {
   if (mode === 'production') {
     return {
       plugins: [
         react(),
-        // Copy manifest.json → dist/ and inject @swallow-manifest comment
+        // 复制 manifest.json 并注入 @swallow-manifest 注释
         {
           name: 'inject-manifest-comment',
           closeBundle() {
             if (!existsSync('dist')) mkdirSync('dist', { recursive: true })
 
-            // Copy manifest.json
+            // 复制 manifest.json
             copyFileSync(
               resolve(__dirname, 'manifest.json'),
               resolve(__dirname, 'dist/manifest.json')
             )
 
-            // Read manifest.json and inject @swallow-manifest comment
+            // 读取 manifest 并注入 @swallow-manifest 注释
             const indexPath = resolve(__dirname, 'dist/index.js')
             const manifestPath = resolve(__dirname, 'manifest.json')
 
             if (existsSync(indexPath) && existsSync(manifestPath)) {
               const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
-              // Build the metadata object that scan_plugins expects
+              // 构建 scan_plugins 需要的元数据对象
               const meta = {
                 id: manifest.id,
                 name: manifest.name,
@@ -73,18 +60,13 @@ export default defineConfig(({ mode }) => {
           fileName: () => 'index.js',
         },
         rollupOptions: {
-          // React and ReactDOM must be external so the plugin uses the
-          // host's React instance (exposed as window.React / window.ReactDOM).
-          // Bundling a second copy causes "multiple React instances" crashes
-          // because hooks rely on a shared internal dispatcher.
+          // React 等需 external，使用宿主实例避免多实例冲突
           external: [
             'react', 'react-dom', 'react-dom/client',
             'react/jsx-runtime', 'react/jsx-dev-runtime',
             'sonner', 'react-i18next', 'i18next',
           ],
-          // Disable code splitting — the plugin loader uses blob URLs
-          // which cannot resolve relative chunk imports. Everything must
-          // be in a single index.js file.
+          // 禁用代码分割，插件加载器用 blob URL 无法解析分块
           output: {
             inlineDynamicImports: true,
           },

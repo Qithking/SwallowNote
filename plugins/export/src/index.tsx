@@ -15,7 +15,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import type { PluginManifest, PluginPanelProps, ToolbarButtonProps } from '@swallow-note/plugin-sdk'
-// Re-export setHost so the host can install SDK overrides at runtime.
+// 导出 setHost 供宿主运行时安装 SDK overrides
 export { setHost } from '@swallow-note/plugin-sdk'
 import { save } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
@@ -26,11 +26,11 @@ import { domToCanvas } from 'modern-screenshot'
 import { compactMarkdown } from './markdown-normalize'
 import { getStrings } from './i18n'
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// ─── 常量 ───
 
-/// Width in CSS pixels that matches an A4 page at 96 dpi.
+/// A4 页宽（96 dpi 下的 CSS 像素）
 const A4_WIDTH_PX = 794
-/// Height of an A4 page in CSS pixels at 96 dpi (297 mm).
+/// A4 页高（96 dpi，297mm）
 const A4_HEIGHT_PX = 1123
 
 /**
@@ -43,12 +43,7 @@ const A4_HEIGHT_PX = 1123
  * application codes here.
  */
 const ERR_MARKDOWN_TOO_LARGE = 1001
-// Note: only `ERR_MARKDOWN_TOO_LARGE` is currently branched on
-// (see `runExport` catch block). The other backend codes
-// (`ERR_DOCX_GENERATION`, etc.) fall through to the format-
-// specific default toast. Add a new constant here and a matching
-// `if (code === ...)` branch if you want to surface a more
-// specific message for a new error type.
+// 仅 ERR_MARKDOWN_TOO_LARGE 有分支处理，其余错误码回退默认 toast
 
 /**
  * Read the user's current locale without depending on
@@ -103,12 +98,11 @@ function extractErrCode(err: unknown): { code: number; message: string } {
       message: codeMatch[2].trim(),
     }
   }
-  // Fallback: legacy messages without the prefix (frontend-only
-  // errors, transport-level errors from the host, etc.).
+  // 回退：无前缀的旧消息（前端错误、宿主传输错误等）
   return { code: 0, message: raw }
 }
 
-// ─── Icon component ──────────────────────────────────────────────────────────
+// ─── 图标组件 ───
 
 function ExportIcon({ size = 18 }: { size?: number }): ReactNode {
   return (

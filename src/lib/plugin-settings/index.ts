@@ -80,6 +80,15 @@ export async function resetSettings(pluginId: string): Promise<void> {
   cache.delete(cacheKey(pluginId))
 }
 
+/**
+ * 仅清理内存缓存条目（不触碰 SQLite）。卸载插件时调用，避免缓存长期残留
+ * 导致同 id 重装时读到旧值。与 resetSettings 的区别：本函数同步、无副作用，
+ * 适合在卸载清理链路中与 dropPluginStorage 等一同调用。
+ */
+export function dropSettingsCache(pluginId: string): void {
+  cache.delete(cacheKey(pluginId))
+}
+
 /** `true` when this plugin ships a `settings.json` schema. */
 export function hasSettings(view: PluginSettingsView | null | undefined): boolean {
   return !!view?.schema

@@ -1,16 +1,11 @@
-/**
- * Plugin Health Monitor
- * 
- * Tracks plugin crash counts and triggers auto-disable after threshold.
- * Resets counter on successful recovery.
- */
+/** 插件健康监控 */
 
 import { usePluginStore } from '@/stores'
 
-// Crash threshold: auto-disable after this many crashes
+// 崩溃阈值，超过自动禁用
 const CRASH_THRESHOLD = 3
 
-// Time window (ms) for counting crashes. After this period, counter resets.
+// 崩溃计数时间窗 ms
 const CRASH_WINDOW_MS = 60000 // 1 minute
 
 interface CrashRecord {

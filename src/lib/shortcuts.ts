@@ -53,18 +53,7 @@ export function getShortcutKey(
   return customShortcuts[key] ?? DEFAULT_SHORTCUTS_MAP[key]
 }
 
-/**
- * Map a physical `e.code` to the normalised key name used in
- * shortcut strings (e.g. 'KeyA' → 'A', 'Digit3' → '3',
- * 'Comma' → ',').  Returns `null` for codes we don't recognise.
- *
- * On macOS, holding Alt (Option) causes `e.key` to produce a
- * different character (Alt+S → 'ß', Alt+2 → '™', Alt+, → '≤',
- * etc.).  Both `parseKeyEvent` and `matchShortcut` use this
- * helper to normalise via the physical key (`e.code`) so that
- * Alt-containing shortcuts are stored and matched consistently
- * regardless of platform.
- */
+/** 映射 e.code 到规范化键名；macOS Alt 键通过 e.code 归一化 */
 const CODE_TO_KEY: Record<string, string> = {
   // Letters
   ...Object.fromEntries(
@@ -96,7 +85,7 @@ const CODE_TO_KEY: Record<string, string> = {
 }
 
 function codeToKeyName(code: string): string | null {
-  // F1-F12 are not in CODE_TO_KEY but follow a simple pattern.
+  // F1-F12 不在表中，但符合简单模式直接返回
   if (/^F([1-9]|1[0-2])$/.test(code)) return code
   return CODE_TO_KEY[code] ?? null
 }
@@ -119,22 +108,15 @@ export function matchShortcut(
 
   const keyLower = e.key.toLowerCase()
 
-  // Primary match: direct e.key comparison
+  // 主匹配：直接比较 e.key
   let keyMatch = keyLower === mainKey
 
-  // #5: On macOS MacBook keyboards the "Delete" key reports as
-  // "Backspace".  Accept both so the shortcut works regardless of
-  // which physical key the user pressed.
+  // macOS Delete 与 Backspace 互相兼容
   if (!keyMatch) {
     if (mainKey === 'delete' && keyLower === 'backspace') keyMatch = true
     else if (mainKey === 'backspace' && keyLower === 'delete') keyMatch = true
   }
 
-  // #4: On macOS, holding Alt (Option) causes e.key to produce a
-  // different character (Alt+S → 'ß', Alt+2 → '™', Alt+, → '≤',
-  // etc.).  Fall back to e.code (which reflects the physical key,
-  // not the produced character) so Alt combos match correctly
-  // cross-platform.
   if (!keyMatch) {
     const codeKey = codeToKeyName(e.code)
     if (codeKey !== null) {
@@ -156,13 +138,6 @@ export function parseKeyEvent(e: KeyboardEvent): string | null {
 
   let keyName = e.key
 
-  // On macOS, holding Alt (Option) causes e.key to produce a
-  // different character (Alt+S → 'ß', Alt+2 → '™', Alt+, → '≤',
-  // etc.).  Normalise back to the physical key via e.code so the
-  // recorded shortcut string is platform-independent.  We only
-  // override when e.code gives us a recognisable key; if e.code
-  // is unknown we keep the original e.key (better to store
-  // something than nothing).
   if (e.altKey) {
     const codeKey = codeToKeyName(e.code)
     if (codeKey !== null) {
@@ -178,13 +153,7 @@ export function parseKeyEvent(e: KeyboardEvent): string | null {
   return parts.join('+')
 }
 
-/**
- * Sources we can collide against when a shortcut is being bound.
- * Used by the plugin-command recorder (and potentially by future
- * rebind flows) to give the user a clear "this clashes with X"
- * message instead of silently letting two commands claim the
- * same key.
- */
+/** 冲突检测的对照来源 */
 export type ShortcutConflictSource =
   | { kind: 'builtin'; key: ShortcutKey; label: string }
   | { kind: 'plugin-command'; bindingKey: string; label: string }
@@ -192,26 +161,19 @@ export type ShortcutConflictSource =
 
 export interface ShortcutConflict {
   source: ShortcutConflictSource
-  /** Localised description of the conflict, suitable for direct
-   *  display in the UI. */
+  /** 供 UI 直接展示的本地化冲突描述 */
   message: string
 }
 
 export function findShortcutConflictDetailed(
-  /**
-   * Optional identity of the binding being recorded. Pass the
-   * same value here that you'll pass to `setPluginCommandShortcut`
-   * so we can exclude the current command from its own conflict
-   * scan (re-binding to the same key is a no-op, not a conflict).
-   * For built-in shortcut recording, pass the `ShortcutKey` value.
-   */
+  /** 用于排除自身的 binding identity */
   selfId: string | null,
   value: string,
   customShortcuts: Record<string, string>,
   pluginCommandShortcuts: Record<string, string>,
   pluginCommandLabels: Record<string, string>
 ): ShortcutConflict | null {
-  // 1. Built-in shortcuts (customised or default).
+  // 1. 内置快捷键（含自定义或默认）
   for (const def of DEFAULT_SHORTCUTS) {
     if (selfId === def.key) continue
     const currentKey = customShortcuts[def.key] ?? def.defaultKey
@@ -222,17 +184,11 @@ export function findShortcutConflictDetailed(
       }
     }
   }
-  // 2. Custom-bound built-in shortcuts that are *only* in the
-  //    `customShortcuts` map (a user rebound to the same value as
-  //    a different default key). This branch is mostly defensive:
-  //    the previous loop already catches the "current value
-  //    equals the candidate" case for any customShortcuts[key]
-  //    that's also a default. Kept for clarity.
+  // 2. 防御性分支：仅出现在 customShortcuts 的自定义绑定
   for (const [key, currentKey] of Object.entries(customShortcuts)) {
     if (selfId === key) continue
     if (currentKey !== value) continue
-    // Skip if the value is also the default of some other built-in
-    // – that case is already covered by branch 1.
+    // 与某内置默认相同则跳过（分支 1 已覆盖）
     const def = DEFAULT_SHORTCUTS.find((d) => d.key === key)
     if (def && def.defaultKey === value) continue
     return {
@@ -240,7 +196,7 @@ export function findShortcutConflictDetailed(
       message: `与「${key}」冲突`,
     }
   }
-  // 3. Plugin-command shortcuts.
+  // 3. 插件命令快捷键
   for (const [bindingKey, currentKey] of Object.entries(pluginCommandShortcuts)) {
     if (selfId !== null && selfId === bindingKey) continue
     if (currentKey !== value) continue

@@ -1,42 +1,24 @@
-/**
- * Plugin-private i18n strings.
- *
- * The plugin is shipped as a self-contained package and previously
- * looked up labels via `react-i18next`'s `t()` against the host's
- * locale catalogue. That works in dev but produces hidden
- * `defaultValue` fallbacks that the host's i18n audit tools can't
- * find. This module keeps the strings next to the plugin so
- * future locale additions don't have to round-trip through the
- * host.
- *
- * Adding a new locale: copy the `zhCN` shape, fill it in, and
- * extend the `getStrings()` switch. We don't depend on
- * `react-i18next` so the plugin bundle stays small.
- */
+/** 插件私有 i18n 字符串，不依赖 react-i18next */
 
 export type ExportLocale = 'zh-CN' | 'en'
 
 interface ExportStrings {
   wordMenu: string
   pdfMenu: string
-  /** Export the active note as a complete, browser-renderable HTML
-   *  document (the same one the PDF path uses internally, but
-   *  saved as a .html file the user can open in any browser). */
+  /** 导出为浏览器可渲染的 HTML 文档 */
   htmlMenu: string
   exportSuccess: string
   exportFailed: string
   pdfExportFailed: string
-  /** Shown when HTML export specifically fails (a save-dialog
-   *  cancel is *not* a failure — this fires for backend errors,
-   *  write errors, etc.). */
+  /** HTML 导出失败（取消保存对话框不算失败） */
   htmlExportFailed: string
-  /** Title used in the loading toast while generating a file. */
+  /** 生成文件时的 loading toast 标题 */
   generating: string
-  /** Returned when the active note is empty and the user clicks anyway. */
+  /** 当前笔记为空时返回 */
   emptyNote: string
-  /** Returned when the backend rejects the request. */
+  /** 后端拒绝请求时返回 */
   tooLarge: string
-  /** Toolbar tooltip / aria-label for the export dropdown trigger. */
+  /** 导出下拉触发器的 tooltip / aria-label */
   tooltip: string
 }
 
@@ -68,12 +50,7 @@ const en: ExportStrings = {
   tooltip: 'Export the current note',
 }
 
-/**
- * Return the strings for the given locale. We default to
- * Simplified Chinese because the host's primary user base is
- * Chinese-speaking; English is the second supported locale. Any
- * other value falls back to English.
- */
+/** 返回指定 locale 的字符串，默认中文，其余回退英文 */
 export function getStrings(locale: string | undefined | null): ExportStrings {
   if (!locale) return zhCN
   const normalised = locale.toLowerCase()

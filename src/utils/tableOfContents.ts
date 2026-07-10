@@ -5,7 +5,7 @@ export interface TocItem {
   title: string
   children: TocItem[]
   matchIndex?: number
-  /** 1-based line number in the source markdown (Source mode only) */
+  /** 源码中的 1 基行号（仅 Source 模式） */
   lineNumber?: number
 }
 
@@ -13,7 +13,7 @@ export interface MarkdownHeading {
   blockId?: string
   level: number
   title: string
-  /** 1-based line number in the source markdown */
+  /** 源码中的 1 基行号 */
   lineNumber?: number
 }
 
@@ -81,26 +81,24 @@ function parseMarkdownHeadings(markdown: string): MarkdownHeading[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
-    // Detect fenced code block boundaries (``` or ~~~)
-    // A fence can have up to 3 leading spaces (CommonMark spec).
+    // 检测围栏代码块边界（``` 或 ~~~），最多 3 个前导空格
     const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
     if (fenceMatch) {
       const fenceChar = fenceMatch[1][0]
       if (!inCodeBlock) {
-        // Opening fence
+        // 开启围栏
         inCodeBlock = true
         codeFenceChar = fenceChar
       } else if (fenceChar === codeFenceChar) {
-        // Closing fence must use the same character
+        // 关闭围栏须用相同字符
         inCodeBlock = false
         codeFenceChar = ''
       }
-      // A different fence character inside a code block is just content
+      // 代码块内不同围栏字符视为内容
       continue
     }
 
-    // Skip lines inside fenced code blocks — # at the start of a code
-    // line is a comment in many languages, not a Markdown heading.
+    // 跳过代码块内的行，# 开头是注释而非标题
     if (inCodeBlock) continue
 
     const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)

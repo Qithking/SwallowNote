@@ -9,12 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      // Host talks to the SDK source directly (no build step) so the
-      // types in the host and the types seen by external plugin
-      // bundles always match. The SDK is a self-contained single
-      // file; aliasing to `src/index.ts` is safe because Vite uses
-      // esbuild's transform pipeline and ignores the SDK's own
-      // `tsc` build output during dev.
+      // 宿主直接引用 SDK 源码，确保类型一致
       '@swallow-note/plugin-sdk': path.resolve(__dirname, './docs/plugin-sdk/src/index.ts'),
     },
   },
@@ -40,22 +35,18 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari13',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
-    // Reduce memory pressure during CI builds with many modules (6000+)
+    // 降低 CI 构建内存压力
     chunkSizeWarningLimit: 1000,
-    // Let Node.js GC more aggressively to avoid OOM on memory-constrained runners
+    // 让 GC 更积极，避免 OOM
     reportCompressedSize: false,
     rollupOptions: {
       output: {
-        // Split large dependencies into separate chunks to reduce per-chunk memory usage
-        // and improve caching — unchanged vendor chunks don't need re-downloading
+        // 拆分大依赖为独立 chunk，降低内存并改善缓存
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            // Merge shiki + mantine into blocknote chunk — they have circular imports:
-            //   shiki <-> blocknote (code-block depends on @shikijs/*)
-            //   blocknote <-> mantine (@blocknote/mantine imports @mantine/core)
+            // 合并 shiki/mantine 到 blocknote（循环依赖）
             if (id.includes('blocknote') || id.includes('shiki') || id.includes('@shikijs') || id.includes('@mantine')) return 'vendor-blocknote'
-            // Merge mermaid into markmap chunk — they share d3/d3-zoom which creates a circular split:
-            //   markmap-view -> d3 -> d3-zoom <- mermaid
+            // 合并 mermaid 到 markmap（共享 d3-zoom）
             if (id.includes('markmap') || id.includes('d3-zoom') || id.includes('mermaid')) return 'vendor-markmap'
             if (id.includes('katex')) return 'vendor-katex'
             if (id.includes('simple-mind-map')) return 'vendor-mindmap'

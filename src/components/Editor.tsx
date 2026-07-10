@@ -429,8 +429,9 @@ export function EditorView() {
       {fileType === 'markdown' && (
         <div className="flex-1 overflow-hidden">
           {viewMode === 'source' ? (
-            <ErrorBoundary>
+            <ErrorBoundary key={activeTab.id}>
               <CodeEditor
+                key={activeTab.id}
                 content={sourceContent ?? ''}
                 filename={activeTab.name}
                 onChange={handleSourceContentChange}
@@ -440,6 +441,7 @@ export function EditorView() {
           ) : (
             <ErrorBoundary key={activeTab.id}>
               <MarkdownEditor
+                key={activeTab.id}
                 content={activeTab.content}
                 onChange={handleContentChange}
               />
@@ -450,8 +452,9 @@ export function EditorView() {
 
       {fileType === 'code' && (
         <div className="flex-1 flex overflow-hidden">
-          <ErrorBoundary>
+          <ErrorBoundary key={activeTab.id}>
             <CodeEditor
+              key={activeTab.id}
               content={activeTab.content}
               filename={activeTab.name}
               onChange={handleContentChange}

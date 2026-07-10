@@ -145,11 +145,16 @@ class PluginEventBusImpl {
    * mounted, e.g. when the module failed to load).
    */
   removeAllListenersForPlugin(pluginId: string): void {
-    for (const [, set] of this.handlers) {
+    // 用 Array.from 快照避免遍历过程中 delete 修改迭代目标
+    for (const [event, set] of Array.from(this.handlers)) {
       for (const handler of Array.from(set)) {
         if (this.readPluginId(handler as unknown as { __pluginId?: string }) === pluginId) {
           set.delete(handler)
         }
+      }
+      // 删除 handler 后若 Set 已空，从 Map 移除整个事件条目，避免空 Set 长期残留
+      if (set.size === 0) {
+        this.handlers.delete(event)
       }
     }
     // Bump the per-plugin "torn down since" counter so any in-flight
@@ -161,6 +166,16 @@ class PluginEventBusImpl {
       pluginId,
       (this.tornDownSince.get(pluginId) ?? 0) + 1,
     )
+  }
+
+  /**
+   * 卸载时清除该插件的"已拆线"计数器。与 removeAllListenersForPlugin 的
+   * 递增语义不同：这里直接删除 entry，使同 id 重装从 0 开始，避免计数器
+   * 长期累积残留。卸载流程已在 removeAllListenersForPlugin 中递增过计数，
+   * 此处删除仅做收尾清理（in-flight 遥测回调的 handler 集已空，无副作用）。
+   */
+  clearTornDownForPlugin(pluginId: string): void {
+    this.tornDownSince.delete(pluginId)
   }
 
   /**
@@ -253,7 +268,8 @@ class PluginEventBusImpl {
 export const pluginEventBus: Omit<PluginEventBus, 'off'> &
   { off: PluginEventBusImpl['off'] } &
   { emit: PluginEventBusImpl['emit'] } &
-  { removeAllListenersForPlugin: PluginEventBusImpl['removeAllListenersForPlugin'] } =
+  { removeAllListenersForPlugin: PluginEventBusImpl['removeAllListenersForPlugin'] } &
+  { clearTornDownForPlugin: PluginEventBusImpl['clearTornDownForPlugin'] } =
   new PluginEventBusImpl()
 
 /** 创建每插件事件总线代理。 */
@@ -391,6 +407,14 @@ class PluginStorageImpl implements PluginStorage {
       return
     }
     return this.doFlush()
+  }
+
+  /**
+   * 退出前刷新入口：将当前缓存写回磁盘。App 退出时由 flushAllPluginStorage
+   * 遍历调用。与私有 flush() 等价，仅作为公开入口暴露给退出流程。
+   */
+  async flushForExit(): Promise<void> {
+    return this.flush()
   }
 
   private async doFlush(): Promise<void> {
@@ -642,6 +666,35 @@ export function getPluginStorage(pluginId: string): PluginStorage {
 /** Drop a plugin's storage from the cache. Called on uninstall. */
 export function dropPluginStorage(pluginId: string): void {
   storageCache.delete(pluginId)
+}
+
+/**
+ * 清理 plugin-host 中按 pluginId 索引的卸载残留状态：
+ *  - trippedPlugins：熔断标志（模块级 Set）
+ *  - tornDownSince：事件总线"已拆线"计数器（实例级 Map，经 clearTornDownForPlugin 暴露）
+ * storageCache 由 dropPluginStorage 单独清理，不在此重复。
+ */
+export function clearPluginHostState(pluginId: string): void {
+  trippedPlugins.delete(pluginId)
+  pluginEventBus.clearTornDownForPlugin(pluginId)
+}
+
+/**
+ * App 退出前批量刷新所有插件 storage 缓存到磁盘。先快照 storageCache entries
+ * 避免遍历期间被其他代码突变；各插件写入独立文件、无共享状态，使用 Promise.allSettled
+ * 并行执行，单个插件 flush 失败用 console.warn 记录且不会中断其他插件落盘。
+ */
+export async function flushAllPluginStorage(): Promise<void> {
+  const entries = Array.from(storageCache.entries())
+  await Promise.allSettled(
+    entries.map(async ([pluginId, impl]) => {
+      try {
+        await impl.flushForExit()
+      } catch (err) {
+        console.warn(`[plugin-host] flushForExit failed for ${pluginId}:`, err)
+      }
+    }),
+  )
 }
 
 /**

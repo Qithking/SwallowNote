@@ -1,16 +1,4 @@
-/**
- * 密盘主面板组件（v2）。
- *
- * 状态机：
- * - loading：检查数据库状态
- * - uninitialized：数据库未创建，内嵌显示密码设置界面
- * - locked：数据库已创建但未解锁，内嵌显示解锁界面
- * - unlocked：已解锁，显示文件树（参考资源管理器）
- *
- * 点击笔记 → 调用 openEditorTab 在主编辑区打开 tab（不在面板内编辑）。
- * 内容编辑防抖 500ms 保存，切换笔记前 flush。
- * 面板 unmount 时，若 requirePasswordEveryTime 为 true，fire-and-forget 调用 lock。
- */
+/** 密盘主面板：loading/uninitialized/locked/unlocked 状态机 */
 import { useEffect, useState, useCallback, useRef, forwardRef } from 'react'
 import {
   Lock, RefreshCw, FilePlus, FolderPlus, Folder, FolderOpen,
@@ -24,16 +12,16 @@ import { Database, Download, Upload, KeyRound } from 'lucide-react'
 import type { DiskState, NoteListItem, NoteFull } from './types'
 import { validatePassword, strengthLabel, strengthColor, PASSWORD_MAX_LEN } from './passwordStrength'
 
-/** 缓存：parentId → 子项列表。null key 表示根级。 */
+/** 缓存：parentId → 子项列表，null 表示根级 */
 type TreeCache = Map<string | null, NoteListItem[]>
 
-/** 防抖保存间隔（毫秒）。 */
+/** 防抖保存间隔（毫秒） */
 const SAVE_DEBOUNCE_MS = 500
 
-/** 展开状态持久化 storage key。 */
+/** 展开状态持久化 storage key */
 const EXPANDED_STORAGE_KEY = 'tree-expanded-ids'
 
-/** 密盘 tab 的工具栏配置：隐藏路径相关项（spec 要求）。 */
+/** 密盘 tab 工具栏配置：隐藏路径相关项 */
 const DISK_TOOLBAR_CONFIG: EditorToolbarConfig = {
   copyPath: false,
   openLocation: false,
@@ -50,12 +38,12 @@ export function SecretDiskPanel(props: PluginPanelProps) {
   const [loading, setLoading] = useState(true)
   const [rootItems, setRootItems] = useState<NoteListItem[]>([])
   const treeCacheRef = useRef<TreeCache>(new Map())
-  // parentMap: 记录每个 item 的 parentId，用于 tab 切换时自动展开祖先文件夹
+  // 记录 item 的 parentId，用于自动展开祖先文件夹
   const parentMapRef = useRef<Map<string, string | null>>(new Map())
-  // treeCache 是 ref 不触发 re-render，用 treeVersion 强制刷新子树
+  // treeCache 是 ref 不触发 re-render，用 treeVersion 强制刷新
   const [treeVersion, setTreeVersion] = useState(0)
   const requirePasswordRef = useRef(false)
-  // 当前活跃笔记的 flush 函数（切换/卸载前调用）
+  // 当前活跃笔记的 flush 函数
   const currentFlushRef = useRef<(() => Promise<void>) | null>(null)
   // 防抖定时器
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -79,7 +67,7 @@ export function SecretDiskPanel(props: PluginPanelProps) {
       const unlocked = (await invokeBackend('is_unlocked')) as boolean
       setDiskState(unlocked ? 'unlocked' : 'locked')
       setLoading(false)
-      // 如果已解锁，加载根级子项（切换侧边栏后重新 mount 需要重新加载）
+      // 已解锁则加载根级子项
       if (unlocked) {
         const items = (await invokeBackend('list_children', { parentId: null })) as NoteListItem[]
         for (const item of items) {
@@ -112,7 +100,7 @@ export function SecretDiskPanel(props: PluginPanelProps) {
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null)
   useEffect(() => {
     const handler = (payload: { noteId: string; path: string }) => {
-      // 仅处理本插件的笔记（path 以 plugin://<pluginId>/ 开头）
+      // 仅处理本插件笔记（plugin://<pluginId>/ 前缀）
       const prefix = `plugin://${pluginId}/`
       if (payload.path.startsWith(prefix)) {
         const noteId = payload.path.slice(prefix.length)
@@ -185,7 +173,7 @@ export function SecretDiskPanel(props: PluginPanelProps) {
         if (parentId === null) {
           setRootItems(items)
         }
-        // 无论 parentId 是否为 null，都触发 treeVersion 更新，确保子组件重新读取 treeCache
+        // 触发 treeVersion 更新，确保子组件重新读取缓存
         setTreeVersion((v) => v + 1)
         return items
       } catch (err) {
@@ -199,13 +187,13 @@ export function SecretDiskPanel(props: PluginPanelProps) {
   /** 点击笔记：flush 前一个 → 加载新笔记 → openEditorTab 在主编辑区打开。 */
   const handleSelectNote = useCallback(
     async (note: NoteListItem) => {
-      // flush 前一个笔记的防抖内容（spec：切换笔记前 flush）
+      // 切换笔记前 flush 前一个笔记的防抖内容
       await flushPending()
 
       try {
         const full = (await invokeBackend('get_note', { id: note.id })) as NoteFull
 
-        // onChange 回调：防抖 500ms 保存到加密数据库
+        // onChange：防抖 500ms 保存
         const onChange = (content: string) => {
           if (debounceTimerRef.current) {
             clearTimeout(debounceTimerRef.current)
@@ -321,7 +309,7 @@ export function SecretDiskPanel(props: PluginPanelProps) {
     setShowChangePassword(false)
   }, [])
 
-  // ── 渲染 ──────────────────────────────────────────────────────
+  // ── 渲染 ──
 
   if (loading) {
     return (
@@ -386,9 +374,7 @@ export function SecretDiskPanel(props: PluginPanelProps) {
   )
 }
 
-// ════════════════════════════════════════════════════════════════
-//  内嵌密码 UI（init / unlock 模式，非弹框）
-// ════════════════════════════════════════════════════════════════
+// ══ 内嵌密码 UI（init/unlock 模式） ══
 
 interface PasswordInlineProps {
   mode: 'init' | 'unlock'
@@ -522,9 +508,7 @@ function PasswordInline({ mode, invokeBackend, onSuccess }: PasswordInlineProps)
   )
 }
 
-// ════════════════════════════════════════════════════════════════
-//  文件树视图（参考 FileTreeView 结构）
-// ════════════════════════════════════════════════════════════════
+// ══ 文件树视图 ══
 
 interface DiskFileTreeProps {
   rootItems: NoteListItem[]
@@ -598,7 +582,7 @@ function DiskFileTree({
     void storageRef.current.get<string[]>(EXPANDED_STORAGE_KEY).then(async (ids) => {
       if (ids && ids.length > 0) {
         setExpanded(new Set(ids))
-        // 修复：重新加载所有已展开文件夹的子项（treeCache 在 unmount 后丢失）
+        // 重新加载已展开文件夹子项（unmount 后缓存丢失）
         for (const id of ids) {
           if (!treeCache.has(id)) {
             await refreshChildrenRef.current(id)
@@ -664,8 +648,7 @@ function DiskFileTree({
   // 拖拽状态
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const dragSourceRef = useRef<string | null>(null)
-  // 类型断言：@types/react 18.3 中 useRef<T>(null) 返回 RefObject<T | null>，
-  // 但原生 input 和 forwardRef 的 ref prop 期望 RefObject<T>（不含 null）
+  // 类型断言：弥补 @types/react 18.3 useRef 类型差异
   const inputRef = useRef<HTMLInputElement>(null) as React.RefObject<HTMLInputElement>
 
   /** 输入框聚焦。 */
@@ -687,7 +670,7 @@ function DiskFileTree({
       if (e.key === 'Escape') setContextMenu(null)
     }
     const onScroll = () => setContextMenu(null)
-    // 捕获阶段：在事件向下传递时就检测，避免菜单自身 stopPropagation 的干扰
+    // 捕获阶段检测，避免菜单 stopPropagation 干扰
     document.addEventListener('mousedown', onMouseDown, true)
     document.addEventListener('keydown', onKey)
     document.addEventListener('scroll', onScroll, true)
@@ -772,7 +755,7 @@ function DiskFileTree({
       return
     }
     try {
-      // 先收集需要关闭的 tab id（删除后端数据后 id 仍可用）
+      // 先收集需关闭的 tab id（删除后 id 仍可用）
       const noteIdsToClose: string[] = item.type === 'file'
         ? [item.id]
         : await collectNoteIds(item.id)
@@ -890,7 +873,7 @@ function DiskFileTree({
 
   return (
     <div style={treeContainerStyle}>
-      {/* 标题栏（参考 FileTreeView：标题 + 工具按钮组） */}
+      {/* 标题栏 */}
       <div style={treeHeaderStyle}>
         <span style={{ fontSize: 13, fontWeight: 500 }}>密盘</span>
         <div style={{ display: 'flex', gap: 2 }}>
@@ -995,7 +978,7 @@ function DiskFileTree({
         />
       )}
 
-      {/* 设置对话框（使用 radix-ui/react-dialog） */}
+      {/* 设置对话框 */}
       <Dialog.Root open={showSettings} onOpenChange={onSettingsOpenChange}>
         <Dialog.Portal>
           <Dialog.Overlay style={settingsOverlayStyle} />
@@ -1109,9 +1092,7 @@ function DiskFileTree({
   )
 }
 
-// ════════════════════════════════════════════════════════════════
-//  递归树项组件
-// ════════════════════════════════════════════════════════════════
+// ══ 递归树项组件 ══
 
 interface TreeItemProps {
   item: NoteListItem
@@ -1260,9 +1241,7 @@ function TreeItem(props: TreeItemProps) {
   )
 }
 
-// ════════════════════════════════════════════════════════════════
-//  新建项目输入框（forwardRef 用于聚焦）
-// ════════════════════════════════════════════════════════════════
+// ══ 新建项目输入框（forwardRef 聚焦） ══
 
 interface NewItemInputProps {
   type: 'file' | 'folder'
@@ -1296,9 +1275,7 @@ const NewItemInput = forwardRef<HTMLInputElement, NewItemInputProps>(function Ne
   )
 })
 
-// ════════════════════════════════════════════════════════════════
-//  右键菜单视图（原生定位，无第三方依赖）
-// ════════════════════════════════════════════════════════════════
+// ══ 右键菜单视图（原生定位） ══
 
 interface ContextMenuViewProps {
   x: number
@@ -1317,7 +1294,7 @@ const ContextMenuView = forwardRef<HTMLDivElement, ContextMenuViewProps>(functio
   { x, y, item, parentId, onNewFile, onNewFolder, onRename, onDelete, onCopyTitle, onClose },
   ref,
 ) {
-  /** 菜单项点击：执行操作后主动关闭菜单（点击外部由 document mousedown 处理）。 */
+  /** 菜单项点击：执行操作后关闭菜单 */
   const handleItemClick = (fn: () => void) => (e: React.MouseEvent) => {
     e.stopPropagation()
     fn()
@@ -1389,11 +1366,9 @@ const ContextMenuView = forwardRef<HTMLDivElement, ContextMenuViewProps>(functio
   )
 })
 
-// ════════════════════════════════════════════════════════════════
-//  样式
-// ════════════════════════════════════════════════════════════════
+// ══ 样式 ══
 
-// ── 密码内嵌 UI 样式 ──────────────────────────────────────────────
+// ── 密码内嵌 UI 样式 ──
 
 const pwdContainerStyle: React.CSSProperties = {
   padding: 24,
@@ -1493,7 +1468,7 @@ const pwdSubmitBtnStyle: React.CSSProperties = {
   marginTop: 8,
 }
 
-// ── 文件树样式 ──────────────────────────────────────────────────
+// ── 文件树样式 ──
 
 const treeContainerStyle: React.CSSProperties = {
   display: 'flex',
@@ -1592,7 +1567,7 @@ const createInputStyle: React.CSSProperties = {
   marginRight: 8,
 }
 
-// ── 右键菜单样式 ────────────────────────────────────────────────
+// ── 右键菜单样式 ──
 
 const menuContainerStyle: React.CSSProperties = {
   position: 'fixed',
@@ -1628,7 +1603,7 @@ const menuDividerStyle: React.CSSProperties = {
   margin: '4px 0',
 }
 
-// ── 设置对话框样式 ──────────────────────────────────────────────
+// ── 设置对话框样式 ──
 
 const settingsOverlayStyle: React.CSSProperties = {
   position: 'fixed',
@@ -1767,7 +1742,7 @@ const settingsCloseBtnStyle: React.CSSProperties = {
   width: '100%',
 }
 
-// ── 修改密码内嵌组件 ──────────────────────────────────────────────
+// ── 修改密码内嵌组件 ──
 
 interface ChangePasswordInlineProps {
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>

@@ -60,14 +60,12 @@ export function dispatchBuiltin(
       }
       // toast 描述携带内置 action 名
       toast(i18n.t('settings.pluginCommandShadowed', { id: pluginId }), {
-        // Wave A / C1: stable id so the same conflict
-        // doesn't stack a new toast on every keypress.
+        // 稳定 id，避免重复冲突堆叠 toast
         id: `plugin-conflict-${key}`,
         description: i18n.t('settings.pluginCommandShadowedDesc', {
           action: key,
         }),
-        // Wave B / M1: 1.5s is too short to read both the
-        // title and the new description. Bump to 3s.
+        // 延长到 3s，便于阅读标题与描述
         duration: 3000,
       })
     }
@@ -164,50 +162,45 @@ export async function handleOpenFile() {
 }
 
 export async function handleSaveFile() {
-  // Flush any pending debounced editor content before reading from the store
+  // 读取前先 flush 编辑器防抖内容
   await flushAllEditors()
   const { tabs, activeTabId } = useEditorStore.getState()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   if (!activeTab || (!activeTab.isDirty && !activeTab.frontmatterDirty)) return
 
   try {
-    // Mark path as saving to prevent file-watcher from closing the tab
+    // 标记保存中，防止 file-watcher 关闭 tab
     useEditorStore.setState((state) => {
       const newSet = new Set(state.savingPaths)
       newSet.add(activeTab.path)
       return { savingPaths: newSet }
     })
     const { writeFile } = await import('@/lib/tauri')
-    // For .md files, merge frontmatter with body before writing
+    // .md 文件写入前合并 frontmatter 与正文
     const isMarkdown = activeTab.path.toLowerCase().endsWith('.md')
-    // 记录保存前的正文基准，await 写入期间若用户再次编辑，content 会变化，
-    // 据此做 CAS 式判断，避免把用户新编辑误标为已保存导致内容丢失
+    // 保存前正文基准，用于 CAS 判断避免误标已保存
     const savingContent = activeTab.content
     let writeContent = activeTab.content
     let fm: NoteFrontmatter | undefined
     if (isMarkdown) {
       const { serializeFrontmatter, stripFrontmatter } = await import('@/lib/utils/frontmatter')
       fm = { ...(activeTab.frontmatter || {}), updated: new Date().toISOString() }
-      // stripFrontmatter is defensive: tab.content normally holds only
-      // the body, but source mode edits may store the full file content.
+      // 防御性剥离 frontmatter（源码模式可能含完整内容）
       const body = stripFrontmatter(activeTab.content ?? '')
       writeContent = serializeFrontmatter(fm, body)
     }
     await writeFile(activeTab.path, writeContent)
-    // 保存 .md 文件后，同步更新 md_frontmatter 表
-    // 确保分类面板刷新时能立即查到最新的文件关联
+    // 同步更新 frontmatter 索引表，供分类面板查询
     if (isMarkdown) {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
         await invoke('index_saved_file', { path: activeTab.path })
       } catch (e) {
-        // 索引线程会异步补偿，但记录日志便于排查
+        // 索引线程会异步补偿，记录日志便于排查
         console.error('Failed to index saved file:', activeTab.path, e)
       }
     }
-    // CAS 式保护：await 写入期间用户可能再次编辑使 isDirty=true。
-    // 仅当 content 仍与保存前一致（期间无新编辑）时才清除脏标记，
-    // 否则保留 isDirty=true，待下次保存处理，避免用户新编辑被误标为已保存
+    // CAS 保护：仅期间无新编辑才清脏标记
     const currentTab = useEditorStore.getState().tabs.find((t) => t.id === activeTab.id)
     if (currentTab && currentTab.content === savingContent) {
       useEditorStore.setState((state) => ({
@@ -216,11 +209,9 @@ export async function handleSaveFile() {
         ),
       }))
     }
-    // Notify plugins: the note has been successfully persisted.
-    // We emit after the store commit so the `isDirty=false` state
-    // is observable by subscribers reading from the store.
+    // 提交后通知插件：笔记已保存
     queueMicrotask(() => emitNoteSaved(activeTab.id, activeTab.path))
-    // Invalidate frontmatter cache so search/file-tree use fresh data
+    // 失效 frontmatter 缓存以刷新搜索/文件树
     if (isMarkdown) {
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
       invalidateFrontmatterCache(activeTab.path)
@@ -235,7 +226,7 @@ export async function handleSaveFile() {
   } catch (e) {
     console.error('Failed to save file:', e)
   } finally {
-    // Delay removing from savingPaths to allow file-watcher events to settle
+    // 延迟移除 savingPaths，等 file-watcher 平息
     const savedPath = activeTab.path
     setTimeout(() => {
       useEditorStore.setState((state) => {
@@ -348,8 +339,7 @@ export function useKeyboardShortcuts() {
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
 
-  // Use refs for tabs to avoid re-binding the keydown listener on every tab change.
-  // This prevents excessive listener teardown/setup which causes GC pressure.
+  // 用 ref 持有 tabs，避免每次切换重新绑定 listener
   const tabsRef = useRef(useEditorStore.getState().tabs)
   useEffect(() => {
     const unsub = useEditorStore.subscribe((state) => {
@@ -360,10 +350,7 @@ export function useKeyboardShortcuts() {
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
-      // Only handle shortcuts explicitly registered in DEFAULT_SHORTCUTS.
-      // Never intercept system-native editing shortcuts (⌘C/⌘V/⌘A/⌘Z/⌘X etc.)
-      // or browser/editor built-in shortcuts. This ensures BlockNote, CodeMirror,
-      // and the system clipboard all work normally.
+      // 仅处理已注册快捷键，不拦截系统/编辑器原生快捷键
 
       if (dispatchBuiltin(e, 'newFile', handleNewFile)) return
       if (dispatchBuiltin(e, 'newFolder', handleNewFolder)) return
@@ -385,15 +372,11 @@ export function useKeyboardShortcuts() {
         return
       if (dispatchBuiltin(e, 'openExplorer', handleOpenExplorer)) return
 
-      // Customizable global shortcuts (user can rebind in Settings)
+      // 用户可在设置中自定义的全局快捷键
 
       if (dispatchBuiltin(e, 'commandPalette', toggleCommandPalette)) return
 
-      // #12: Don't intercept Ctrl+F when focus is inside a CodeMirror
-      // editor — let CodeMirror's built-in search (searchKeymap) handle
-      // it instead.  CodeMirror's keymap runs at the target phase; our
-      // window listener runs at the bubble phase, so skipping here lets
-      // the event reach CodeMirror's handler unimpeded.
+      // CodeMirror 内不拦截 Ctrl+F，交给其内置搜索
       const isInCodeMirror = !!(e.target as HTMLElement | null)?.closest?.('.cm-editor')
       if (!isInCodeMirror && dispatchBuiltin(e, 'searchPanel', handleToggleSearch)) return
 
@@ -427,20 +410,18 @@ export function useKeyboardShortcuts() {
         return
       }
 
-      // ⌘1-9 — Tab switching (not in ShortcutKey because it's 9 separate keys,
-      // not a single rebindable shortcut. No standard editing shortcut uses mod+digit.)
+      // ⌘1-9 切换 tab（非单一可重绑快捷键）
       const isMod = e.ctrlKey || e.metaKey
       if (isMod && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         const index = parseInt(e.key) - 1
         if (tabsRef.current[index]) {
           const tab = tabsRef.current[index]
-          // 切换前 flush 旧编辑器防抖内容，防止 300ms 窗口内未序列化的编辑丢失
+          // 切换前 flush 防抖内容，避免编辑丢失
           await flushAllEditors()
-          // Switch tab immediately for better UX
+          // 立即切换 tab 提升体验
           useEditorStore.getState().setActiveTab(tab.id)
-          // Load content asynchronously after switching tab
-          // Check content === undefined to detect unloaded tabs (empty string is valid content)
+          // 异步加载内容；用 undefined 判断未加载（空串有效）
           if (tab.content === undefined && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
             setTimeout(() => {
               useEditorStore.getState().loadTabContent(tab.id)
@@ -450,16 +431,14 @@ export function useKeyboardShortcuts() {
         return
       }
 
-      // Escape — dismiss open overlays (command palette, search panel, etc.)
-      // Only act when there's actually something to dismiss; never swallow Escape
-      // that the editor might need (e.g., exiting a special mode)
+      // Escape 关闭浮层；编辑器需要时不拦截
       if (e.key === 'Escape') {
         const { commandPaletteVisible } = useUIStore.getState()
         if (commandPaletteVisible) {
           toggleCommandPalette()
           return
         }
-        // No overlay open — don't preventDefault, let editor/system handle it
+        // 无浮层时不 preventDefault，交由编辑器处理
       }
     }
 

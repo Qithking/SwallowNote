@@ -40,16 +40,9 @@ import {
  */
 export function usePluginTelemetryVersion(): number {
   return useSyncExternalStore(
-    // The telemetry module owns the subscription list. We
-    // delegate to its `subscribeToMetricsVersion`, which adds
-    // the React-supplied `onChange` callback to the shared
-    // subscriber set on mount and removes it on unmount.
+    // 委托 telemetry 模块管理订阅列表
     subscribeToMetricsVersion,
-    // Snapshot: read the current value. React compares
-    // `Object.is(prev, next)` on each render to decide whether
-    // to re-render the consumer; since the counter is a
-    // monotonically increasing integer, every recorder call
-    // produces a new value and the consumer re-renders.
+    // 快照：计数器单调递增，每次记录触发重渲染
     () => getMetricsVersion(),
   )
 }

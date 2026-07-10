@@ -98,6 +98,15 @@ function walkBlocks(blocks: any[], visitor: (block: any) => any): any[] {
   return result
 }
 
+// 模块级单例，避免每次 parseContent 都创建新实例
+let _sharedParseEditor: ReturnType<typeof BlockNoteEditor.create> | null = null
+function getSharedParseEditor() {
+  if (!_sharedParseEditor) {
+    _sharedParseEditor = BlockNoteEditor.create()
+  }
+  return _sharedParseEditor
+}
+
 interface MarkdownEditorProps {
   content: string
   onChange?: (content: string) => void
@@ -112,7 +121,7 @@ function BlockNoteInner({
   onChange?: (content: string) => void
 }) {
   const uploadPath = useUIStore((state) => state.uploadPath)
-  const { rootPath } = useWorkspaceStore()
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
   const activeTabId = useEditorStore((s) => s.activeTabId)
   const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
   const activeTabName = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.name ?? '')
@@ -128,7 +137,7 @@ function BlockNoteInner({
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
   // Cache the last onChange result so getFullContent can return it synchronously
-  const lastContentRef = useRef<string>('')
+  const lastContentRef = useRef<string | null>('')
   // Refs to access latest values inside stable callbacks (editor is created once)
   const activeTabPathRef = useRef(activeTabPath)
   activeTabPathRef.current = activeTabPath
@@ -1072,6 +1081,8 @@ function BlockNoteInner({
         // 兜底：触发序列化（async，不阻塞 cleanup）
         serializeAndNotify()
       }
+      // 释放缓存的文档内容，避免 tab 切换后闭包持有大字符串
+      lastContentRef.current = null
     }
   }, [serializeAndNotify])
 
@@ -1585,7 +1596,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
         // already-stripped body is a no-op, so this is always safe.
         const body = stripFrontmatter(content)
 
-        const tempEditor = BlockNoteEditor.create()
+        const tempEditor = getSharedParseEditor()
         let blocks: PartialBlock[] = []
 
         try {

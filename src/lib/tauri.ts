@@ -199,14 +199,14 @@ export async function getPluginStoragePath(pluginId: string): Promise<string> {
 
 // ── Plugin settings（SQLite 后端）──
 
-/** Mirrors the Rust `PluginSettingsView`. */
+/** 对应 Rust PluginSettingsView */
 export interface PluginSettingsView {
   exists: boolean
   values: Record<string, unknown>
   schema: PluginSettingsSchema | null
 }
 
-/** Mirrors the Rust `SettingsSchema`. */
+/** 对应 Rust SettingsSchema */
 export interface PluginSettingsSchema {
   version: number
   title?: string
@@ -259,9 +259,7 @@ export async function writePluginSettings(
   pluginId: string,
   values: Record<string, unknown>
 ): Promise<void> {
-  // 嵌套结构体 WriteSettingsArgs（plugin_id, values）后端无 rename_all，
-  // Tauri v2 不做 camelCase → snake_case 自动转换，需传 snake_case 字段名
-  // （与项目内 CreateFileRequest / RenameFileRequest 一致）。
+  // Tauri v2 不转 camelCase，需传 snake_case
   await invoke('write_plugin_settings', { args: { plugin_id: pluginId, values } })
 }
 
@@ -269,7 +267,7 @@ export async function deletePluginSettings(pluginId: string): Promise<void> {
   await invoke('delete_plugin_settings', { pluginId })
 }
 
-// ── Market source management ──────────────────────────────
+// 市场源管理
 export interface MarketSourceView {
   name: string
   url: string
@@ -335,7 +333,7 @@ export async function writeBinaryFile(path: string, data: string): Promise<void>
   await invoke('write_binary_file', { path, data })
 }
 
-// ===== 远程图片批量下载（后端 image_downloader.rs） =====
+// 远程图片批量下载
 
 /** 单张远程图片的下载请求。 */
 export interface RemoteImageRequest {
@@ -409,7 +407,7 @@ export async function searchInFiles(req: SearchRequest): Promise<SearchResult[]>
   return await invoke('search_in_files', { req })
 }
 
-// Git APIs
+// Git API
 export async function gitInit(path: string): Promise<void> {
   await invoke('git_init', { path })
 }
@@ -458,7 +456,7 @@ export async function gitForcePullWithCredentials(path: string, username: string
   await invoke('git_force_pull_with_credentials', { path, username, password })
 }
 
-// Conflict resolution APIs
+// 冲突解决 API
 export interface ConflictFile {
   path: string
   abs_path: string
@@ -488,7 +486,7 @@ export async function gitAbortConflict(repoPath: string): Promise<void> {
   await invoke('git_abort_conflict', { repoPath })
 }
 
-// Conflict Repo Record APIs (persistent conflict state)
+// 冲突仓库记录 API
 export interface ConflictRepoRecord {
   repo_path: string
   repo_name: string
@@ -518,7 +516,7 @@ export async function checkAndUpdateConflictRepo(
   return await invoke('check_and_update_conflict_repo', { repoPath, repoName })
 }
 
-// Word Diff API (computed in Rust via similar crate)
+// Word Diff API（Rust 计算）
 export interface WordDiffPart {
   value: string
   removed: boolean
@@ -534,7 +532,7 @@ export async function computeWordDiff(oldText: string, newText: string): Promise
   return await invoke('compute_word_diff', { oldText, newText })
 }
 
-// Git Keyring Credential APIs
+// Git 凭据 Keyring API
 export interface GitCredential {
   username: string
   password: string
@@ -633,12 +631,12 @@ export async function scanGitRepos(rootPath: string): Promise<GitRepositoryInfo[
   return await invoke('scan_git_repos', { rootPath })
 }
 
-// Clipboard APIs
+// 剪贴板 API
 export async function readClipboardFilePaths(): Promise<string[]> {
   return await invoke('read_clipboard_file_paths')
 }
 
-// File watcher APIs
+// 文件监听 API
 export async function watchDirectory(path: string): Promise<void> {
   await invoke('watch_directory', { path })
 }
@@ -647,12 +645,12 @@ export async function unwatchDirectory(path: string): Promise<void> {
   await invoke('unwatch_directory', { path })
 }
 
-// Platform info
+// 平台信息
 export async function getPlatform(): Promise<string> {
   return await platform()
 }
 
-// Folder History APIs
+// 文件夹历史 API
 export async function saveFolderHistory(path: string): Promise<void> {
   await invoke('save_folder_history', { path })
 }
@@ -673,17 +671,17 @@ export async function clearOtherFolderHistory(currentPath: string | null): Promi
   await invoke('clear_other_folder_history', { currentPath })
 }
 
-// macOS Dock Icon APIs
+// macOS Dock 图标 API
 export async function setDockIconVisibility(visible: boolean): Promise<void> {
   await invoke('set_dock_icon_visibility', { visible })
 }
 
-// Locale API - sync frontend language setting to backend
+// 语言设置同步到后端
 export async function setAppLocale(locale: string): Promise<void> {
   await invoke('set_app_locale', { locale })
 }
 
-// Session State APIs
+// 会话状态 API
 export async function saveSessionState(states: Record<string, string>): Promise<void> {
   await invoke('save_session_state', { states })
 }
@@ -692,7 +690,7 @@ export async function getSessionState(): Promise<Record<string, string>> {
   return await invoke('get_session_state')
 }
 
-// App Settings (persisted via session_state)
+// 应用设置（session_state 持久化）
 const SETTINGS_PREFIX = 'settings.'
 
 export interface AppSettings {
@@ -789,9 +787,7 @@ export async function checkLatestVersion(): Promise<{ latest: string; current: s
   try {
     const packageJson = await import('../../package.json')
     const current = packageJson.default.version
-    // Use the Rust backend to check the latest version.
-    // This avoids CORS errors and 504 gateway timeouts that occur when the
-    // browser directly fetches from api.github.com (especially behind a proxy).
+    // 走 Rust 后端避免 CORS / 504
     const [latest, hasUpdate] = await invoke<[string, boolean]>('check_latest_version', { currentVersion: current })
     return { latest, current, hasUpdate }
   } catch (e) {
@@ -826,8 +822,7 @@ export function downloadLatestRelease(
     unlistenComplete?.()
   }
 
-  // 使用 async IIFE 保证两个监听器注册完成后再 invoke，
-  // 避免后端在监听器注册前发送事件导致丢失；仍同步返回 cleanup 供调用方随时取消。
+  // async IIFE 保证监听器先注册再 invoke
   void (async () => {
     try {
       const fnProgress = await listen<DownloadProgress>('download-progress', (event) => {
@@ -863,7 +858,7 @@ export async function installAndRestart(dmgPath: string): Promise<void> {
   await invoke('install_and_restart', { dmgPath })
 }
 
-// AI APIs
+// AI API
 export async function encryptApiKey(plaintext: string): Promise<string> {
   return await invoke('encrypt_api_key', { plaintext })
 }
@@ -986,7 +981,7 @@ export async function getBuiltinAiModels(): Promise<BuiltinAiModel[]> {
   return await invoke('get_builtin_ai_models')
 }
 
-// ── Plugin APIs ────────────────────────────────────────────────────────────────
+// 插件 API
 
 export interface PluginMetadataRust {
   id: string
@@ -995,20 +990,9 @@ export interface PluginMetadataRust {
   version: string
   author: string
   published_at: string
-  /**
-   * Where to show the plugin's icon. `null` / `undefined`
-   * means the plugin has no UI surface (e.g. a file-format
-   * editor that's only triggered by opening the matching
-   * file). The host's `buildRegistry` skips the plugin in
-   * that case, but the plugin's other capabilities
-   * (`editorFileExtensions`, lifecycle hooks, settings, …)
-   * are still honoured.
-   */
+  /** 图标位置，null 表示无 UI */
   icon_position: string | null
-  /**
-   * Where to show the plugin's panel content. Optional for
-   * the same reason as `icon_position`.
-   */
+  /** 面板位置，同 icon_position 可选 */
   content_position: string | null
   order: number
   enabled: boolean
@@ -1016,16 +1000,16 @@ export interface PluginMetadataRust {
   has_backend: boolean
   // 是否随附 settings.json schema
   has_settings_schema: boolean
-  /** The repo URL this plugin was installed from. Empty for local zip uploads. */
+  /** 安装来源 repo URL，本地 zip 为空 */
   source: string
 }
 
-/** Scan the plugins directory and return metadata for each plugin */
+/** 扫描插件目录返回元数据 */
 export async function scanPlugins(): Promise<PluginMetadataRust[]> {
   return await invoke('scan_plugins')
 }
 
-// 安装 .zip 插件。expectedSha256 可选完整性校验，source 可选来源仓库 URL
+// 安装 zip 插件，可选 sha256 校验与来源
 export async function installPlugin(
   zipPath: string,
   expectedSha256?: string,
@@ -1034,12 +1018,12 @@ export async function installPlugin(
   return await invoke('install_plugin', { zipPath, expectedSha256, source })
 }
 
-/** Uninstall a plugin by id */
+/** 按 id 卸载插件 */
 export async function uninstallPlugin(pluginId: string, deleteData?: boolean): Promise<void> {
   return await invoke('uninstall_plugin', { pluginId, deleteData })
 }
 
-/** Enable or disable a plugin */
+/** 启用或禁用插件 */
 export async function togglePluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
   return await invoke('toggle_plugin_enabled', { pluginId, enabled })
 }
@@ -1056,19 +1040,19 @@ export interface PluginConfigImportEntry {
   message: string
 }
 
-/** Outcome of an `importPluginConfigs` call. */
+/** importPluginConfigs 结果 */
 export interface PluginConfigImportResult {
   swallow_version: string
   schema_version: number
   plugin_count: number
-  /** Number of storages successfully written. */
+  /** 成功写入的 storage 数 */
   imported: number
-  /** Number of entries that were skipped (missing / error). */
+  /** 跳过的条目数 */
   skipped: number
   entries: PluginConfigImportEntry[]
 }
 
-/** Manifest at the root of an export bundle. */
+/** 导出包根 manifest */
 export interface ExportManifest {
   schema_version: number
   swallow_version: string

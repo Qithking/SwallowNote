@@ -1,14 +1,13 @@
-/** 插件依赖解析器（G4），pure 函数。输出：DependencyResolution（missing/unsatisfied/cycles/installOrder）。 */
+/** 插件依赖解析器，纯函数 */
 import semver from 'semver'
 import type { PluginDependency } from '@/types/plugin'
 
-// ─── Public types ─────────────────────────────────────────────────────────────
+// 公共类型
 
 /** 本地已安装插件快照。 */
 export interface ResolverInstalledPlugin {
   version: string
-  /** Optional transitive dependencies. Required for accurate
-   *  cycle detection in the full plugin graph. */
+  /** 可选传递依赖，用于循环检测 */
   dependencies?: PluginDependency[]
 }
 
@@ -21,9 +20,9 @@ export interface ResolverIndexEntry {
 /** 可从市场安装的缺失依赖。 */
 export interface ResolvableDependency {
   id: string
-  /** What the parent manifest required. */
+  /** 父 manifest 要求的范围 */
   required: string
-  /** What the marketplace index actually offers. */
+  /** 市场实际提供的版本 */
   available: string
 }
 
@@ -32,17 +31,15 @@ export interface UnsatisfiedDependency {
   id: string
   required: string
   installed: string
-  /** Why the installed version didn't satisfy the range.
-   *  `invalid-range` means the manifest's range is itself
-   *  unparseable and needs to be fixed in the upstream manifest. */
+  /** manifest 依赖范围无法解析 */
   kind: 'out-of-range' | 'invalid-range' | 'unparseable-version'
 }
 
 /** 检测到的依赖循环。 */
 export interface DependencyCycle {
-  /** Plugin id where the cycle started (== where the cycle closes). */
+  /** 循环起点 id（即闭合点） */
   root: string
-  /** The full chain, including the duplicated `root` at the end. */
+  /** 完整路径，末尾重复 root */
   path: string[]
 }
 
@@ -51,14 +48,13 @@ export interface DependencyResolution {
   ok: boolean
   /** 未安装的依赖。 */
   missing: ResolvableDependency[]
-  /** Dependencies that are installed but at the wrong version. */
+  /** 已安装但版本不符 */
   unsatisfied: UnsatisfiedDependency[]
-  /** Dependency cycles that would prevent a clean install. */
+  /** 阻碍安装的依赖循环 */
   cycles: DependencyCycle[]
   /** 拓扑安装序（不含 root），仅无循环时填充。 */
   installOrder: string[]
-  /** The root manifest as the resolver saw it (id + declared
-   *  dependencies). Useful for diagnostics + tests. */
+  /** 根 manifest 快照，用于诊断 */
   root: {
     id: string
     version: string
@@ -66,7 +62,7 @@ export interface DependencyResolution {
   }
 }
 
-// ─── Parsing helpers ──────────────────────────────────────────────────────────
+// 解析辅助
 
 /** 解析 <id>@<range> 字符串。无 @ 时 range 为 *。 */
 export function parseDependencySpec(spec: string): PluginDependency {
@@ -74,16 +70,11 @@ export function parseDependencySpec(spec: string): PluginDependency {
   const trimmed = spec.trim()
   if (!trimmed) return { id: '', version: '' }
   const at = trimmed.lastIndexOf('@')
-  // No `@` at all: the whole string is the id, with `*` as the
-  // implicit "any version" range. Matches the npm convention of
-  // `npm i <id>` picking up the latest version automatically.
+  // 无 @ 时整体为 id，range 默认 *
   if (at < 0) {
     return { id: trimmed, version: '*' }
   }
-  // `@` at position 0: there is no id, only a range. The caller
-  // (`parseDependencyList`) drops empty-id entries, so this path
-  // surfaces as a silent skip rather than a half-built
-  // dependency.
+  // @ 在首位则无 id，调用方丢弃
   if (at === 0) {
     return { id: '', version: trimmed.slice(1).trim() || '*' }
   }
@@ -104,16 +95,13 @@ export function parseDependencyList(specs: readonly string[] | undefined): Plugi
   return out
 }
 
-// ─── Semver helpers ──────────────────────────────────────────────────────────
+// semver 辅助
 
 /** range 是否匹配 version（node-semver）。 */
 export function satisfiesRange(range: string, version: string): boolean {
   const r = (range || '').trim() || '*'
   if (!version) return false
-  // Wildcard shorthands: any of these matches any non-empty
-  // version. The semver library already handles `*`, `x`, `X`,
-  // and empty string in `satisfies`, but we short-circuit them
-  // so a malformed version on the installed side doesn't crash.
+  // 通配符短路，避免畸形版本崩溃
   if (r === '*' || r === 'x' || r === 'X' || r === '') {
     return semver.valid(version) !== null
   }
@@ -131,7 +119,7 @@ export function isValidRange(range: string): boolean {
   return semver.validRange(r) !== null
 }
 
-// ─── Core resolver ───────────────────────────────────────────────────────────
+// 核心解析器
 
 /**
  * 解析依赖图。遍历声明依赖，递归已安装目录检测循环；不递归市场索引。
@@ -164,7 +152,7 @@ export function resolveDependencies(
   const ordered: string[] = []
 
   const visit = (pluginId: string, dep: PluginDependency): void => {
-    // ── Self-reference: A → A. Cheap to detect, easy to surface.
+    // 自引用 A→A
     if (pluginId === root.id) {
       result.cycles.push({ root: root.id, path: [...visitedStack, pluginId] })
       return
@@ -179,9 +167,7 @@ export function resolveDependencies(
       return
     }
 
-    // Already finished in a previous sibling's subtree — its
-    // descendants are already in `ordered` in the right
-    // position. No need to redo the work.
+    // 已完成则跳过
     if (completed.has(pluginId)) {
       return
     }
@@ -199,9 +185,7 @@ export function resolveDependencies(
       return
     }
 
-    // Installed. Validate the range. A plugin author who ships
-    // an unparseable range gets a clear `invalid-range` error
-    // rather than a silent "uninstalled" report.
+    // 校验 range，不可解析报 invalid-range
     if (!isValidRange(dep.version)) {
       result.unsatisfied.push({
         id: pluginId,
@@ -209,14 +193,12 @@ export function resolveDependencies(
         installed: local.version,
         kind: 'invalid-range',
       })
-      // Don't recurse — the manifest is broken.
+      // manifest 损坏，不递归
       return
     }
 
     if (!satisfiesRange(dep.version, local.version)) {
-      // Distinguish "installed version is unparseable" from
-      // "installed version is out of range". Both are real
-      // problems but the diagnostic message is different.
+      // 区分版本不可解析与越界
       const kind: UnsatisfiedDependency['kind'] =
         semver.valid(local.version) === null
           ? 'unparseable-version'

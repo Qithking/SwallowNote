@@ -6,6 +6,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
+/// watched_paths 上限，FIFO 淘汰
+const MAX_WATCHED_PATHS: usize = 32;
+
 struct FileWatcherState {
     debouncer: Option<notify_debouncer_full::Debouncer<notify::RecommendedWatcher, RecommendedCache>>,
     watched_paths: Vec<PathBuf>,
@@ -121,6 +124,15 @@ pub async fn watch_directory(path: String) -> Result<(), String> {
                 .watch(&path_buf, RecursiveMode::Recursive)
                 .map_err(|e| format!("Failed to watch directory: {}", e))?;
 
+            // FIFO 淘汰；clone 旧路径避免借用冲突
+            if state.watched_paths.len() >= MAX_WATCHED_PATHS {
+                if let Some(old_path) = state.watched_paths.first().cloned() {
+                    // unwatch 旧路径，忽略错误（路径可能已失效或被外部移除）
+                    let _ = debouncer.unwatch(&old_path);
+                    state.watched_paths.remove(0);
+                }
+            }
+
             state.watched_paths.push(path_buf);
             Ok(())
         } else {
@@ -157,7 +169,7 @@ pub async fn unwatch_directory(path: String) -> Result<(), String> {
     .unwrap_or_else(|e| Err(format!("unwatch_directory join error: {}", e)))
 }
 
-/// 监听 plugins 目录下 storage.json 变更，发射 plugin-storage-changed 事件供前端同步存储大小。幂等。
+/// 监听 plugins 下 storage.json 变更，发射事件供前端同步。
 pub fn watch_plugin_storage(app_handle: AppHandle) {
     // 复用 init_watcher 单例；未初始化时静默跳过。
     let mut guard = match FILE_WATCHER.lock() {
@@ -181,9 +193,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
     };
     let plugins_root = app_data_dir.join("plugins");
 
-    // Create the dir on the spot so the watcher can attach —
-    // fresh installs (no plugins yet) would otherwise fail to
-    // watch a non-existent path.
+    // 插件目录不存在时立即创建
     if !plugins_root.exists() {
         if let Err(e) = std::fs::create_dir_all(&plugins_root) {
             eprintln!(
@@ -194,8 +204,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
         }
     }
 
-    // Skip if we already watch this root (idempotent across
-    // `setup` re-runs, e.g. hot reload).
+    // 已监听则跳过（幂等）
     if state.watched_paths.contains(&plugins_root) {
         return;
     }
@@ -214,7 +223,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
     }
 
     // 安装第二个 debouncer 监听同一路径；notify 允许多 watcher 共存。
-    drop(guard); // release the singleton lock before constructing the second watcher
+    drop(guard); // 构造第二个 watcher 前释放单例锁
 
     let app_handle_for_storage = app_handle.clone();
     let storage_debouncer = match new_debouncer(
@@ -263,7 +272,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
     PLUGIN_STORAGE_DEBOUNCER.set(storage_debouncer).ok();
 }
 
-/// 从 <app_data>/plugins/<pluginId>/storage.json 路径提取 pluginId；路径深度不符返回 None。
+/// 从 storage.json 路径提取 pluginId；深度不符返回 None。
 fn extract_plugin_storage_id(path: &Path) -> Option<String> {
     let components: Vec<&str> = path
         .components()

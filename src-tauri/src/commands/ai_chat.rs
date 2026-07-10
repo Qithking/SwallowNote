@@ -19,7 +19,8 @@ pub fn load_ai_messages(
     before_id: Option<i64>,
     limit: Option<i64>,
 ) -> Result<Vec<AiMessage>, String> {
-    let limit = limit.unwrap_or(30);
+    // 限制 limit 范围在 1..=200，防止前端传入超大值导致一次性加载过多消息
+    let limit = limit.unwrap_or(30).clamp(1, 200);
     crate::db::ai_chat::load_messages(&db, before_id, limit)
         .map_err(|e| format!("Failed to load AI messages: {}", e))
 }

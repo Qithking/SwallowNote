@@ -109,7 +109,7 @@ pub fn delete_role_prompt(db: &Database, role_key: &str) -> Result<()> {
         eprintln!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
-    // Only allow deleting non-builtin prompts
+    // 仅允许删除非内置提示词
     conn.execute(
         "DELETE FROM ai_role_prompts WHERE role_key = ?1 AND is_builtin = 0",
         [role_key],

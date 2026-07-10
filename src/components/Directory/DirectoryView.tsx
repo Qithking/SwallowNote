@@ -23,10 +23,7 @@ function DirectoryView() {
   const activeTabName = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.name ?? '')
   const activeTabContent = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.content ?? '')
   const viewMode = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.viewMode ?? 'preview')
-  // Tracks whether we've received a block-ID-based TOC from the
-  // 'block-editor-ready' event.  In preview mode the text-parsed TOC
-  // is only a fallback until the event arrives; after that the event
-  // is the sole source (it carries block IDs for precise scrolling).
+  // 标记是否已收到块 ID 形式的 TOC
   const hasBlockTocRef = useRef(false)
   const { t } = useTranslation()
   const [toc, setToc] = useState<TocItem | null>(null)
@@ -54,9 +51,7 @@ function DirectoryView() {
     return result
   }
 
-  // BlockNote (preview) mode TOC: listens for 'block-editor-ready' events
-  // dispatched by MarkdownEditor.  Always registered so events are never
-  // missed, but only acts in preview mode.
+  // 预览模式 TOC：监听 block-editor-ready 事件
   useEffect(() => {
     const handler = (e: Event) => {
       if (viewMode !== 'preview') return
@@ -81,17 +76,12 @@ function DirectoryView() {
     return () => window.removeEventListener('block-editor-ready', handler)
   }, [viewMode])
 
-  // Reset block-TOC tracking on tab / mode switch so the text fallback
-  // can populate the panel before the next 'block-editor-ready' event.
+  // 切换 tab/模式时重置块 TOC 标记
   useEffect(() => {
     hasBlockTocRef.current = false
   }, [viewMode, activeTabId])
 
-  // Markdown text TOC — always runs.  In source mode it is the primary
-  // source (with lineNumber for CodeMirror scrolling).  In preview mode it
-  // serves as an immediate fallback so the panel isn't empty before the
-  // 'block-editor-ready' event arrives; once that event has fired the ref
-  // gates further text-based updates to preserve block IDs.
+  // 文本 TOC：源码模式为主，预览模式作回退
   useEffect(() => {
     if (!activeTabId) {
       setToc(null)
@@ -119,7 +109,7 @@ function DirectoryView() {
     }
 
     const timer = setTimeout(() => {
-      // In preview mode, skip once block-editor has provided a TOC.
+      // 预览模式收到块 TOC 后跳过
       if (viewMode === 'preview' && hasBlockTocRef.current) return
 
       const entryTitle = activeTabName.replace(/\.md$/i, '')
@@ -142,25 +132,21 @@ function DirectoryView() {
   const scrollToPosition = useCallback((item: TocItem) => {
     setTimeout(() => {
       if (item.blockId) {
-        // Block-based TOC (from BlockNote) — always precise in both modes.
+        // 块 ID 定位：两种模式都精确
         window.dispatchEvent(
           new CustomEvent('scroll-to-block-id', {
             detail: { blockId: item.blockId, fallbackText: item.title },
           })
         )
       } else if (viewMode === 'source' && item.lineNumber) {
-        // Source mode — scroll CodeMirror to the heading's line number.
-        // Only valid in source mode; in preview mode lineNumber does NOT
-        // map 1:1 to BlockNote block indices.
+        // 源码模式按行号滚动 CodeMirror
         window.dispatchEvent(
           new CustomEvent('scroll-to-line', {
             detail: { line: item.lineNumber },
           })
         )
       } else if (item.title) {
-        // Preview-mode fallback TOC (text-parsed, no blockId): dispatch a
-        // scroll-to-block-id with only fallbackText so doScrollToBlockId
-        // can find the block by its text content.
+        // 预览模式回退：按文本定位块
         window.dispatchEvent(
           new CustomEvent('scroll-to-block-id', {
             detail: { blockId: '', fallbackText: item.title },

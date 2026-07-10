@@ -1,49 +1,34 @@
 /**
  * @swallow-note/plugin-sdk
  *
- * Single-file standalone SDK for building SwallowNote plugins.
+ * SwallowNote 插件单文件独立 SDK。
  *
- * Design goals:
- *  1. **Zero host coupling** – plugin authors only need this file
- *     plus React. They never need to `git clone` SwallowNote.
- *  2. **Identical types** – the `PluginDefinition`, `PluginEvent`
- *     etc. exported here are the *same shapes* the host consumes;
- *     a manifest built with the SDK loads unchanged into the host.
- *  3. **Browser-stub fallbacks** – when running outside the host
- *     (e.g. inside `npm run dev` of the starter template), every
- *     runtime API degrades gracefully: storage → localStorage,
- *     event bus → in-process EventTarget, context menu → in-memory
- *     registry. The plugin sees a real working API surface and
- *     `npm run build` produces a `dist/index.js` that runs in
- *     both host and standalone preview without modification.
- *  4. **Host takeover** – when SwallowNote loads the plugin's
- *     bundle, it calls `setHost({...})` to replace the stubs with
- *     the real implementations. The plugin's call sites are
- *     unchanged.
+ * 设计目标：
+ * 1. 零宿主耦合：仅需本文件 + React
+ * 2. 类型一致：导出与宿主相同的类型
+ * 3. 浏览器兜底：宿主外运行时 API 优雅降级
+ * 4. 宿主接管：setHost 替换兜底为真实实现
  *
- * The SDK intentionally has *no* runtime dependencies other than
- * `react` (peer). All hooks are implemented from scratch with
- * `useState` / `useEffect` / `useSyncExternalStore` so the bundle
- * is small and side-effect-free.
+ * 仅依赖 react（peer），无其他运行时依赖。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Types – mirror src/types/plugin.ts. Keep in sync with the host.
+//  类型定义 – 镜像 src/types/plugin.ts，需与宿主同步
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Where the plugin icon (trigger) is displayed */
+/** 插件图标显示位置 */
 export type IconPosition = 'sidebar' | 'editorToolbar' | 'titleBar'
 
-/** Where the plugin panel (content) is displayed */
+/** 插件面板内容显示位置 */
 export type ContentPosition =
   | 'leftPanel'
   | 'rightPanel'
   | 'fullPanel'
   | 'editorArea'
 
-/** Host-emitted events that plugins can subscribe to */
+/** 插件可订阅的宿主事件 */
 export type PluginEvent =
   | 'note:open'
   | 'note:close'
@@ -58,7 +43,7 @@ export type PluginEvent =
   | 'editor:registered'
   | 'editor:unregistered'
 
-/** Payload shape for each event */
+/** 各事件的 payload 结构 */
 export interface PluginEventPayloadMap {
   'note:open': { noteId: string; path: string }
   'note:close': { noteId: string; path: string }
@@ -86,32 +71,25 @@ export interface PluginContext {
 
 export type PluginLifecycleHook = (context: PluginContext) => void | Promise<void>
 
-/** Persistent storage API for plugins */
+/** 插件持久化存储 API */
 export interface PluginStorage {
   get<T = unknown>(key: string): Promise<T | null>
   set<T = unknown>(key: string, value: T): Promise<void>
   delete(key: string): Promise<void>
   clear(): Promise<void>
-  /** List all keys in this plugin's namespace. Useful for debug
-   *  tooling and "export all" features. */
+  /** 列出当前插件命名空间所有 key */
   keys(): Promise<string[]>
-  /** Read-only snapshot of every key with its estimated JSON
-   *  size, sorted by `size` descending. Mirrors the host API
-   *  so plugin code can introspect its own namespace. */
+  /** 所有 key 及 JSON 大小的只读快照，按 size 降序 */
   entries(): Promise<Array<{ key: string; size: number }>>
 }
 
-/** Event subscription API. The host bus is one-way: the host
- *  publishes events and plugins subscribe; the bus does NOT expose
- *  `emit` to plugins because plugins are not allowed to broadcast
- *  host events. Use a module-scope emitter (or storage) for any
- *  plugin-internal pub/sub. */
+/** 事件订阅 API；总线单向：仅 host 发，插件订阅 */
 export interface PluginEventBus {
   on<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): () => void
   off<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void
 }
 
-/** Context-menu contribution shape */
+/** 右键菜单项结构 */
 export type ContextMenuLocation =
   | 'fileTree'
   | 'fileTreeEmpty'
@@ -139,27 +117,21 @@ export interface ContextMenuItem {
 export type ContextMenuRegistry = Record<ContextMenuLocation, ContextMenuItem[]>
 
 /**
- * A single command contributed by a plugin. Appears in the host's
- * command palette (Ctrl/Cmd+P) and is dispatchable via a
- * user-configurable keyboard shortcut set in the settings panel.
- * `id` must be stable across reloads because the host keys
- * user-bound shortcuts by `<pluginId>:<id>`.
+ * 插件贡献的命令，出现在命令面板（Ctrl/Cmd+P），
+ * 可绑定快捷键。id 需跨重载稳定，宿主按 <pluginId>:<id> 索引。
  */
 export interface PluginCommand {
   id: string
   label: string
   iconName?: string
-  /** Optional category for grouping in the command palette. */
+  /** 命令面板中的可选分组类别 */
   category?: string
   when?: () => boolean
   onTrigger: () => void | Promise<void>
 }
 
 /**
- * Plugin permission types. The host's grant model has a fixed
- * catalog of permissions (see `PLUGIN_PERMISSIONS` in
- * `src/types/plugin.ts`). Mirror them here so a manifest declared
- * with the SDK has the same set available to the type-checker.
+ * 插件权限类型，镜像宿主的固定权限目录。
  */
 export type PluginPermission =
   | 'storage'
@@ -173,8 +145,7 @@ export type PluginPermission =
   | 'notifications'
   | 'editor'
 
-/** The props passed to a panel / settings component. Field order
- *  matches the host's `PluginPanelProps`: action → state → identity. */
+/** 面板/设置组件的 props，字段顺序与宿主一致 */
 export interface PluginPanelProps {
   close: () => void
   isActive: boolean
@@ -182,39 +153,23 @@ export interface PluginPanelProps {
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
   store: PluginStorage
   events: PluginEventBus
-  /** Current active note content (markdown string). Empty string if no note is active. */
+  /** 当前活动笔记内容，无笔记时为空串 */
   activeNoteContent: string
-  /** Current active note file path. Empty string if no note is active. */
+  /** 当前活动笔记路径，无笔记时为空串 */
   activeNotePath: string
-  /** Read a single setting from the plugin's `settings.json`-defined
-   *  schema. Returns the stored value, the schema default, or
-   *  `null` if neither is set. The host bridges this to the
-   *  per-plugin SQLite table; in standalone mode the SDK caches
-   *  values in the plugin's storage namespace under `__settings__`. */
+  /** 按 schema 读取单个设置，返回值为 T 类型 */
   getSetting<T = unknown>(key: string): Promise<T | null>
-  /** Persist a single setting key. The host writes through SQLite
-   *  and emits `plugin-settings:change`; the SDK's stub fires the
-   *  same event in standalone mode. */
+  /** 持久化单个设置，写穿 SQLite */
   setSetting<T = unknown>(key: string, value: T): Promise<void>
-  /** Read every stored setting as a flat key/value map. Useful
-   *  for "seed my local state from persisted settings" on mount. */
+  /** 读取所有设置为扁平 key/value map */
   getAllSettings(): Promise<Record<string, unknown>>
-  /** Subscribe to settings changes. The handler receives the new
-   *  full map on every write. The returned function detaches the
-   *  listener. The handler fires for writes originating from this
-   *  plugin's own code, other plugin instances of the same id,
-   *  and the host's settings dialog. */
+  /** 订阅设置变更，handler 收到 (新值, 旧值, key) */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
-  /** Get the frontmatter object of the active note. Returns null
-   *  if no note is active or the note has no frontmatter. */
+  /** 获取活动笔记 frontmatter，无则返回 null */
   getActiveNoteFrontmatter(): Record<string, unknown> | null
-  /** Update the frontmatter of the active note. Merges the
-   *  provided data into the existing frontmatter. No-op if no
-   *  note is active. */
+  /** 合并更新活动笔记 frontmatter */
   setActiveNoteFrontmatter(data: Record<string, unknown>): void
-  /** Subscribe to frontmatter changes of the active note. The
-   *  callback fires whenever the active note's frontmatter
-   *  object changes. Returns an unsubscribe function. */
+  /** 订阅活动笔记 frontmatter 变更 */
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
 }
 
@@ -273,89 +228,55 @@ export interface OpenEditorTabProps {
 }
 
 /**
- * Props for a plugin's custom toolbar button component.
- *
- * When a plugin provides `toolbarButton` in its manifest, the host
- * renders this component instead of the default icon + button. This
- * allows plugins to implement custom interactions such as dropdown
- * menus, direct actions, or any other toolbar-level UI.
+ * 插件自定义工具栏按钮组件的 props。
+ * 宿主渲染此组件替代默认图标按钮，支持自定义交互。
  */
 export interface ToolbarButtonProps {
-  /** Recommended icon size for the current toolbar context */
+  /** 当前工具栏上下文的推荐图标大小 */
   size: number
-  /** Whether this plugin's panel is currently active */
+  /** 当前插件面板是否激活 */
   isActive: boolean
-  /** Plugin ID */
+  /** 插件 ID */
   pluginId: string
-  /** Invoke the plugin's backend command */
+  /** 调用插件后端命令 */
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
-  /** Persistent key/value store scoped to this plugin */
+  /** 插件作用域的持久化存储 */
   store: PluginStorage
-  /** Host event bus */
+  /** 宿主事件总线 */
   events: PluginEventBus
-  /** Activate the plugin (show panel based on contentPosition) */
+  /** 激活插件（按 contentPosition 显示面板） */
   activate: () => void
-  /** Deactivate the plugin (hide panel) */
+  /** 停用插件（隐藏面板） */
   deactivate: () => void
-  /** Current active note content (markdown string). Empty string if no note is active. */
+  /** 当前活动笔记内容，无笔记时为空串 */
   activeNoteContent: string
-  /** Current active note file path. Empty string if no note is active. */
+  /** 当前活动笔记路径，无笔记时为空串 */
   activeNotePath: string
-  /**
-   * Current active note file name (last path segment, e.g.
-   * `note.md`). Empty string when no note is active. Plugins use
-   * this for UI hints without re-parsing `activeNotePath`.
-   */
+  /** 活动笔记文件名，无笔记时为空串 */
   activeNoteName: string
-  /**
-   * Lower-cased file extension of the active note (without the
-   * leading dot, e.g. `"md"`, `"markdown"`, `"json"`). Empty string
-   * when no note is active or the file has no extension. Plugins
-   * gate visibility on this value (e.g. return `null` from the
-   * toolbar button when the extension is not in their supported
-   * set) instead of re-deriving a regex from the path.
-   */
+  /** 活动笔记小写扩展名（无点前缀），无笔记或无扩展名时为空串 */
   activeNoteExt: string
-  /**
-   * `true` when the host has detected that the active note is a
-   * Markdown file (i.e. `activeNoteExt` is `md` or `markdown`).
-   * Plugins that only make sense for Markdown can either return
-   * `null` from their toolbar button (so the host renders nothing
-   * for non-markdown files) or use it as a shorter check than
-   * `activeNoteExt === 'md' || activeNoteExt === 'markdown'`.
-   */
+  /** 活动笔记是否为 Markdown 文件 */
   isActiveNoteMarkdown: boolean
-  /** Read a single setting from the plugin's schema. See
-   *  {@link PluginPanelProps.getSetting} for details. */
+  /** 读取单个设置，详见 PluginPanelProps.getSetting */
   getSetting<T = unknown>(key: string): Promise<T | null>
-  /** Persist a single setting key. See
-   *  {@link PluginPanelProps.setSetting} for details. */
+  /** 持久化单个设置，详见 PluginPanelProps.setSetting */
   setSetting<T = unknown>(key: string, value: T): Promise<void>
-  /** Read every stored setting. See {@link PluginPanelProps.getAllSettings}. */
+  /** 读取所有设置，详见 PluginPanelProps.getAllSettings */
   getAllSettings(): Promise<Record<string, unknown>>
-  /** Subscribe to settings changes. See
-   *  {@link PluginPanelProps.onSettingsChange}. */
+  /** 订阅设置变更，详见 PluginPanelProps.onSettingsChange */
   onSettingsChange(handler: (settings: Record<string, unknown>) => void): () => void
-  /** Get the frontmatter object of the active note. See
-   *  {@link PluginPanelProps.getActiveNoteFrontmatter}. */
+  /** 获取活动笔记 frontmatter */
   getActiveNoteFrontmatter(): Record<string, unknown> | null
-  /** Update the frontmatter of the active note. See
-   *  {@link PluginPanelProps.setActiveNoteFrontmatter}. */
+  /** 更新活动笔记 frontmatter */
   setActiveNoteFrontmatter(data: Record<string, unknown>): void
-  /** Subscribe to frontmatter changes of the active note. See
-   *  {@link PluginPanelProps.onNoteFrontmatterChanged}. */
+  /** 订阅活动笔记 frontmatter 变更 */
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
 }
 
 /**
- * The shape exported by a plugin's `index.js`. Lifecycle hooks are
- * **flat top-level fields** (not wrapped in a `hooks` object). The
- * host's plugin-loader copies them onto PluginDefinition.hooks at
- * load time.
- *
- * Plugin authors should `const manifest: PluginManifest = { ... }`
- * in their index.js. Once a manifest is loaded, the host wraps the
- * flat hooks into PluginDefinition.hooks for the runtime store.
+ * 插件 index.js 导出的结构。生命周期钩子为扁平顶层字段，
+ * 宿主加载时复制到 PluginDefinition.hooks。
  */
 export interface PluginManifest {
   id: string
@@ -364,82 +285,29 @@ export interface PluginManifest {
   version?: string
   author?: string
   publishedAt?: string
-  /**
-   * Where to show the plugin's icon. Optional: a plugin that
-   * does not provide a UI surface (e.g. a file-format editor
-   * that's only triggered by opening the matching file) can
-   * omit this field. When omitted, the host's
-   * `buildRegistry` simply skips the plugin (no icon is
-   * rendered anywhere, no panel mount is attempted) but the
-   * plugin's other capabilities (`editorFileExtensions`,
-   * lifecycle hooks, settings, …) are still honoured.
-   */
+  /** 插件图标显示位置，无 UI 的插件可省略 */
   iconPosition?: IconPosition
-  /**
-   * Where to show the plugin's panel content. Optional for
-   * the same reason as `iconPosition`: a plugin that only
-   * contributes an `editorComponent` (e.g. mind map) has no
-   * standalone panel to mount, so this field can be omitted.
-   */
+  /** 插件面板内容位置，无独立面板的插件可省略 */
   contentPosition?: ContentPosition
   order?: number
   enabled?: boolean
-  /**
-   * Icon component. Optional: omit when the plugin does not
-   * provide a UI surface. A plugin that omits both `icon`
-   * and `iconPosition` will not be rendered in any of the
-   * host's chrome surfaces (title bar / activity bar /
-   * editor toolbar). It can still contribute
-   * `editorFileExtensions`, lifecycle hooks, and settings.
-   */
+  /** 图标组件，无 UI 时省略；省略后不渲染但仍可贡献其他能力 */
   icon?: ComponentType<{ size?: number }>
-  /**
-   * Panel content component. Optional: omit when the plugin
-   * does not provide a standalone panel. The host will not
-   * try to mount a panel for the plugin.
-   */
+  /** 面板内容组件，无独立面板时省略 */
   panel?: ComponentType<PluginPanelProps>
-  /**
-   * Optional custom toolbar button component. When provided, the host
-   * renders this component instead of the default icon + button pattern.
-   * The component receives ToolbarButtonProps and can implement custom
-   * interactions (dropdown menus, direct actions, etc.).
-   */
+  /** 自定义工具栏按钮组件，替代默认图标按钮 */
   toolbarButton?: ComponentType<ToolbarButtonProps>
   settings?: ComponentType<PluginPanelProps>
-  /**
-   * Optional file extensions this plugin can render (e.g. `['.smm']`).
-   * When a file with one of these extensions is opened, the host
-   * delegates rendering to {@link editorComponent} instead of using
-   * the built-in Markdown / code / mind-map editors. Multiple plugins
-   * cannot claim the same extension — the host rejects the second
-   * installer with a toast. The host also requires the `'editor'`
-   * permission to be declared in `permissions`.
-   */
+  /** 插件可渲染的文件扩展名，需声明 editor 权限 */
   editorFileExtensions?: string[]
-  /**
-   * Optional React component that renders an open file whose
-   * extension matches one of {@link editorFileExtensions}. The host
-   * passes `{ content, onChange }`: the plugin reads the initial
-   * `content` and pushes the new content back via `onChange` so
-   * the host can persist it through the same pipeline that
-   * Markdown / code editors use.
-   */
+  /** 匹配扩展名的文件渲染组件，接收 content/onChange */
   editorComponent?: ComponentType<{
     content: string
     onChange: (content: string) => void
   }>
-  /**
-   * Permissions this plugin needs from the host. Listed values must
-   * match `PluginPermission`; the host shows the user a grant/revoke
-   * dialog at install time and re-checks on every protected call.
-   * A plugin that omits this field gets a default of `[]` – the
-   * panel still loads, but any feature that needs `storage`,
-   * `events`, `backend`, etc. will throw `PluginPermissionDeniedError`
-   * until the user grants them.
-   */
+  /** 插件所需权限，省略时默认为空数组 */
   permissions?: PluginPermission[]
-  // ── Lifecycle hooks (all optional, all flat) ──────────────────────────
+  // ── 生命周期钩子（均可选，均为扁平字段） ──────────────────────────
   onLoad?: PluginLifecycleHook
   onUnload?: PluginLifecycleHook
   onEnable?: PluginLifecycleHook
@@ -451,11 +319,8 @@ export interface PluginManifest {
 }
 
 /**
- * Runtime representation stored in the host's plugin store. This
- * is the *hydrated* version of a PluginManifest where icon/panel
- * are guaranteed to be usable, all metadata is required, and
- * lifecycle hooks are wrapped in a `hooks` object so the store
- * can dispatch them at register / unregister / enable / disable.
+ * 宿主插件存储中的运行时表示，是 PluginManifest 的水合版本。
+ * 钩子包装在 hooks 对象中以便分发。
  */
 export interface PluginDefinition {
   id: string
@@ -464,73 +329,32 @@ export interface PluginDefinition {
   version: string
   author: string
   publishedAt: string
-  /**
-   * Where to show the plugin's icon. Optional: a plugin that
-   * does not provide a UI surface (e.g. a file-format editor)
-   * can omit this field. The host's `buildRegistry` skips
-   * plugins whose `iconPosition` is undefined so they never
-   * appear in the title bar / activity bar / editor toolbar.
-   */
+  /** 插件图标位置，无 UI 时省略 */
   iconPosition?: IconPosition
-  /**
-   * Where to show the plugin's panel content. Optional for
-   * the same reason as `iconPosition`.
-   */
+  /** 面板内容位置，与 iconPosition 同理可省略 */
   contentPosition?: ContentPosition
   order: number
   enabled: boolean
-  /**
-   * Resolved icon component. Optional: omitted when the
-   * manifest does not declare a UI surface. A plugin without
-   * `icon` and `iconPosition` does not render anywhere in the
-   * host's chrome but can still register
-   * `editorFileExtensions`, lifecycle hooks, etc.
-   */
+  /** 已解析的图标组件，无 UI 时省略 */
   icon?: ComponentType<{ size?: number }>
-  /**
-   * Resolved panel component. Optional: omitted when the
-   * manifest does not declare a standalone panel.
-   */
+  /** 已解析的面板组件，无独立面板时省略 */
   panel?: ComponentType<PluginPanelProps>
-  /** Custom toolbar button component (overrides default icon rendering) */
+  /** 自定义工具栏按钮组件（覆盖默认图标） */
   toolbarButton?: ComponentType<ToolbarButtonProps>
   settings?: ComponentType<PluginPanelProps>
-  /**
-   * File extensions (with leading dot, lower-cased) the plugin can
-   * render. Mirrors {@link PluginManifest.editorFileExtensions};
-   * the host uses the runtime value when wiring up file-open
-   * dispatch. See that field for the full semantics.
-   */
+  /** 插件可渲染的扩展名（带点小写），镜像 manifest 字段 */
   editorFileExtensions?: string[]
-  /**
-   * Editor component the host mounts for files whose extension
-   * matches one of {@link editorFileExtensions}. Mirrors
-   * {@link PluginManifest.editorComponent}.
-   */
+  /** 匹配扩展名时宿主挂载的编辑器组件 */
   editorComponent?: ComponentType<{
     content: string
     onChange: (content: string) => void
   }>
-  /**
-   * Schema-driven settings description (mirrors the host's
-   * `PluginSettingsSchema`). The SDK keeps this as `any` so the
-   * standalone package doesn't have to import the host's
-   * strongly-typed definition – the host hydrates the schema
-   * from the plugin's on-disk `settings.json` at install time
-   * and the SDK's typed shape lives in `src/lib/tauri.ts`.
-   * Plugins that ship a `settings.json` get this populated by
-   * the host's loader; standalone previews fall back to `undefined`.
-   */
+  /** 设置 schema 描述，独立预览时为 undefined */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   settingsSchema?: any
   pluginPath: string
   hasBackend: boolean
-  /**
-   * Permissions this plugin needs from the host. Listed values must
-   * match `PluginPermission`; the host shows the user a grant/revoke
-   * dialog at install time and re-checks on every protected call.
-   * A plugin that omits this field gets a default of `[]`.
-   */
+  /** 插件所需权限，省略时默认为空数组 */
   permissions?: PluginPermission[]
   hooks?: {
     onLoad?: PluginLifecycleHook
@@ -616,6 +440,18 @@ function createStubStorage(pluginId: string): PluginStorage {
 
 const storageCache = new Map<string, PluginStorage>()
 
+/**
+ * Map FIFO（先进先出）上限淘汰：插入新条目后调用，超过 maxSize 时删除最旧条目
+ * （Map 按插入顺序迭代，keys().next().value 即最旧；get 时不更新访问顺序，故为
+ * FIFO 而非 LRU）。用于 storageCache 与 settingsCache，避免无界增长。
+ */
+function evictOldest<K, V>(map: Map<K, V>, maxSize: number): void {
+  if (map.size > maxSize) {
+    const oldest = map.keys().next().value
+    if (oldest !== undefined) map.delete(oldest)
+  }
+}
+
 export function getPluginStorage(pluginId: string): PluginStorage {
   const override = currentHostOverrides().getPluginStorage?.(pluginId)
   if (override) return override
@@ -623,12 +459,16 @@ export function getPluginStorage(pluginId: string): PluginStorage {
   if (!s) {
     s = createStubStorage(pluginId)
     storageCache.set(pluginId, s)
+    // FIFO 上限 50：超过时淘汰最旧条目，避免缓存无界增长
+    evictOldest(storageCache, 50)
   }
   return s
 }
 
 export function dropPluginStorage(pluginId: string): void {
   storageCache.delete(pluginId)
+  // 同步清理设置缓存与监听器，确保卸载存储时设置缓存一并释放
+  dropPluginSettings(pluginId)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -663,17 +503,14 @@ const settingsListeners = new Map<string, Set<SettingsListener>>()
 function readSettingsCache(pluginId: string): Record<string, unknown> {
   let cache = settingsCache.get(pluginId)
   if (cache) return cache
-  // Hydrate from the plugin's storage so values written via the
-  // raw `store.set` API show up under `getSetting` too.
-  const stored = getPluginStorage(pluginId)
-  void stored
-  // Synchronous hydration: the stub storage is a Map-backed
-  // implementation so the read is effectively synchronous even
-  // though the API is async. We use the in-process settings
-  // cache as the source of truth and let the host's override
-  // route to SQLite instead.
+  // 注意：此处未从 storage 读取已持久化的设置（storage 为异步 API），
+  // cache 初始化为空对象。硬刷新或缓存淘汰后，getSetting 将返回 null
+  // 直到下次 setSetting 写入。writeSettingsCache 会同步写入 storage。
+  void getPluginStorage(pluginId)
   cache = {}
   settingsCache.set(pluginId, cache)
+  // FIFO 上限 50：超过时淘汰最旧条目，避免缓存无界增长
+  evictOldest(settingsCache, 50)
   return cache
 }
 
@@ -682,10 +519,9 @@ function writeSettingsCache(
   values: Record<string, unknown>
 ): Record<string, unknown> {
   settingsCache.set(pluginId, { ...values })
-  // Mirror to storage so the values survive a hard reload of the
-  // standalone preview window. We use the host's getPluginStorage
-  // for symmetry with the rest of the SDK; the storage layer
-  // itself is a localStorage-backed Map in standalone mode.
+  // FIFO 上限 50：超过时淘汰最旧条目，避免缓存无界增长
+  evictOldest(settingsCache, 50)
+  // 同步到 storage 以支持硬刷新
   void getPluginStorage(pluginId).set(SETTINGS_CACHE_KEY, values)
   return values
 }
@@ -820,9 +656,7 @@ class StubEventBus implements PluginEventBus {
     return () => this.target.removeEventListener(event, wrapped)
   }
 
-  // Event bus is best-effort: identity of the wrapped handler is not
-  // exposed. Callers should keep the unsubscribe returned by `on()`.
-  // The args are kept for API symmetry with the host implementation.
+  // 事件总线 best-effort；保留 unsubscribe 返回值
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   off<E extends PluginEvent>(_event: E, _handler: PluginEventHandler<E>): void {
     // no-op – see comment above
@@ -1054,10 +888,7 @@ export function listPluginCommands(): PluginCommand[] {
 }
 
 export function subscribePluginCommands(listener: () => void): () => void {
-  // The standalone stub has no host bridge; if the host provides
-  // its own subscription, use it instead. In practice the host
-  // override always exists by the time a plugin is loaded, so the
-  // fallback path is only for `npm run dev` previews.
+  // 独立预览模式的兜底，host 加载后由其覆盖
   return currentHostOverrides().subscribePluginCommands?.(listener) ??
     stubCommandRegistry.subscribe(listener)
 }
@@ -1190,11 +1021,7 @@ class StubEditorRegistry {
       override(pluginId, 'editor', operation)
       return
     }
-    // No host bridge installed: the standalone preview cannot
-    // know whether the plugin has the permission, so we let the
-    // call through. The host will perform the real check on the
-    // next load. This matches the policy used by the other
-    // in-process stubs (storage, events, …).
+    // 独立预览放行，下次加载时由 host 校验
   }
 }
 
@@ -1603,11 +1430,7 @@ function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPaylo
     try {
       hostEmit(event, payload)
     } catch (err) {
-      // Wave B / M4: a permission denial is the most likely
-      // cause of a throw here, and the most likely cause of
-      // "why isn't my event being seen?" bug reports from
-      // plugin authors. Surface it loudly so the devtools
-      // console points straight at the missing grant.
+      // 权限拒绝时大声报错便于排查
       if (
         err &&
         typeof err === 'object' &&
@@ -1623,9 +1446,7 @@ function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPaylo
         )
         return
       }
-      // Any other throw is a genuine bug (host implementation
-      // problem, payload shape mismatch, etc.). Keep the old
-      // error log so the dev sees the stack.
+      // 其他异常视为 bug，保留错误日志
       // eslint-disable-next-line no-console
       console.error(`[plugin-sdk] host emit for "${event}" threw:`, err)
     }
@@ -1654,25 +1475,18 @@ function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPaylo
  */
 export function setHost(overrides: HostOverrides): () => void {
   const token = nextHostToken++
-  // Merge the new overrides on top of whatever's currently active.
-  // We compute a fresh object so the layer is independent of the
-  // stack below it – popping this layer doesn't mutate the prior
-  // layer's overrides.
+  // 合并 overrides 到新对象，pop 不影响下层
   const merged: HostOverrides = { ...currentHostOverrides(), ...overrides }
   hostOverridesStack.push({ overrides: merged, token })
   return () => {
-    // Walk top-down so a restore of an inner layer doesn't skip over
-    // a still-active outer layer in O(n) time. Tokens are unique so
-    // the lookup terminates in at most stack-depth iterations.
+    // 自顶向下查找 token，O(n) 终止
     for (let i = hostOverridesStack.length - 1; i >= 0; i--) {
       if (hostOverridesStack[i].token === token) {
         hostOverridesStack.splice(i, 1)
         return
       }
     }
-    // No matching layer: the caller invoked `restore` twice. We
-    // swallow it rather than throw because a host that double-fires
-    // a finally block shouldn't break the world.
+    // 重复 restore 静默忽略，避免 finally 双触发崩溃
   }
 }
 
@@ -1711,10 +1525,7 @@ export function usePluginStorage<T = unknown>(
     return () => {
       cancelled = true
     }
-    // The key/store identity shouldn't change for the lifetime of a
-    // mounted panel, so we depend on `key` only. `initialValue` is
-    // intentionally NOT a dep – otherwise a parent re-render with a
-    // new object identity would clobber stored state.
+    // 依赖 key 而非 initialValue，避免父组件重渲染覆盖状态
   }, [key, store])
 
   const set = useCallback(
@@ -1728,9 +1539,7 @@ export function usePluginStorage<T = unknown>(
       setValue(resolved)
       void store.set(key, resolved)
     },
-    // `value` is captured so the function-form update has the latest
-    // state. `initialValue` is included for the same reason – if a
-    // parent ever swaps the hook's initial value, we honour that.
+    // 捕获 value 与 initialValue 保证函数式更新最新
     [key, store, value, initialValue]
   )
 
@@ -1805,10 +1614,7 @@ export function usePluginEvent<E extends PluginEvent>(
   const { events } = panel
 
   useEffect(() => {
-    // No need to manually tag __pluginId here — the host's
-    // `createPluginEventBus(pluginId)` wrapper automatically tags
-    // every handler passed through `events.on()`. The SDK's stub
-    // bus ignores the tag; only the host bus checks it.
+    // __pluginId 由 host 总线自动打标
     const wrapped = ((payload: PluginEventPayloadMap[E]) => {
       handlerRef.current(payload)
     }) as PluginEventHandler<E>
@@ -1820,10 +1626,7 @@ export function usePluginEvent<E extends PluginEvent>(
 export function usePluginEvents<E extends PluginEvent>(
   panel: PluginPanelProps,
   events: readonly E[],
-  // Payload is `unknown` when subscribing to multiple different event types
-  // (TypeScript can't narrow intersection to union). Cast inside the handler:
-  //   if (event === 'note:open') { const p = payload as PluginEventPayloadMap['note:open'] }
-  // For single-event arrays use `usePluginEvent` instead.
+  // 多事件订阅时 payload 为 unknown，单事件用 usePluginEvent
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: (event: E, payload: unknown) => void
 ): void {
@@ -1832,9 +1635,6 @@ export function usePluginEvents<E extends PluginEvent>(
   handlerRef.current = handler
 
   useEffect(() => {
-    // No need to manually tag __pluginId — the host's
-    // `createPluginEventBus(pluginId)` automatically tags every
-    // handler passed through `events.on()`.
     const unsubs = events.map((evt) => {
       const wrapped = ((payload: PluginEventPayloadMap[typeof evt]) => {
         handlerRef.current(evt, payload)
@@ -1848,13 +1648,7 @@ export function usePluginEvents<E extends PluginEvent>(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Emit helpers – same names as the host's per-event emitters.
-//
-//  These are intended for **dev preview only** (the host's bus is
-//  one-way, so plugins should not emit at runtime in production).
-//  In standalone mode they dispatch into the stub bus; in host
-//  mode they fall through `hostOverrides.emit` if the host opted
-//  in. Most plugins never need to call these.
+// dev preview 专用 emit 助手
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function emitNoteOpened(noteId: string, path: string): void {

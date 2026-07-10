@@ -11,7 +11,7 @@ import type {
 } from '@/types/plugin'
 import { emptyRegistry } from '@/types/plugin'
 import { useUIStore } from './ui'
-import { dropPluginStorage, pluginEventBus, buildPluginContext, clearPluginTripped } from '@/lib/plugin-host'
+import { dropPluginStorage, pluginEventBus, buildPluginContext, clearPluginTripped, clearPluginHostState } from '@/lib/plugin-host'
 import { runPluginLifecycleHook, installHostTakeover, uninstallHostTakeover, type PluginWithModule } from '@/lib/plugin-host-takeover'
 import { clearPluginMenuItems } from '@/lib/plugin-menu'
 import { clearPluginCommands } from '@/lib/plugin-commands'
@@ -21,6 +21,9 @@ import {
   type PluginConflict,
 } from '@/lib/plugin-conflicts'
 import { clearPluginMetrics, recordPluginConflict } from '@/lib/plugin-telemetry'
+import { dropSettingsCache } from '@/lib/plugin-settings'
+import { resetPluginCrashCount } from '@/lib/plugin-health'
+import { dropPluginBlobUrl } from '@/lib/plugin-loader'
 
 /** localStorage 键前缀，严格 opt-in。 */
 export const PLUGIN_AUTO_UPDATE_KEY_PREFIX = 'plugin_auto_update_'
@@ -54,7 +57,7 @@ export interface PluginState {
   /** 每插件自动更新 opt-in 映射，持久化到 localStorage。 */
   pluginAutoUpdate: Record<string, boolean>
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Actions ──
 
   /** Register a single plugin */
   registerPlugin: (plugin: PluginDefinition) => void
@@ -172,17 +175,8 @@ function buildRegistry(plugins: PluginDefinition[]): PluginRegistry {
   const registry: PluginRegistry = { sidebar: [], editorToolbar: [], titleBar: [] }
   for (const plugin of plugins) {
     if (!plugin.enabled) continue
-    // Plugins without a `iconPosition` are headless — they
-    // don't render anywhere in the title bar / activity bar /
-    // editor toolbar. Typical example: a file-format editor
-    // (e.g. the `com.swallownote.mindmap` plugin for `.smm`
-    // files) that only contributes `editorFileExtensions`.
-    // The plugin is still loaded, its lifecycle hooks still
-    // fire, and its `editorFileExtensions` claim is still
-    // honoured — it just doesn't appear in any chrome
-    // surface. We intentionally skip the unknown-position
-    // warning here because a missing position is a valid
-    // choice, not a typo.
+    // 无 iconPosition 的插件为 headless（如文件格式编辑器），
+    // 不渲染但正常加载，故跳过未知位置警告
     if (!plugin.iconPosition) continue
     const key = plugin.iconPosition
     if (key in registry) {
@@ -241,7 +235,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       }
     })
     // 注册后：先安装持久化 host takeover，再触发 onLoad。
-    // setHost 需要在 onLoad 之前安装，以便 onLoad 中就能使用 SDK 顶层 API。
+    // setHost 在 onLoad 前安装，以便 onLoad 中可用 SDK API
     installHostTakeover(plugin)
     void runPluginLifecycleHook(
       plugin,
@@ -258,9 +252,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const added = newPlugins.filter((p) => !existingIds.has(p.id))
     if (added.length > 0) {
       const plugins = [...state.plugins, ...added]
-      // Task 13 / G13: rebuild the conflict map alongside
-      // the registry so any collision the new entries cause
-      // is reflected in the per-plugin badge immediately.
+      // 同步重建冲突映射，使新条目的冲突立即反映到 badge
       set({
         plugins,
         registry: buildRegistry(plugins),
@@ -308,33 +300,20 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   },
 
   unregisterPlugin: (id) => {
-    // Capture the plugin reference before the set() call removes it
-    // from the list, so we can fire onUnload on the same instance.
+    // set 前捕获插件引用，以便对同一实例触发 onUnload
     const target = get().plugins.find((p) => p.id === id)
     set((state) => {
       const plugins = state.plugins.filter((p) => p.id !== id)
       const updates: Partial<PluginState> = {
         plugins,
         registry: buildRegistry(plugins),
-        // Drop the per-plugin health record so a reinstall of the
-        // same id starts from a clean slate (no stale "unhealthy"
-        // badge carried over from a previously-removed install).
+        // 丢弃健康记录，重装时从干净状态开始
         pluginHealth: omitKey(state.pluginHealth, id),
-        // Also drop the per-plugin load-failure record. If the
-        // user uninstalls a broken plugin we want the banner to
-        // vanish immediately, not linger until the next rescan.
+        // 丢弃加载失败记录，卸载后 banner 立即消失
         loadFailures: omitKey(state.loadFailures, id),
-        // Drop the per-plugin auto-update opt-in (Task 11 /
-        // G11). The localStorage entry is removed in the
-        // post-set side-effect below so a reinstall of the
-        // same id never inherits a stale preference.
+        // 丢弃自动更新 opt-in（localStorage 在下方副作用中清除）
         pluginAutoUpdate: omitKey(state.pluginAutoUpdate, id),
-        // Task 13 / G13: rebuild the conflict map so any
-        // collision the removed plugin *resolved* (e.g. two
-        // sidebar plugins, the user uninstalled one) clears
-        // out of the remaining plugin's badge list. We re-run
-        // the full scan — the cost is negligible and a splice
-        // would have to walk every peer's `peerIds` list.
+        // 重建冲突映射，清除被卸载插件所解决的冲突
         pluginConflicts: buildConflictMap(plugins),
       }
       if (state.activeLeftPanelPluginId === id) updates.activeLeftPanelPluginId = null
@@ -343,11 +322,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       if (state.activeEditorAreaPluginId === id) updates.activeEditorAreaPluginId = null
       return updates
     })
-    // Synchronously clean up UI state that referenced the removed plugin
-    // so that downstream renders don't briefly show stale views. We only
-    // hide the fullPanel surface when the removed plugin was actually the
-    // current one – otherwise we'd clobber a different fullPanel plugin
-    // the user is currently browsing.
+    // 同步清理引用被卸载插件的 UI 状态，避免残留视图
     const ui = useUIStore.getState()
     if (ui.sidebarView === `plugin:${id}`) {
       ui.setSidebarView('explorer')
@@ -358,8 +333,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     if (ui.rightPanelType === `plugin:${id}`) {
       ui.setRightPanelType(null)
     }
-    // Fire onUnload (after the plugin is fully detached) and drop
-    // the cached PluginStorage so a future reinstall starts clean.
+    // 触发 onUnload 并丢弃缓存，便于重装
     if (target) {
       void runPluginLifecycleHook(
         target,
@@ -368,18 +342,20 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         'onUnload'
       )
     }
-    // 卸载持久化 host takeover（必须在 onUnload 之后，onUnload 中可能仍需 SDK API）
+    // 卸载 host takeover（须在 onUnload 后，onUnload 可能仍需 SDK API）
     uninstallHostTakeover(id)
     dropPluginStorage(id)
-    // Remove all event handlers registered by this plugin so stale
-    // subscriptions don't fire after the plugin is gone (especially
-    // important when the plugin failed to load and its useEffect
-    // cleanup never ran).
+    // 释放插件加载时缓存的 blob URL，避免 Blob 对象内存泄漏
+    if (target) dropPluginBlobUrl(target.pluginPath)
+    // 清理 plugin-host 残留状态（熔断标志、事件总线"已拆线"计数器）。
+    clearPluginHostState(id)
+    // 清理 plugin-settings 内存缓存，避免同 id 重装读到旧设置。
+    dropSettingsCache(id)
+    // 清理插件崩溃计数，避免同 id 重装继承历史崩溃记录。
+    resetPluginCrashCount(id)
+    // 移除插件注册的所有事件处理器，避免残留订阅触发
     pluginEventBus.removeAllListenersForPlugin(id)
-    // Drop any context-menu items this plugin contributed so they
-    // don't linger after the plugin is gone. Clear before running
-    // onUnload so the plugin's own tear-down logic can't see stale
-    // items referenced by id.
+    // 清理插件贡献的右键菜单项（onUnload 前清理避免残留）
     clearPluginMenuItems(id)
     // 清理命令面板条目。
     clearPluginCommands(id)
@@ -402,8 +378,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   },
 
   setPluginEnabled: (id, enabled) => {
-    // Capture pre-state to know which transition we're on (true→false
-    // means call onDisable, false→true means call onEnable).
+    // 捕获前置状态以判断转换方向（调 onEnable/onDisable）
     const target = get().plugins.find((p) => p.id === id)
     const wasEnabled = target?.enabled ?? false
     if (!target) {
@@ -415,8 +390,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       const plugins = state.plugins.map((p) => {
         if (p.id !== id) return p
         const next = { ...p, enabled }
-        // Preserve the non-enumerable __pluginModule field so
-        // lifecycle hooks can still call setHost after a toggle.
+        // 保留不可枚举的 __pluginModule，使 toggle 后仍可 setHost
         const mod = (p as PluginWithModule).__pluginModule
         if (mod) {
           Object.defineProperty(next, '__pluginModule', {
@@ -428,10 +402,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         }
         return next
       })
-      // Task 13 / G13: re-run the conflict scan. Disabling a
-      // plugin removes it from every conflict group; enabling
-      // it can re-attach it to a slot. The scan is O(3N) and
-      // cheap enough to run inline here.
+      // 重新运行冲突扫描（禁用移出冲突组，启用可能重新占位）
       return {
         plugins,
         registry: buildRegistry(plugins),
@@ -439,11 +410,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       }
     })
     if (wasEnabled !== enabled) {
-      // When re-enabling a previously disabled plugin, fire onLoad
-      // before onEnable. The lifecycle model is onLoad → onEnable,
-      // and a plugin that was disabled on cold start skipped onLoad
-      // (see `setPlugins`). Without this, the plugin's event
-      // subscriptions, storage seeding, and timers never run.
+      // 重新启用时先 onLoad 再 onEnable（冷启动禁用的插件跳过了 onLoad）
       if (enabled && !wasEnabled) {
         // 用户手动重新启用插件时清除熔断标志，使之前因超时被熔断的插件恢复工作。
         // 不能在 runPluginLifecycleHook 入口清除：上一轮超时的 hookPromise 仍在后台
@@ -470,8 +437,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         console.warn(
           `[plugin-store] setPlugins received duplicate id "${p.id}", keeping the last occurrence`,
         )
-        // Replace the prior kept entry with this later one so
-        // the "last wins" semantics are well-defined.
+        // 用后一条覆盖前一条，保证 last wins 语义
         const idx = deduped.findIndex((q) => q.id === p.id)
         if (idx >= 0) deduped[idx] = p
         continue
@@ -485,11 +451,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const removed = state.plugins.filter((p) => !newIds.has(p.id))
     const added = deduped.filter((p) => !oldIds.has(p.id))
 
-    // Build active-state updates for removed plugins (same logic as
-    // `unregisterPlugin`). Without this, a plugin removed via
-    // `setPlugins` (e.g. after a marketplace uninstall + rescan)
-    // leaves stale IDs in the active-plugin fields and the UI store's
-    // sidebarView / rightPanelType pointing at a non-existent plugin.
+    // 为被移除的插件构建 active-state 更新（同 unregisterPlugin）
     const activeUpdates: Partial<PluginState> = {}
     for (const target of removed) {
       if (state.activeLeftPanelPluginId === target.id) activeUpdates.activeLeftPanelPluginId = null
@@ -497,9 +459,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       if (state.activeFullPanelPluginId === target.id) activeUpdates.activeFullPanelPluginId = null
       if (state.activeEditorAreaPluginId === target.id) activeUpdates.activeEditorAreaPluginId = null
     }
-    // Strip the per-plugin health record for each removed plugin.
-    // Computing this in a single pass keeps the `set()` below to
-    // exactly one update.
+    // 单次遍历剥离被移除插件的健康记录，保持 set() 单次更新
     let nextHealth = state.pluginHealth
     for (const target of removed) {
       if (Object.prototype.hasOwnProperty.call(nextHealth, target.id)) {
@@ -521,8 +481,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const withAutoUpdate = deduped.map((p) => {
       if (state.pluginAutoUpdate[p.id] !== true) return p
       const next = { ...p, autoUpdate: true }
-      // Preserve the non-enumerable __pluginModule field so
-      // lifecycle hooks can still call setHost after a toggle.
+      // 保留不可枚举的 __pluginModule，使 toggle 后仍可 setHost
       const mod = (p as PluginWithModule).__pluginModule
       if (mod) {
         Object.defineProperty(next, '__pluginModule', {
@@ -551,7 +510,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       recordPluginConflict(c.message)
     }
 
-    // Synchronously clean up UI state for removed plugins
+    // 同步清理被移除插件的 UI 状态
     const ui = useUIStore.getState()
     for (const target of removed) {
       if (ui.sidebarView === `plugin:${target.id}`) {
@@ -573,29 +532,24 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       // 卸载持久化 host takeover（onUnload 之后）
       uninstallHostTakeover(target.id)
       dropPluginStorage(target.id)
+      // 释放插件加载时缓存的 blob URL，避免 Blob 对象内存泄漏
+      dropPluginBlobUrl(target.pluginPath)
+      // 清理 plugin-host 残留状态（熔断标志、事件总线"已拆线"计数器）。
+      clearPluginHostState(target.id)
+      // 清理 plugin-settings 内存缓存，避免同 id 重装读到旧设置。
+      dropSettingsCache(target.id)
+      // 清理插件崩溃计数，避免同 id 重装继承历史崩溃记录。
+      resetPluginCrashCount(target.id)
       pluginEventBus.removeAllListenersForPlugin(target.id)
       clearPluginMenuItems(target.id)
-      // Drop the plugin's command-palette entries too. Same
-      // rationale as `clearPluginMenuItems` – the plugin is gone,
-      // and any in-flight `when()` check on these entries would
-      // either throw or fire on a stale closure.
+      // 清理命令面板条目（同 clearPluginMenuItems 理由）
       clearPluginCommands(target.id)
-      // Drop the in-memory grant cache synchronously so a freshly
-      // installed plugin with the same id cannot inherit the
-      // previous install's grants while the async `removeItem` is
-      // still in flight. The localStorage delete runs in the
-      // background — `clearGranted` is the security boundary,
-      // the disk write is just a tidiness pass.
+      // 同步丢弃内存权限缓存（clearGranted 是安全边界，磁盘删除异步）
       clearGranted(target.id)
       void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
         void dropPluginPermissions(target.id)
       })
-      // Fourth-round review / M6: drop the persisted
-      // auto-update opt-in key for this removed plugin so a
-      // reinstall of the same id starts with the feature
-      // disabled. Mirrors the same `try`/`catch` block in
-      // `unregisterPlugin` so a private-mode / quota
-      // failure never throws out of the diff loop.
+      // 丢弃持久化的自动更新 opt-in（重装时默认禁用）
       try {
         window.localStorage.removeItem(
           `${PLUGIN_AUTO_UPDATE_KEY_PREFIX}${target.id}`,
@@ -606,11 +560,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       // 清理移除插件的遥测缓冲。
       clearPluginMetrics(target.id)
     }
-    // Task 9 / G9: prune the user's plugin-command bindings
-    // (Task 9 / G9) so a removed plugin's `<pluginId>:<id>`
-    // keys don't accumulate forever. We do this once at the
-    // end of the diff using the post-set valid-id set so any
-    // *added* plugin keeps its (just-loaded) binding.
+    // 清理已移除插件的命令快捷键绑定（用 post-set valid-id 集）
     useUIStore.getState().prunePluginCommandShortcuts(newIds)
     for (const target of added) {
       // 对新增插件触发 onLoad，跳过持久化为禁用的插件。
@@ -630,9 +580,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   setLoaded: (loaded) => set({ loaded }),
 
   setPluginHealth: (id, health) => {
-    // Look up the plugin once and bail if it's been removed; we
-    // don't want to write a stale entry to `pluginHealth` for a
-    // plugin that the user just uninstalled.
+    // 插件已移除则跳过，避免写入 stale 健康记录
     const target = get().plugins.find((p) => p.id === id)
     if (!target) {
       console.warn(`[plugin-store] setPluginHealth: plugin "${id}" not found in registry`)
@@ -714,14 +662,9 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   },
 
   hydratePluginAutoUpdate: (record) => {
-    // Wholesale replace from the localStorage snapshot.
-    // We don't merge with the in-memory copy because the
-    // localStorage copy is the source of truth — any
-    // in-memory divergence is, by definition, stale.
+    // 整体替换（localStorage 为权威源，不与内存合并）
     set({ pluginAutoUpdate: { ...record } })
-    // Re-mirror onto the runtime definitions so the
-    // installed-card toggle shows the persisted state
-    // immediately on first paint.
+    // 重新镜像到运行时定义，首屏即显示持久化状态
     set((state) => {
       const plugins = state.plugins.map((p) =>
         record[p.id] === true ? { ...p, autoUpdate: true } : p,
@@ -770,11 +713,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   },
 
   getPluginAutoUpdate: (id) => {
-    // Strict opt-in: an absent key must read as `false`,
-    // never as `undefined` (the `||` short-circuit also
-    // coerces an accidentally-stored empty string, but
-    // `setPluginAutoUpdate` never writes anything other
-    // than `'true'` / `'false'`).
+    // 严格 opt-in：缺失键读为 false（非 undefined）
     return get().pluginAutoUpdate[id] === true
   },
 

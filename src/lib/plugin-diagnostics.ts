@@ -1,9 +1,4 @@
-/**
- * Plugin Diagnostics Export
- *
- * Exports plugin diagnostic data (metrics, errors, config) as a JSON bundle.
- * Used for troubleshooting and bug reports.
- */
+/** 插件诊断数据导出（JSON 包，用于排障和 bug 报告） */
 
 import {
   getAllPluginMetrics,
@@ -18,7 +13,7 @@ import { usePluginStore } from '@/stores'
 // 从 package.json 导入版本号，避免硬编码（resolveJsonModule 已启用）
 import { version } from '../../package.json'
 
-// ─── Diagnostic bundle types ─────────────────────────────────────────────────
+// 诊断包类型
 
 export interface DiagnosticBundle {
   version: string
@@ -27,7 +22,7 @@ export interface DiagnosticBundle {
   userAgent: string
   platform: string
 
-  // Plugin list
+  // 插件列表
   plugins: Array<{
     id: string
     name: string
@@ -40,38 +35,31 @@ export interface DiagnosticBundle {
     hasBackend: boolean
   }>
 
-  // Aggregated metrics
+  // 聚合指标
   metrics: ReturnType<typeof getAllPluginMetrics>
 
-  // Recent events (last 100)
+  // 最近事件（末 100 条）
   recentEvents: ReturnType<typeof getEventMetrics>
 
-  // Recent storage operations (last 100)
+  // 最近存储操作（末 100 条）
   recentStorage: ReturnType<typeof getStorageMetrics>
 
-  // Recent hook invocations (last 100)
+  // 最近 hook 调用（末 100 条）
   recentHooks: ReturnType<typeof getHookMetrics>
 
-  // Recent backend calls (last 100)
+  // 最近后端调用（末 100 条）
   recentBackend: ReturnType<typeof getBackendMetrics>
 
-  // Crash counts per plugin
+  // 各插件崩溃计数
   crashCounts: Record<string, number>
 
-  // Permission audit logs
+  // 权限审计日志
   permissionLogs: PermissionAuditLogEntry[]
 }
 
-// ─── Bundle generation ────────────────────────────────────────────────────────
+// 诊断包生成
 
-/**
- * Generate a complete diagnostic bundle
- *
- * `getPermissionAuditLogs` is async (it reads from disk) so the whole
- * bundle is produced asynchronously. Callers that need a sync snapshot
- * should be aware that permissionLogs will be `[]` until the promise
- * resolves.
- */
+/** 生成完整诊断包（异步，因需读取权限日志） */
 export async function generateDiagnosticBundle(): Promise<DiagnosticBundle> {
   const pluginStore = usePluginStore.getState()
   const permissionLogs = await getPermissionAuditLogs()
@@ -111,17 +99,13 @@ export async function generateDiagnosticBundle(): Promise<DiagnosticBundle> {
   }
 }
 
-/**
- * Generate diagnostic bundle as a JSON string
- */
+/** 生成 JSON 字符串形式的诊断包 */
 export async function generateDiagnosticBundleJson(): Promise<string> {
   const bundle = await generateDiagnosticBundle()
   return JSON.stringify(bundle, null, 2)
 }
 
-/**
- * Download diagnostic bundle as a file
- */
+/** 下载诊断包为文件 */
 export async function downloadDiagnosticBundle(): Promise<void> {
   const json = await generateDiagnosticBundleJson()
   const blob = new Blob([json], { type: 'application/json' })
@@ -137,17 +121,13 @@ export async function downloadDiagnosticBundle(): Promise<void> {
   URL.revokeObjectURL(url)
 }
 
-/**
- * Copy diagnostic bundle to clipboard
- */
+/** 复制诊断包到剪贴板 */
 export async function copyDiagnosticBundleToClipboard(): Promise<void> {
   const json = await generateDiagnosticBundleJson()
   await navigator.clipboard.writeText(json)
 }
 
-/**
- * Get bundle as a Blob (useful for programmatic use)
- */
+/** 获取诊断包为 Blob */
 export async function getDiagnosticBundleBlob(): Promise<Blob> {
   const json = await generateDiagnosticBundleJson()
   return new Blob([json], { type: 'application/json' })
