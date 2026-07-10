@@ -13,6 +13,9 @@
    - [持久化存储](#持久化存储)
    - [事件总线](#事件总线)
    - [右键菜单贡献](#右键菜单贡献)
+   - [命令面板贡献](#命令面板贡献)
+   - [自定义文件编辑器](#自定义文件编辑器)
+   - [编辑器 Tab API](#编辑器-tab-api)
    - [设置面板](#设置面板)
    - [Rust 后端](#rust-后端)
 5. [8 个生命周期钩子](#8-个生命周期钩子)
@@ -120,6 +123,10 @@ const manifest: PluginDefinition = {
 }
 
 export default manifest
+
+// 必须 re-export setHost，否则 tree-shaker 会丢弃该符号，
+// 宿主无法通过 setHost 注入真实实现
+export { setHost } from '@swallow-note/plugin-sdk'
 ```
 
 ### 4) 打包 + 上传
@@ -187,10 +194,19 @@ interface PluginPanelProps {
   events: PluginEventBus                     // 事件订阅
   activeNoteContent: string                  // 当前活跃笔记的 markdown 内容（宿主提供）
   activeNotePath: string                     // 当前活跃笔记的文件路径（宿主提供）
+  // —— 设置 API（详见 [设置面板](#设置面板)） ——
+  getSetting<T>(key: string): Promise<T | null>             // 读单个设置
+  setSetting<T>(key: string, value: T): Promise<void>       // 写单个设置
+  getAllSettings(): Promise<Record<string, unknown>>        // 读所有设置
+  onSettingsChange(handler): () => void                     // 订阅设置变更
+  // —— Frontmatter API（详见 [设置面板](#设置面板)） ——
+  getActiveNoteFrontmatter(): Record<string, unknown> | null  // 获取当前笔记 frontmatter
+  setActiveNoteFrontmatter(data): void                        // 更新 frontmatter（合并写入）
+  onNoteFrontmatterChanged(callback): () => void              // 订阅 frontmatter 变更
 }
 ```
 
-> `settings` 组件接收**完全相同**的 props（但 `isActive === false`，因为是 modal）。
+> `settings` 组件接收**完全相同**的 props（但 `isActive === false`，因为是 modal）。`ToolbarButtonProps`（`editorToolbar` 触发器）包含上述全部字段，并额外提供 `activate()` / `deactivate()` / `activeNoteName` / `activeNoteExt` / `isActiveNoteMarkdown`。
 
 > **`activeNoteContent` / `activeNotePath` 使用提示**：这两个属性由宿主直接提供当前活跃笔记的内容和路径，插件无需订阅 `note:change` 事件即可获取当前笔记内容。这一点非常重要——插件挂载时，初始的 `note:change` 事件已经触发完毕，基于事件的内容获取可能错过初始内容。如果需要实时跟踪笔记变化，仍可结合 `usePluginEvent(panel, 'note:change', ...)` 使用。
 
@@ -242,7 +258,7 @@ export default manifest
 
 每个插件有独立的 JSON 文件：`<app_data>/plugins/<pluginId>/storage.json`。**键以插件 id 命名空间隔离**。
 
-#### 5 个方法
+#### 6 个方法
 
 ```typescript
 interface PluginStorage {
@@ -250,7 +266,10 @@ interface PluginStorage {
   set<T = unknown>(key: string, value: T): Promise<void>
   delete(key: string): Promise<void>
   clear(): Promise<void>
+  /** 列出当前插件命名空间所有 key（排序返回） */
   keys(): Promise<string[]>
+  /** 所有 key 及 JSON 大小的只读快照，按 size 降序 */
+  entries(): Promise<Array<{ key: string; size: number }>>
 }
 ```
 
@@ -290,19 +309,22 @@ await store.set('lastLogin', new Date().toISOString())
 
 ### 事件总线
 
-#### 9 个内置事件
+#### 12 个内置事件
 
 | 事件 | Payload | 触发时机 | 实现位置 |
 | --- | --- | --- | --- |
 | `note:open` | `{ noteId, path }` | 编辑器创建新 tab | `src/stores/editor.ts` |
 | `note:close` | `{ noteId, path }` | 编辑器关闭 tab | 同上 |
-| `note:save` | `{ noteId, path }` | 写盘成功 | `src/stores/files.ts` |
+| `note:save` | `{ noteId, path }` | 写盘成功 | `src/stores/editor.ts` |
 | `note:change` | `{ noteId, path, content }` | 编辑器内容变化 | `src/stores/editor.ts` |
 | `theme:change` | `{ theme }` | 用户切换主题 | `src/stores/ui.ts` |
 | `locale:change` | `{ locale }` | 用户切换语言 | 同上 |
 | `settings:change` | `{ key, value }` | 用户修改任意设置项 | 同上 |
 | `app:ready` | `{}` | 应用启动完成 | `src/App.tsx` |
 | `app:exit` | `{}` | 应用开始关闭 | `src/App.tsx` |
+| `plugin-settings:change` | `{ pluginId, values }` | 插件设置变更（`setSetting` 写入后广播） | `src/lib/plugin-host-takeover.ts` |
+| `editor:registered` | `{ pluginId, extension }` | 插件注册自定义编辑器 | `src/stores/pluginEditor.ts` |
+| `editor:unregistered` | `{ pluginId, extension }` | 插件注销自定义编辑器 | 同上 |
 
 #### 三种使用方式
 
@@ -347,13 +369,16 @@ function onUnload() {
 **emit 自己合成的事件**
 
 ```typescript
-import { pluginEventBus, emitSettingChanged } from '@/lib/plugin-host'
+import { pluginEventBus, emitSettingChanged, emitPluginSettingsChanged } from '@/lib/plugin-host'
 
 // 通用
 pluginEventBus.emit('settings:change', { key: 'foo', value: 42 })
 
 // 类型安全的 helper（推荐）
 emitSettingChanged('my-plugin:last-clicked', 42)
+
+// 插件设置变更广播（host 内部使用，插件一般通过 setSetting 间接触发）
+emitPluginSettingsChanged('com.example.my-plugin', { apiKey: 'xxx' })
 ```
 
 > **错误隔离**：bus 内部 `try/catch` 每个 handler 的调用，一个 plugin 抛异常不影响其他订阅者。
@@ -453,6 +478,213 @@ Check, X
 
 ---
 
+### 命令面板贡献
+
+插件可以向宿主命令面板（Ctrl/Cmd+P）贡献命令条目，用户可通过命令面板触发或绑定快捷键。
+
+#### `PluginCommand` 接口
+
+```typescript
+import type { PluginCommand } from '@/types/plugin'
+
+interface PluginCommand {
+  /** 稳定 id，用于去重、设置键和更新（跨重载必须稳定） */
+  id: string
+  /** 显示标签，也用作命令面板搜索词 */
+  label: string
+  /** 可选 lucide-react 图标名，默认 "zap" */
+  iconName?: string
+  /** 可选分类，默认为插件显示名 */
+  category?: string
+  /** 可选谓词，返回 false 时在命令面板中隐藏 */
+  when?: () => boolean
+  /** 触发处理函数 */
+  onTrigger: () => void | Promise<void>
+}
+```
+
+#### API
+
+```typescript
+import {
+  registerCommand,
+  unregisterCommand,
+  clearPluginCommands,
+  listPluginCommands,
+  usePluginCommands,
+} from '@/lib/plugin-commands'
+// 或独立开发：from '@swallow-note/plugin-sdk'
+```
+
+| 函数 | 说明 |
+| --- | --- |
+| `registerCommand(pluginId, command)` | 注册一条命令（同 id 替换） |
+| `unregisterCommand(pluginId, commandId)` | 按 id 注销命令 |
+| `clearPluginCommands(pluginId)` | 清除插件全部命令（卸载时宿主自动调用） |
+| `listPluginCommands()` | 已注册命令只读快照 |
+| `usePluginCommands()` | React hook：订阅命令列表变化，自动过滤 `when()` 返回 false 的项 |
+
+#### 示例
+
+```typescript
+function onLoad(ctx: { pluginId: string }) {
+  registerCommand(ctx.pluginId, {
+    id: 'my-plugin:insert-timestamp',
+    label: '插入时间戳',
+    iconName: 'Clock',
+    onTrigger: () => {
+      console.log('insert', new Date().toISOString())
+    },
+  })
+}
+
+function onUnload(ctx: { pluginId: string }) {
+  unregisterCommand(ctx.pluginId, 'my-plugin:insert-timestamp')
+}
+```
+
+> **权限**：命令注册复用 `events` 权限门禁（见 [plugin-commands.ts:21](../../src/lib/plugin-commands.ts#L21)）。未声明 `events` 权限时 `registerCommand` 会抛 `PluginPermissionDeniedError`。
+
+---
+
+### 自定义文件编辑器
+
+插件可以声明对特定扩展名文件的渲染责任，当用户打开匹配文件时宿主挂载插件提供的编辑器组件替代内置 Markdown / 代码编辑器。
+
+#### Manifest 声明
+
+```typescript
+const manifest: PluginDefinition = {
+  // ...
+  editorFileExtensions: ['.smm'],   // 带点小写，同一扩展名仅允许一个插件注册
+  editorComponent: MyEditor,        // 接收 content / onChange
+  permissions: ['editor'],          // 必须声明 editor 权限
+}
+```
+
+`editorComponent` 组件签名：
+
+```typescript
+interface PluginEditorComponent {
+  content: string
+  onChange: (content: string) => void
+}
+```
+
+#### 三层机制
+
+1. **清单声明**：`editorFileExtensions` + `editorComponent` 在 manifest 中声明
+2. **运行时注册**：插件 `onLoad` 时由宿主自动调用 `registerEditor(pluginId, extension, component)`，或插件主动调用
+3. **分发查询**：用户打开文件时，`Editor.tsx` 调用 `getEditorForExtension(ext)` 查找匹配的插件组件，找不到则回退到内置编辑器
+
+#### API
+
+```typescript
+import {
+  registerEditor,
+  unregisterEditor,
+  getEditorForExtension,
+  getActivePluginExtensions,
+} from '@/stores/pluginEditor'
+// 或独立开发：from '@swallow-note/plugin-sdk'
+```
+
+| 函数 | 说明 |
+| --- | --- |
+| `registerEditor(pluginId, extension, component)` | 注册编辑器（需 `editor` 权限，扩展名冲突抛错） |
+| `unregisterEditor(pluginId)` | 注销该插件全部编辑器（卸载时宿主自动调用） |
+| `getEditorForExtension(ext)` | 查询扩展名对应的编辑器，无则返回 `null` |
+| `getActivePluginExtensions()` | 当前已注册扩展名只读快照（`Set<string>`） |
+
+> **冲突处理**：同一扩展名仅允许一个插件注册。第二个插件注册时抛 `Error` 并 toast 提示。扩展名会规范化为带点小写（`SMM` → `.smm`）。
+
+> **事件**：注册/注销时会派发 `editor:registered` / `editor:unregistered` 事件（见 [事件总线](#事件总线)）。
+
+---
+
+### 编辑器 Tab API
+
+插件可以在主编辑区打开自定义 tab（如加密笔记、预览视图），由宿主用内置 `MarkdownEditor` 渲染内容，插件通过 `onChange` 回调接收编辑结果并自行存储。
+
+#### `OpenEditorTabProps`
+
+```typescript
+interface OpenEditorTabProps {
+  /** tab 唯一标识（相同 id 复用已有 tab） */
+  id: string
+  /** tab 标题文字 */
+  name: string
+  /** tab 标题图标（替换默认 FileText 图标） */
+  icon?: ReactNode
+  /** 初始内容（markdown 字符串） */
+  content: string
+  /** 内容变化回调：用户编辑后宿主调用此函数传回新内容 */
+  onChange?: (content: string) => void
+  /** 工具栏显示配置（控制各按钮的显示/隐藏） */
+  toolbarConfig?: EditorToolbarConfig
+}
+```
+
+#### `EditorToolbarConfig`
+
+未设置的字段默认显示（向后兼容）。插件 tab 可通过此配置隐藏不适用的功能。
+
+```typescript
+interface EditorToolbarConfig {
+  copyPath?: boolean                 // 复制完整路径（默认 true）
+  openLocation?: boolean            // 在文件夹中显示（默认 true）
+  openHistory?: boolean             // 打开历史记录（默认 true）
+  noteProperties?: boolean          // 笔记属性面板（默认 true）
+  directory?: boolean               // 大纲/目录（默认 true）
+  sourceView?: boolean              // 源码视图切换（默认 true）
+  noteWidth?: boolean               // 宽窄模式切换（默认 true）
+  contentLayout?: boolean           // 内容布局（默认 true）
+  downloadRemoteImages?: boolean    // 下载远程图片（默认 true）
+  showFilePath?: boolean            // 左侧文件路径显示（默认 true）
+  externalChangeWarning?: boolean   // 外部变更警告（默认 true）
+  conflictIndicator?: boolean       // 冲突指示器（默认 true）
+}
+```
+
+#### API
+
+```typescript
+import {
+  openEditorTab,
+  closeEditorTab,
+  closePluginTabs,
+} from '@swallow-note/plugin-sdk'
+```
+
+| 函数 | 说明 |
+| --- | --- |
+| `openEditorTab(pluginId, props)` | 打开（或复用同 id 的）tab |
+| `closeEditorTab(pluginId, tabId)` | 关闭该插件打开的指定 tab（校验归属） |
+| `closePluginTabs(pluginId)` | 关闭该插件打开的所有 tab（锁定/卸载时使用） |
+
+#### 示例
+
+```typescript
+import { openEditorTab } from '@swallow-note/plugin-sdk'
+
+function onOpenSecretNote(ctx: { pluginId: string }, noteId: string, content: string) {
+  openEditorTab(ctx.pluginId, {
+    id: noteId,
+    name: '加密笔记',
+    content,
+    onChange: (next) => {
+      // 插件负责保存到自己的存储（如加密数据库）
+      void saveEncrypted(noteId, next)
+    },
+    toolbarConfig: { openLocation: false, noteProperties: false },
+  })
+}
+```
+
+> **独立预览模式**：`openEditorTab` / `closeEditorTab` / `closePluginTabs` 在未安装 host 时（`npm run dev`）打印警告并 no-op，因为没有主编辑区可打开。生产环境通过 `setHost` 注入真实实现。
+
+---
+
 ### 设置面板
 
 #### 声明
@@ -486,6 +718,81 @@ function MySettings(panel: PluginPanelProps) {
 - 关闭：点击遮罩 / ESC / `panel.close()`
 
 > **生命周期**：打开 mount → `onMount(ctx)`；关闭 unmount → `onUnmount(ctx)`。
+
+#### 设置 API
+
+除 `usePluginStorage` 外，插件可通过 `PluginPanelProps` 上的设置 API 读写插件专属设置（持久化在 SQLite 表 `plugin_settings_<id>`，由宿主 `settings.json` schema 描述）：
+
+```typescript
+interface PluginPanelProps {
+  // ...
+  getSetting<T>(key: string): Promise<T | null>             // 读单个设置
+  setSetting<T>(key: string, value: T): Promise<void>       // 写单个设置
+  getAllSettings(): Promise<Record<string, unknown>>        // 读所有设置
+  onSettingsChange(handler): () => void                     // 订阅设置变更
+}
+```
+
+```typescript
+function MyPanel(panel: PluginPanelProps) {
+  const [apiKey, setApiKey] = useState<string | null>(null)
+  useEffect(() => {
+    void panel.getSetting<string>('apiKey').then(setApiKey)
+    return panel.onSettingsChange((values) => {
+      setApiKey((values.apiKey as string) ?? null)
+    })
+  }, [panel])
+  return <input value={apiKey ?? ''} onChange={(e) => panel.setSetting('apiKey', e.target.value)} />
+}
+```
+
+模块级 API（用于生命周期钩子等非 panel 场景）：
+
+```typescript
+import { getSetting, setSetting, getAllSettings, onSettingsChange } from '@swallow-note/plugin-sdk'
+
+await getSetting('com.example.my-plugin', 'apiKey')
+await setSetting('com.example.my-plugin', 'apiKey', 'xxx')
+await getAllSettings('com.example.my-plugin')
+const off = onSettingsChange('com.example.my-plugin', (values) => { /* ... */ })
+```
+
+> **权限**：设置 API 复用 `storage` 权限。`setSetting` 写入后会广播 `plugin-settings:change` 事件，所有同插件 id 的 panel / toolbar 实例都会收到通知。
+
+#### Frontmatter API
+
+插件可读写当前活动笔记的 frontmatter（YAML 元数据）：
+
+```typescript
+interface PluginPanelProps {
+  // ...
+  getActiveNoteFrontmatter(): Record<string, unknown> | null  // 无活动笔记返回 null
+  setActiveNoteFrontmatter(data: Partial<NoteFrontmatter>): void  // 合并写入
+  onNoteFrontmatterChanged(callback): () => void              // 订阅变更
+}
+```
+
+```typescript
+function MyPanel(panel: PluginPanelProps) {
+  // 给当前笔记打标签
+  const handleAddTag = () => {
+    const fm = panel.getActiveNoteFrontmatter() ?? {}
+    const tags = Array.isArray(fm.tags) ? fm.tags as string[] : []
+    if (!tags.includes('reviewed')) {
+      panel.setActiveNoteFrontmatter({ tags: [...tags, 'reviewed'] })
+    }
+  }
+  // 监听 frontmatter 变化
+  useEffect(() => {
+    return panel.onNoteFrontmatterChanged((data) => {
+      console.log('frontmatter changed:', data)
+    })
+  }, [panel])
+  return <button onClick={handleAddTag}>标记为已审阅</button>
+}
+```
+
+> **合并语义**：`setActiveNoteFrontmatter` 做浅合并（类似 `Object.assign`），不会清空未传入的字段。无活动笔记时为空操作。
 
 完整文档：[settings.md](./settings.md)
 
@@ -605,11 +912,15 @@ panel deactivated─► onDeactivate    (blur)
 interface PluginContext {
   pluginId: string              // 插件 id
   pluginPath: string            // 插件包绝对路径
-  invokeBackend(cmd, args?): Promise<unknown>  // ⚠️ 钩子内调用会抛错
+  invokeBackend(cmd, args?): Promise<unknown>  // 调用 Rust 后端
 }
 ```
 
-> **关键**：**钩子内不能调用 `ctx.invokeBackend`**——`buildPluginContext` 返回的 no-op 版本会抛错。后端 IPC 只能在 mounted panel 里通过 `panel.invokeBackend` 调。详见 [plugin-host.ts:474-484](../../src/lib/plugin-host.ts#L474-L484)。
+> **注意**：钩子内的 `ctx.invokeBackend` 行为取决于运行模式：
+> - **host 模式**：正常调用 Rust 后端（通过 `invoke_plugin` command）
+> - **standalone 模式**：打印 `console.warn` 并返回 `null`（无 Tauri runtime）
+>
+> 因此，如果钩子需要调用后端，建议在 `onMount`/`onActivate` 中调用（此时面板已挂载，可通过 `panel.invokeBackend` 调用），而非在 `onLoad` 中。
 
 #### 异常隔离
 
@@ -681,14 +992,15 @@ const manifest: PluginDefinition = {
 
 ## 权限系统
 
-### 9 个权限
+### 10 个权限
 
 | Permission | 触发的 API | 校验位置 |
 | --- | --- | --- |
-| `storage` | `store.get / set / delete / clear / keys` | [plugin-host.ts:217-219](../../src/lib/plugin-host.ts#L217-L219) |
-| `events` | `events.on(event, handler)` | [plugin-host.ts:64](../../src/lib/plugin-host.ts#L64) |
+| `storage` | `store.get / set / delete / clear / keys / entries` | [plugin-host.ts:348-350](../../src/lib/plugin-host.ts#L348-L350) |
+| `events` | `events.on(event, handler)` / `registerCommand(...)` | [plugin-host.ts:101](../../src/lib/plugin-host.ts#L101) |
 | `context-menu` | `registerContextMenu(...)` | [plugin-menu.ts:47](../../src/lib/plugin-menu.ts#L47) |
-| `backend` | `panel.invokeBackend(...)` | [plugin-utils.tsx:159](../../src/lib/plugin-utils.tsx#L159) |
+| `backend` | `panel.invokeBackend(...)` | [plugin-host-takeover.ts:100](../../src/lib/plugin-host-takeover.ts#L100) |
+| `editor` | `registerEditor(...)` | [pluginEditor.ts:91](../../src/stores/pluginEditor.ts#L91) |
 | `filesystem-read` | 未来 FS API | — |
 | `filesystem-write` | 未来 FS API | — |
 | `network` | 未来 net API | — |
@@ -809,38 +1121,52 @@ cd ~/code/my-plugin
 npm install         # 通过 file: 协议 link 到本地 SDK
 npm run dev         # http://localhost:5173
 # 改 src/plugin/index.tsx，HMR 即时生效
-npm run build       # → dist/plugin.js + dist/manifest.json
+npm run build       # → dist/index.js + dist/manifest.json
 ```
 
 ### 构建配置（vite.config.ts）
 
-独立开发使用 Vite library mode 构建，关键配置如下：
+独立开发使用 Vite library mode 构建，产物为 **ES 模块**（`formats: ['es']`），与官方模板和示例一致：
 
 ```typescript
 // vite.config.ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { resolve } from 'node:path'
 
-export default defineConfig({
-  plugins: [react()],
-  build: {
-    lib: { entry: 'src/MyPlugin.tsx', formats: ['iife'], name: 'MyPlugin', fileName: () => 'plugin.js' },
-    rollupOptions: {
-      external: [
-        'react', 'react-dom', 'react/jsx-runtime',
-        'sonner', 'react-i18next', 'i18next',
-      ],
-      output: {
-        inlineDynamicImports: true,  // 必须禁用代码分割，插件加载器使用 blob URL，无法解析相对路径的 chunk 导入
+export default defineConfig(({ mode }) => {
+  if (mode === 'production') {
+    return {
+      plugins: [react()],
+      define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+      build: {
+        outDir: 'dist',
+        emptyOutDir: true,
+        lib: {
+          entry: resolve(__dirname, 'src/MyPlugin.tsx'),
+          formats: ['es'],
+          fileName: () => 'index.js',
+        },
+        rollupOptions: {
+          external: [
+            'react', 'react-dom', 'react-dom/client',
+            'react/jsx-runtime', 'react/jsx-dev-runtime',
+            'sonner', 'react-i18next', 'i18next',
+          ],
+          output: {
+            inlineDynamicImports: true,  // 禁用代码分割，blob URL 无法解析分块导入
+          },
+        },
       },
-    },
-  },
+    }
+  }
+  return { plugins: [react()], server: { port: 5173, open: true } }
 })
 ```
 
 > **external 说明**：`react` / `react-dom` / `react/jsx-runtime` 由宿主通过 `window.React` / `window.ReactDOM` 提供；`sonner` 由宿主通过 `window.SonnerToast` 提供；`react-i18next` / `i18next` 由宿主通过 `window.ReactI18Next` 提供。这些依赖不需要打包进插件产物，否则会导致体积膨胀或运行时冲突。
 
-> **`inlineDynamicImports` 说明**：插件加载器使用 blob URL 加载插件代码，blob URL 无法解析相对路径的 chunk 文件导入。因此必须设置 `inlineDynamicImports: true` 禁用代码分割，确保所有代码输出到单个 `plugin.js` 文件中。
+> **`inlineDynamicImports` 说明**：插件加载器使用 blob URL 加载插件代码，blob URL 无法解析相对路径的 chunk 文件导入。因此必须设置 `inlineDynamicImports: true` 禁用代码分割，确保所有代码输出到单个 `index.js` 文件中。
 
 ### SDK 双模式
 
@@ -864,20 +1190,48 @@ import {
   type PluginEvent,
   type PluginStorage,
   type ContextMenuItem,
+  type PluginCommand,
+  type OpenEditorTabProps,
+  type EditorToolbarConfig,
   // Runtime (with host takeover)
   pluginEventBus,
   getPluginStorage,
   registerContextMenu,
   unregisterContextMenu,
+  // 命令面板
+  registerCommand,
+  unregisterCommand,
+  clearPluginCommands,
+  listPluginCommands,
+  // 文件编辑器
+  registerEditor,
+  unregisterEditor,
+  getEditorForExtension,
+  getActivePluginExtensions,
+  // 编辑器 Tab
+  openEditorTab,
+  closeEditorTab,
+  closePluginTabs,
+  // 设置 API（模块级）
+  getSetting,
+  setSetting,
+  getAllSettings,
+  onSettingsChange,
   // React hooks
   usePluginStorage,
   usePluginEvent,
   usePluginEvents,
+  usePluginCommands,
   // Host takeover
   setHost,
   // Dev preview integration
   type HostOverrides,
+  // Emit helpers（dev preview）
+  emitPluginSettingsChanged,
 } from '@swallow-note/plugin-sdk'
+
+// 插件入口必须 re-export setHost，否则 tree-shaker 会丢弃该符号
+export { setHost } from '@swallow-note/plugin-sdk'
 ```
 
 ### 方法 C：单文件 demo
@@ -913,18 +1267,23 @@ export default manifest
 
 | 关注点 | 源码位置 |
 | --- | --- |
-| 类型定义（`PluginDefinition` / `PluginEvent` / `PluginStorage`） | [src/types/plugin.ts](../../src/types/plugin.ts) |
+| 类型定义（`PluginDefinition` / `PluginEvent` / `PluginStorage` / `PluginCommand`） | [src/types/plugin.ts](../../src/types/plugin.ts) |
 | 事件总线 + 存储 + 生命周期调度 | [src/lib/plugin-host.ts](../../src/lib/plugin-host.ts) |
+| 宿主接管（`setHost` override 工厂） | [src/lib/plugin-host-takeover.ts](../../src/lib/plugin-host-takeover.ts) |
 | 菜单注册表 | [src/lib/plugin-menu.ts](../../src/lib/plugin-menu.ts) |
+| 命令面板注册表 | [src/lib/plugin-commands.ts](../../src/lib/plugin-commands.ts) |
+| 文件编辑器注册表 | [src/stores/pluginEditor.ts](../../src/stores/pluginEditor.ts) |
+| 插件设置（SQLite 缓存层） | [src/lib/plugin-settings/index.ts](../../src/lib/plugin-settings/index.ts) |
 | React hooks | [src/lib/plugin-hooks.ts](../../src/lib/plugin-hooks.ts) |
 | 权限检查 | [src/lib/plugin-permission-guard.ts](../../src/lib/plugin-permission-guard.ts) |
 | 权限持久化 | [src/lib/plugin-permissions.ts](../../src/lib/plugin-permissions.ts) |
 | 插件加载 + manifest 合并 | [src/lib/plugin-loader.ts](../../src/lib/plugin-loader.ts) |
 | Panel props 工厂 | [src/lib/plugin-utils.tsx](../../src/lib/plugin-utils.tsx) |
 | 插件状态管理（store） | [src/stores/plugin.ts](../../src/stores/plugin.ts) |
-| 插件市场 store | [src/stores/plugin-market.ts](../../src/stores/plugin-store.ts) |
+| 插件市场 store | [src/stores/plugin-market.ts](../../src/stores/plugin-market.ts) |
 | Rust 命令注册 | [src-tauri/src/commands/plugin.rs](../../src-tauri/src/commands/plugin.rs) |
 | Rust 后端 IPC | [src-tauri/src/commands/plugin_invoke.rs](../../src-tauri/src/commands/plugin_invoke.rs) |
+| Rust 插件设置 IPC | [src-tauri/src/commands/plugin_settings.rs](../../src-tauri/src/commands/plugin_settings.rs) |
 | 错误类型 | [src-tauri/src/commands/error.rs](../../src-tauri/src/commands/error.rs) |
 | 内置示例插件 | [src/lib/core-plugins/](../../src/lib/core-plugins/) |
 | SDK 实现 | [docs/plugin-sdk/src/index.ts](../plugin-sdk/src/index.ts) |
@@ -971,7 +1330,7 @@ localStorage.getItem('plugin_permissions_com.example.my-plugin')
 | `PluginPermissionDeniedError` | 用了 API 但未声明 | `manifest.permissions` 加对应权限 |
 | 卸载后菜单残留 | 忘了 `onUnload` 里 `unregisterContextMenu` | host 会自动清理，但显式清理是好习惯 |
 | `usePluginEvents` 反复重订 | 数组字面量作为依赖 | module-scope 常量 |
-| `panel.invokeBackend` 在 hook 里调用 | hook context 没有真实 IPC | 只在 mounted panel 内调用 |
+| `panel.invokeBackend` 在 hook 里调用 | host 模式可用但 standalone 模式返回 null | 优先在 `onMount`/`onActivate` 中通过 `panel.invokeBackend` 调用 |
 | 后端超时（30s） | 子进程卡死 | 优化后端逻辑；或 catch `err.message === '... timeout ...'` 重试 |
 
 ---
@@ -1155,6 +1514,7 @@ const manifest: PluginDefinition = {
   settings: MySettings,
   pluginPath: '',
   hasBackend: false,
+  // 仅声明实际用到的权限：命令面板复用 events；自定义编辑器需 editor
   permissions: ['storage', 'events', 'context-menu'],
   hooks: {
     onLoad,
@@ -1169,6 +1529,10 @@ const manifest: PluginDefinition = {
 }
 
 export default manifest
+
+// 必须 re-export setHost，否则 tree-shaker 会丢弃该符号，
+// 宿主无法通过 setHost 注入真实实现
+export { setHost } from '@swallow-note/plugin-sdk'
 ```
 
 ---
@@ -1186,9 +1550,9 @@ export default manifest
 | 加设置 dialog | [settings.md](./settings.md) |
 | 写 Rust 后端 | [backend.md](./backend.md) |
 | 独立开发 | [standalone-development.md](./standalone-development.md) |
-| 看完整示例 | [core-plugins/](../core-plugins/) |
+| 看完整示例 | [内置插件示例](../../src/lib/core-plugins/) |
 | 走市场分发 | [plugin-marketplace/](../plugin-marketplace/) |
 
 ---
 
-> **最后更新**：2026-06-10，Phase 9.9。所有 API 表面与 SDK / host 1:1 对齐。如发现不一致请检查 SDK 版本或向 SwallowNote Team 反馈。
+> **最后更新**：2026-07-10，Phase 9.9。所有 API 表面与 SDK / host 1:1 对齐。如发现不一致请检查 SDK 版本或向 SwallowNote Team 反馈。

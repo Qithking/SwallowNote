@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
-import { copyFileSync, mkdirSync, existsSync } from 'node:fs'
+import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 /** 插件模板构建配置：dev 预览 + 生产 ES 模块，React external */
 export default defineConfig(({ mode }) => {
@@ -9,15 +9,37 @@ export default defineConfig(({ mode }) => {
     return {
       plugins: [
         react(),
-        // 复制 manifest.json 到 dist/
         {
-          name: 'copy-manifest',
+          name: 'inject-manifest-comment',
           closeBundle() {
             if (!existsSync('dist')) mkdirSync('dist', { recursive: true })
             copyFileSync(
               resolve(__dirname, 'src/plugin/manifest.json'),
               resolve(__dirname, 'dist/manifest.json')
             )
+            // 注入 // @swallow-manifest 注释到 index.js 头部，供 Rust 端解析插件元数据
+            const indexPath = resolve(__dirname, 'dist/index.js')
+            const manifestPath = resolve(__dirname, 'src/plugin/manifest.json')
+            if (existsSync(indexPath) && existsSync(manifestPath)) {
+              const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
+              // snake_case 字段名匹配 Rust 端 PluginMetadataRust
+              const meta = {
+                id: manifest.id,
+                name: manifest.name,
+                description: manifest.description || '',
+                version: manifest.version || '',
+                author: manifest.author || '',
+                published_at: manifest.publishedAt || '',
+                icon_position: manifest.iconPosition,
+                content_position: manifest.contentPosition,
+                order: manifest.order ?? 100,
+                enabled: manifest.enabled ?? true,
+                has_backend: manifest.hasBackend ?? false,
+              }
+              const comment = `// @swallow-manifest ${JSON.stringify(meta)}\n`
+              const content = readFileSync(indexPath, 'utf-8')
+              writeFileSync(indexPath, comment + content)
+            }
           },
         },
       ],

@@ -4,8 +4,11 @@
   "description": "Live event stream viewer – subscribes to every host event.",
   "version": "0.1.0",
   "author": "SwallowNote",
+  "publishedAt": "2026-06-10",
   "iconPosition": "sidebar",
   "contentPosition": "rightPanel",
+  "order": 80,
+  "enabled": true,
   "hasBackend": false,
   "entry": "index.tsx"
 }

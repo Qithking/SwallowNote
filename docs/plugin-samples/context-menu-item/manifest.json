@@ -4,8 +4,11 @@
   "description": "Contributes custom entries to file tree, tab, and editor right-click menus.",
   "version": "0.1.0",
   "author": "SwallowNote",
+  "publishedAt": "2026-06-10",
   "iconPosition": "titleBar",
   "contentPosition": "leftPanel",
+  "order": 60,
+  "enabled": true,
   "hasBackend": false,
   "entry": "index.tsx"
 }

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Context Menu Item — demonstrates registerContextMenu",
   "type": "module",
-  "main": "./dist/plugin.js",
+  "main": "./dist/index.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

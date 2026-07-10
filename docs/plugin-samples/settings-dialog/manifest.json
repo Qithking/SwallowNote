@@ -4,8 +4,11 @@
   "description": "Plugin with a configurable settings dialog opened from the plugin manager.",
   "version": "0.1.0",
   "author": "SwallowNote",
+  "publishedAt": "2026-06-10",
   "iconPosition": "sidebar",
   "contentPosition": "leftPanel",
+  "order": 70,
+  "enabled": true,
   "hasBackend": false,
   "entry": "index.tsx"
 }

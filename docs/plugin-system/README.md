@@ -11,9 +11,14 @@ SwallowNote 插件系统允许第三方代码扩展编辑器面板、订阅宿�
 | 注册面板 / 图标 | `manifest.panel` / `manifest.icon` | [manifest.md](./manifest.md) |
 | 生命周期钩子 | `manifest.onLoad` / `onMount` / ... | [lifecycle.md](./lifecycle.md) |
 | 事件订阅 | `panel.events.on(event, handler)` | [events.md](./events.md) |
-| 持久化存储 | `panel.store.get / set / delete` | [storage.md](./storage.md) |
+| 持久化存储 | `panel.store.get / set / delete / keys / entries` | [storage.md](./storage.md) |
 | 设置面板 | `manifest.settings` | [settings.md](./settings.md) |
 | 右键菜单贡献 | `registerContextMenu(pluginId, item)` | [context-menu.md](./context-menu.md) |
+| **命令面板贡献** | `registerCommand(pluginId, command)` | [DEVELOPER_GUIDE.md#命令面板贡献](./DEVELOPER_GUIDE.md#命令面板贡献) |
+| **自定义文件编辑器** | `registerEditor(pluginId, extension, component)` | [DEVELOPER_GUIDE.md#自定义文件编辑器](./DEVELOPER_GUIDE.md#自定义文件编辑器) |
+| **编辑器 Tab API** | `openEditorTab(pluginId, props)` | [DEVELOPER_GUIDE.md#编辑器-tab-api](./DEVELOPER_GUIDE.md#编辑器-tab-api) |
+| **设置 API** | `panel.getSetting / setSetting` | [DEVELOPER_GUIDE.md#设置-api](./DEVELOPER_GUIDE.md#设置-api) |
+| **Frontmatter API** | `panel.getActiveNoteFrontmatter / setActiveNoteFrontmatter` | [DEVELOPER_GUIDE.md#frontmatter-api](./DEVELOPER_GUIDE.md#frontmatter-api) |
 | Rust 后端 | `panel.invokeBackend(cmd, args)` | [backend.md](./backend.md) |
 | **权限声明与授权** | `manifest.permissions` | [manifest.md#权限字段permissions](./manifest.md#权限字段permissions) |
 | **独立开发** | `@swallow-note/plugin-sdk` | [standalone-development.md](./standalone-development.md) |
@@ -92,7 +97,11 @@ SDK 把所有类型和 React hooks 抽到一个 npm 包，stub 实现允许在�
 | 类型定义 | `src/types/plugin.ts` |
 | 事件总线 | `src/lib/plugin-host.ts` |
 | 持久化存储 | `src/lib/plugin-host.ts` (`PluginStorageImpl`) |
+| 宿主接管（setHost 工厂） | `src/lib/plugin-host-takeover.ts` |
 | 菜单注册表 | `src/lib/plugin-menu.ts` |
+| 命令面板注册表 | `src/lib/plugin-commands.ts` |
+| 文件编辑器注册表 | `src/stores/pluginEditor.ts` |
+| 插件设置（SQLite 缓存） | `src/lib/plugin-settings/index.ts` |
 | 插件加载 | `src/lib/plugin-loader.ts` |
 | 宿主上下文 | `src/lib/plugin-host.ts` (`buildPluginContext`) |
 | 示例插件 | `src/lib/core-plugins/recent-notes-counter.tsx` |

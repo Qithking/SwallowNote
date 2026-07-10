@@ -4,8 +4,11 @@
   "description": "A minimal example plugin that shows a single greeting panel.",
   "version": "0.1.0",
   "author": "SwallowNote",
+  "publishedAt": "2026-06-10",
   "iconPosition": "sidebar",
   "contentPosition": "fullPanel",
+  "order": 100,
+  "enabled": true,
   "hasBackend": false,
   "entry": "index.tsx"
 }

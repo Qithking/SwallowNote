@@ -9,5 +9,6 @@
   "contentPosition": "leftPanel",
   "order": 100,
   "enabled": true,
-  "hasBackend": false
+  "hasBackend": false,
+  "entry": "index.tsx"
 }

@@ -1,11 +1,14 @@
 {
   "id": "com.example.storage-counter",
   "name": "Storage Counter",
-  "description": "Counter with persistent history stored in the plugin's JSON file.",
+  "description": "Counter with persistent history stored in the plugin JSON file.",
   "version": "0.1.0",
   "author": "SwallowNote",
+  "publishedAt": "2026-06-10",
   "iconPosition": "sidebar",
   "contentPosition": "rightPanel",
+  "order": 90,
+  "enabled": true,
   "hasBackend": false,
   "entry": "index.tsx"
 }

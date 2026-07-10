@@ -4,8 +4,11 @@
   "description": "A full-featured plugin using all 5 host APIs: storage, events, settings, context menu, and lifecycle hooks.",
   "version": "1.0.0",
   "author": "SwallowNote",
+  "publishedAt": "2026-06-10",
   "iconPosition": "sidebar",
   "contentPosition": "leftPanel",
+  "order": 50,
+  "enabled": true,
   "hasBackend": false,
   "entry": "index.tsx"
 }

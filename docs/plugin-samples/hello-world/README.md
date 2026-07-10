@@ -44,6 +44,6 @@
 | [event-listener](../event-listener) | 订阅宿主事件 | `'events'` |
 | [settings-dialog](../settings-dialog) | 设置面板 | （不增加权限，`settings` 是 UI 入口） |
 | [context-menu-item](../context-menu-item) | 右键菜单贡献 | `'context-menu'` |
-| [full-stack](../full-stack) | 5 项能力综合 | 全部 4 项 |
+| [full-stack](../full-stack) | 5 项能力综合 | `'storage'` + `'events'` + `'context-menu'` |
 
 完整权限列表、运行时检查机制、撤销即时生效等细节见 [manifest.md](../../plugin-system/manifest.md) "权限字段"一节。

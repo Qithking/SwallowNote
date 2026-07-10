@@ -5,7 +5,8 @@
 ## 声明 settings
 
 ```typescript
-import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
+import type { PluginDefinition, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import { usePluginStorage } from '@swallow-note/plugin-sdk'
 
 function MySettings(panel: PluginPanelProps) {
   const [apiKey, setApiKey] = usePluginStorage(panel, 'apiKey', '')
@@ -46,6 +47,17 @@ interface PluginPanelProps {
   invokeBackend: (cmd, args?) => Promise<unknown>
   store: PluginStorage
   events: PluginEventBus
+  activeNoteContent: string   // 当前活动笔记内容，无笔记时为空
+  activeNotePath: string      // 当前活动笔记路径，无笔记时为空
+  // 设置 API（详见下方“设置 API”小节）
+  getSetting<T>(key: string): Promise<T | null>
+  setSetting<T>(key: string, value: T): Promise<void>
+  getAllSettings(): Promise<Record<string, unknown>>
+  onSettingsChange(handler): () => void
+  // Frontmatter API（详见下方“Frontmatter API”小节）
+  getActiveNoteFrontmatter(): Record<string, unknown> | null
+  setActiveNoteFrontmatter(data: Record<string, unknown>): void
+  onNoteFrontmatterChanged(callback): () => void
 }
 ```
 
@@ -123,6 +135,83 @@ function ComplexSettings(panel: PluginPanelProps) {
   )
 }
 ```
+
+## 设置 API
+
+`PluginPanelProps`（以及 `ToolbarButtonProps`）注入了四个设置读写方法，背后由宿主的 SQLite 层支撑（独立预览模式下回退到 SDK 的内存 + localStorage stub）。这些方法**独立于 `store`**：`store` 是插件自由键值存储，而设置 API 走 `plugin_settings_<id>` 表，受 `settings.json` schema 约束。
+
+| 方法 | 签名 | 说明 |
+| --- | --- | --- |
+| `getSetting` | `<T>(key) => Promise<T \| null>` | 按 schema 读取单个设置值，缺失时回退到 schema 默认值并返回 `null` |
+| `setSetting` | `<T>(key, value) => Promise<void>` | 持久化单个设置键（写穿 SQLite），并 emit `plugin-settings:change` |
+| `getAllSettings` | `() => Promise<Record<string, unknown>>` | 读取所有设置为扁平 key/value map，缺失键回退到 schema 默认值 |
+| `onSettingsChange` | `(handler) => () => void` | 订阅设置变化，handler 收到完整设置 map；返回取消订阅函数 |
+
+```typescript
+import type { PluginPanelProps } from '@/types/plugin'
+// 独立开发可改用：import type { PluginPanelProps } from '@swallow-note/plugin-sdk'
+
+function SettingsPanel(panel: PluginPanelProps) {
+  const load = async () => {
+    // 读取单个值
+    const apiKey = await panel.getSetting<string>('apiKey')
+    // 读取全部设置
+    const all = await panel.getAllSettings()
+    console.log(apiKey, all)
+  }
+
+  // 订阅外部修改（例如用户在另一处 dialog 改了设置）
+  useEffect(() => {
+    return panel.onSettingsChange((next) => {
+      console.log('settings changed:', next)
+    })
+  }, [panel])
+
+  const save = () => panel.setSetting('apiKey', 'sk-new')
+
+  return <button onClick={save}>Save</button>
+}
+```
+
+> **模块级 API**：SDK 还导出 `getSetting(pluginId, key)` / `setSetting(pluginId, key, value)` / `getAllSettings(pluginId)` / `onSettingsChange(pluginId, handler)` / `emitPluginSettingsChanged(pluginId, values)`，适合在生命周期钩子等非组件场景使用。host 模式下转发到 SQLite，独立模式回退到 stub。
+
+## Frontmatter API
+
+`PluginPanelProps` / `ToolbarButtonProps` 还提供三个操作当前笔记 frontmatter 的方法，便于插件读写笔记元数据（如 tags、title、自定义字段）。
+
+| 方法 | 签名 | 说明 |
+| --- | --- | --- |
+| `getActiveNoteFrontmatter` | `() => Record<string, unknown> \| null` | 获取当前活动笔记的 frontmatter 对象，无活动笔记时返回 `null` |
+| `setActiveNoteFrontmatter` | `(data: Record<string, unknown>) => void` | **合并**更新当前笔记的 frontmatter（浅合并），无活动笔记时为空操作 |
+| `onNoteFrontmatterChanged` | `(callback) => () => void` | 监听 frontmatter 变更事件，返回取消订阅函数 |
+
+```typescript
+import type { PluginPanelProps } from '@/types/plugin'
+
+function FrontmatterPanel(panel: PluginPanelProps) {
+  const read = () => {
+    const fm = panel.getActiveNoteFrontmatter()
+    if (!fm) return
+    console.log('tags:', fm.tags)
+  }
+
+  // 监听 frontmatter 变更（例如用户在属性面板编辑了 tag）
+  useEffect(() => {
+    return panel.onNoteFrontmatterChanged((data) => {
+      console.log('frontmatter updated:', data)
+    })
+  }, [panel])
+
+  const addTag = () => {
+    // 浅合并：仅覆盖传入的键，其余保留
+    panel.setActiveNoteFrontmatter({ tags: ['note', 'demo'] })
+  }
+
+  return <button onClick={addTag}>Add tag</button>
+}
+```
+
+> `setActiveNoteFrontmatter` 是**合并写**：传入 `{ tags: [...] }` 只更新 `tags` 字段，不触碰 frontmatter 中其他键。无活动笔记时调用为空操作（不抛错）。
 
 ## 源码引用
 

@@ -24,12 +24,17 @@ import {
   emitNoteClosed,
   emitNoteOpened,
   emitNoteSaved,
+  emitPluginSettingsChanged,
   emitSettingChanged,
   emitThemeChanged,
   getContextMenuItems,
   getPluginStorage,
+  getSetting,
+  getAllSettings,
+  onSettingsChange,
   pluginEventBus,
   runLifecycleHook,
+  setSetting,
 } from '@swallow-note/plugin-sdk'
 
 // ────────────────────────────── styles ────────────────────────────────────
@@ -105,6 +110,7 @@ const EVENT_PRESETS: { label: string; fire: () => void }[] = [
   { label: 'theme:change → light', fire: () => emitThemeChanged('light') },
   { label: 'locale:change → zh-CN', fire: () => emitLocaleChanged('zh-CN') },
   { label: 'settings:change fontSize=14', fire: () => emitSettingChanged('fontSize', 14) },
+  { label: 'plugin-settings:change', fire: () => emitPluginSettingsChanged(manifest.id, { theme: 'dark' }) },
 ]
 
 // ──────────────────────────── component ──────────────────────────────────
@@ -151,6 +157,8 @@ export function Preview() {
     const all = [
       'note:open', 'note:close', 'note:save', 'note:change',
       'theme:change', 'locale:change', 'settings:change', 'app:ready',
+      'app:exit', 'plugin-settings:change',
+      'editor:registered', 'editor:unregistered',
     ] as const
     const unsubs = all.map((evt) =>
       pluginEventBus.on(evt, (payload) => {
@@ -162,7 +170,8 @@ export function Preview() {
     return () => unsubs.forEach((u) => u())
   }, [])
 
-  // Build panel props
+  // Build panel props — 补齐 PluginPanelProps 全部必需字段，
+  // settings/frontmatter 在独立预览中走 SDK stub 或返回空值
   const panelProps = useMemo<PluginPanelProps>(() => ({
     pluginId: manifest.id,
     isActive: active,
@@ -173,7 +182,17 @@ export function Preview() {
     },
     store: getPluginStorage(manifest.id),
     events: pluginEventBus,
-  }), [active])
+    activeNoteContent: '',
+    activeNotePath: notePath,
+    getSetting: (key: string) => getSetting(manifest.id, key),
+    setSetting: (key: string, value: unknown) => setSetting(manifest.id, key, value),
+    getAllSettings: () => getAllSettings(manifest.id),
+    onSettingsChange: (handler) => onSettingsChange(manifest.id, handler),
+    // 预览模式无活动笔记，frontmatter 返回 null / no-op
+    getActiveNoteFrontmatter: () => null,
+    setActiveNoteFrontmatter: () => {},
+    onNoteFrontmatterChanged: () => () => {},
+  }), [active, notePath])
 
   const Panel = manifest.panel as ComponentType<PluginPanelProps>
 

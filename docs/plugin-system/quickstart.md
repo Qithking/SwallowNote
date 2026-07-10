@@ -33,7 +33,10 @@ hello-world/
 ## 第 3 步：写 `index.tsx`
 
 ```tsx
-import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
+import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+// 必须 re-export setHost，否则 tree-shaker 会丢弃该符号，
+// 宿主无法通过 setHost 注入真实实现（权限检查、真实存储等）。
+export { setHost } from '@swallow-note/plugin-sdk'
 
 // ─── 图标（侧边栏） ────────────────────────────────────────────
 function HelloIcon({ size = 18 }: { size?: number }) {
@@ -57,7 +60,7 @@ function HelloPanel({ pluginId }: PluginPanelProps) {
 }
 
 // ─── Manifest ─────────────────────────────────────────────────
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   id: 'com.example.hello-world',
   name: 'Hello World',
   description: 'A minimal example plugin',
@@ -70,14 +73,12 @@ const manifest: PluginDefinition = {
   enabled: true,
   icon: HelloIcon,
   panel: HelloPanel,
-  pluginPath: '',  // 加载时由 loader 填充
-  hasBackend: false,
 }
 
 export default manifest
 ```
 
-> 完整 manifest 字段含义见 [manifest.md](./manifest.md)。`pluginPath` 留空即可，loader 会自动填上。
+> 完整 manifest 字段含义见 [manifest.md](./manifest.md)。独立开发用 `@swallow-note/plugin-sdk` 导入类型；项目内开发用 `@/types/plugin`。两者字段一致。
 
 > **可用 Props**：`PluginPanelProps` 和 `ToolbarButtonProps` 中还包含 `activeNoteContent`（当前活动笔记的 Markdown 内容）和 `activeNotePath`（当前活动笔记的文件路径）两个由宿主注入的只读字段。插件可以直接从 props 中解构使用，无需订阅额外事件。例如：`function MyPanel({ pluginId, activeNoteContent, activeNotePath }: PluginPanelProps) { ... }`。完整 Props 字段列表见 [manifest.md](./manifest.md)。
 
@@ -89,7 +90,7 @@ export default manifest
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
-import { copyFileSync, mkdirSync, existsSync } from 'node:fs'
+import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 
 export default defineConfig(({ mode }) => {
   if (mode === 'production') {
@@ -97,13 +98,36 @@ export default defineConfig(({ mode }) => {
       plugins: [
         react(),
         {
-          name: 'copy-manifest',
+          // 注入 // @swallow-manifest 注释到 dist/index.js 头部，
+          // 宿主通过该注释读取插件元数据（名称、位置、版本等）
+          name: 'inject-manifest-comment',
           closeBundle() {
             if (!existsSync('dist')) mkdirSync('dist', { recursive: true })
             copyFileSync(
               resolve(__dirname, 'manifest.json'),
               resolve(__dirname, 'dist/manifest.json')
             )
+            const indexPath = resolve(__dirname, 'dist/index.js')
+            const manifestPath = resolve(__dirname, 'manifest.json')
+            if (existsSync(indexPath) && existsSync(manifestPath)) {
+              const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
+              const meta = {
+                id: manifest.id,
+                name: manifest.name,
+                description: manifest.description || '',
+                version: manifest.version || '',
+                author: manifest.author || '',
+                published_at: manifest.publishedAt || '',
+                icon_position: manifest.iconPosition,
+                content_position: manifest.contentPosition,
+                order: manifest.order ?? 100,
+                enabled: manifest.enabled ?? true,
+                has_backend: manifest.hasBackend ?? false,
+              }
+              const comment = `// @swallow-manifest ${JSON.stringify(meta)}\n`
+              const content = readFileSync(indexPath, 'utf-8')
+              writeFileSync(indexPath, comment + content)
+            }
           },
         },
       ],
@@ -160,6 +184,11 @@ export default defineConfig(({ mode }) => {
 - 订阅 [事件总线](./events.md) → [event-listener 示例](../plugin-samples/event-listener)
 - 添加 [设置面板](./settings.md) → [settings-dialog 示例](../plugin-samples/settings-dialog)
 - 贡献 [右键菜单](./context-menu.md) → [context-menu-item 示例](../plugin-samples/context-menu-item)
+- 贡献 [命令面板](./DEVELOPER_GUIDE.md#命令面板贡献)（`registerCommand`）
+- 注册 [自定义文件编辑器](./DEVELOPER_GUIDE.md#自定义文件编辑器)（`registerEditor`）
+- 使用 [编辑器 Tab API](./DEVELOPER_GUIDE.md#编辑器-tab-api)（`openEditorTab`）
+- 使用 [设置 API](./DEVELOPER_GUIDE.md#设置-api)（`getSetting` / `setSetting`）
+- 使用 [Frontmatter API](./DEVELOPER_GUIDE.md#frontmatter-api)（`getActiveNoteFrontmatter`）
 - 完整示例（5 项能力）→ [full-stack 示例](../plugin-samples/full-stack)
 
 ## 常见错误
@@ -168,5 +197,6 @@ export default defineConfig(({ mode }) => {
 | --- | --- | --- |
 | 上传后无图标 | `iconPosition` 不是 `sidebar` | 改 `iconPosition: 'sidebar'` |
 | 点击无反应 | `contentPosition` 与触发器不匹配 | `fullPanel` 用于全屏；`rightPanel` / `leftPanel` 配合 sidebar |
-| 控制台报 `Cannot find module '@/types/plugin'` | 路径别名仅在 SwallowNote 项目内解析 | 在本地 demo 项目里也配置相同别名（参考 `tsconfig.json` 的 `paths`） |
+| 控制台报 `Cannot find module '@swallow-note/plugin-sdk'` | 未安装 SDK 或未建软链 | `npm install` 或将 `node_modules/@swallow-note/plugin-sdk` 软链到 SDK dist |
 | 打包后体积巨大 | 包含 `node_modules` | 只打包源码 + 锁定第三方依赖到具体路径 |
+| 插件管理界面显示的名称/位置与实际不符 | 构建产物 `dist/index.js` 头部缺少 `// @swallow-manifest` 注释 | 确保 vite.config.ts 的 production 配置中包含 `inject-manifest-comment` 插件（见模板） |

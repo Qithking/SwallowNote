@@ -87,6 +87,8 @@ export interface PluginStorage {
 export interface PluginEventBus {
   on<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): () => void
   off<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void
+  /** 移除该插件的所有监听器（卸载时由宿主调用） */
+  removeAllListenersForPlugin(pluginId: string): void
 }
 
 /** 右键菜单项结构 */
@@ -274,6 +276,14 @@ export interface ToolbarButtonProps {
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
 }
 
+/** 插件依赖声明 */
+export interface PluginDependency {
+  /** 唯一插件标识符 */
+  id: string
+  /** semver 范围，空或 * 匹配任意版本 */
+  version: string
+}
+
 /**
  * 插件 index.js 导出的结构。生命周期钩子为扁平顶层字段，
  * 宿主加载时复制到 PluginDefinition.hooks。
@@ -292,21 +302,27 @@ export interface PluginManifest {
   order?: number
   enabled?: boolean
   /** 图标组件，无 UI 时省略；省略后不渲染但仍可贡献其他能力 */
-  icon?: ComponentType<{ size?: number }>
+  icon?: ComponentType<{ size?: number }> | ReactNode
   /** 面板内容组件，无独立面板时省略 */
-  panel?: ComponentType<PluginPanelProps>
+  panel?: ComponentType<PluginPanelProps> | ReactNode
   /** 自定义工具栏按钮组件，替代默认图标按钮 */
-  toolbarButton?: ComponentType<ToolbarButtonProps>
-  settings?: ComponentType<PluginPanelProps>
+  toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
+  settings?: ComponentType<PluginPanelProps> | ReactNode
   /** 插件可渲染的文件扩展名，需声明 editor 权限 */
   editorFileExtensions?: string[]
   /** 匹配扩展名的文件渲染组件，接收 content/onChange */
   editorComponent?: ComponentType<{
     content: string
     onChange: (content: string) => void
-  }>
+  }> | ReactNode
   /** 插件所需权限，省略时默认为空数组 */
   permissions?: PluginPermission[]
+  /** 插件间依赖 */
+  dependencies?: PluginDependency[]
+  /** 贡献的命令面板 id 列表 */
+  commandPalette?: string[]
+  /** 是否启用自动更新 */
+  autoUpdate?: boolean
   // ── 生命周期钩子（均可选，均为扁平字段） ──────────────────────────
   onLoad?: PluginLifecycleHook
   onUnload?: PluginLifecycleHook
@@ -336,19 +352,19 @@ export interface PluginDefinition {
   order: number
   enabled: boolean
   /** 已解析的图标组件，无 UI 时省略 */
-  icon?: ComponentType<{ size?: number }>
+  icon?: ComponentType<{ size?: number }> | ReactNode
   /** 已解析的面板组件，无独立面板时省略 */
-  panel?: ComponentType<PluginPanelProps>
+  panel?: ComponentType<PluginPanelProps> | ReactNode
   /** 自定义工具栏按钮组件（覆盖默认图标） */
-  toolbarButton?: ComponentType<ToolbarButtonProps>
-  settings?: ComponentType<PluginPanelProps>
+  toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
+  settings?: ComponentType<PluginPanelProps> | ReactNode
   /** 插件可渲染的扩展名（带点小写），镜像 manifest 字段 */
   editorFileExtensions?: string[]
   /** 匹配扩展名时宿主挂载的编辑器组件 */
   editorComponent?: ComponentType<{
     content: string
     onChange: (content: string) => void
-  }>
+  }> | ReactNode
   /** 设置 schema 描述，独立预览时为 undefined */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   settingsSchema?: any
@@ -356,6 +372,12 @@ export interface PluginDefinition {
   hasBackend: boolean
   /** 插件所需权限，省略时默认为空数组 */
   permissions?: PluginPermission[]
+  /** 插件间依赖 */
+  dependencies?: PluginDependency[]
+  /** 贡献的命令面板 id 列表 */
+  commandPalette?: string[]
+  /** 是否启用自动更新 */
+  autoUpdate?: boolean
   hooks?: {
     onLoad?: PluginLifecycleHook
     onUnload?: PluginLifecycleHook
@@ -649,17 +671,38 @@ export function dropPluginSettings(pluginId: string): void {
 
 class StubEventBus implements PluginEventBus {
   private readonly target = new EventTarget()
+  /** handler → wrapped 映射，使 off 能找到原始 wrapped 引用 */
+  private readonly wrapperMap = new Map<Function, Map<PluginEvent, EventListener>>()
 
   on<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): () => void {
     const wrapped = (e: Event) => handler((e as CustomEvent).detail)
     this.target.addEventListener(event, wrapped)
-    return () => this.target.removeEventListener(event, wrapped)
+    let perHandler = this.wrapperMap.get(handler)
+    if (!perHandler) {
+      perHandler = new Map()
+      this.wrapperMap.set(handler, perHandler)
+    }
+    perHandler.set(event, wrapped)
+    return () => {
+      this.target.removeEventListener(event, wrapped)
+      perHandler!.delete(event)
+      if (perHandler!.size === 0) this.wrapperMap.delete(handler)
+    }
   }
 
-  // 事件总线 best-effort；保留 unsubscribe 返回值
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  off<E extends PluginEvent>(_event: E, _handler: PluginEventHandler<E>): void {
-    // no-op – see comment above
+  off<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void {
+    const perHandler = this.wrapperMap.get(handler)
+    const wrapped = perHandler?.get(event)
+    if (wrapped) {
+      this.target.removeEventListener(event, wrapped)
+      perHandler!.delete(event)
+      if (perHandler!.size === 0) this.wrapperMap.delete(handler)
+    }
+  }
+
+  removeAllListenersForPlugin(_pluginId: string): void {
+    // standalone 模式下无法按 pluginId 过滤监听器（EventTarget 不支持枚举）
+    // 宿主模式下由宿主的 createPluginEventBus 实现真实清理
   }
 
   emit<E extends PluginEvent>(event: E, payload: PluginEventPayloadMap[E]): void {
@@ -683,8 +726,20 @@ type PluginBusWithEmit = PluginEventBus & {
   emit: <E extends PluginEvent>(event: E, payload: PluginEventPayloadMap[E]) => void
 }
 export const pluginEventBus: PluginEventBus = {
-  on: stubBus.on.bind(stubBus),
-  off: stubBus.off.bind(stubBus),
+  on: <E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): (() => void) => {
+    const hostOn = currentHostOverrides().on
+    if (hostOn) return hostOn(event, handler)
+    return stubBus.on(event, handler)
+  },
+  off: <E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void => {
+    const hostOff = currentHostOverrides().off
+    if (hostOff) hostOff(event, handler)
+    else stubBus.off(event, handler)
+  },
+  removeAllListenersForPlugin: (pluginId: string): void => {
+    // standalone 模式下无法按 pluginId 过滤监听器
+    stubBus.removeAllListenersForPlugin(pluginId)
+  },
 } as PluginBusWithEmit
 ;(pluginEventBus as unknown as PluginBusWithEmit).emit = stubBus.emit.bind(stubBus)
 

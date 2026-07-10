@@ -59,6 +59,24 @@ interface PluginContext {
 }
 ```
 
+### `invokeBackend` 在不同模式下的行为
+
+`PluginContext.invokeBackend` 的具体实现由构造 context 的代码决定：
+
+- **host 模式**（生产）：宿主构造的 `PluginContext` 把 `invokeBackend` 桥接到 `@tauri-apps/api/core` 的 `invoke`，正常调用 Rust 后端命令。
+- **standalone 模式**（`npm run dev` 独立预览，无 Tauri runtime）：SDK 的 `buildPluginContext(plugin)` 返回的 `invokeBackend` 会先检查 host 是否注入了 `invokeBackend` override；若未注入，则打印 `console.warn` 并返回 `null`，方便插件在无 Rust 后端时也能跑通 UI 预览。
+
+```typescript
+// SDK 中的 standalone 兜底实现（简化）
+import { buildPluginContext } from '@swallow-note/plugin-sdk'
+
+const ctx = buildPluginContext({ id: 'com.example.demo', pluginPath: '/tmp/demo' })
+const result = await ctx.invokeBackend('count_words', { text: 'hi' })
+// host 未注入时：打印 warn，result === null
+```
+
+> 因此生命周期钩子里调用 `invokeBackend` 时应处理 `null` 兜底（standalone 模式）。如果钩子需要调用后端，建议在 `onMount`/`onActivate` 中调用（此时面板已挂载，可通过 `panel.invokeBackend` 调用），而非在 `onLoad` 中。详见 [backend.md](./backend.md)。
+
 ## 完整示例
 
 ```typescript
