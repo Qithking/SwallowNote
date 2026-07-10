@@ -38,6 +38,21 @@
 
 > **本文档的第 2-7 节以"项目内开发"为例** —— 概念和 API 与独立开发 100% 一致，后者只是把宿主实现替换成 SDK 内的 stub（开发用）和宿主真实实现（运行时通过 `setHost` 接管）。详见 [第 8 节](#独立开发swallow-noteplugin-sdk--plugin-template)。
 
+### 插件类型选择
+
+根据你的功能需求选择合适的插件类型：
+
+| 插件类型 | iconPosition | contentPosition | 典型场景 |
+|----------|-------------|-----------------|---------|
+| 侧边栏面板插件 | `sidebar` | `fullPanel` / `leftPanel` / `rightPanel` | 笔记计数器、AI 助手、文件树增强 |
+| 编辑器工具栏插件 | `editorToolbar` | `editorArea` | 格式化按钮、插入模板、快速操作 |
+| 标题栏插件 | `titleBar` | `leftPanel` / `rightPanel` | 全局搜索、快速笔记 |
+| 自定义文件编辑器 | 省略 | 省略 | 打开 `.smm`/`.canvas` 等自定义格式文件 |
+| 纯后台插件 | 省略 | 省略 | 文件监听、自动同步、定时任务 |
+| 混合插件 | `sidebar` | `fullPanel` | 既有侧边栏面板又有自定义编辑器 |
+
+> **无 UI 插件**：省略 `iconPosition` 和 `contentPosition` 后，插件不渲染图标和面板，但仍可贡献：生命周期钩子、事件订阅、右键菜单、命令面板、自定义编辑器等。
+
 ---
 
 ## 5 分钟上手：写一个最小可运行插件
@@ -73,7 +88,7 @@ Rust 端**只读这一份 JSON** 来决定插件 id / 名称 / 是否带后端�
 }
 ```
 
-> JSON 字段命名是 snake_case（`has_backend`、`icon_position`），由 Rust 端 `serde::Deserialize` 解析。JS manifest（下面）用 camelCase。两边独立，**不要** 误以为它们是同一份。
+> `manifest.json` 使用 **camelCase**（如 `iconPosition`、`contentPosition`、`hasBackend`、`publishedAt`），由前端 TypeScript 读取。打包时 vite 插件会自动转换为 snake_case 的 `// @swallow-manifest` 注释，供 Rust 端 `serde::Deserialize` 解析。开发者只需维护 camelCase 的 `manifest.json`，无需关心 snake_case 转换。
 
 ### 3) `index.tsx`（JS 端）
 
@@ -798,6 +813,60 @@ function MyPanel(panel: PluginPanelProps) {
 
 ---
 
+### 国际化（i18n）
+
+宿主使用 `react-i18next` 进行国际化，已通过 vite external 外部化（`react-i18next` / `i18next` 由宿主 `window.ReactI18Next` 提供）。插件可以直接使用宿主的 i18n 实例。
+
+#### 在插件中使用 i18n
+
+```typescript
+import { useTranslation } from 'react-i18next'
+
+function MyPanel(panel: PluginPanelProps) {
+  const { t } = useTranslation()
+  return (
+    <div>
+      <h2>{t('my-plugin.title', 'My Plugin')}</h2>
+      <button>{t('my-plugin.save', 'Save')}</button>
+    </div>
+  )
+}
+```
+
+> **注意**：`useTranslation` 返回的 `t` 函数来自宿主的 i18next 实例。插件的翻译 key 需要通过宿主注册，或插件自行初始化 i18next。
+
+#### 监听语言切换
+
+通过 `locale:change` 事件监听语言变化（payload 为 `{ locale: string }`）：
+
+```typescript
+import { usePluginEvent } from '@swallow-note/plugin-sdk'
+
+function MyPanel(panel: PluginPanelProps) {
+  usePluginEvent(panel, 'locale:change', (payload) => {
+    console.log('语言切换为:', payload.locale)
+    // 可以在此重新加载翻译资源
+  })
+  // ...
+}
+```
+
+#### locale 格式
+
+宿主使用 BCP 47 语言标签：
+
+- `'zh'` — 简体中文
+- `'en'` — 英文
+- `'ja'` — 日文
+
+#### 推荐做法
+
+1. 使用带命名空间的 key（如 `my-plugin.xxx`）避免与其他插件冲突
+2. `t` 函数的第二个参数作为 fallback 字符串，在翻译缺失时显示
+3. 如果插件翻译量大，考虑自建 i18next 实例而非依赖宿主
+
+---
+
 ### Rust 后端
 
 需要时携带 Tauri command 作为后端（解析大文件、跑复杂计算、调用系统 API）。
@@ -815,17 +884,52 @@ my-plugin/
 └── README.md
 ```
 
-#### Rust command 示例
+#### Rust 后端实现
+
+后端是独立的 stdin/stdout 子进程，**不依赖 Tauri 框架**。通信使用 JSON-RPC 2.0：宿主按行写入请求到子进程 stdin，子进程按行把响应写回 stdout。
+
+> 完整协议说明（生命周期、错误码、Cargo.toml、日志、命名约定）和编译指南见 [backend.md](./backend.md)。
+
+下面是最小可运行的 `main.rs` 示例：按行读取 stdin、解析 JSON-RPC 请求、分发到对应方法、把响应写回 stdout。
 
 ```rust
-// backend/src/lib.rs
-use tauri::command;
+// backend/src/main.rs
+use std::io::{self, BufRead, Write};
 
-#[command]
-pub fn count_words(text: String) -> u32 {
-    text.split_whitespace().count() as u32
+fn main() {
+    let stdin = io::stdin();
+    let mut out = io::stdout().lock();
+
+    // 按行读取 stdin：每行是一个 JSON-RPC 请求
+    for line in stdin.lock().lines() {
+        let line = match line { Ok(l) => l, Err(_) => continue };
+        let req: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,  // 解析失败：跳过（生产环境应返回 parse error）
+        };
+        let id = req.get("id").cloned();
+        let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        let params = req.get("params").cloned().unwrap_or(serde_json::Value::Null);
+
+        // 分发到对应方法
+        let result = match method {
+            "count_words" => {
+                let text = params.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                serde_json::json!(text.split_whitespace().count())
+            }
+            _ => continue,  // 未知方法：生产环境应返回 method not found
+        };
+
+        // 有 id 的是请求，需要返回响应；无 id 的是通知，忽略
+        if let Some(id) = id {
+            let resp = serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result });
+            writeln!(out, "{}", resp).unwrap();
+        }
+    }
 }
 ```
+
+> 错误处理：返回 JSON-RPC `error` 对象（如 `{"code": -32603, "message": "..."}`）即可，宿主会把 `message` 转成 `PluginError` 抛给前端。完整示例见 [backend.md](./backend.md)。
 
 #### 前端调用
 
@@ -859,24 +963,6 @@ TS panel ─invoke('plugin_<id>_<cmd>', args)─▶ Rust host (plugin_invoke)
 - 子进程 stdout 关闭 → 全部 pending 请求立即报错
 - 单次调用超时 30 秒（`INVOKE_TIMEOUT`）
 - 后端进程在插件**卸载前**会被 `kill_plugin` Tauri command 杀死
-
-#### 错误处理
-
-```rust
-#[command]
-pub fn parse(data: String) -> Result<MyStruct, String> {
-    serde_json::from_str(&data).map_err(|e| e.to_string())
-}
-```
-
-```typescript
-try {
-  const parsed = await panel.invokeBackend('parse', { data: '...' })
-} catch (err) {
-  // err.message 是 host 转发的字符串
-  console.error('parse failed:', err)
-}
-```
 
 #### 跨平台编译
 
@@ -1335,6 +1421,107 @@ localStorage.getItem('plugin_permissions_com.example.my-plugin')
 
 ---
 
+## 性能最佳实践
+
+### 事件订阅
+
+- `note:change` 是**高频事件**（每次按键触发），监听时务必防抖：
+
+```typescript
+import { useRef } from 'react'
+
+function MyPanel(panel: PluginPanelProps) {
+  const timerRef = useRef<ReturnType<typeof setTimeout>>()
+
+  useEffect(() => {
+    const unsub = panel.events.on('note:change', () => {
+      clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => {
+        // 防抖后的逻辑
+      }, 300)
+    })
+    return unsub
+  }, [])
+}
+```
+
+- `usePluginEvents` 的 `events` 数组必须是 **module-scope 常量**，否则每次渲染都会重新订阅
+- 避免在事件 handler 中同步读取 `activeNoteContent`（大文件会阻塞）
+
+### 存储
+
+- `store.get` 会异步读盘，避免在渲染路径中调用——用 `usePluginStorage` hook 自动管理
+- `entries()` 会遍历所有键并计算 size，不要在高频路径中调用
+- 大数据（>1MB）考虑分片或使用后端文件系统
+
+### 渲染
+
+- 插件面板是 React 组件，遵循 React 性能最佳实践（`useMemo`、`useCallback`、`React.memo`）
+- 大列表使用虚拟滚动（`react-window` 或类似库）
+- 避免在 `render` 中调用 `store.get` / `getSetting` 等异步 API
+
+### 后端通信
+
+- `invokeBackend` 有 30 秒超时，长时间任务考虑分批返回
+- 后端子进程空闲 10 分钟会被自动回收，下次调用有 spawn 延迟
+- 避免频繁调用 `invokeBackend`（每次都有 IPC 开销），考虑批量化
+
+## 错误处理最佳实践
+
+### API 调用失败
+
+```typescript
+try {
+  const result = await panel.invokeBackend('my_command', args)
+} catch (err) {
+  // invokeBackend 错误：超时、子进程崩溃、命令不存在
+  console.error('后端调用失败:', err)
+  // 向用户展示友好的错误提示
+  toast.error('操作失败，请重试')
+}
+
+try {
+  await panel.store.set('key', value)
+} catch (err) {
+  // 存储失败：磁盘满、权限问题
+  console.error('存储失败:', err)
+}
+```
+
+### 权限被拒绝
+
+当插件使用了未声明的权限时，SDK 会抛出 `PluginPermissionDeniedError`：
+
+```typescript
+import { PluginPermissionDeniedError } from '@swallow-note/plugin-sdk'
+
+try {
+  await panel.store.set('key', 'value')
+} catch (err) {
+  if (err instanceof PluginPermissionDeniedError) {
+    console.warn(`权限不足: ${err.operation}，请在 manifest 中声明 'storage' 权限`)
+  }
+}
+```
+
+### 生命周期钩子报错
+
+钩子内的异常会被宿主 try/catch 捕获，不会崩溃宿主，但会记录错误日志。超时（5 秒）会触发 `PluginLifecycleTimeoutError`。
+
+### 降级处理
+
+当 API 不可用时（如 standalone 模式），考虑降级方案：
+
+```typescript
+const result = await panel.invokeBackend('count_words', { text })
+  .catch(() => {
+    // 后端不可用时，用前端降级方案
+    return text.split(/\s+/).filter(Boolean).length
+  })
+```
+
+---
+
 ## 发布与更新
 
 ### 发布流程
@@ -1379,6 +1566,77 @@ host 自 Phase 9.2 起**对每个插件做版本管理**：
 - **不要**删除事件
 - 钩子签名变化要在 README 标注 major version bump
 - 后端 command 删除要 deprecate 至少 1 个 minor 版本
+
+### 版本兼容性
+
+#### SDK 版本
+
+`@swallow-note/plugin-sdk` 当前版本为 `0.1.0`（见导出的 `SDK_VERSION` 常量）。SDK 版本与宿主版本独立演进：
+
+- **Minor 版本升级**（如 0.1.0 → 0.2.0）：可能新增 API，不破坏现有 API
+- **Major 版本升级**（如 0.x → 1.0.0）：可能移除已废弃 API，需要插件适配
+
+#### 兼容性策略
+
+- 宿主加载插件时会解析 `// @swallow-manifest` 注释中的 `version` 字段
+- SDK 的 stub 实现保证了 standalone 模式下的向后兼容（旧 API 调用不会崩溃）
+- 新增的 API（如 `registerCommand`、`openEditorTab`）在旧版宿主上会走 stub（no-op + warn）
+- 插件可以通过 `SDK_VERSION` 在运行时检查 SDK 版本
+
+#### Breaking Changes
+
+目前处于 `0.x` 阶段，API 可能调整。正式 1.0 发布后将遵循语义化版本（SemVer）：
+
+- 新增功能：minor 版本升级
+- Bug 修复：patch 版本升级
+- 破坏性变更：major 版本升级
+
+---
+
+## FAQ
+
+### 插件上传后不显示
+
+检查以下几点：
+1. `dist/index.js` 头部是否有 `// @swallow-manifest` 注释（vite.config 的 `inject-manifest-comment` 插件）
+2. `manifest.json` 的 `id` 是否唯一（不能与已有插件重复）
+3. `manifest.json` 的 `iconPosition` 是否正确设置
+4. 查看宿主控制台（`F12` → Console）是否有加载错误
+
+### storage 数据在卸载后还在
+
+这是设计行为。`store` 的数据持久化在 `<app_data>/plugins/<pluginId>/storage.json`，卸载插件不会删除数据。重新安装同一插件会恢复数据。如需彻底清除，用户需在设置中"删除插件数据"。
+
+### 如何在 dev 模式下测试后端调用
+
+standalone 模式下 `invokeBackend` 返回 `null`（无 Tauri runtime）。要测试后端调用，需要在宿主中安装插件。`plugin-template` 的 `preview.tsx` 提供了前端 UI 的独立预览，但不支持后端测试。
+
+### usePluginStorage 返回的值初始为 undefined
+
+`usePluginStorage` 是异步的——首次渲染返回 `initialValue`，`store.get` 完成后触发重渲染更新为存储值。如果需要 loading 状态，检查 `value === initialValue` 是否为初始状态。
+
+### 插件面板不刷新
+
+Zustand 的 selector 订阅需要返回稳定的引用。如果 selector 返回新对象/数组，每次 store 变化都会触发重渲染。使用 `useShallow` 包装：
+
+```typescript
+const { a, b } = useUIStore(useShallow(s => ({ a: s.a, b: s.b })))
+```
+
+### 如何支持多语言
+
+宿主使用 `react-i18next`，已通过 vite external 外部化。插件可以直接使用 `useTranslation` hook：
+
+```typescript
+import { useTranslation } from 'react-i18next'
+
+function MyPanel() {
+  const { t } = useTranslation()
+  return <div>{t('my-plugin.hello')}</div>
+}
+```
+
+翻译资源需要通过宿主的 i18n 系统注册，或使用插件自己的 i18next 实例。`locale:change` 事件可用于监听语言切换。
 
 ---
 

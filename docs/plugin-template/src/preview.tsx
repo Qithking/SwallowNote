@@ -9,15 +9,20 @@
  * imports `Preview`; the `vite build` library entry point is
  * `src/plugin/index.tsx` instead.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, CSSProperties } from 'react'
 import manifest from './plugin'
 import {
   type ContextMenuItem,
   type ContextMenuLocation,
+  type PluginCommand,
+  type PluginEvent,
+  type PluginEventBus,
+  type PluginEventPayloadMap,
   type PluginPanelProps,
   buildPluginContext,
   clearPluginMenuItems,
+  emitAppExit,
   emitAppReady,
   emitLocaleChanged,
   emitNoteChanged,
@@ -31,10 +36,14 @@ import {
   getPluginStorage,
   getSetting,
   getAllSettings,
+  listPluginCommands,
   onSettingsChange,
   pluginEventBus,
+  registerCommand,
   runLifecycleHook,
   setSetting,
+  unregisterCommand,
+  usePluginCommands,
 } from '@swallow-note/plugin-sdk'
 
 // ────────────────────────────── styles ────────────────────────────────────
@@ -102,6 +111,23 @@ const input: CSSProperties = {
 
 // ─────────────────────────── dev tools data ──────────────────────────────
 
+// pluginEventBus 内部挂载了 emit 方法（类型上未暴露），
+// 预览模式需要发射 editor:registered / editor:unregistered 事件，
+// 但 SDK 未提供公开的 emit 助手，这里通过类型转换访问内部 emit。
+type PluginBusWithEmit = PluginEventBus & {
+  emit: <E extends PluginEvent>(event: E, payload: PluginEventPayloadMap[E]) => void
+}
+
+/** 发射 editor:registered 事件（SDK 未提供公开助手） */
+function emitEditorRegistered(pluginId: string, extension: string): void {
+  ;(pluginEventBus as unknown as PluginBusWithEmit).emit('editor:registered', { pluginId, extension })
+}
+
+/** 发射 editor:unregistered 事件（SDK 未提供公开助手） */
+function emitEditorUnregistered(pluginId: string, extension: string): void {
+  ;(pluginEventBus as unknown as PluginBusWithEmit).emit('editor:unregistered', { pluginId, extension })
+}
+
 const EVENT_PRESETS: { label: string; fire: () => void }[] = [
   { label: 'note:open  /notes/welcome.md', fire: () => emitNoteOpened('n1', '/notes/welcome.md') },
   { label: 'note:save /notes/welcome.md', fire: () => emitNoteSaved('n1', '/notes/welcome.md') },
@@ -111,7 +137,167 @@ const EVENT_PRESETS: { label: string; fire: () => void }[] = [
   { label: 'locale:change → zh-CN', fire: () => emitLocaleChanged('zh-CN') },
   { label: 'settings:change fontSize=14', fire: () => emitSettingChanged('fontSize', 14) },
   { label: 'plugin-settings:change', fire: () => emitPluginSettingsChanged(manifest.id, { theme: 'dark' }) },
+  // app:exit 需要用户确认后再发射，避免误触发导致宿主准备退出
+  {
+    label: 'app:exit (confirm)',
+    fire: () => {
+      if (window.confirm('确认发射 app:exit 事件？')) emitAppExit()
+    },
+  },
 ]
+
+// ─────────────────────── 命令面板测试 ─────────────────────────────────────
+
+/** 命令面板测试区域：注册 / 注销 / 列出命令，并通过 usePluginCommands 实时展示 */
+function CommandPaletteSection() {
+  const [cmdId, setCmdId] = useState('')
+  const [cmdLabel, setCmdLabel] = useState('')
+  const [cmdIconName, setCmdIconName] = useState('')
+  const [listResult, setListResult] = useState<PluginCommand[] | null>(null)
+  // usePluginCommands 内部订阅 registry 变更，命令注册 / 注销后自动刷新
+  const commands = usePluginCommands()
+
+  const handleRegister = () => {
+    if (!cmdId || !cmdLabel) return
+    registerCommand('preview', {
+      id: cmdId,
+      label: cmdLabel,
+      iconName: cmdIconName || undefined,
+      onTrigger: () => console.log(`[preview] command "${cmdId}" triggered`),
+    })
+  }
+
+  const handleUnregister = () => {
+    if (!cmdId) return
+    unregisterCommand('preview', cmdId)
+  }
+
+  const handleList = () => {
+    setListResult(listPluginCommands())
+  }
+
+  return (
+    <div style={sectionStyle}>
+      <div style={sectionTitle}>Command palette</div>
+      <input style={input} value={cmdId} onChange={(e) => setCmdId(e.target.value)} placeholder="命令 id" />
+      <input style={input} value={cmdLabel} onChange={(e) => setCmdLabel(e.target.value)} placeholder="label" />
+      <input style={input} value={cmdIconName} onChange={(e) => setCmdIconName(e.target.value)} placeholder="iconName（可选）" />
+      <div>
+        <button style={btn} onClick={handleRegister}>注册命令</button>
+        <button style={btn} onClick={handleUnregister}>注销命令</button>
+        <button style={btn} onClick={handleList}>列出命令</button>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11, color: '#6e6e73' }}>
+        usePluginCommands() 实时命令（{commands.length}）:
+      </div>
+      {commands.length === 0 && (
+        <div style={{ fontSize: 11, color: '#6e6e73' }}>(无)</div>
+      )}
+      {commands.map((c) => (
+        <div key={c.id} style={{ fontSize: 11, fontFamily: 'monospace' }}>
+          {c.id} — {c.label}{c.iconName ? ` [${c.iconName}]` : ''}
+        </div>
+      ))}
+      {listResult && (
+        <>
+          <div style={{ marginTop: 8, fontSize: 11, color: '#6e6e73' }}>
+            listPluginCommands() 结果（{listResult.length}）:
+          </div>
+          {listResult.map((c) => (
+            <div key={c.id} style={{ fontSize: 11, fontFamily: 'monospace' }}>
+              {c.id} — {c.label}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────── Frontmatter 测试 ─────────────────────────────────
+
+/** Frontmatter 测试区域：读取 / 写入活动笔记的 frontmatter（预览模式走模拟数据） */
+function FrontmatterSection({ panelProps }: { panelProps: PluginPanelProps }) {
+  const [fmKey, setFmKey] = useState('')
+  const [fmValue, setFmValue] = useState('')
+  // undefined = 尚未读取；null = 已读取但无 frontmatter；对象 = 读取到的内容
+  const [fmDisplay, setFmDisplay] = useState<Record<string, unknown> | null | undefined>(undefined)
+
+  const handleRead = () => {
+    setFmDisplay(panelProps.getActiveNoteFrontmatter())
+  }
+
+  const handleWrite = () => {
+    if (!fmKey) return
+    panelProps.setActiveNoteFrontmatter({ [fmKey]: fmValue })
+  }
+
+  return (
+    <div style={sectionStyle}>
+      <div style={sectionTitle}>Frontmatter</div>
+      <button style={btn} onClick={handleRead}>读取 Frontmatter</button>
+      {fmDisplay !== undefined && (
+        <pre style={{ fontSize: 10, fontFamily: 'monospace', margin: '4px 0', color: '#6e6e73' }}>
+          {fmDisplay === null ? 'null' : JSON.stringify(fmDisplay, null, 2)}
+        </pre>
+      )}
+      <input style={input} value={fmKey} onChange={(e) => setFmKey(e.target.value)} placeholder="key" />
+      <input style={input} value={fmValue} onChange={(e) => setFmValue(e.target.value)} placeholder="value" />
+      <button style={btn} onClick={handleWrite}>写入 Frontmatter</button>
+    </div>
+  )
+}
+
+// ─────────────────────── 设置 API 测试 ────────────────────────────────────
+
+/** 设置 API 测试区域：读取 / 写入单个设置，读取所有设置 */
+function SettingsApiSection({ panelProps }: { panelProps: PluginPanelProps }) {
+  const [settingKey, setSettingKey] = useState('')
+  const [settingValue, setSettingValue] = useState('')
+  const [readResult, setReadResult] = useState<unknown>(null)
+  const [readDone, setReadDone] = useState(false)
+  const [allSettings, setAllSettings] = useState<Record<string, unknown> | null>(null)
+
+  const handleRead = async () => {
+    if (!settingKey) return
+    const v = await panelProps.getSetting(settingKey)
+    setReadResult(v)
+    setReadDone(true)
+  }
+
+  const handleWrite = async () => {
+    if (!settingKey) return
+    await panelProps.setSetting(settingKey, settingValue)
+  }
+
+  const handleReadAll = async () => {
+    const all = await panelProps.getAllSettings()
+    setAllSettings(all)
+  }
+
+  return (
+    <div style={sectionStyle}>
+      <div style={sectionTitle}>Settings API</div>
+      <input style={input} value={settingKey} onChange={(e) => setSettingKey(e.target.value)} placeholder="key" />
+      <input style={input} value={settingValue} onChange={(e) => setSettingValue(e.target.value)} placeholder="value" />
+      <div>
+        <button style={btn} onClick={handleRead}>读取设置</button>
+        <button style={btn} onClick={handleWrite}>写入设置</button>
+        <button style={btn} onClick={handleReadAll}>读取所有设置</button>
+      </div>
+      {readDone && (
+        <div style={{ fontSize: 11, fontFamily: 'monospace', marginTop: 4 }}>
+          <strong>读取结果:</strong> {JSON.stringify(readResult)}
+        </div>
+      )}
+      {allSettings && (
+        <pre style={{ fontSize: 10, fontFamily: 'monospace', margin: '4px 0' }}>
+          {JSON.stringify(allSettings, null, 2)}
+        </pre>
+      )}
+    </div>
+  )
+}
 
 // ──────────────────────────── component ──────────────────────────────────
 
@@ -126,6 +312,17 @@ export function Preview() {
     y: number
     items: ContextMenuItem[]
   } | null>(null)
+
+  // 预览模式无真实笔记，用 ref 维护一个模拟 frontmatter 对象，
+  // 供 panelProps.getActiveNoteFrontmatter / setActiveNoteFrontmatter 读写。
+  // 使用 ref 避免 panelProps memo 因 frontmatter 变更而重建。
+  const mockFrontmatterRef = useRef<Record<string, unknown>>({})
+
+  // 参数化事件的输入状态（plugin-settings:change / editor:registered / editor:unregistered）
+  const [psPluginId, setPsPluginId] = useState(manifest.id)
+  const [psValues, setPsValues] = useState('{"theme":"dark"}')
+  const [editorPluginId, setEditorPluginId] = useState(manifest.id)
+  const [editorExtension, setEditorExtension] = useState('.md')
 
   // Lifecycle: onMount, onUnmount, onActivate, onDeactivate
   // Hooks are flat top-level fields on PluginManifest (not under
@@ -188,9 +385,11 @@ export function Preview() {
     setSetting: (key: string, value: unknown) => setSetting(manifest.id, key, value),
     getAllSettings: () => getAllSettings(manifest.id),
     onSettingsChange: (handler) => onSettingsChange(manifest.id, handler),
-    // 预览模式无活动笔记，frontmatter 返回 null / no-op
-    getActiveNoteFrontmatter: () => null,
-    setActiveNoteFrontmatter: () => {},
+    // 预览模式用 mockFrontmatterRef 模拟活动笔记的 frontmatter
+    getActiveNoteFrontmatter: () => mockFrontmatterRef.current,
+    setActiveNoteFrontmatter: (data) => {
+      mockFrontmatterRef.current = { ...mockFrontmatterRef.current, ...data }
+    },
     onNoteFrontmatterChanged: () => () => {},
   }), [active, notePath])
 
@@ -302,7 +501,70 @@ export function Preview() {
           >
             emit note:change
           </button>
+
+          {/* 参数化事件：需要用户输入参数的事件发射器 */}
+          <div style={{ marginTop: 10, fontSize: 11, color: '#6e6e73' }}>
+            参数化事件
+          </div>
+          <input
+            style={input}
+            value={psPluginId}
+            onChange={(e) => setPsPluginId(e.target.value)}
+            placeholder="pluginId"
+          />
+          <input
+            style={input}
+            value={psValues}
+            onChange={(e) => setPsValues(e.target.value)}
+            placeholder='values JSON，如 {"theme":"dark"}'
+          />
+          <button
+            style={btn}
+            onClick={() => {
+              try {
+                const values = JSON.parse(psValues) as Record<string, unknown>
+                emitPluginSettingsChanged(psPluginId, values)
+              } catch (err) {
+                console.error('[preview] values 不是合法 JSON', err)
+              }
+            }}
+          >
+            plugin-settings:change
+          </button>
+          <input
+            style={input}
+            value={editorPluginId}
+            onChange={(e) => setEditorPluginId(e.target.value)}
+            placeholder="pluginId"
+          />
+          <input
+            style={input}
+            value={editorExtension}
+            onChange={(e) => setEditorExtension(e.target.value)}
+            placeholder="extension，如 .md"
+          />
+          <button
+            style={btn}
+            onClick={() => emitEditorRegistered(editorPluginId, editorExtension)}
+          >
+            editor:registered
+          </button>
+          <button
+            style={btn}
+            onClick={() => emitEditorUnregistered(editorPluginId, editorExtension)}
+          >
+            editor:unregistered
+          </button>
         </div>
+
+        {/* 命令面板测试 */}
+        <CommandPaletteSection />
+
+        {/* Frontmatter 测试 */}
+        <FrontmatterSection panelProps={panelProps} />
+
+        {/* 设置 API 测试 */}
+        <SettingsApiSection panelProps={panelProps} />
 
         <div style={sectionStyle}>
           <div style={sectionTitle}>Storage ({manifest.id})</div>

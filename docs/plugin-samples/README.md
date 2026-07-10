@@ -11,6 +11,12 @@
 | [event-listener](./event-listener) | 事件订阅 | ⭐⭐ |
 | [settings-dialog](./settings-dialog) | 设置面板 | ⭐⭐ |
 | [context-menu-item](./context-menu-item) | 右键菜单贡献 | ⭐⭐⭐ |
+| [toolbar-button](./toolbar-button) | 编辑器工具栏按钮 | ⭐⭐ |
+| [custom-editor](./custom-editor) | 自定义文件编辑器 | ⭐⭐⭐ |
+| [command-palette](./command-palette) | 命令面板贡献 | ⭐⭐⭐ |
+| [editor-tab](./editor-tab) | 编辑器 Tab API | ⭐⭐⭐ |
+| [frontmatter-tagger](./frontmatter-tagger) | Frontmatter 读写 | ⭐⭐ |
+| [rust-backend](./rust-backend) | Rust 后端通信（JSON-RPC） | ⭐⭐⭐⭐ |
 | [full-stack](./full-stack) | 5 项能力综合 | ⭐⭐⭐⭐ |
 
 ## 使用方式

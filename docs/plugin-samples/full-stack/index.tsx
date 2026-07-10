@@ -20,7 +20,7 @@
  *  - Storage keys are namespaced: 'config' for settings, 'history' for
  *    the list, 'installedAt' for read-only metadata.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type {
   PluginContext,
   PluginManifest,
@@ -137,8 +137,9 @@ function RecentSettings(panel: PluginPanelProps) {
 function RecentPanel(panel: PluginPanelProps) {
   const [config] = usePluginStorage<PluginConfig>(panel, 'config', defaultConfig)
   const [history, setHistory] = usePluginStorage<RecentNote[]>(panel, 'history', [])
-  // Bump a key to force re-read from disk after context-menu actions
-  const [refreshTick, setRefreshTick] = usePluginStorage<number>(panel, 'refreshTick', 0)
+  // Bump a key to force re-render after context-menu actions.
+  // 使用 useState 而非 usePluginStorage，避免把仅用于触发重渲染的临时计数器写盘。
+  const [refreshTick, setRefreshTick] = useState(0)
 
   // Hold the latest `history` in a ref so the internal-bus
   // subscription (registered once) can read it without forcing the

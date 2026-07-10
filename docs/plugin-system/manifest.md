@@ -59,6 +59,35 @@ interface PluginDependency {
 }
 ```
 
+### 依赖声明的作用
+
+`dependencies` 字段用于声明插件间的依赖关系。当前实现中（解析器见 [src/lib/plugin-dependencies.ts](../../src/lib/plugin-dependencies.ts) 的 `resolveDependencies`）：
+
+- **安装时检查**：宿主在安装插件时会检查 `dependencies` 中声明的依赖是否已安装。如果依赖缺失或已安装版本不满足声明的 semver 范围，安装会被拒绝并提示用户先安装/升级依赖。
+- **加载顺序**：`resolveDependencies` 返回拓扑安装序（`installOrder`），宿主据此确定加载顺序，确保被依赖的插件先加载。同时会做循环依赖检测，发现环时拒绝安装。
+- **不支持直接 API 调用**：当前不支持插件间直接调用对方的 API。插件间通信只能通过事件总线（`pluginEventBus`）间接进行。
+
+示例：插件 A 依赖插件 B 的事件
+
+```typescript
+import { pluginEventBus } from '@/lib/plugin-host'
+// 独立开发：from '@swallow-note/plugin-sdk'
+
+const manifest: PluginManifest = {
+  id: 'plugin-a',
+  name: 'Plugin A',
+  dependencies: [{ id: 'plugin-b', version: '^1.0.0' }],
+  onLoad(ctx) {
+    // 插件 B 会 emit 事件，插件 A 订阅
+    pluginEventBus.on('plugin-settings:change', (payload) => {
+      if (payload.pluginId === 'plugin-b') {
+        console.log('依赖插件 B 的设置变更:', payload.values)
+      }
+    })
+  },
+}
+```
+
 ## 权限字段（`permissions`）
 
 插件在 `manifest.permissions` 中**声明**所需权限，宿主在安装/首次使用时弹窗授权，运行时由沙箱强制执行。

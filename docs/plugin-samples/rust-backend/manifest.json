@@ -1,0 +1,14 @@
+{
+  "id": "com.example.rust-backend",
+  "name": "Rust Backend Demo",
+  "description": "Demonstrates a plugin with a Rust backend using stdin/stdout JSON-RPC",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "publishedAt": "2026-07-10",
+  "iconPosition": "sidebar",
+  "contentPosition": "fullPanel",
+  "order": 100,
+  "enabled": true,
+  "hasBackend": true,
+  "entry": "index.tsx"
+}

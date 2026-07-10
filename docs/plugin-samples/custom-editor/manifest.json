@@ -1,0 +1,14 @@
+{
+  "id": "com.example.custom-editor",
+  "name": "Custom Editor Demo",
+  "description": "Demonstrates registering a custom file editor for .smm files",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "publishedAt": "2026-07-10",
+  "iconPosition": "sidebar",
+  "contentPosition": "fullPanel",
+  "order": 100,
+  "enabled": true,
+  "hasBackend": false,
+  "entry": "index.tsx"
+}

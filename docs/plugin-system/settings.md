@@ -213,6 +213,136 @@ function FrontmatterPanel(panel: PluginPanelProps) {
 
 > `setActiveNoteFrontmatter` 是**合并写**：传入 `{ tags: [...] }` 只更新 `tags` 字段，不触碰 frontmatter 中其他键。无活动笔记时调用为空操作（不抛错）。
 
+## Settings Schema
+
+插件可以通过 `settings.json` 文件声明设置的 schema，定义每个设置项的类型、默认值、可见性约束等。schema 在安装/更新时由 Rust 端读取并应用到 SQLite，运行时由 `getSetting` 等 API 消费。
+
+### 文件位置
+
+`settings.json` 放在插件根目录（与 `manifest.json` 同级），随插件 zip 一起分发：
+
+```
+my-plugin/
+├── manifest.json
+├── settings.json    ← 设置 schema（可选 sidecar）
+├── index.tsx
+└── dist/
+    └── index.js
+```
+
+> 安装时 Rust 端会检测 active version dir 下是否存在 `settings.json`（见 [`plugin.rs`](../../src-tauri/src/commands/plugin.rs) 的 `has_settings_schema` 字段）。存在则由 `apply_settings_schema_on_disk` 读取并写入 SQLite。
+
+### Schema 格式
+
+`settings.json` 是一个对象，包含 `version`、可选的 `title` / `description`，以及 `fields` 数组。每个 field 描述一个设置项：
+
+```json
+{
+  "version": 2,
+  "title": "图床设置",
+  "description": "配置默认图床、上传格式等选项。",
+  "fields": [
+    {
+      "key": "defaultProvider",
+      "label": "默认图床",
+      "type": "select",
+      "options": [
+        { "value": "smms", "label": "SM.MS" },
+        { "value": "imgur", "label": "Imgur" }
+      ],
+      "default": "smms",
+      "required": true,
+      "description": "选择默认图床。"
+    },
+    {
+      "key": "maxFileSizeMB",
+      "label": "最大文件大小 (MB)",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 100,
+      "required": true
+    },
+    {
+      "key": "enableHistory",
+      "label": "启用上传历史",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "smmsToken",
+      "label": "SM.MS Token",
+      "type": "password",
+      "secret": true,
+      "visibleWhen": { "key": "defaultProvider", "equals": "smms" }
+    }
+  ]
+}
+```
+
+### Schema 顶层字段
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| `version` | `number` | 是 | schema 版本号。变化时触发 Rust 端 `migrate_values` 按新 schema diff 旧值并写回 |
+| `title` | `string` | 否 | 设置面板标题 |
+| `description` | `string` | 否 | 设置面板描述 |
+| `fields` | `PluginSettingsField[]` | 是 | 设置项定义数组 |
+
+### Field 字段说明
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|:---:|------|
+| `key` | `string` | 是 | 设置项唯一键名，`getSetting(key)` 据此读取 |
+| `type` | `PluginSettingsFieldType` | 是 | 设置项类型（见下表） |
+| `label` | `string` | 是 | 设置面板中显示的标签 |
+| `default` | `any` | 否 | 默认值。未设置时 `getSetting` 回退到此值；缺失则为 `null` |
+| `required` | `boolean` | 否 | 是否必填（默认 false） |
+| `secret` | `boolean` | 否 | 是否为敏感字段（如 Token），前端做脱敏展示 |
+| `placeholder` | `string` | 否 | 输入框占位文本 |
+| `options` | `{ value, label }[]` | 否 | `select` 类型的可选项，`value` 为存储值、`label` 为显示文本 |
+| `visibleWhen` | `{ key, equals }` | 否 | 条件可见性：当 `values[key] === equals` 时才显示该字段 |
+| `min` / `max` | `number` | 否 | `number` 类型的最小/最大值约束 |
+
+### 支持的字段类型（`type`）
+
+| 类型 | 说明 |
+|------|------|
+| `string` | 单行文本 |
+| `string-multiline` | 多行文本 |
+| `number` | 数字（可配 `min` / `max`） |
+| `boolean` | 开关 |
+| `select` | 下拉选择（需配 `options`） |
+| `color` | 颜色选择器 |
+| `directory` | 目录路径选择 |
+| `password` | 密码输入（建议同时设 `secret: true`） |
+
+### 与 getSetting 的关系
+
+`readSetting`（[src/lib/plugin-settings/index.ts](../../src/lib/plugin-settings/index.ts)）读取设置时的回退顺序：
+
+1. 先从 `values`（SQLite 持久化的值，host 模式）或内存缓存（standalone 模式）读取
+2. 如果未找到，回退到 schema 中该 field 的 `default` 值
+3. 如果 schema 中也没有定义 `default`，返回 `null`
+
+因此，即使用户从未设置过某个值，只要 schema 中有 `default`，`getSetting` 就会返回默认值而非 `null`。安装时 Rust 端的 `defaults_from_schema` 会用每个 field 的 `default`（或 `Null`）初始化 SQLite 行。
+
+### schema 版本与迁移
+
+`version` 字段用于 schema 演进。当插件更新且 `settings.json` 的 `version` 变化时，Rust 端 `apply_settings_schema_on_disk` 会：
+
+- **首次安装**：用 schema defaults 填充 SQLite 行
+- **版本相同**：保留用户已有值不动
+- **版本变化**：按新 schema diff 旧值——保留用户值（类型漂移会记录 `~key`），新字段填 default，丢弃新 schema 未声明的 key（降级为破坏性）
+
+### 与 manifest.settings 组件的关系
+
+`manifest.settings` 指定的是**设置面板 UI 组件**，而 `settings.json` 定义的是**设置数据 schema**。两者独立：
+
+- **有 schema 无 UI 组件**：设置通过代码（`setSetting`）管理，宿主不会显示齿轮按钮，但 `getSetting` 仍能读取 schema 默认值
+- **有 UI 组件无 schema**：UI 组件自行管理设置读写（如直接用 `usePluginStorage`），无默认值回退、无类型约束
+- **推荐两者配合使用**：schema 定义数据与默认值，UI 组件提供用户编辑界面（参考 [picgo 插件](../../plugins/picgo/settings.json)）
+
 ## 源码引用
 
 - 类型定义：[src/types/plugin.ts](../../src/types/plugin.ts) `PluginManifest.settings` / `PluginDefinition.settings`

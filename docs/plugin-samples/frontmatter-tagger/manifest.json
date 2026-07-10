@@ -1,0 +1,14 @@
+{
+  "id": "com.example.frontmatter-tagger",
+  "name": "Frontmatter Tagger",
+  "description": "Demonstrates reading and writing note frontmatter",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "publishedAt": "2026-07-10",
+  "iconPosition": "sidebar",
+  "contentPosition": "fullPanel",
+  "order": 100,
+  "enabled": true,
+  "hasBackend": false,
+  "entry": "index.tsx"
+}

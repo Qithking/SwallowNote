@@ -156,6 +156,32 @@ async function runLifecycleHook(hook, ctx) {
 
 → **钩子抛异常不会阻塞宿主**，但建议在钩子内部用 `try / catch` 处理可恢复错误。
 
+## 超时机制
+
+宿主为每个生命周期钩子设置了 **5 秒超时**（`timeoutMs`，可通过 `RunLifecycleHookOptions` 配置）：
+
+- 钩子在 5 秒内完成：正常继续
+- 钩子超时：宿主记录 `PluginLifecycleTimeoutError`，标记插件为"不健康"状态，但不阻塞其他插件加载
+- 超时后钩子的 Promise 仍会继续执行（不会被 abort），但其结果被忽略
+
+> **最佳实践**：`onLoad` / `onUnload` 中的异步操作（如 `store.set`、`invokeBackend`）如果可能超过 5 秒，考虑改为"启动后台任务 + 立即返回"模式。
+
+## 钩子内能做什么、不能做什么
+
+| 操作 | onLoad | onEnable | onMount | onActivate | onUnload | onDisable | onUnmount | onDeactivate |
+|------|--------|----------|---------|------------|----------|-----------|-----------|-------------|
+| registerContextMenu | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| registerCommand | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| registerEditor | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| store.get/set | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| events.on | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| getSetting/setSetting | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ctx.invokeBackend | ⚠️ host 可用 | ⚠️ host 可用 | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
+| panel.invokeBackend | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| React state (useState) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+> ⚠️ = host 模式可用但 standalone 模式返回 null；❌ = 不可用或无意义
+
 ## React 集成
 
 在 panel 组件内部，**不要**在生命周期钩子里读 `useState` —— 钩子在 React 树之外运行。应改用 React hook：
