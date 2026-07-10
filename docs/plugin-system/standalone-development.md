@@ -53,7 +53,7 @@ npm install @swallow-note/plugin-sdk react react-dom
 在 `src/MyPlugin.tsx`：
 
 ```typescript
-import { type PluginDefinition, usePluginStorage } from '@swallow-note/plugin-sdk'
+import { type PluginManifest, usePluginStorage } from '@swallow-note/plugin-sdk'
 
 // ... 实现你的 manifest
 export default manifest

@@ -82,8 +82,6 @@ const manifest: PluginManifest = {
   enabled: true,
   icon: Icon,
   panel: Panel,
-  pluginPath: '',
-  hasBackend: false,
 
   // ① 静态声明：让 host 在安装时知道这个插件"想要"处理哪些扩展名
   editorFileExtensions: ['.smm'],

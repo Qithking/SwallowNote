@@ -5,7 +5,7 @@
 ## 声明 settings
 
 ```typescript
-import type { PluginDefinition, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
 import { usePluginStorage } from '@swallow-note/plugin-sdk'
 
 function MySettings(panel: PluginPanelProps) {
@@ -26,7 +26,7 @@ function MySettings(panel: PluginPanelProps) {
   )
 }
 
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   id: 'com.example.api',
   name: 'API Plugin',
   // ...

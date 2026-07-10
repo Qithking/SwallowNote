@@ -93,7 +93,7 @@ Rust 端**只读这一份 JSON** 来决定插件 id / 名称 / 是否带后端�
 ### 3) `index.tsx`（JS 端）
 
 ```tsx
-import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
+import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
 
 // ─── 图标（侧边栏） ────────────────────────────────────────────
 function HelloIcon({ size = 18 }: { size?: number }) {
@@ -117,7 +117,7 @@ function HelloPanel({ pluginId }: PluginPanelProps) {
 }
 
 // ─── Manifest ─────────────────────────────────────────────────
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   id: 'com.example.hello-world',
   name: 'Hello World',
   description: 'A minimal example plugin',
@@ -130,8 +130,6 @@ const manifest: PluginDefinition = {
   enabled: true,
   icon: HelloIcon,
   panel: HelloPanel,
-  pluginPath: '',  // loader 自动填充
-  hasBackend: false,
   // 没有用 storage / events / context-menu / backend 时
   // permissions 不需要声明
   permissions: [],
@@ -230,7 +228,7 @@ interface PluginPanelProps {
 ### 完整 manifest 示例
 
 ```typescript
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   // 身份
   id: 'com.example.my-plugin',
   name: 'My Plugin',
@@ -251,15 +249,10 @@ const manifest: PluginDefinition = {
 
   // 可选
   settings: MySettingsDialog,
-  hooks: {
-    onLoad: async (ctx) => { /* 注册菜单、订阅事件 */ },
-    onUnload: (ctx) => { /* 清理 */ },
-  },
+  // 生命周期钩子为扁平字段（非 hooks 对象）
+  onLoad: async (ctx) => { /* 注册菜单、订阅事件 */ },
+  onUnload: (ctx) => { /* 清理 */ },
   permissions: ['storage', 'events'],
-
-  // 运行时（loader 填充）
-  pluginPath: '',
-  hasBackend: false,
 }
 
 export default manifest
@@ -569,7 +562,7 @@ function onUnload(ctx: { pluginId: string }) {
 #### Manifest 声明
 
 ```typescript
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   // ...
   editorFileExtensions: ['.smm'],   // 带点小写，同一扩展名仅允许一个插件注册
   editorComponent: MyEditor,        // 接收 content / onChange
@@ -705,7 +698,7 @@ function onOpenSecretNote(ctx: { pluginId: string }, noteId: string, content: st
 #### 声明
 
 ```typescript
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   // ...
   panel: MyMainPanel,
   settings: MySettingsDialog,  // ← 声明后齿轮按钮才会出现
@@ -1024,7 +1017,7 @@ async function runLifecycleHook(hook, ctx, hookName) {
 #### 完整示例
 
 ```typescript
-import type { PluginContext, PluginDefinition, PluginPanelProps } from '@/types/plugin'
+import type { PluginContext, PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
 import { getPluginStorage, pluginEventBus } from '@/lib/plugin-host'
 import { registerContextMenu, unregisterContextMenu } from '@/lib/plugin-menu'
 import { usePluginStorage, usePluginEvent } from '@/lib/plugin-hooks'
@@ -1065,10 +1058,11 @@ function MyPanel(panel: PluginPanelProps) {
   return <div>Count: {count}</div>
 }
 
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   // ... 基础字段 ...
   panel: MyPanel,
-  hooks: { onLoad, onUnload },
+  onLoad,
+  onUnload,
 }
 ```
 
@@ -1124,7 +1118,7 @@ localStorage['plugin_permissions_<pluginId>'] = [
 ### 完整示例
 
 ```typescript
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   // ...
   permissions: ['storage', 'events', 'context-menu'],
 }
@@ -1270,7 +1264,7 @@ SDK 的核心：**一份代码、两种运行模式、零分支**。
 ```typescript
 import {
   // Types
-  type PluginDefinition,
+  type PluginManifest,
   type PluginPanelProps,
   type PluginContext,
   type PluginEvent,
@@ -1324,20 +1318,18 @@ export { setHost } from '@swallow-note/plugin-sdk'
 
 ```typescript
 // hello.tsx
-import type { PluginDefinition } from '@/types/plugin'
+import type { PluginManifest } from '@swallow-note/plugin-sdk'
 
 function Icon() { return <span>📝</span> }
 function Panel() { return <div>Hello</div> }
 
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   id: 'com.example.demo',
   name: 'Demo',
   iconPosition: 'sidebar',
   contentPosition: 'fullPanel',
   icon: Icon,
   panel: Panel,
-  pluginPath: '',
-  hasBackend: false,
 }
 
 export default manifest
@@ -1353,7 +1345,7 @@ export default manifest
 
 | 关注点 | 源码位置 |
 | --- | --- |
-| 类型定义（`PluginDefinition` / `PluginEvent` / `PluginStorage` / `PluginCommand`） | [src/types/plugin.ts](../../src/types/plugin.ts) |
+| 类型定义（`PluginManifest` / `PluginDefinition` / `PluginEvent` / `PluginStorage` / `PluginCommand`） | [src/types/plugin.ts](../../src/types/plugin.ts) |
 | 事件总线 + 存储 + 生命周期调度 | [src/lib/plugin-host.ts](../../src/lib/plugin-host.ts) |
 | 宿主接管（`setHost` override 工厂） | [src/lib/plugin-host-takeover.ts](../../src/lib/plugin-host-takeover.ts) |
 | 菜单注册表 | [src/lib/plugin-menu.ts](../../src/lib/plugin-menu.ts) |
@@ -1647,10 +1639,10 @@ function MyPanel() {
 ```tsx
 import { useState, useEffect, type ReactNode } from 'react'
 import type {
-  PluginDefinition,
+  PluginManifest,
   PluginContext,
   PluginPanelProps,
-} from '@/types/plugin'
+} from '@swallow-note/plugin-sdk'
 import { getPluginStorage, pluginEventBus } from '@/lib/plugin-host'
 import {
   registerContextMenu,
@@ -1756,7 +1748,7 @@ function onDeactivate(ctx: PluginContext): void {
 }
 
 // ─── Manifest ────────────────────────────────────────────────
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   id: 'com.example.my-plugin',
   name: 'My Plugin',
   description: 'Does one thing well',
@@ -1770,20 +1762,17 @@ const manifest: PluginDefinition = {
   icon: MyIcon,
   panel: MyPanel,
   settings: MySettings,
-  pluginPath: '',
-  hasBackend: false,
   // 仅声明实际用到的权限：命令面板复用 events；自定义编辑器需 editor
   permissions: ['storage', 'events', 'context-menu'],
-  hooks: {
-    onLoad,
-    onUnload,
-    onEnable,
-    onDisable,
-    onMount,
-    onUnmount,
-    onActivate,
-    onDeactivate,
-  },
+  // 生命周期钩子为扁平字段（非 hooks 对象）
+  onLoad,
+  onUnload,
+  onEnable,
+  onDisable,
+  onMount,
+  onUnmount,
+  onActivate,
+  onDeactivate,
 }
 
 export default manifest

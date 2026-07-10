@@ -28,12 +28,23 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; img-src 'self' asset: data: blob: https:; connect-src 'self' http://127.0.0.1:* http://localhost:* https: ws: wss:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' blob:",
       "assetProtocol": {
         "enable": true,
         "scope": {
           "allow": ["/**/*"],
-          "deny": []
+          "deny": [
+            "$HOME/.ssh/**",
+            "$HOME/.gnupg/**",
+            "$HOME/.aws/**",
+            "$HOME/.docker/**",
+            "$HOME/.kube/**",
+            "$HOME/.netrc",
+            "$HOME/.npmrc",
+            "$HOME/Library/Keychains/**",
+            "$HOME/Library/Cookies/**",
+            "/etc/**"
+          ]
         }
       }
     }

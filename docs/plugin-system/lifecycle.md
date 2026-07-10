@@ -80,7 +80,7 @@ const result = await ctx.invokeBackend('count_words', { text: 'hi' })
 ## 完整示例
 
 ```typescript
-import type { PluginDefinition, PluginContext, PluginPanelProps } from '@/types/plugin'
+import type { PluginManifest, PluginContext, PluginPanelProps } from '@swallow-note/plugin-sdk'
 import { getPluginStorage, pluginEventBus } from '@/lib/plugin-host'
 import { registerContextMenu } from '@/lib/plugin-menu'
 
@@ -128,11 +128,14 @@ function onUnload(): void {
   // 右键菜单 / 存储 cache 会被 host 自动清理（但显式清理是好习惯）
 }
 
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   id: 'com.example.lifecycle',
   name: 'Lifecycle Demo',
   // ...
-  hooks: { onLoad, onMount, onUnmount, onUnload },
+  onLoad,
+  onMount,
+  onUnmount,
+  onUnload,
 }
 
 export default manifest

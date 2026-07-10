@@ -124,9 +124,9 @@ const manifest: PluginManifest = {
 ## 完整 manifest 示例
 
 ```typescript
-import type { PluginDefinition } from '@/types/plugin'
+import type { PluginManifest } from '@swallow-note/plugin-sdk'
 
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   // 身份
   id: 'com.example.my-plugin',
   name: 'My Plugin',
@@ -156,14 +156,9 @@ const manifest: PluginDefinition = {
   dependencies: [{ id: 'com.example.core', version: '^1.0.0' }],
   autoUpdate: true,
 
-  hooks: {
-    onLoad: async (ctx) => { /* ... */ },
-    onUnload: (ctx) => { /* ... */ },
-  },
-
-  // 运行时（loader 填充）
-  pluginPath: '',
-  hasBackend: false,
+  // 生命周期钩子为扁平字段（非 hooks 对象）
+  onLoad: async (ctx) => { /* ... */ },
+  onUnload: (ctx) => { /* ... */ },
 }
 
 export default manifest
