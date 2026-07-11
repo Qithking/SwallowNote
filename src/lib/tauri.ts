@@ -36,6 +36,12 @@ export interface GitStatus {
   untracked: string[]
 }
 
+/** G-02 修复：git_commit_and_push 返回结构，让前端区分"无改动"/"已提交"/"已推送" */
+export interface CommitPushResult {
+  committed: boolean
+  pushed: boolean
+}
+
 interface CreateFileRequest {
   path: string
   is_directory: boolean
@@ -416,8 +422,9 @@ export async function gitStatus(path: string): Promise<GitStatus> {
   return await invoke('git_status', { path })
 }
 
-export async function gitCommit(path: string, message: string): Promise<void> {
-  await invoke('git_commit', { path, message })
+// G-02 修复：返回 boolean 表示是否有实际提交（true=已提交，false=无改动）
+export async function gitCommit(path: string, message: string): Promise<boolean> {
+  return await invoke('git_commit', { path, message })
 }
 
 export async function gitPush(path: string): Promise<void> {
@@ -428,8 +435,9 @@ export async function gitPushWithCredentials(path: string, username: string, pas
   await invoke('git_push_with_credentials', { path, username, password })
 }
 
-export async function gitCommitAndPush(path: string, message: string): Promise<void> {
-  await invoke('git_commit_and_push', { path, message })
+// G-02 修复：返回 CommitPushResult 让前端区分"无改动"/"已提交"/"已推送"
+export async function gitCommitAndPush(path: string, message: string): Promise<CommitPushResult> {
+  return await invoke('git_commit_and_push', { path, message })
 }
 
 export async function gitPull(path: string): Promise<void> {

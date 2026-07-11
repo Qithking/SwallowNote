@@ -447,13 +447,25 @@ function App() {
             const { gitCommitAndPush, gitCredentialGet, gitPushWithCredentials } = await import('@/lib/tauri')
             for (const repo of reposWithChanges) {
               try {
-                await gitCommitAndPush(repo.path, 'Auto sync')
-                pushSucceeded++
+                // G-02 修复：后端返回 CommitPushResult，auto sync 只统计有实际提交或推送的
+                const result = await gitCommitAndPush(repo.path, 'Auto sync')
+                if (result.committed || result.pushed) {
+                  pushSucceeded++
+                }
               } catch (e) {
                 const errorMessage = String(e).trim()
                 // Track conflict repos from push phase
                 if (errorMessage.startsWith('REBASE_CONFLICT:') || errorMessage.includes('rebase/merge is in progress')) {
                   pushConflictPaths.push(repo.path)
+                  continue
+                }
+                // G-04 修复：rebase --continue 或 merge commit 失败，按冲突处理
+                if (errorMessage.startsWith('REBASE_CONTINUE_FAILED:') || errorMessage.startsWith('MERGE_COMMIT_FAILED:')) {
+                  pushConflictPaths.push(repo.path)
+                  continue
+                }
+                // G-06 修复：detached HEAD 跳过，不重试
+                if (errorMessage.startsWith('DETACHED_HEAD:')) {
                   continue
                 }
                 // Try saved credentials on auth error
@@ -473,11 +485,9 @@ function App() {
                     // Failed to get credentials
                   }
                 }
-                // Ignore "nothing to commit" errors (already committed by auto_commit)
-                if (!errorMessage.includes('nothing to commit') &&
-                    !errorMessage.includes('working tree clean') &&
-                    !errorMessage.includes('no changes added to commit') &&
-                    !errorMessage.startsWith('AUTH_REQUIRED:')) {
+                // G-02 修复：后端不再返回 "nothing to commit" 错误，而是返回 committed=false。
+                // 此处只需排除 AUTH_REQUIRED（已在上面处理），其他错误计入 pushFailed。
+                if (!errorMessage.startsWith('AUTH_REQUIRED:')) {
                   pushFailed++
                   pushErrorPaths.push(repo.path)
                   console.error('Auto sync push failed:', repo.path, errorMessage)

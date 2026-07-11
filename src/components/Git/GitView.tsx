@@ -247,12 +247,19 @@ function CommitSection({
 
     for (const repo of finalRepos) {
       try {
+        // G-02 修复：后端返回 CommitPushResult，让前端区分"无改动"/"已提交"/"已推送"。
+        // 无改动且未推送时仍然计入 success（静默跳过，不显示"提交成功"误导）。
         await gitCommitAndPush(repo.path, commitMessage)
         successCount++
       } catch (e) {
         const errorMessage = String(e).trim()
         console.error('Failed to commit and push:', repo.path, errorMessage)
-        if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+        // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
+        if (errorMessage.startsWith('DETACHED_HEAD:')) {
+          failCount++
+          errorDetails.push(`${repo.name}: ${t('git.detachedHead', { defaultValue: '仓库处于 detached HEAD 状态，请先切换到分支再提交' })}`)
+          errorPaths.push(repo.path)
+        } else if (errorMessage.startsWith('AUTH_REQUIRED:')) {
           // Try to use saved credentials from keyring first
           let pushedWithSavedCred = false
           try {
@@ -278,11 +285,6 @@ function CommitSection({
               repoName: repo.name,
             })
           }
-        } else if (errorMessage.includes('nothing to commit') ||
-            errorMessage.includes('working tree clean') ||
-            errorMessage.includes('no changes added to commit') ||
-            (errorMessage.includes('modified content') && errorMessage.includes('submodule'))) {
-          successCount++
         } else if (errorMessage.startsWith('SUBMODULE_UNCOMMITTED:')) {
           successCount++
           errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
@@ -296,6 +298,11 @@ function CommitSection({
           errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
           conflictPaths.push(repo.path)
           // Do NOT auto-open conflict tab — user must click conflict icon or repo to open
+        } else if (errorMessage.startsWith('REBASE_CONTINUE_FAILED:') || errorMessage.startsWith('MERGE_COMMIT_FAILED:')) {
+          // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
+          failCount++
+          errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { defaultValue: '冲突解决失败，请手动处理', error: errorMessage })}`)
+          conflictPaths.push(repo.path)
         } else {
           failCount++
           errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
