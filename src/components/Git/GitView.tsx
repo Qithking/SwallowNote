@@ -13,11 +13,12 @@ import {
   ArrowUpFromLine,
   ArrowDownToLine,
   Download,
+  Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, mapRepoInfosToRepositories, PullResult } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitForcePushWithCredentials, gitCredentialSave, gitCredentialGet, gitForcePush, gitForcePull } from '@/lib/tauri'
+import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitForcePush, gitForcePull } from '@/lib/tauri'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +40,16 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/components/ui/alert-dialog'
 
 // Credential input dialog for git push authentication
 function CredentialDialog({
@@ -48,6 +59,7 @@ function CredentialDialog({
   repoName,
   repoPath,
   isLoading,
+  actionLabel,
 }: {
   open: boolean
   onClose: () => void
@@ -55,6 +67,7 @@ function CredentialDialog({
   repoName: string
   repoPath: string
   isLoading: boolean
+  actionLabel?: string
 }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -160,7 +173,7 @@ function CredentialDialog({
               disabled={!username.trim() || !password.trim() || isLoading}
             >
               {isLoading && <Loader2 size={12} className="animate-spin mr-1" />}
-              {t('git.pushWithCredential')}
+              {actionLabel || t('git.pushWithCredential')}
             </Button>
           </DialogFooter>
         </form>
@@ -182,6 +195,7 @@ function CommitSection({
   onStatusUpdate: (conflictPaths: string[], errorPaths: string[]) => void
 }) {
   const [isCommitting, setIsCommitting] = useState(false)
+  const [commitMessage, setCommitMessage] = useState('Sync changes')
   const [credentialDialog, setCredentialDialog] = useState<{
     open: boolean
     repoPath: string
@@ -207,8 +221,6 @@ function CommitSection({
   }
 
   const handleCommit = async () => {
-    const commitMessage = 'Sync changes'
-
     const reposToCommit = selectedRepos.length > 0
       ? allRepos.filter(r => selectedRepos.includes(r.path))
       : allRepos.filter(r => r.hasUncommittedChanges)
@@ -330,7 +342,15 @@ function CommitSection({
   
   return (
     <>
-      <div className="p-2" style={{ borderColor: 'var(--border-color)' }}>
+      <div className="p-2 flex flex-col gap-1.5" style={{ borderColor: 'var(--border-color)' }}>
+        <input
+          type="text"
+          value={commitMessage}
+          onChange={(e) => setCommitMessage(e.target.value)}
+          placeholder="Sync changes"
+          className="flex h-8 w-full rounded-md border px-2.5 py-1 text-xs bg-[var(--bg-primary)] border-[var(--border-color)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          disabled={isCommitting}
+        />
         <Button
           className="w-full h-8 text-xs"
           variant="default"
@@ -369,6 +389,14 @@ function RepositoryItem({
   const showToast = useUIStore((s) => s.showToast)
   const [isForceAction, setIsForceAction] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'forcePush' | 'forcePull' | null>(null)
+  const [showForgetCredential, setShowForgetCredential] = useState(false)
+  const [isForgettingCredential, setIsForgettingCredential] = useState(false)
+  // 凭证对话框状态：强制推送/拉取认证失败时弹出
+  const [credentialDialog, setCredentialDialog] = useState<{
+    open: boolean
+    action: 'forcePush' | 'forcePull'
+  }>({ open: false, action: 'forcePush' })
+  const [isCredentialLoading, setIsCredentialLoading] = useState(false)
 
   const handleClick = () => {
     if (repo.status === 'conflict') {
@@ -385,7 +413,7 @@ function RepositoryItem({
     try {
       await gitForcePush(repo.path)
       showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
-      onRefresh()
+      await onRefresh()
     } catch (e) {
       const errorMessage = String(e).trim()
       if (errorMessage.startsWith('AUTH_REQUIRED:')) {
@@ -406,7 +434,8 @@ function RepositoryItem({
         } catch {
           // Failed to get credentials
         }
-        showToast(t('git.forcePushFailed', { repo: repo.name, error: t('git.credentialTitle') }), 'error')
+        // 保存凭证也失败，弹出凭证对话框让用户手动输入
+        setCredentialDialog({ open: true, action: 'forcePush' })
       } else {
         showToast(t('git.forcePushFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
       }
@@ -421,12 +450,74 @@ function RepositoryItem({
     try {
       await gitForcePull(repo.path)
       showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
-      onRefresh()
+      await onRefresh()
     } catch (e) {
       const errorMessage = String(e).trim()
-      showToast(t('git.forcePullFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+        // Try saved credentials
+        try {
+          const savedCred = await gitCredentialGet(repo.path)
+          if (savedCred) {
+            try {
+              await gitForcePullWithCredentials(repo.path, savedCred.username, savedCred.password)
+              showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
+              onRefresh()
+              return
+            } catch {
+              // Saved credentials failed
+            }
+          }
+        } catch {
+          // Failed to get credentials
+        }
+        // 保存凭证也失败，弹出凭证对话框让用户手动输入
+        setCredentialDialog({ open: true, action: 'forcePull' })
+      } else {
+        showToast(t('git.forcePullFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      }
     } finally {
       setIsForceAction(false)
+    }
+  }
+
+  // 凭证对话框提交处理
+  const handleCredentialSubmit = async (username: string, password: string) => {
+    setIsCredentialLoading(true)
+    try {
+      if (credentialDialog.action === 'forcePush') {
+        await gitForcePushWithCredentials(repo.path, username, password)
+        showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
+      } else {
+        await gitForcePullWithCredentials(repo.path, username, password)
+        showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
+      }
+      setCredentialDialog({ open: false, action: 'forcePush' })
+      await onRefresh()
+    } catch (e) {
+      const errorMessage = String(e).trim()
+      showToast(
+        credentialDialog.action === 'forcePush'
+          ? t('git.forcePushFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') })
+          : t('git.forcePullFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }),
+        'error'
+      )
+    } finally {
+      setIsCredentialLoading(false)
+    }
+  }
+
+  // 清除已保存的凭证
+  const handleForgetCredential = async () => {
+    setIsForgettingCredential(true)
+    try {
+      await gitCredentialDelete(repo.path)
+      showToast(t('git.forgetCredentialSuccess'), 'success')
+      setShowForgetCredential(false)
+    } catch (e) {
+      const errorMessage = String(e).trim()
+      showToast(t('git.forgetCredentialFailed', { error: errorMessage || t('git.unknownError') }), 'error')
+    } finally {
+      setIsForgettingCredential(false)
     }
   }
 
@@ -464,6 +555,47 @@ function RepositoryItem({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 忘记凭证确认对话框 */}
+      <AlertDialog open={showForgetCredential} onOpenChange={(v) => !v && setShowForgetCredential(false)}>
+        <AlertDialogContent className="sm:max-w-[400px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Trash2 size={16} />
+              {t('git.forgetCredential')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('git.forgetCredentialConfirm', { repo: repo.name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isForgettingCredential}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isForgettingCredential}
+              onClick={(e) => {
+                e.preventDefault()
+                handleForgetCredential()
+              }}
+            >
+              {isForgettingCredential && <Loader2 size={12} className="animate-spin mr-1" />}
+              {t('git.forgetCredential')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 强制推送/拉取凭证对话框 */}
+      <CredentialDialog
+        open={credentialDialog.open}
+        onClose={() => setCredentialDialog({ open: false, action: 'forcePush' })}
+        onSubmit={handleCredentialSubmit}
+        repoName={repo.name}
+        repoPath={repo.path}
+        isLoading={isCredentialLoading}
+        actionLabel={credentialDialog.action === 'forcePush' ? t('git.pushWithCredential') : t('git.pullWithCredential')}
+      />
 
       <div
         className={cn(
@@ -546,6 +678,18 @@ function RepositoryItem({
                   <span>{t('git.forcePull')}</span>
                   <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{t('git.forcePullDesc')}</span>
                 </div>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-xs cursor-pointer gap-2"
+                style={{ color: 'var(--text-primary)' }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setShowForgetCredential(true)
+                }}
+              >
+                <Trash2 size={12} style={{ color: 'var(--text-muted)' }} />
+                <span>{t('git.forgetCredential')}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -1,19 +1,11 @@
-/**
- * Plugin Telemetry
- * 
- * Collects observability metrics for plugins:
- * - Event payload sizes and handler durations
- * - Storage sizes and operation counts
- * - Hook invocation timing
- * - Backend IPC call latency
- */
+/** 插件遥测：收集事件、存储、钩子、IPC 指标 */
 
 import type { PluginEvent, PluginEventPayloadMap } from '@/types/plugin'
 import { getPluginStorageSize } from './tauri'
 
-// ─── Metric types ─────────────────────────────────────────────────────────────
+// 指标类型
 
-/** A single event emission record */
+/** 单次事件发射记录 */
 export interface EventMetric {
   timestamp: number
   pluginId: string
@@ -24,7 +16,7 @@ export interface EventMetric {
   errors: number
 }
 
-/** Storage operation metric */
+/** 存储操作指标 */
 export interface StorageMetric {
   timestamp: number
   pluginId: string
@@ -36,7 +28,7 @@ export interface StorageMetric {
   error?: string
 }
 
-/** Hook invocation metric */
+/** 钩子调用指标 */
 export interface HookMetric {
   timestamp: number
   pluginId: string
@@ -46,7 +38,7 @@ export interface HookMetric {
   error?: string
 }
 
-/** Backend IPC call metric */
+/** 后端 IPC 调用指标 */
 export interface BackendMetric {
   timestamp: number
   pluginId: string
@@ -62,13 +54,11 @@ export interface PluginLastError {
   hook: string
   message: string
   timestamp: number
-  /** True when the health monitor disabled the plugin as a
-   *  consequence of this error. False for hook-internal errors
-   *  that the host surfaces but doesn't act on. */
+  /** 健康监控据此禁用插件时为 true */
   autoDisabled: boolean
 }
 
-/** Aggregated plugin metrics */
+/** 插件聚合指标 */
 export interface PluginMetrics {
   pluginId: string
   totalEvents: number
@@ -91,16 +81,13 @@ const storageMetrics: StorageMetric[] = []
 const hookMetrics: HookMetric[] = []
 const backendMetrics: BackendMetric[] = []
 
-/** Plugin metadata cache (for storage size tracking) */
+/** 插件元数据缓存（存储尺寸跟踪） */
 const pluginStorageSize = new Map<string, number>()
 
-/**
- * 指标版本计数器：记录新指标时自增，供 usePluginTelemetryVersion 订阅触发重渲染。
- * clearAllMetrics 重置为 0；每次 recordX 调用通过 bumpMetricsVersion 自增。
- */
+/** 指标版本计数器：记录时自增触发重渲染 */
 let metricsVersion = 0
 
-/** Bump the version counter. Called by every recorder. */
+/** 自增版本计数器 */
 function bumpMetricsVersion(): void {
   metricsVersion += 1
   // 迭代副本以避免订阅者取消订阅导致迭代错乱。
@@ -131,18 +118,15 @@ export function subscribeToMetricsVersion(onChange: () => void): () => void {
   }
 }
 
-/** Synthetic plugin id used to attribute conflict metrics to the
- *  host (the conflict detector lives in the host, not in any
- *  individual plugin). Keeping it as a const string means log
- *  filter chips can treat the host entries uniformly. */
+/** 用于归因冲突指标的合成 plugin id */
 const HOST_PLUGIN_ID = 'host'
 
 /** 每插件"最近错误"缓存：健康监控写入，诊断弹窗读取，卸载或恢复健康时清除。 */
 const lastErrorByPlugin = new Map<string, PluginLastError>()
 
-// ─── Recording functions ─────────────────────────────────────────────────────
+// 记录函数
 
-/** Record an event emission */
+/** 记录事件发射 */
 export function recordEventMetric(
   pluginId: string,
   event: PluginEvent,
@@ -212,7 +196,7 @@ export function recordStorageMetric(
   }
 }
 
-/** Record a hook invocation */
+/** 记录钩子调用 */
 export function recordHookMetric(
   pluginId: string,
   hook: string,
@@ -262,9 +246,9 @@ export function recordBackendMetric(
   bumpMetricsVersion()
 }
 
-// ─── Query functions ──────────────────────────────────────────────────────────
+// 查询函数
 
-/** Get all event metrics */
+/** 获取全部事件指标 */
 export function getEventMetrics(): readonly EventMetric[] {
   return eventMetrics
 }
@@ -274,12 +258,12 @@ export function getStorageMetrics(): readonly StorageMetric[] {
   return storageMetrics
 }
 
-/** Get all hook metrics */
+/** 获取全部钩子指标 */
 export function getHookMetrics(): readonly HookMetric[] {
   return hookMetrics
 }
 
-/** Get all backend metrics */
+/** 获取全部后端指标 */
 export function getBackendMetrics(): readonly BackendMetric[] {
   return backendMetrics
 }
@@ -377,7 +361,7 @@ export function getPluginMetrics(pluginId: string): PluginMetrics {
   return summariseGroup(pluginId, g)
 }
 
-/** Get metrics for all plugins */
+/** 获取所有插件指标 */
 let _metricsCache: PluginMetrics[] | null = null
 let _metricsCacheAt = 0
 const METRICS_CACHE_TTL_MS = 1000
@@ -399,7 +383,7 @@ export function getAllPluginMetrics(): PluginMetrics[] {
   return result
 }
 
-/** Clear all metrics */
+/** 清空全部指标 */
 export function clearAllMetrics(): void {
   eventMetrics.length = 0
   storageMetrics.length = 0
@@ -413,9 +397,7 @@ export function clearAllMetrics(): void {
   bumpMetricsVersion()
 }
 
-/** Clear metrics for a specific plugin. We splice each array in
- *  reverse order so the indexes of the remaining items don't shift
- *  while we iterate. */
+/** 清除指定插件指标，逆序 splice 保持索引稳定 */
 export function clearPluginMetrics(pluginId: string): void {
   for (let i = eventMetrics.length - 1; i >= 0; i--) {
     if (eventMetrics[i].pluginId === pluginId) eventMetrics.splice(i, 1)
@@ -437,19 +419,12 @@ export function clearPluginMetrics(pluginId: string): void {
   bumpMetricsVersion()
 }
 
-/**
- * 用 host 的权威字节数初始化/覆盖插件存储尺寸跟踪器。
- * 启动和文件变更时调用；单次调用最多 bump 一次以合并重渲染。
- */
+/** 用 host 字节数初始化插件存储尺寸跟踪器 */
 export function seedPluginStorageSizes(sizes: Record<string, number>): void {
   let changed = false
   for (const [pluginId, bytes] of Object.entries(sizes)) {
     const prev = pluginStorageSize.get(pluginId) ?? 0
-    // Always overwrite — the host's stat is the source of
-    // truth. The JS-side delta tracker can be ahead (pending
-    // `set` not yet flushed) but that's bounded by the size
-    // of one in-flight value, and a future set/delete will
-    // reconcile it.
+    // 以 host 统计为准覆盖
     if (prev !== bytes) {
       pluginStorageSize.set(pluginId, Math.max(0, bytes))
       changed = true
@@ -471,10 +446,7 @@ export async function refreshPluginStorageSize(pluginId: string): Promise<number
   return size
 }
 
-/**
- * 订阅 host 的 plugin-storage-changed 事件以同步外部写入造成的尺寸变化。
- * 返回取消订阅函数；动态 import 以避免测试环境的硬依赖。
- */
+/** 订阅 plugin-storage-changed 事件同步尺寸 */
 export async function subscribeToPluginStorageChanges(): Promise<() => void> {
   if (pluginStorageChangesUnsub) return pluginStorageChangesUnsub
   const { listen } = await import('@tauri-apps/api/event')
@@ -505,8 +477,7 @@ export function getTotalPluginStorageBytes(): number {
   return total
 }
 
-/** Read the cached storage size for a single plugin (0
- *  if the plugin has no record in the tracker). */
+/** 读取插件缓存存储尺寸，无记录为 0 */
 export function getPluginStorageBytes(pluginId: string): number {
   return pluginStorageSize.get(pluginId) ?? 0
 }
@@ -528,7 +499,7 @@ export function __resetPluginStorageChangesForTests(): void {
   }
 }
 
-// ─── Health-monitor integration ─────────────────────────────────────────────
+// 健康监控集成
 
 /** 记录插件"最近错误"。autoDisabled 区分自动禁用与仅记录两种情况。 */
 export function recordPluginError(
@@ -551,26 +522,17 @@ export function markPluginHealthy(pluginId: string): void {
   lastErrorByPlugin.delete(pluginId)
 }
 
-/**
- * Get the most recent health-monitor error for a plugin, if any.
- * Returns `undefined` when the plugin is healthy (no recorded
- * error) or when the last error was cleared via
- * `markPluginHealthy` / `clearPluginLastError`.
- */
+/** 返回最近错误，健康时为 undefined */
 export function getPluginLastError(pluginId: string): PluginLastError | undefined {
   return lastErrorByPlugin.get(pluginId)
 }
 
-/**
- * Manually clear a plugin's cached "last error". Used by the
- * diagnostics popup's "Clear error" button, and by the store on
- * a successful re-enable so the badge transitions cleanly.
- */
+/** 手动清除最近错误缓存 */
 export function clearPluginLastError(pluginId: string): void {
   lastErrorByPlugin.delete(pluginId)
 }
 
-// ─── Plugin conflict logging (Task 13 / G13) ───────────────────────────────
+// 插件冲突日志
 
 /** 将插件冲突记录为合成的 HookMetric（hook=plugin.conflict），供 Logs 弹窗渲染。 */
 export function recordPluginConflict(message: string): void {
@@ -591,9 +553,9 @@ export function recordPluginConflict(message: string): void {
   bumpMetricsVersion()
 }
 
-// ─── Helper functions ─────────────────────────────────────────────────────────
+// 辅助函数
 
-/** Estimate the size of a JSON-serializable payload in bytes */
+/** 估算 JSON 载荷字节数 */
 function estimatePayloadSize(payload: unknown): number {
   try {
     return JSON.stringify(payload).length
@@ -612,7 +574,7 @@ export async function measureAsync<T>(
   return { result, durationMs }
 }
 
-/** Measure execution time of a sync function */
+/** 测量同步函数执行耗时 */
 export function measure<T>(fn: () => T): { result: T; durationMs: number } {
   const start = performance.now()
   const result = fn()
@@ -620,42 +582,32 @@ export function measure<T>(fn: () => T): { result: T; durationMs: number } {
   return { result, durationMs }
 }
 
-// ─── Log formatting (for the new Logs popup) ────────────────────────────────
+// 日志格式化
 
-/** Log severity for the formatted log line. */
+/** 日志严重级别 */
 export type LogLevel = 'info' | 'ok' | 'warn' | 'err'
 
-/** Visual grouping hint used by the Logs popup. Plain metric
- *  lines default to `'normal'`; conflict entries are tagged
- *  `'conflict'` so the popup can render them under a dedicated
- *  "⚠️ Conflict" header above the regular stream. */
+/** conflict 类型用于弹窗分组渲染 */
 export type LogLineGroup = 'normal' | 'conflict'
 
-/** Synthetic hook name recorded for conflict entries. Used by
- *  `formatLogLine` to recognise the special "host-attributed"
- *  log line and route it to the conflict group. */
 export const PLUGIN_CONFLICT_HOOK = 'plugin.conflict'
 
-/** One formatted line ready to render in the Logs popup. */
+/** 可渲染的日志行 */
 export interface FormattedLogLine {
-  /** Timestamp the host recorded for the metric. */
+  /** 指标时间戳 */
   timestamp: number
-  /** Time formatted as `HH:MM:SS.mmm`. */
+  /** HH:MM:SS.mmm 格式时间 */
   time: string
-  /** Severity used to pick the colour-coded chip. */
+  /** 严重级别，用于配色 */
   level: LogLevel
-  /** Plugin id (short, may be elided for host events). */
+  /** 插件 id */
   plugin: string
-  /** Plain-text body of the log line. Caller can still add `<b>` markup. */
+  /** 日志正文 */
   message: string
-  /** Visual grouping hint for the Logs popup. Defaults to
-   *  `'normal'` for ordinary metric entries; conflict
-   *  detections (Task 13 / G13) set this to `'conflict'` so
-   *  the popup can render a dedicated warning section. */
   group?: LogLineGroup
 }
 
-/** Union of all metric record types — accepted by `formatLogLine`. */
+/** 所有指标记录的联合类型 */
 export type AnyMetric = EventMetric | StorageMetric | HookMetric | BackendMetric
 
 /** 将单条指标转换为日志行。严重级别默认 info，失败时升级。 */
@@ -708,7 +660,7 @@ export function formatLogLine(metric: AnyMetric, now: number = Date.now()): Form
       message: `hook ${m.hook} · ${m.durationMs.toFixed(2)}ms${m.error ? ` · ${m.error}` : ''}`,
     }
   }
-  // BackendMetric (must be last because every other type has a discriminator above)
+  // BackendMetric 兜底分支
   const m = metric as BackendMetric
   const level: LogLevel = m.success ? 'info' : 'err'
   return {
@@ -718,15 +670,13 @@ export function formatLogLine(metric: AnyMetric, now: number = Date.now()): Form
     plugin,
     message: `ipc ${m.command} · ${m.durationMs.toFixed(2)}ms${m.error ? ` · ${m.error}` : ''}`,
   }
-  // `now` is reserved for future "x seconds ago" formatting.
+  // now 预留给未来的相对时间格式
   void now
 }
 
-/** Return up to `limit` log lines, newest first. */
+/** 返回最近 limit 条日志，新到旧 */
 export function getRecentLogLines(limit: number = 100): FormattedLogLine[] {
-  // We use `getAllPluginMetrics` indirectly through the per-type helpers
-  // because the host already keeps three ring buffers; merging them
-  // is cheaper than asking the plugin store for a per-plugin summary.
+  // 合并环形缓冲比按插件汇总更省
   const events = eventMetrics
   const storage = storageMetrics
   const hooks = hookMetrics
@@ -742,31 +692,22 @@ export function getRecentLogLines(limit: number = 100): FormattedLogLine[] {
     .map((m) => formatLogLine(m))
 }
 
-// ─── Export (Task 8 / G8) ──────────────────────────────────────────────────
+// 日志导出
 
-/** Supported on-disk formats for `exportLogs`. Currently only
- *  `jsonl` is implemented; the union is kept narrow so the UI
- *  can pass a literal without widening to `string`. */
+/** 目前仅支持 jsonl */
 export type LogExportFormat = 'jsonl'
 
-/** Outcome of a single `exportLogs` call. We return both the
- *  rendered text and the count of records the caller can echo
- *  in a toast – the dialog doesn't have to re-walk the metrics
- *  arrays to figure out "how many lines did I just save?". */
+/** exportLogs 返回结果：渲染文本与记录数 */
 export interface LogExportResult {
-  /** Rendered, ready-to-write payload. */
+  /** 待写入的渲染文本 */
   text: string
-  /** Number of metric records actually written. */
+  /** 实际写入的记录数 */
   recordCount: number
-  /** Format string echoed back so the caller can branch
-   *  (e.g. for future CSV / text variants). */
+  /** 格式回显，供调用方分支 */
   format: LogExportFormat
 }
 
-/** Options that tune `exportLogs` without widening its positional
- *  argument list. Both fields are optional; the defaults preserve
- *  the original "full ring buffer, oldest-first" contract that
- *  pre-existing callers (and the TC-08 tests) rely on. */
+/** exportLogs 的可选配置参数 */
 export interface ExportLogsOptions {
   /** 记录数上限，过滤后应用；省略或非正值表示无上限。 */
   limit?: number
@@ -868,66 +809,48 @@ export function exportLogs(
   }
   // 尾随换行遵循 POSIX 约定。
   const text = lines.length > 0 ? lines.join('\n') + '\n' : ''
-  // `format` is reserved for future variants; the call site
-  // already passes the literal and a future PR can branch on
-  // it without breaking the public signature.
+  // format 预留给未来格式扩展
   void format
   return { text, recordCount: limited.length, format: 'jsonl' }
 }
 
-// ─── Time-window aggregation (Task 12 / G12) ────────────────────────────────
+// 时间窗口聚合
 
 /** 单时间窗口的聚合指标桶。 */
 export interface TelemetryBucket {
-  /** Bucket start timestamp (inclusive, ms since epoch). */
+  /** 桶起始时间戳（含） */
   startTs: number
-  /** Bucket end timestamp (exclusive, ms since epoch). */
+  /** 桶结束时间戳（不含） */
   endTs: number
-  /** Number of lifecycle hook invocations in this bucket. */
+  /** 钩子调用数 */
   hookCount: number
-  /** Number of backend IPC calls in this bucket. */
+  /** 后端 IPC 调用数 */
   backendCount: number
-  /** Number of storage operations in this bucket. */
+  /** 存储操作数 */
   storageCount: number
-  /** Number of event emissions in this bucket. */
+  /** 事件发射数 */
   eventCount: number
-  /** Average hook duration in ms; `0` when `hookCount === 0`. */
+  /** 平均钩子耗时 ms */
   avgHookDurationMs: number
-  /** Average backend IPC duration in ms; `0` when `backendCount === 0`. */
+  /** 平均后端耗时 ms */
   avgBackendDurationMs: number
-  /** Sum of errors across every metric type in this bucket. */
+  /** 错误总数 */
   errorCount: number
-  /** Total number of operations in this bucket. */
+  /** 操作总数 */
   totalCount: number
-  /** Error rate `errorCount / totalCount` in `[0, 1]`. `0` when empty. */
+  /** 错误率 [0,1] */
   errorRate: number
 }
 
-/** Options for `aggregateTelemetryByTimeWindow`. */
+/** 聚合参数 */
 export interface TimeWindowAggregateOptions {
-  /**
-   * Plugin id to filter by. Omit (or pass `undefined`) to aggregate
-   * every plugin's records into the same windowed view.
-   */
+  /** 过滤插件 id；省略聚合所有插件 */
   pluginId?: string
-  /**
-   * Window size in ms per bucket. Default 60_000 (1 minute). Must
-   * be a positive finite number; non-positive values yield an empty
-   * result rather than throwing – the sparkline is a "best effort"
-   * visualisation, and a misconfigured width should be ignored.
-   */
+  /** 桶宽 ms，默认 60000；非正返回空 */
   windowMs?: number
-  /**
-   * Number of buckets to return. Default 30. Must be a positive
-   * integer; non-positive values yield an empty result.
-   */
+  /** 桶数，默认 30；非正返回空 */
   bucketCount?: number
-  /**
-   * Reference "now" timestamp (ms since epoch). Defaults to
-   * `Date.now()`. Pinning `now` makes the function deterministic
-   * for tests so a record recorded at `T` always lands in the
-   * same bucket regardless of when the test runs.
-   */
+  /** 参考 now 时间戳，默认 Date.now() */
   now?: number
 }
 
@@ -965,9 +888,7 @@ export function aggregateTelemetryByTimeWindow(
     }
   }
 
-  // Parallel sum arrays so we can compute averages in a single
-  // divide at the end. Reusing fixed-length arrays avoids the GC
-  // pressure of allocating inside the per-record loop.
+  // 并行累加数组，末尾统一算均值
   const hookDurationSum = new Array<number>(bucketCount).fill(0)
   const backendDurationSum = new Array<number>(bucketCount).fill(0)
 
@@ -980,9 +901,7 @@ export function aggregateTelemetryByTimeWindow(
     return idx >= 0 && idx < bucketCount ? idx : -1
   }
 
-  // Hook metrics – the closest signal to "plugin startup time"
-  // for the sparkline. We track the running duration sum so the
-  // average is `sum / count` at the end.
+  // 钩子指标：启动时长信号
   for (const m of hookMetrics) {
     if (pluginId !== undefined && m.pluginId !== pluginId) continue
     const idx = place(m.timestamp)
@@ -1004,10 +923,7 @@ export function aggregateTelemetryByTimeWindow(
     backendDurationSum[idx] += m.durationMs
     if (!m.success) b.errorCount++
   }
-  // Storage operations contribute to the total count and error
-  // count but are not "duration"-bearing in the sparkline's
-  // vocabulary (we don't want a long `storage.get` to skew the
-  // "startup time" line).
+  // 存储操作仅计入总数和错误数
   for (const m of storageMetrics) {
     if (pluginId !== undefined && m.pluginId !== pluginId) continue
     const idx = place(m.timestamp)
@@ -1017,9 +933,7 @@ export function aggregateTelemetryByTimeWindow(
     b.totalCount++
     if (!m.success) b.errorCount++
   }
-  // Event emissions – same rationale as storage: contribute to
-  // the error count (the event metric records `errors` as a
-  // per-emission integer) but not to the duration line.
+  // 事件发射仅计入错误数
   for (const m of eventMetrics) {
     if (pluginId !== undefined && m.pluginId !== pluginId) continue
     const idx = place(m.timestamp)
@@ -1030,9 +944,7 @@ export function aggregateTelemetryByTimeWindow(
     b.errorCount += m.errors
   }
 
-  // Finalise averages and error rates. The error rate is the
-  // primary input to the sparkline's color picker; we compute it
-  // here so the rendering layer never has to.
+  // 计算均值与错误率
   for (let i = 0; i < bucketCount; i++) {
     const b = buckets[i]
     b.avgHookDurationMs = b.hookCount > 0 ? hookDurationSum[i] / b.hookCount : 0

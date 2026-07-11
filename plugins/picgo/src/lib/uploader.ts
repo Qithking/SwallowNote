@@ -112,7 +112,7 @@ export async function uploadImage(
   const provider = getProvider(providerId)
   const displayName = getProviderDisplayName(providerId)
 
-  // 1. Preprocess. The provider should only see clean blobs.
+  // 1. 预处理，确保 provider 收到干净的 blob
   const pre = await preprocessImage({
     file: options.file,
     filename: options.filename,
@@ -145,8 +145,7 @@ export async function uploadImage(
     if (isAbortError(err)) {
       throw new UploadCancelledError(displayName)
     }
-    // Provider already returns a "Provider: reason" error; pass
-    // it through so the toast can show the exact wording.
+    // provider 错误透传，toast 显示原始信息
     if (err instanceof Error) {
       if (!err.message.startsWith(displayName)) {
         throw new Error(`${displayName}: ${err.message}`)
@@ -158,8 +157,7 @@ export async function uploadImage(
     dispose()
   }
 
-  // 4. Append history (best-effort — never let storage errors
-  //    turn a successful upload into a failed one).
+  // 4. 追加历史（best-effort，不影响上传成功）
   if (settings.enableHistory && ctx.store) {
     try {
       await appendHistory(ctx.store, result, settings.historyRetention)

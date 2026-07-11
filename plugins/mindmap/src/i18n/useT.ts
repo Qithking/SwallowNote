@@ -71,9 +71,7 @@ function subscribeLocale(listener: () => void): () => void {
  */
 export function useT(): (key: string) => string {
   const locale = useSyncExternalStore(subscribeLocale, localeSnapshot, localeSnapshot)
-  // Track the locale as state too so callers re-render on change.
-  // (useSyncExternalStore covers re-renders already, but using
-  // useState keeps the dependency surface in this file obvious.)
+  // 用 state 跟踪 locale 变化以触发重渲染
   const [, setTick] = useState(0)
   useEffect(() => {
     const l = () => setTick((n) => n + 1)

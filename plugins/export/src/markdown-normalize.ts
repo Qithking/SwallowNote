@@ -1,28 +1,4 @@
-/**
- * Markdown post-processor — simplified copy of the host's
- * `src/utils/compact-markdown.ts`.
- *
- * The plugin is shipped as a self-contained package and must not
- * `import` from the host. This file mirrors the same normalisations
- * the editor runs before saving so the export sees the same string
- * the user sees in the preview. Keep changes in sync with
- * [`compact-markdown.ts`](file:///Users/thking/code/codeBuddy/SwallowNote/src/utils/compact-markdown.ts).
- *
- * SYNC_VERSION: 2026-06-14
- *
- * Bump this version whenever the normalisations drift from the
- * host (e.g. host adds a new rule, or you add one here to match).
- * The version is checked manually during code review — there is
- * no automatic diff runner, so the date stamp is the only audit
- * trail. A future improvement could be a pre-commit hook that
- * diffs the two files and refuses to commit if the version
- * doesn't match.
- *
- * The two implementations have deliberately diverged in one place:
- * the host version's HTML-entity decoder is not reproduced here
- * because by the time the export pipeline runs, the content has
- * already been decoded by the editor.
- */
+/** Markdown 后处理：镜像宿主 compact-markdown.ts 的规范化逻辑 */
 
 const LIST_RE = /^(\s*)([-*+]|\d+\.)\s/
 const HARD_BREAK_ONLY_RE = /^\\+$/
@@ -56,16 +32,7 @@ interface ProcessMarkdownLineResult {
   line: string | null
 }
 
-/**
- * Post-process markdown to produce standard-convention output:
- *  - Tight lists (no blank lines between consecutive list items)
- *  - Bullet list markers normalized to `-`
- *  - Leading/trailing inline whitespace moved outside bold markers
- *  - Stray hard-break-only lines removed after a markdown hard break
- *  - No runs of 3+ blank lines (collapsed to one blank line)
- *  - No trailing blank lines
- *  - Code block content is never modified
- */
+/** 规范化 markdown：紧凑列表、统一标记、去除多余空行等 */
 export function compactMarkdown(md: string): string {
   if (!md) return md
 

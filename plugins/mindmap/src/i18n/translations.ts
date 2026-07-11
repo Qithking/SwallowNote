@@ -1,16 +1,4 @@
-/**
- * Plugin-local translations.
- *
- * Keys are kept structurally identical to the host's
- * `src/i18n/locales/<locale>.json` `mindMap` namespace so a future
- * sync with the host's translation files is mechanical. The plugin
- * is fully self-contained: it does not depend on `react-i18next` or
- * any host translation pipeline.
- *
- * Locales are intentionally duplicated in this file (rather than
- * importing JSON) so the Vite build can inline them into a single
- * ES module without extra fetchers.
- */
+/** 插件本地翻译，不依赖 react-i18next，构建时内联 */
 export const TRANSLATIONS = {
   'zh-CN': {
     mindMap: {
@@ -208,14 +196,7 @@ export const TRANSLATIONS = {
 
 export type Locale = keyof typeof TRANSLATIONS
 
-/**
- * Resolve a dot-separated key path against an arbitrary object.
- * Returns the string at that path, or `fallback` if any segment
- * along the way is missing or the final value is not a string.
- *
- * Mirrors the behaviour of `t('a.b.c')` from i18next so the host
- * translations remain a drop-in reference.
- */
+/** 按点分路径解析 key，缺失时返回 fallback */
 function resolveKey(map: Record<string, unknown>, key: string, fallback: string): string {
   const parts = key.split('.')
   let cur: unknown = map
@@ -229,11 +210,7 @@ function resolveKey(map: Record<string, unknown>, key: string, fallback: string)
   return typeof cur === 'string' ? cur : fallback
 }
 
-/**
- * The plugin's translation function. If `key` is missing in the
- * active locale we fall back to the zh-CN map, then to the key
- * itself, so the UI never crashes because of a missing string.
- */
+/** 翻译函数：key 缺失时回退 zh-CN，再回退 key 本身 */
 export function translate(locale: Locale, key: string): string {
   const primary = TRANSLATIONS[locale] as Record<string, unknown> | undefined
   if (primary) {

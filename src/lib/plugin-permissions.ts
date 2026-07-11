@@ -1,22 +1,9 @@
-/**
- * Plugin Permission Manager
- *
- * Handles permission checking, granting, and audit logging.
- *
- * Persistence layout in `window.localStorage`:
- *   - `plugin_permissions_<pluginId>`: JSON of `PluginPermissionStatus[]`
- *   - `plugin_audit_log`:               JSON of `PermissionAuditLogEntry[]`
- *
- * The in-memory permission guard (`./plugin-permission-guard.ts`) is
- * what the event bus, storage, and backend IPC consult on the hot
- * path. We mirror every grant/revoke there so the UI and the host
- * can never disagree about whether a permission is granted.
- */
+/** 插件权限管理：检查、授权、审计日志 */
 
 import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
 import { setGranted, clearGranted } from './plugin-permission-guard'
 
-// Storage keys
+// 存储键
 const PERMISSIONS_KEY = 'plugin_permissions'
 const AUDIT_LOG_KEY = 'plugin_audit_log'
 
@@ -34,24 +21,14 @@ export async function getPluginPermissions(pluginId: string): Promise<PluginPerm
   }
 }
 
-/**
- * Grant permissions to a plugin
- */
+/** 授权插件权限 */
 export async function grantPluginPermissions(
   pluginId: string,
   permissions: PluginPermission[]
 ): Promise<void> {
   const current = await getPluginPermissions(pluginId)
 
-  // Merge: keep every existing grant untouched and add the new
-  // permissions as `granted: true`. The previous implementation
-  // built `updated` solely from the incoming `permissions` arg,
-  // which silently *discarded* any pre-existing grants the plugin
-  // already had. A single `grant(id, ['events'])` would demote the
-  // plugin from N grants down to 1, and the in-memory guard (which
-  // already computed the merged set in the post-call block) would
-  // disagree with localStorage until the next page reload
-  // re-hydrated the truncated list.
+  // 合并：保留既有授权并新增 granted:true
   const byName = new Map<string, PluginPermissionStatus>(
     current.map((s) => [s.permission, s] as const),
   )
@@ -67,14 +44,10 @@ export async function grantPluginPermissions(
 
   await window.localStorage.setItem(`${PERMISSIONS_KEY}_${pluginId}`, JSON.stringify(updated))
 
-  // Log the grant action
+  // 记录授权操作
   await logPermissionAction(pluginId, 'grant', permissions)
 
-  // Mirror to the in-memory guard. Only include permissions
-  // that are actually granted — the previous code used
-  // `updated.map(s => s.permission)` which included
-  // `granted: false` entries, effectively making the guard
-  // treat every permission as granted.
+  // 同步到内存 guard，仅含 granted 项
   const merged = new Set<PluginPermission>()
   for (const s of updated) {
     if (s.granted) merged.add(s.permission)
@@ -82,9 +55,7 @@ export async function grantPluginPermissions(
   setGranted(pluginId, Array.from(merged))
 }
 
-/**
- * Revoke permissions from a plugin
- */
+/** 撤销插件权限 */
 export async function revokePluginPermissions(
   pluginId: string,
   permissions: PluginPermission[]
@@ -98,17 +69,15 @@ export async function revokePluginPermissions(
 
   await window.localStorage.setItem(`${PERMISSIONS_KEY}_${pluginId}`, JSON.stringify(updated))
 
-  // Log the revoke action
+  // 记录撤销操作
   await logPermissionAction(pluginId, 'revoke', permissions)
 
-  // Mirror to the in-memory guard with the post-revoke granted set.
+  // 同步撤销后授权集到 guard
   const remaining = updated.filter((s) => s.granted).map((s) => s.permission)
   setGranted(pluginId, remaining)
 }
 
-/**
- * Check if a plugin has a specific permission
- */
+/** 检查插件是否有指定权限 */
 export async function checkPluginPermission(
   pluginId: string,
   permission: PluginPermission
@@ -118,9 +87,7 @@ export async function checkPluginPermission(
   return status?.granted ?? false
 }
 
-/**
- * Check multiple permissions at once
- */
+/** 批量检查权限 */
 export async function checkPluginPermissions(
   pluginId: string,
   permissions: PluginPermission[]
@@ -136,9 +103,7 @@ export async function checkPluginPermissions(
   return result
 }
 
-/**
- * Initialize permissions for a plugin (sets requested flags)
- */
+/** 初始化插件权限（设置 requested） */
 export async function initializePluginPermissions(
   pluginId: string,
   requestedPermissions: PluginPermission[]
@@ -156,7 +121,7 @@ export async function initializePluginPermissions(
     })
   }
   
-  // Keep existing permissions that are no longer requested but were granted
+  // 保留不再请求但已授权的权限
   for (const existing of current) {
     if (!requestedPermissions.includes(existing.permission) && existing.granted) {
       updated.push(existing)
@@ -166,9 +131,7 @@ export async function initializePluginPermissions(
   await window.localStorage.setItem(`${PERMISSIONS_KEY}_${pluginId}`, JSON.stringify(updated))
 }
 
-/**
- * Audit log entry
- */
+/** 审计日志条目 */
 export interface PermissionAuditLogEntry {
   timestamp: number
   pluginId: string
@@ -178,9 +141,7 @@ export interface PermissionAuditLogEntry {
   reason?: string
 }
 
-/**
- * Log a permission action
- */
+/** 记录权限操作 */
 async function logPermissionAction(
   pluginId: string,
   action: 'grant' | 'revoke',
@@ -198,20 +159,18 @@ async function logPermissionAction(
       success: true,
     })
 
-    // Keep only last 100 entries
+    // 仅保留最近 100 条
     if (logs.length > 100) {
       logs.shift()
     }
 
     await window.localStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(logs))
   } catch {
-    // Silent fail for audit logging
+    // 审计日志静默失败
   }
 }
 
-/**
- * Get audit logs
- */
+/** 获取审计日志 */
 export async function getPermissionAuditLogs(): Promise<PermissionAuditLogEntry[]> {
   try {
     const stored = await window.localStorage.getItem(AUDIT_LOG_KEY)
@@ -221,43 +180,18 @@ export async function getPermissionAuditLogs(): Promise<PermissionAuditLogEntry[
   }
 }
 
-/**
- * Clear audit logs
- */
+/** 清空审计日志 */
 export async function clearPermissionAuditLogs(): Promise<void> {
   await window.localStorage.removeItem(AUDIT_LOG_KEY)
 }
 
-/**
- * Drop a plugin's permissions from both the disk store and the
- * in-memory guard. Called on uninstall. The localStorage key is
- * deleted (not zeroed) so the next install of a plugin with the
- * same id starts from a clean slate.
- */
+/** 卸载时清除插件权限与内存 guard */
 export async function dropPluginPermissions(pluginId: string): Promise<void> {
   await window.localStorage.removeItem(`${PERMISSIONS_KEY}_${pluginId}`)
   clearGranted(pluginId)
 }
 
-/**
- * Seed the in-memory guard from localStorage. Called on app start so
- * the host services (event bus, storage, backend) can run a
- * synchronous permission check on the first user action without
- * waiting on the next grant/revoke.
- *
- * `pluginIds` is the list of installed plugin ids; we need it because
- * localStorage is a flat key/value store with no listing query that
- * doesn't depend on the `Object.keys` order.
- *
- * Performance: each `getPluginPermissions` call hits localStorage
- * twice (one `getItem` for the plugin's permission entry, one for the
- * schema check). For a 200-plugin install, the old sequential
- * `for…of` loopped through them serially (~200ms+ on cold cache).
- * We fan them out with `Promise.all` so all localStorage reads
- * happen concurrently — localStorage serialises them internally
- * anyway, but the I/O latency overlap is enough to drop total
- * hydration to roughly the cost of the slowest single read.
- */
+/** 启动时从 localStorage 填充内存 guard */
 export async function hydratePermissionGuard(pluginIds: string[]): Promise<void> {
   await Promise.all(
     pluginIds.map(async (id) => {

@@ -1,12 +1,4 @@
-/**
- * SM.MS provider.
- *
- * - Endpoint: `POST https://sm.ms/api/v2/upload`
- * - Body: multipart/form-data, file field `smfile`
- * - Auth: optional `Authorization: <token>` (anonymous uploads
- *   are allowed but rate-limited)
- * - Response: `{ success, code, message, data: { url, ... } }`
- */
+/** SM.MS provider：multipart 上传，可选 Token 鉴权 */
 import type { AllSettings, UploadResult, UploadProgressHandler } from '../types'
 import type { PicgoProvider } from './types'
 
@@ -42,8 +34,7 @@ export const smmsProvider: PicgoProvider = {
       throw new Error(`SM.MS: 网络错误：${(err as Error).message || 'fetch 失败'}`)
     }
 
-    // SM.MS returns HTTP 200 for both success and most "soft"
-    // failures (e.g. image_repeated, code: "image_too_large").
+    // SM.MS 成功和软失败均返回 HTTP 200
     let json: {
       success?: boolean
       code?: string
@@ -64,7 +55,7 @@ export const smmsProvider: PicgoProvider = {
     }
 
     if (!json.success) {
-      // Common soft-fail codes: image_repeated, image_too_large, ...
+      // 常见软失败：image_repeated、image_too_large 等
       const code = json.code || 'unknown_error'
       const message = json.message || code
       throw new Error(`SM.MS: ${message}`)

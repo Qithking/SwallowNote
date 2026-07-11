@@ -26,7 +26,7 @@ import type {
 import {
   registerContextMenu,
   unregisterContextMenu,
-  getStubMenuRegistry,
+  getContextMenuItems,
   usePluginStorage,
 } from '@swallow-note/plugin-sdk'
 // Re-export `setHost` so the host can install its real
@@ -158,6 +158,7 @@ function MainPanel(panel: PluginPanelProps) {
     null
   )
   // Bump to force re-render when the host clears contributions.
+  // 改为按需刷新（点击按钮），避免每秒 setInterval 导致的无意义重渲染。
   const [, setRefresh] = useState(0)
 
   useEffect(() => {
@@ -170,12 +171,8 @@ function MainPanel(panel: PluginPanelProps) {
       }
     }
     internalHandlers.add(handler)
-    // Re-render whenever the host's menu registry changes – useful
-    // for showing the "active items" count below.
-    const interval = window.setInterval(() => setRefresh((n) => n + 1), 1000)
     return () => {
       internalHandlers.delete(handler)
-      window.clearInterval(interval)
     }
   }, [setLastCopied, setLastCount])
 
@@ -193,7 +190,15 @@ function MainPanel(panel: PluginPanelProps) {
           Last word count:{' '}
           {lastCount ? `${lastCount.words} words / ${lastCount.chars} chars` : '(none)'}
         </div>
-        <div>Active items: {getStubMenuRegistry().getByLocation('fileTree').length}</div>
+        {/* 使用 getContextMenuItems 而非 getStubMenuRegistry，
+            在 host 模式下会路由到宿主的权限校验 registry，返回真实注册的菜单项 */}
+        <div>Active items (fileTree): {getContextMenuItems('fileTree', { location: 'fileTree' }).length}</div>
+        <button
+          style={{ marginTop: 4, padding: '2px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 3, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}
+          onClick={() => setRefresh((n) => n + 1)}
+        >
+          刷新计数
+        </button>
       </div>
     </div>
   )

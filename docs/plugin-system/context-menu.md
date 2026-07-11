@@ -38,8 +38,7 @@ interface ContextMenuContext {
 ## 完整示例
 
 ```typescript
-import { registerContextMenu, unregisterContextMenu } from '@/lib/plugin-menu'
-import { pluginEventBus } from '@/lib/plugin-host'
+import { registerContextMenu, unregisterContextMenu } from '@swallow-note/plugin-sdk'
 
 function onLoad(ctx: { pluginId: string }) {
   // 1. 文件树节点上的"复制路径"条目

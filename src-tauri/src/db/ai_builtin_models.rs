@@ -1,5 +1,6 @@
 use crate::ai_proxy::crypto;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use once_cell::sync::OnceCell;
 use serde::Serialize;
 
 const BUILTIN_XOR_KEY: &[u8] = b"SwallowNote-Builtin-2024";
@@ -28,20 +29,28 @@ pub struct BuiltinAiModel {
     pub is_built_in: bool,
 }
 
-pub fn get_builtin_models() -> Vec<BuiltinAiModel> {
-    let raw_key = xor_decode(OBFUSCATED_API_KEY);
-    let encrypted_key = crypto::encrypt_api_key(&raw_key).unwrap_or_default();
+/// 缓存加密后的内置模型列表，避免每次调用都重新执行 xor_decode + AES 加密。
+/// 加密 key 依赖 machine id，在进程生命周期内稳定，因此结果可安全缓存复用。
+static BUILTIN_MODELS: OnceCell<Vec<BuiltinAiModel>> = OnceCell::new();
 
-    vec![
-        BuiltinAiModel {
-            id: "builtin-siliconflow-qwen3-8b".to_string(),
-            name: "Qwen3-8B".to_string(),
-            category: "api".to_string(),
-            provider: "siliconflow".to_string(),
-            api_key: encrypted_key,
-            base_url: "https://api.siliconflow.cn/v1".to_string(),
-            model: "Qwen/Qwen3-8B".to_string(),
-            is_built_in: true,
-        },
-    ]
+pub fn get_builtin_models() -> Vec<BuiltinAiModel> {
+    BUILTIN_MODELS
+        .get_or_init(|| {
+            let raw_key = xor_decode(OBFUSCATED_API_KEY);
+            let encrypted_key = crypto::encrypt_api_key(&raw_key).unwrap_or_default();
+
+            vec![
+                BuiltinAiModel {
+                    id: "builtin-siliconflow-qwen3-8b".to_string(),
+                    name: "Qwen3-8B".to_string(),
+                    category: "api".to_string(),
+                    provider: "siliconflow".to_string(),
+                    api_key: encrypted_key,
+                    base_url: "https://api.siliconflow.cn/v1".to_string(),
+                    model: "Qwen/Qwen3-8B".to_string(),
+                    is_built_in: true,
+                },
+            ]
+        })
+        .clone()
 }

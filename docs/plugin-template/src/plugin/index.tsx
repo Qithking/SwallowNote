@@ -3,7 +3,7 @@
  * template is dev infrastructure that you can leave alone.
  *
  * - `npm run dev`   – opens the standalone preview in your browser
- * - `npm run build` – emits `dist/plugin.js` (IIFE) + `dist/manifest.json`
+ * - `npm run build` – emits `dist/index.js` (ES module) + `dist/manifest.json`
  *                     that you can upload to SwallowNote.
  *
  * Lifecycle hooks are **flat top-level fields** on the manifest
@@ -20,7 +20,7 @@ import {
 
 // Re-export `setHost` so the host can install its real
 // implementations on this bundle before firing lifecycle hooks.
-// The bundler's IIFE format exposes the entry's exports as
+// The bundler's ES format exposes the entry's exports as
 // properties on the bundle object; without this re-export the
 // tree-shaker would drop `setHost` and the host would silently
 // fall back to the SDK's in-process stubs.
@@ -143,7 +143,7 @@ const manifest: PluginManifest = {
   // Available values (see `PLUGIN_PERMISSIONS` in the SDK):
   //   'storage' | 'events' | 'context-menu' | 'backend'
   //   'filesystem-read' | 'filesystem-write' | 'network'
-  //   'clipboard' | 'notifications'
+  //   'clipboard' | 'notifications' | 'editor'
   //
   // Note: this template uses `usePluginEvent('note:open', ...)` to
   // listen for host events, so `events` is required in addition to

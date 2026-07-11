@@ -1,6 +1,36 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* v4 使用 CSS 配置取代 tailwind.config.js；darkMode: ["class"] 改为 @custom-variant */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* v4 设计令牌：原 tailwind.config.js 的 theme.extend 迁移至此 */
+@theme {
+  --breakpoint-3xl: 1920px;
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
 
 html {
   background-color: transparent;
@@ -3122,9 +3152,9 @@ body, #root {
 .pa-batch-bar .pa-btn { height: 28px; padding: 0 10px; font-size: 11px; }
 
 /* ── CodeMirror gutter (line number column) ─────────────────
-   Use a light transparent overlay of the editor background to
-   visually separate the gutter from the content area without
-   introducing a hard color split. */
+Use a light transparent overlay of the editor background to
+visually separate the gutter from the content area without
+introducing a hard color split. */
 .cm-editor .cm-gutters {
   background-color: color-mix(in srgb, var(--bg-primary) 25%, transparent) !important;
   border-right-color: var(--border-color) !important;
@@ -3132,6 +3162,14 @@ body, #root {
 .dark .cm-editor .cm-gutters {
   background-color: color-mix(in srgb, var(--bg-primary) 25%, transparent) !important;
   border-right-color: var(--border) !important;
+}
+
+/* Remove the default dotted focus outline from CodeMirror.
+   basicSetup adds `outline: 1px dotted #212121` on .cm-focused,
+   which appears as a stray bottom line because the surrounding
+   ScrollArea clips the top/left/right sides. */
+.cm-editor.cm-focused {
+  outline: none !important;
 }
 
 /* ============================================================

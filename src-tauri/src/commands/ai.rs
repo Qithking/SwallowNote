@@ -6,6 +6,10 @@ use tauri::State;
 
 pub struct AiProxyStateHolder {
     pub server: Mutex<Option<AiProxyServer>>,
+    /// 共享的 reqwest::Client，供 test_ai_model_cmd 等命令复用，
+    /// 避免每次连通性测试都新建 Client（含连接池/TLS 初始化开销）。
+    /// reqwest::Client 内部基于 Arc，clone 廉价。
+    pub client: reqwest::Client,
 }
 
 pub type SharedAiProxyState = Arc<AiProxyStateHolder>;
@@ -13,6 +17,8 @@ pub type SharedAiProxyState = Arc<AiProxyStateHolder>;
 pub fn new_shared_ai_proxy_state() -> SharedAiProxyState {
     Arc::new(AiProxyStateHolder {
         server: Mutex::new(None),
+        // 应用启动时构造一次共享 Client；reqwest::Client 内部基于 Arc，clone 廉价
+        client: reqwest::Client::new(),
     })
 }
 
@@ -46,7 +52,7 @@ pub async fn start_ai_proxy_cmd(
     let server = start_ai_proxy(settings).await?;
 
     let actual_port = server.port;
-    let mut guard = holder.server.lock().unwrap();
+    let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(server);
 
     Ok(actual_port)
@@ -54,7 +60,7 @@ pub async fn start_ai_proxy_cmd(
 
 #[tauri::command]
 pub fn stop_ai_proxy(holder: State<'_, SharedAiProxyState>) -> Result<(), String> {
-    let mut guard = holder.server.lock().unwrap();
+    let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(server) = guard.take() {
         let _ = server.shutdown_tx.send(());
     }
@@ -71,7 +77,7 @@ pub async fn restart_ai_proxy_cmd(
     port: u16,
 ) -> Result<u16, String> {
     let old_server = {
-        let mut guard = holder.server.lock().unwrap();
+        let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
         guard.take()
     };
     if let Some(server) = old_server {
@@ -90,7 +96,7 @@ pub async fn restart_ai_proxy_cmd(
     let server = start_ai_proxy(settings).await?;
 
     let actual_port = server.port;
-    let mut guard = holder.server.lock().unwrap();
+    let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(server);
 
     Ok(actual_port)
@@ -98,6 +104,7 @@ pub async fn restart_ai_proxy_cmd(
 
 #[tauri::command]
 pub async fn test_ai_model_cmd(
+    holder: State<'_, SharedAiProxyState>,
     provider: String,
     api_key: String,
     base_url: String,
@@ -105,10 +112,11 @@ pub async fn test_ai_model_cmd(
     _port: u16,
 ) -> Result<String, String> {
     use crate::ai_proxy::get_provider_base_url;
-    use reqwest::Client;
     use serde_json::json;
 
-    let client = Client::new();
+    // 复用 state 中共享的 reqwest::Client，避免每次测试连通性都新建 Client
+    // （reqwest::Client 内部基于 Arc，clone 廉价，可共享连接池）
+    let client = holder.client.clone();
     let resolved_base = get_provider_base_url(&provider, &base_url);
     let test_message = "hi";
 

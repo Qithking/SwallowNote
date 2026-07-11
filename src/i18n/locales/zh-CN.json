@@ -18,7 +18,8 @@
   "editor": {
     "untitled": "未命名",
     "preview": "预览",
-    "split": "分屏视图"
+    "split": "分屏视图",
+    "loadFailed": "编辑器加载失败，请关闭标签页重试"
   },
   "fileTree": {
     "newFile": "新建文件",
@@ -61,11 +62,15 @@
     "shortcuts": "快捷键",
     "about": "关于",
     "plugins": "插件",
+    "development": "开发",
+    "development.developerMode": "开发者模式",
+    "development.developerMode.desc": "开启后禁用右键菜单，主要用于调试模式",
     "plugins.configs": "插件配置",
     "plugins.configs.desc": "将所有已安装插件的 storage 打包成一个压缩包进行导出/导入。可用于在重装前备份配置，或在多台机器之间迁移设置。",
     "plugins.configs.export": "导出插件配置",
     "plugins.configs.import": "导入插件配置",
     "plugins.configs.exportSuccess": "已导出 {{count}} 个插件配置",
+    "plugins.configs.exportFailed": "导出插件配置失败",
     "plugins.configs.importSuccess": "已导入 {{imported}}/{{total}} 个插件配置；跳过 {{skipped}} 个",
     "plugins.configs.importNone": "压缩包中没有可导入的条目",
     "plugins.configs.versionMismatch": "压缩包来自 SwallowNote v{{bundleVersion}}（schema v{{bundleSchema}}），当前构建期望 schema v{{expected}}",
@@ -78,6 +83,8 @@
     "general.closeWithoutExit.desc": "关闭窗口后应用继续在后台运行，可通过托盘图标退出",
     "general.language": "语言设置",
     "general.language.desc": "切换界面显示语言，重启后生效",
+    "general.language.en": "English",
+    "general.language.zhCN": "中文（简体）",
     "general.noteWidth": "默认笔记宽度",
     "general.noteWidth.desc": "选择编辑器默认内容区域宽度布局",
     "general.noteWidth.normal": "正常",
@@ -296,7 +303,8 @@
     "success": "成功",
     "no": "否",
     "yes": "是",
-    "settings": "设置"
+    "settings": "设置",
+    "retry": "重试"
   },
   "activityBar": {
     "explorer": "资源管理器",
@@ -338,8 +346,10 @@
     "copyPath": "复制路径",
     "copyRelativePath": "复制相对路径",
     "showInExplorer": "在文件资源管理器中显示",
-    "revealInTree": "在文件树中定位"
-  },
+"revealInTree": "在文件树中定位",
+"refresh": "刷新",
+"refreshConfirm": "该文件有未保存的修改，刷新将丢弃本地修改并重新从磁盘加载，确定继续吗？"
+},
   "fileTree": {
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
@@ -528,15 +538,20 @@
     "passwordOrToken": "密码/访问令牌",
     "passwordPlaceholder": "请输入密码或 Personal Access Token",
     "pushWithCredential": "验证并推送",
+    "pullWithCredential": "验证并拉取",
     "rememberCredential": "记住凭证",
+    "forgetCredential": "忘记凭证",
+    "forgetCredentialConfirm": "确定要清除 {{repo}} 的已保存凭证吗？",
+    "forgetCredentialSuccess": "凭证已清除",
+    "forgetCredentialFailed": "清除凭证失败: {{error}}",
     "scanning": "扫描中...",
     "scanningPath": "扫描 {{path}}...",
     "pullSuccess": "已拉取 {{count}} 个仓库",
     "pullResult": "拉取完成：成功 {{success}} 个，失败 {{fail}} 个",
     "pullConflict": "仓库 {{repos}} 存在合并冲突，请手动解决冲突后再同步",
-    "forcePush": "强制同步",
+    "forcePush": "强制推送",
     "forcePushDesc": "强制推送本地提交到远程仓库，覆盖远程历史",
-    "forcePull": "强制刷新",
+    "forcePull": "强制拉取",
     "forcePullDesc": "强制拉取远程内容覆盖到本地，丢弃本地所有未提交的修改",
     "forcePushConfirm": "确定要强制推送 {{repo}} 吗？这将覆盖远程仓库的历史记录。",
     "forcePullConfirm": "确定要强制刷新 {{repo}} 吗？这将丢弃本地所有未提交的修改，以远程内容为准。",
@@ -725,7 +740,14 @@
       "cloneCompleted": "克隆完成",
       "cloneFailed": "克隆失败",
       "targetPathExists": "目标路径已存在",
-      "submoduleUncommitted": "子模块内部有未提交的变更，请先在子模块内提交"
+      "submoduleUncommitted": "子模块内部有未提交的变更，请先在子模块内提交",
+      "invalidRepoPath": "无效的仓库路径",
+      "invalidPathEncoding": "无效的路径编码",
+      "invalidRelativePath": "无效的相对路径",
+      "fetchFailed": "拉取失败",
+      "checkLocalChangesFailed": "检查本地改动失败",
+      "checkoutFileFailed": "检出文件失败",
+      "terminatedBySignal": "被信号终止"
     }
   },
   "tray": {

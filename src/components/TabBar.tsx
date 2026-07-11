@@ -3,7 +3,8 @@
  * Shows file tabs with dirty/saved status indicators
  */
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
-import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal, Crosshair } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { X, FileText, ChevronLeft, ChevronRight, MoreHorizontal, Crosshair, RefreshCw } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -12,10 +13,12 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { useEditorStore, useFileTreeStore, useWorkspaceStore, useUIStore } from '@/stores'
+import { getPluginTabRuntime } from '@/stores/editor'
 import { invoke } from '@tauri-apps/api/core'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
+import { flushAllEditors } from '@/lib/editor-flush'
 
 /** Fields from EditorTab that TabBar actually needs for rendering.
  *  Excludes `content` (the only field that changes on every keystroke)
@@ -27,15 +30,24 @@ type TabBarItem = {
   isEdited: boolean
   path: string
   isLoading: boolean
-  type: 'file' | 'diff' | 'conflict'
+  type: 'file' | 'diff' | 'conflict' | 'plugin'
   isContentLoaded: boolean
 }
 
+/** 渲染 tab 图标：插件 tab 使用 pluginTabRuntime 中注册的 icon，其他使用默认 FileText。
+ *  插件 icon 由插件提供（ReactNode），用 span 包裹以应用间距和尺寸约束。 */
+function renderTabIcon(tab: TabBarItem, iconClassName: string): ReactNode {
+  if (tab.type === 'plugin') {
+    const icon = getPluginTabRuntime(tab.id)?.icon
+    if (icon) {
+      return <span className={cn('shrink-0 inline-flex items-center', iconClassName)}>{icon}</span>
+    }
+  }
+  return <FileText size={14} className={cn('shrink-0', iconClassName)} />
+}
+
 function TabBar() {
-  // Subscribe to a string "fingerprint" of tab metadata (excluding
-  // `content`).  Because it's a primitive, Zustand's default Object.is
-  // equality correctly prevents re-renders when only `content` changes.
-  // The actual TabBarItem[] is derived via useMemo below.
+  // 订阅 tab 元数据指纹，content 变化不重渲染
   const tabsFingerprint = useEditorStore((s) => {
     let fp = ''
     for (const t of s.tabs) {
@@ -45,9 +57,7 @@ function TabBar() {
     }
     return fp
   })
-  // Derive TabBarItem[] from the store's current state, only re-creating
-  // the array when the fingerprint changes (i.e. when tab metadata — not
-  // content — changes).
+  // 由指纹派生 TabBarItem[]，仅元数据变化时重建
   const tabs = useMemo<TabBarItem[]>(() =>
     useEditorStore.getState().tabs.map((t) => ({
       id: t.id,
@@ -86,6 +96,15 @@ function TabBar() {
       return path.substring(rootPath.length + 1)
     }
     return path
+  }
+
+  /**
+   * 路径左省略：保留末尾 max 字符（覆盖文件名 + 末级目录），过长时前缀用 … 代替。
+   * 纯 JS 截断，不依赖浏览器 bidi 行为，避免与中英文/数字混合时被重排隐藏。
+   */
+  const truncatePath = (path: string, max: number = 40): string => {
+    if (path.length <= max) return path
+    return '…' + path.slice(path.length - max + 1)
   }
 
   const confirmCloseDirty = (dirtyTabs: TabBarItem[]): boolean => {
@@ -140,6 +159,14 @@ function TabBar() {
     } catch {
       showToast(t('tabBar.openFailed'))
     }
+  }
+
+  const handleRefresh = (tab: TabBarItem) => {
+    // diff/conflict tab 无文件内容，不刷新
+    if (tab.type === 'diff' || tab.type === 'conflict') return
+    // 有未保存改动时提示，刷新会丢弃
+    if (tab.isDirty && !confirm(t('tabBar.refreshConfirm'))) return
+    useEditorStore.getState().loadTabContent(tab.id, 0, true)
   }
 
   const handleRevealInTree = (tab: TabBarItem) => {
@@ -246,11 +273,10 @@ function TabBar() {
     fileTreeStore.clearMultiSelection()
     fileTreeStore.setLastClickedPath(tab.path)
 
-    // 工作区模式下折叠非活动文件夹，单文件夹模式仅 revealPath
+    // 切换 tab 时不折叠其他已展开目录，仅展开目标文件路径并选中
     if (workspaceMode === 'workspace' && workspaceFolders.length > 0) {
       const folder = workspaceFolders.find(f => tab.path.startsWith(f))
       if (folder) {
-        fileTreeStore.collapseAllExceptPath(tab.path, folder)
         fileTreeStore.revealPath(tab.path, folder)
       }
     } else if (rootPath) {
@@ -302,17 +328,17 @@ function TabBar() {
     }
   }
 
-  const handleTabClick = (tabId: string) => {
+  const handleTabClick = async (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId)
     if (!tab) return
 
+    // 切换前 flush 旧编辑器防抖内容，防止 300ms 窗口内未序列化的编辑丢失
+    await flushAllEditors()
     // Switch tab immediately for better UX
     setActiveTab(tabId)
     scrollToTab(tabId)
 
-    // Load content asynchronously after switching tab
-    // This prevents blocking the UI and avoids race conditions
-    // Check content === undefined to detect unloaded tabs (empty string is valid content)
+    // 切换 tab 后异步加载内容，避免阻塞 UI
     if (!tab.isContentLoaded && !tab.isLoading && tab.type !== 'diff' && tab.type !== 'conflict') {
       // Use setTimeout to ensure tab switch happens first
       setTimeout(() => {
@@ -412,7 +438,7 @@ function TabBar() {
                   )}
 
                   {/* File icon + name */}
-                  <FileText size={14} className="shrink-0 mr-1" />
+                  {renderTabIcon(tab, 'mr-1')}
                   <span className="truncate max-w-[120px]">{tab.name}</span>
 
                   {/* Close button */}
@@ -436,6 +462,16 @@ function TabBar() {
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
                 }}
               >
+                <ContextMenuItem
+                  onClick={() => handleRefresh(tab)}
+                  style={{ color: 'var(--text-secondary)' }}
+                  className="cursor-pointer"
+                  disabled={tab.type === 'diff' || tab.type === 'conflict' || tab.type === 'plugin'}
+                >
+                  <RefreshCw size={12} />
+                  <span>{t('tabBar.refresh')}</span>
+                </ContextMenuItem>
+                <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
                 <ContextMenuItem
                   onClick={() => handleClose(tab)}
                   style={{ color: 'var(--text-secondary)' }}
@@ -471,6 +507,7 @@ function TabBar() {
                   onClick={() => handleCopyPath(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
+                  disabled={tab.type === 'plugin'}
                 >
                   <FileText size={12} />
                   <span>{t('tabBar.copyPath')}</span>
@@ -479,6 +516,7 @@ function TabBar() {
                   onClick={() => handleCopyRelativePath(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
+                  disabled={tab.type === 'plugin'}
                 >
                   <FileText size={12} />
                   <span>{t('tabBar.copyRelativePath')}</span>
@@ -488,6 +526,7 @@ function TabBar() {
                   onClick={() => handleRevealInTree(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
+                  disabled={tab.type === 'plugin'}
                 >
                   <Crosshair size={12} />
                   <span>{t('tabBar.revealInTree')}</span>
@@ -496,6 +535,7 @@ function TabBar() {
                   onClick={() => handleShowInFinder(tab)}
                   style={{ color: 'var(--text-secondary)' }}
                   className="cursor-pointer"
+                  disabled={tab.type === 'plugin'}
                 >
                   <FileText size={12} />
                   <span>{t('tabBar.showInExplorer')}</span>
@@ -543,7 +583,7 @@ function TabBar() {
           <div
             className={cn(
               "absolute top-full right-0 z-50 mt-1",
-              "min-w-[180px] max-h-[300px] overflow-y-auto",
+              "min-w-[260px] max-w-[480px] max-h-[300px] overflow-y-auto",
               "bg-[var(--bg-secondary)] border border-[var(--border-color)]",
               "shadow-lg rounded-md py-1"
             )}
@@ -557,40 +597,54 @@ function TabBar() {
                     handleTabClick(tab.id)
                     setShowMoreMenu(false)
                   }}
+                  title={tab.path}
                   className={cn(
-                    "group flex items-center h-8 px-3 cursor-pointer select-none",
+                    "group flex items-start py-1.5 px-3 cursor-pointer select-none",
                     "text-sm",
                     isActive
                       ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
                       : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                   )}
                 >
-                  {/* Status dot */}
-                  {tab.isEdited && (
-                    tab.isDirty ? (
-                      <span className="w-2 h-2 rounded-full bg-red-500 mr-2 shrink-0" />
-                    ) : (
-                      <span className="w-2 h-2 rounded-full bg-green-500 mr-2 shrink-0" />
-                    )
-                  )}
-
-                  <FileText size={14} className="shrink-0 mr-2" />
-                  <span className="truncate max-w-[200px]">{tab.name}</span>
-
-                  {/* Close button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleTabClose(e, tab.id)
-                    }}
-                    className={cn(
-                      "ml-2 h-4 w-4 flex items-center justify-center rounded-sm shrink-0",
-                      "opacity-0 group-hover:opacity-100",
-                      "hover:bg-[rgba(255,255,255,0.1)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  {/* 状态圆点 */}
+                  <span className="shrink-0 mt-0.5 mr-2 w-2 h-2 flex items-center justify-center">
+                    {tab.isEdited && (
+                      tab.isDirty ? (
+                        <span className="w-2 h-2 rounded-full bg-red-500" />
+                      ) : (
+                        <span className="w-2 h-2 rounded-full bg-green-500" />
+                      )
                     )}
-                  >
-                    <X size={12} />
-                  </button>
+                  </span>
+
+                  <div className="flex-1 min-w-0">
+                    {/* 文件名行 */}
+                    <div className="flex items-center">
+                      {renderTabIcon(tab, 'mr-1.5')}
+                      <span className="truncate">{tab.name}</span>
+                      {/* 关闭按钮 */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleTabClose(e, tab.id)
+                        }}
+                        className={cn(
+                          "ml-auto pl-2 h-5 w-5 flex items-center justify-center rounded-sm shrink-0",
+                          "opacity-0 group-hover:opacity-100",
+                          "hover:bg-[rgba(255,255,255,0.1)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                        )}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    {/* 全路径行：JS 截断保留末尾路径 + 文件名 */}
+                    <div
+                      className="text-xs mt-0.5 truncate"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      {truncatePath(tab.path)}
+                    </div>
+                  </div>
                 </div>
               )
             })}

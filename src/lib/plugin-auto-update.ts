@@ -1,4 +1,4 @@
-/** 插件自动更新（Task 11/G11）。启动时扫描 opted-in 插件，下载安装新版本，toast 提供撤销。best-effort：失败不阻塞启动。 */
+/** 插件自动更新：启动时扫描 opted-in 插件下载新版本 */
 import { toast } from 'sonner'
 import semver from 'semver'
 import type { PluginDefinition, PluginIndex, PluginIndexEntry } from '@/types/plugin'
@@ -57,10 +57,7 @@ export async function runAutoUpdateOnStartup(
     failed: [],
   }
 
-  // 1. Snapshot the opt-in set from the store. The plugin list
-  //    itself is read from the store's `plugins` slice so we
-  //    use the same data the UI is showing (no parallel
-  //    scanPlugins call that could disagree with the manager).
+  // 从 store 读取插件列表，避免与 UI 不一致
   const pluginStore = usePluginStore.getState()
   const optedIn = pluginStore.plugins.filter((p) =>
     pluginStore.getPluginAutoUpdate(p.id),
@@ -70,10 +67,7 @@ export async function runAutoUpdateOnStartup(
     return report
   }
 
-  // 2. Need a configured marketplace repo to check for updates.
-  //    No URL → nothing to do; we deliberately do not throw,
-  //    because the auto-update chain is opt-in and the absence
-  //    of a repo is the common case for fresh installs.
+  // 无仓库 URL 则跳过，不抛错
   const marketStore = usePluginMarketStore.getState()
   const repoUrl = marketStore.repoUrl
   if (!repoUrl) {
@@ -84,8 +78,7 @@ export async function runAutoUpdateOnStartup(
   let index: PluginIndex | null
   try {
     await marketStore.refreshIndex({ background: true })
-    // The background refresh flips `index` inside the store,
-    // so re-read it after the await.
+    // await 后重新读取 index
     index = usePluginMarketStore.getState().index
   } catch (err) {
     console.warn('[auto-update] failed to fetch marketplace index:', err)
@@ -95,9 +88,7 @@ export async function runAutoUpdateOnStartup(
     return report
   }
 
-  // Build a lookup once so we can resolve each opted-in plugin
-  // to its index entry in O(1) instead of scanning the index
-  // for every iteration.
+  // 构建 O(1) 查找表
   const entryById = new Map<string, PluginIndexEntry>()
   for (const entry of index.plugins) {
     entryById.set(entry.id, entry)
@@ -107,9 +98,7 @@ export async function runAutoUpdateOnStartup(
   for (const plugin of optedIn) {
     const entry = entryById.get(plugin.id)
     if (!entry) {
-      // Opted in but not in the marketplace — nothing to do.
-      // (Could be a locally-built plugin; auto-update is only
-      // meaningful for marketplace-published ones.)
+      // opted-in 但不在市场，跳过
       continue
     }
     // 本地 semver 比较避免 IPC 往返。
@@ -207,8 +196,7 @@ export async function undoAutoUpdate(args: {
         }),
       },
     )
-    // Re-scan so the manager reflects the rolled-back version
-    // and any state that depended on the new version is reset.
+    // 回滚后重新扫描
     void refreshInstalledPlugins()
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
@@ -236,10 +224,7 @@ export function isNewerVersion(remote: string, local: string): boolean {
     try {
       return semver.gt(r, l)
     } catch {
-      // Defensive: semver.gt should not throw when both inputs
-      // are valid, but if it ever does, fall through to the
-      // string-based fallback rather than crashing the
-      // auto-update chain.
+      // semver 异常时回退字符串比较
     }
   }
   // semver 解析失败时回退字符串比较。

@@ -1,21 +1,4 @@
-/**
- * Custom provider — generic HTTP endpoint with templated body and
- * dot-path response parsing.
- *
- * Reads from `settings.customEndpoint` / `customMethod` /
- * `customHeaders` / `customBodyTemplate` / `customResponseUrlPath`.
- *
- * - `customHeaders`: multi-line, each line `Key: Value`; merged on
- *   top of a default `Content-Type: application/json` header (or
- *   left untouched when the body is empty).
- * - `customBodyTemplate`: supports placeholders `{filename}`,
- *   `{base64}`, `{mime}`, `{size}`. If `{base64}` is present the
- *   body is treated as a JSON object string and a `base64` field
- *   is computed; otherwise the placeholder is replaced literally.
- * - `customResponseUrlPath`: dot-separated JSONPath, e.g. `data.url`
- *   or `result.image`. The plugin walks the parsed response and
- *   returns the string at that path.
- */
+/** Custom provider：通用 HTTP 端点，模板化请求体 + 点路径响应解析 */
 import type { AllSettings, UploadResult, UploadProgressHandler } from '../types'
 import type { PicgoProvider } from './types'
 
@@ -33,7 +16,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return typeof btoa === 'function' ? btoa(binary) : binary
 }
 
-/** Parse `Key: Value` lines into a headers object. */
+/** 解析 `Key: Value` 行为 headers 对象 */
 function parseHeaders(raw: string | undefined): Record<string, string> {
   const out: Record<string, string> = {}
   if (!raw) return out
@@ -99,9 +82,7 @@ export const customProvider: PicgoProvider = {
       .replace(/\{size\}/g, String(file.size))
 
     const headers = parseHeaders(settings.customHeaders)
-    // Default to JSON when the body uses placeholders but no
-    // Content-Type is supplied. Skip when the body is empty
-    // (caller may want to send a raw binary upload).
+    // 占位符请求体默认 JSON；空请求体时跳过
     if (!headers['Content-Type'] && !headers['content-type'] && hasBase64Placeholder(template)) {
       headers['Content-Type'] = 'application/json'
     }
@@ -123,8 +104,7 @@ export const customProvider: PicgoProvider = {
       throw new Error('Custom: 鉴权失败，请检查请求头配置')
     }
 
-    // Try JSON first, fall back to text (some endpoints return
-    // plain text URLs in the body).
+    // 优先 JSON，失败则回退为纯文本
     let text: string
     try {
       text = await resp.text()
@@ -136,7 +116,7 @@ export const customProvider: PicgoProvider = {
     try {
       parsed = JSON.parse(text)
     } catch {
-      // not JSON; leave parsed as the raw text
+      // 非 JSON，保留原始文本
     }
 
     if (!resp.ok) {

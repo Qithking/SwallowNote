@@ -55,7 +55,7 @@ export interface CloneState {
   /** Reset all clone state back to idle. */
   resetCloneState: () => void
 
-  // ---- internal helpers driven by the global event listener ----
+  // ---- 内部 helper（由全局事件监听器驱动）----
   _setStarted: (url?: string, localPath?: string) => void
   _setProgress: (message: string, percent: number | null) => void
   _setComplete: () => void
@@ -66,9 +66,15 @@ export interface CloneState {
 let _cancelled = false
 
 let _listenerInitialized = false
+/** 保存 git-clone-progress 监听器的 unlisten 函数，供 dispose 时调用。 */
+let _cloneListenerUnlisten: (() => void) | null = null
+/** 标记是否已 dispose：防止 listen Promise 延迟 resolve 后赋值已释放的 unlisten */
+let _listenerDisposed = false
+
 function initCloneProgressListener() {
   if (_listenerInitialized) return
   _listenerInitialized = true
+  _listenerDisposed = false
 
   listen<{ status: string; message: string; percent?: number; url?: string; local_path?: string }>(
     'git-clone-progress',
@@ -85,7 +91,33 @@ function initCloneProgressListener() {
         store._setError(payload.message)
       }
     },
-  )
+  ).then((unlisten) => {
+    // dispose 在 Promise resolve 前已调用：立即释放监听器，避免泄漏
+    if (_listenerDisposed) {
+      try { unlisten() } catch { /* noop */ }
+      return
+    }
+    _cloneListenerUnlisten = unlisten
+  }).catch((err) => {
+    console.error('[clone] failed to register progress listener:', err)
+  })
+}
+
+/**
+ * 释放 git-clone-progress 全局监听器。模块级单例通常无需手动调用，
+ * 仅供测试或显式销毁场景使用，避免监听器泄漏。
+ */
+export function disposeCloneListener(): void {
+  _listenerDisposed = true
+  if (_cloneListenerUnlisten) {
+    try {
+      _cloneListenerUnlisten()
+    } catch (err) {
+      console.error('[clone] unlisten failed:', err)
+    }
+    _cloneListenerUnlisten = null
+  }
+  _listenerInitialized = false
 }
 
 /**
@@ -107,7 +139,7 @@ async function initFromBackend() {
       })
     }
   } catch {
-    // Backend command might not be registered yet; ignore.
+    // 后端命令可能未注册，忽略
   }
 }
 
@@ -153,8 +185,7 @@ export const useCloneStore = create<CloneState>((set, get) => ({
         await openFolder(clonedPath)
       }
 
-      // Clear the "completed" flag after a short delay so the UI can
-      // briefly show the success state.
+      // 延迟清除 completed 标志，让 UI 短暂显示成功态
       setTimeout(() => {
         get().resetCloneState()
       }, 3000)
@@ -202,10 +233,7 @@ export const useCloneStore = create<CloneState>((set, get) => ({
   },
 
   _setStarted: (url, localPath) => {
-    // If isCloning is already true the values are already set by
-    // startClone().  If it's false we're recovering from a page
-    // refresh — restore isCloning and the url/local_path from the
-    // event payload (or from the backend status query).
+    // 已在克隆中则仅更新进度；否则为刷新恢复，从事件恢复状态
     set((state) => {
       if (state.isCloning) {
         return { cloneProgress: i18n.t('recent.cloning'), cloneError: '', clonePercent: null }
@@ -223,8 +251,7 @@ export const useCloneStore = create<CloneState>((set, get) => ({
   },
 
   _setProgress: (message, percent) => {
-    // Recover isCloning if this is a progress event arriving after a
-    // page refresh (the store was reset but the backend is still running).
+    // 刷新恢复：进度事件到达时恢复 isCloning
     set({
       isCloning: true,
       cloneProgress: message,
@@ -242,7 +269,6 @@ export const useCloneStore = create<CloneState>((set, get) => ({
   },
 }))
 
-// Initialise the global event listener and query the backend as soon as
-// the module is imported.
+// 模块导入时初始化全局事件监听并查询后端
 initCloneProgressListener()
 initFromBackend()

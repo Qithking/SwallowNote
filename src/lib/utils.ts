@@ -17,11 +17,14 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 }
 
 export function formatBytes(bytes: number, decimals = 2): string {
+  // 负值或非有限值（NaN/Infinity）无法表达为合法字节数，统一以占位符返回
+  if (!Number.isFinite(bytes) || bytes < 0) return '—'
   if (bytes === 0) return '0 B'
   const k = 1024
   const dm = decimals < 0 ? 0 : decimals
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  // 用 Math.min 防止超大值导致 i 越界（>=1PB 时回退到最大单位 PB）
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
 }
 

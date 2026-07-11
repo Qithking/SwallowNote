@@ -19,7 +19,7 @@ export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' |
  * `SettingsSection` type in `Settings/SettingsView.tsx`.
  * `null` means "no specific section requested" (default first paint).
  */
-export type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | null
+export type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | 'development' | null
 
 /** Request from editor context menu to trigger an AI action */
 export interface AiContextMenuRequest {
@@ -506,6 +506,8 @@ export interface UIState {
   deleteCustomTheme: (id: string) => void
   renameCustomTheme: (id: string, name: string) => void
   updateCustomThemeColor: (id: string, themeType: 'light' | 'dark', key: keyof CustomThemeColors, value: string) => void
+  developerMode: boolean
+  setDeveloperMode: (enabled: boolean) => void
   loadSettings: () => Promise<void>
 }
 
@@ -552,22 +554,17 @@ export const useUIStore = create<UIState>((set, get) => ({
   customThemes: [...BUILT_IN_THEMES],
   activeLightCustomThemeId: 'builtin-light',
   activeDarkCustomThemeId: 'builtin-dark',
+  developerMode: false,
   setTheme: (theme) => {
     set({ theme })
     saveAppSettings({ theme })
-    // Plugins only need to know the resolved theme identifier; they
-    // shouldn't need to read the raw `theme` (which can be 'system')
-    // to compute the actual dark/light state. We emit only the
-    // persisted identifier so consumers can mirror localStorage if
-    // they want to.
+    // 通知插件已解析的主题标识（不暴露原始 system）
     queueMicrotask(() => emitThemeChanged(theme))
   },
   setThemeColor: (color) => {
     set({ themeColor: color })
     saveAppSettings({ themeColor: color })
-    // Colour change goes through `settings:change` rather than
-    // `theme:change` because plugins tracking `theme:change` care
-    // about the light/dark mode, not the accent colour.
+    // 颜色变更走 settings:change（theme:change 仅关注明暗）
     queueMicrotask(() => emitSettingChanged('themeColor', color))
   },
   setSidebarView: (view) => set({ sidebarView: view }),
@@ -621,9 +618,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ autoStart: value })
     saveAppSettings({ autoStart: String(value) })
     setAutoStartEnabled(value).catch((err) => {
-      // OS-level registration (LaunchAgent / registry) failed — the
-      // UI is now ahead of reality. Roll back the optimistic state
-      // and surface the error so the user isn't silently misled.
+      // OS 注册失败，回滚乐观状态并提示错误
       console.error('[ui] setAutoStartEnabled failed', err)
       toast.error(i18n.t('settings.general.autoStart.failed'), { description: String(err) })
       get().setAutoStart(!value)
@@ -698,9 +693,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       saveAppSettings({ aiApiKey: encrypted })
       const { aiProvider, aiBaseUrl, aiModel, aiPort } = useUIStore.getState()
       if (aiProvider) {
-        // Restart failure means the new key is persisted but chat
-        // still proxies through the old config — surface this so
-        // the user knows the change hasn't taken effect yet.
+        // 重启失败：新 key 已持久化但代理仍用旧配置，需提示
         restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch((err) => {
           console.error('[ui] restartAiProxy failed', err)
           toast.error(i18n.t('settings.ai.restartFailed'), { description: String(err) })
@@ -926,6 +919,11 @@ export const useUIStore = create<UIState>((set, get) => ({
     }))
     saveAppSettings({ customThemes: JSON.stringify(useUIStore.getState().customThemes) })
   },
+  setDeveloperMode: (value) => {
+    set({ developerMode: value })
+    saveAppSettings({ developerMode: String(value) })
+    queueMicrotask(() => emitSettingChanged('developerMode', value))
+  },
   loadSettings: async () => {
     try {
       const s = await getAppSettings()
@@ -1063,6 +1061,7 @@ export const useUIStore = create<UIState>((set, get) => ({
         customThemes,
         activeLightCustomThemeId: s.activeLightCustomThemeId || 'builtin-light',
         activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',
+        developerMode: s.developerMode === 'true',
       })
     } catch {
       // DB not ready, use defaults

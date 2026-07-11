@@ -1,16 +1,4 @@
-/**
- * Filename strategy.
- *
- * - `original`: use the user-provided filename unchanged.
- * - `uuid`: replace the basename with a v4 UUID, keep the
- *   extension. Collision rate is negligible (~1 in 2^122).
- *   Uses the browser's built-in `crypto.randomUUID()` (no
- *   external dep — host can't resolve bare `uuid` imports).
- * - `timestamp`: prefix with `YYYY-MM-DDTHHmmssZ-` (colons
- *   stripped to keep Windows-friendly names) and append the
- *   original basename. Useful for humans scanning a flat
- *   directory listing.
- */
+/** 文件名策略：original/uuid/timestamp */
 import type { FilenameStrategy } from '../types'
 
 function getExtension(filename: string): string {
@@ -19,9 +7,7 @@ function getExtension(filename: string): string {
 }
 
 function buildTimestamp(): string {
-  // YYYY-MM-DDTHHmmssZ — the host provider's filesystem is
-  // happier with the colon-free form on Windows, hence the
-  // explicit re-format.
+  // YYYY-MM-DDTHHmmssZ，避免冒号以兼容 Windows
   const d = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
   return (
@@ -34,10 +20,7 @@ function uuidv4(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
   }
-  // Last-resort fallback for environments without
-  // crypto.randomUUID (very old webviews). Math.random is
-  // not cryptographically secure, but for filename
-  // uniqueness it is more than sufficient.
+  // 无 crypto.randomUUID 时的回退方案
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0
     const v = c === 'x' ? r : (r & 0x3) | 0x8

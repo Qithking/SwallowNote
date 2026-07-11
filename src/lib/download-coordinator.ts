@@ -1,15 +1,4 @@
-/**
- * 远程图片下载协调器（全局单例）。
- *
- * 设计目标：
- * 1. **多文件合并进度**：所有并发下载任务共享同一个 toast，按全局总进度更新文案。
- * 2. **即时替换 URL**：每下载成功 1 张图片，后端立即通过
- *    `remote-image-download-item-done` 事件通知前端，前端立即 `editor.updateBlock`，
- *    不必等待整批 invoke 返回。
- *
- * 一次 enqueueBatch 对应一次后端 download_remote_images 调用。
- * 多文件/多次入队会启动多个 invoke 并行执行，但通过协调器合并到同一个 toast。
- */
+/** 远程图片下载协调器（全局单例） */
 import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { downloadRemoteImages, type RemoteImageResult } from './tauri'
@@ -53,22 +42,50 @@ class DownloadCoordinator {
   private failedCount = 0
   private bytesDownloaded = 0
   private startedAt = 0
-  /** url → 应用回调上下文数组（同一 URL 可能被多个 block 引用，需逐个替换）。 */
+  /** url → 回调上下文数组 */
   private urlMap: Map<string, ApplyContext[]> = new Map()
   /** 已处理过的 URL（防止 item-done + results 重复计数）。 */
   private processedUrls: Set<string> = new Set()
   private listenersRegistered = false
+  /** 保存已注册监听器的 unlisten 函数，dispose 时统一调用。 */
+  private unlistenFns: Array<() => void> = []
   /** 当前正在飞行的后端 invoke 任务数。 */
   private inFlight = 0
+  /** busy 状态变更订阅者集合（事件驱动，替代轮询）。 */
+  private busyListeners: Set<() => void> = new Set()
+  /** 上一次的 busy 状态，用于检测变化避免重复通知。 */
+  private wasBusy = false
 
   constructor() {
-    // 应用启动即注册全局事件监听，避免第一次点击时监听器尚未就绪导致事件丢失。
+    // 启动即注册监听，避免首点丢事件
     this.ensureListeners()
   }
 
   /** 是否有正在飞行的下载任务（用于 Toolbar 禁用按钮）。 */
   get isBusy(): boolean {
     return this.inFlight > 0
+  }
+
+  /** 订阅 busy 状态变化 */
+  onBusyChange(callback: () => void): () => void {
+    this.busyListeners.add(callback)
+    return () => {
+      this.busyListeners.delete(callback)
+    }
+  }
+
+  /** 检测 busy 状态是否变化，变化时通知所有订阅者。 */
+  private notifyBusyChange() {
+    const isBusy = this.inFlight > 0
+    if (isBusy === this.wasBusy) return
+    this.wasBusy = isBusy
+    for (const cb of this.busyListeners) {
+      try {
+        cb()
+      } catch (err) {
+        console.error('[DownloadCoordinator] busy listener failed:', err)
+      }
+    }
   }
 
   /** 将已下载字节数与耗时格式化为速度字符串。 */
@@ -97,7 +114,7 @@ class DownloadCoordinator {
     this.listenersRegistered = true
 
     // 监听单张完成事件：成功时立即替换 block URL，并即时刷新进度
-    await listen<ItemDonePayload>(
+    const unlistenItemDone = await listen<ItemDonePayload>(
       'remote-image-download-item-done',
       (e) => {
         const { url, ok, relative_path, file_name } = e.payload
@@ -128,9 +145,10 @@ class DownloadCoordinator {
         }
       }
     )
+    this.unlistenFns.push(unlistenItemDone)
 
     // 监听进度事件：主要用于刷新已下载字节数
-    await listen<ProgressPayload>(
+    const unlistenProgress = await listen<ProgressPayload>(
       'remote-image-download-progress',
       (e) => {
         const { bytes_downloaded, phase } = e.payload
@@ -140,14 +158,23 @@ class DownloadCoordinator {
         }
       }
     )
+    this.unlistenFns.push(unlistenProgress)
   }
 
-  /**
-   * 排队一批图片（来自同一文件）。一次 invoke。
-   * @param items 当前批次的图片项（每个含 url + blockId）
-   * @param blockContexts 同一文件中所有图片 block 的 url → { editor, blockId } 映射
-   * @param ctx 文件上下文：targetDir / fileDir / rootPath
-   */
+  /** 释放全局事件监听器 */
+  dispose(): void {
+    for (const fn of this.unlistenFns) {
+      try {
+        fn()
+      } catch (err) {
+        console.error('[DownloadCoordinator] unlisten failed:', err)
+      }
+    }
+    this.unlistenFns = []
+    this.listenersRegistered = false
+  }
+
+  /** 排队一批图片，一次 invoke */
   enqueueBatch(
     items: BatchItem[],
     blockContexts: Map<string, ApplyContext[]>,
@@ -155,7 +182,7 @@ class DownloadCoordinator {
   ) {
     if (items.length === 0) return
 
-    // 1. 第一次 enqueue 时建立 toast + 启动时间
+    // 第一次 enqueue 时建立 toast
     if (this.toastId === null) {
       this.toastId = toast.loading('正在准备下载…')
       this.startedAt = Date.now()
@@ -166,9 +193,7 @@ class DownloadCoordinator {
       this.processedUrls.clear()
     }
 
-    // 2. 累积 urlMap + 统计新 URL 数量（跨批次去重）
-    //    - 新 URL：写入 urlMap，加入待下载列表，累加 total
-    //    - 已入队 URL（来自之前批次）：仅追加 block 上下文，不重复发起 IPC 调用
+    // 累积 urlMap 并区分新/旧 URL
     let newUrlCount = 0
     const itemsToDownload: BatchItem[] = []
     for (const item of items) {
@@ -193,6 +218,7 @@ class DownloadCoordinator {
 
     // 3. 启动后端调用（fire-and-forget）
     this.inFlight++
+    this.notifyBusyChange()
     this.runBatch(itemsToDownload, ctx)
   }
 
@@ -214,12 +240,12 @@ class DownloadCoordinator {
         })
       } catch (err) {
         console.error('[DownloadCoordinator] invoke failed:', err)
-        // invoke 整体失败：本批所有图片都算失败，并弹出可见错误提示
+        // invoke 失败：本批图片算失败并提示
         const message = err instanceof Error ? err.message : String(err)
         toast.error(`远程图片下载失败：${message}`)
       }
 
-      // 累加 done：优先使用 invoke 返回的 results，补充尚未被 item-done 处理的 URL
+      // 累加 done，补充 item-done 未处理的
       if (results.length > 0) {
         for (const r of results) {
           if (!this.processedUrls.has(r.url)) {
@@ -236,6 +262,7 @@ class DownloadCoordinator {
       }
 
       this.inFlight--
+      this.notifyBusyChange()
       this.updateToast()
       this.maybeFinish()
     })()

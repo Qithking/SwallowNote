@@ -1,36 +1,45 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
-import { copyFileSync, mkdirSync, existsSync } from 'node:fs'
+import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 
-/**
- * Two modes:
- *  - `vite` (dev): runs the standalone preview at http://localhost:5173
- *  - `vite build`: emits `dist/index.js` (ES module) + `dist/manifest.json`
- *    that can be zipped and installed into SwallowNote.
- *
- * Uses ES module format so that the host's `import()` can resolve
- * `module.default` as the plugin manifest object.
- * React and ReactDOM are marked as external so the plugin uses the
- * host's React instance (exposed as window.React / window.ReactDOM /
- * window.ReactJSXRuntime). Bundling a second copy causes "multiple
- * React instances" crashes because hooks rely on a shared internal
- * dispatcher.
- */
+/** 插件模板构建配置：dev 预览 + 生产 ES 模块，React external */
 export default defineConfig(({ mode }) => {
   if (mode === 'production') {
     return {
       plugins: [
         react(),
-        // Copy manifest.json from src/plugin/ → dist/ after build
         {
-          name: 'copy-manifest',
+          name: 'inject-manifest-comment',
           closeBundle() {
             if (!existsSync('dist')) mkdirSync('dist', { recursive: true })
             copyFileSync(
               resolve(__dirname, 'src/plugin/manifest.json'),
               resolve(__dirname, 'dist/manifest.json')
             )
+            // 注入 // @swallow-manifest 注释到 index.js 头部，供 Rust 端解析插件元数据
+            const indexPath = resolve(__dirname, 'dist/index.js')
+            const manifestPath = resolve(__dirname, 'src/plugin/manifest.json')
+            if (existsSync(indexPath) && existsSync(manifestPath)) {
+              const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
+              // snake_case 字段名匹配 Rust 端 PluginMetadataRust
+              const meta = {
+                id: manifest.id,
+                name: manifest.name,
+                description: manifest.description || '',
+                version: manifest.version || '',
+                author: manifest.author || '',
+                published_at: manifest.publishedAt || '',
+                icon_position: manifest.iconPosition,
+                content_position: manifest.contentPosition,
+                order: manifest.order ?? 100,
+                enabled: manifest.enabled ?? true,
+                has_backend: manifest.hasBackend ?? false,
+              }
+              const comment = `// @swallow-manifest ${JSON.stringify(meta)}\n`
+              const content = readFileSync(indexPath, 'utf-8')
+              writeFileSync(indexPath, comment + content)
+            }
           },
         },
       ],
@@ -46,21 +55,14 @@ export default defineConfig(({ mode }) => {
           fileName: () => 'index.js',
         },
         rollupOptions: {
-          // React and ReactDOM must be external so the plugin uses the
-          // host's React instance (exposed as window.React / window.ReactDOM /
-          // window.ReactJSXRuntime). Bundling a second copy causes "multiple
-          // React instances" crashes because hooks rely on a shared internal
-          // dispatcher.
-          // sonner / react-i18next / i18next are also provided by the host
-          // as window.SonnerToast / window.ReactI18Next.
+          // React 等需 external，使用宿主实例避免多实例冲突
           external: [
             'react', 'react-dom', 'react-dom/client',
             'react/jsx-runtime', 'react/jsx-dev-runtime',
             'sonner', 'react-i18next', 'i18next',
           ],
           output: {
-            // Disable code splitting — the plugin loader uses blob URLs
-            // which cannot resolve relative chunk imports.
+            // 禁用代码分割，blob URL 无法解析分块
             inlineDynamicImports: true,
           },
         },

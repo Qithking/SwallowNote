@@ -2,12 +2,77 @@
  * Editor Store - Manages editor state
  */
 import { create } from 'zustand'
+import { subscribeWithSelector } from 'zustand/middleware'
+import type { ReactNode } from 'react'
 import { loadFileContent } from '@/lib/api'
 import { writeFile, gitAutoCommit } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
 import { countWords } from '@/lib/utils/wordCount'
 import { parseFrontmatter, serializeFrontmatter, stripFrontmatter } from '@/lib/utils/frontmatter'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
+
+/**
+ * 编辑器工具栏配置：控制各工具栏项的显示/隐藏。
+ * 未设置的字段默认显示（保持向后兼容）。插件 tab 通过此配置隐藏不适用的功能。
+ */
+export interface EditorToolbarConfig {
+  /** 复制完整路径按钮（默认 true） */
+  copyPath?: boolean
+  /** 在文件夹中显示按钮（默认 true） */
+  openLocation?: boolean
+  /** 打开历史记录按钮（默认 true） */
+  openHistory?: boolean
+  /** 笔记属性面板按钮（默认 true） */
+  noteProperties?: boolean
+  /** 大纲/目录按钮（默认 true） */
+  directory?: boolean
+  /** 源码视图切换按钮（默认 true） */
+  sourceView?: boolean
+  /** 宽窄模式切换按钮（默认 true） */
+  noteWidth?: boolean
+  /** 内容布局按钮（默认 true） */
+  contentLayout?: boolean
+  /** 下载远程图片按钮（默认 true） */
+  downloadRemoteImages?: boolean
+  /** 左侧文件路径显示（默认 true） */
+  showFilePath?: boolean
+  /** 外部变更警告（默认 true） */
+  externalChangeWarning?: boolean
+  /** 冲突指示器（默认 true） */
+  conflictIndicator?: boolean
+}
+
+/**
+ * 插件 tab 运行时数据：不参与序列化，进程内有效。
+ * 存储 icon（ReactNode）和 onChange 回调等不可序列化的数据。
+ */
+export interface PluginTabRuntime {
+  /** tab 标题图标（替换默认 FileText） */
+  icon?: ReactNode
+  /** 内容变化回调：宿主通过此回调将编辑器内容传回插件 */
+  onChange?: (content: string) => void
+}
+
+/** 插件 tab 运行时数据注册表：tabId → 运行时数据 */
+const pluginTabRuntime = new Map<string, PluginTabRuntime>()
+
+/** 注册插件 tab 运行时数据（icon、onChange 回调） */
+export function registerPluginTabRuntime(tabId: string, runtime: PluginTabRuntime) {
+  pluginTabRuntime.set(tabId, runtime)
+}
+
+/** 注销插件 tab 运行时数据（tab 关闭时调用） */
+export function unregisterPluginTabRuntime(tabId: string) {
+  pluginTabRuntime.delete(tabId)
+}
+
+/** 获取插件 tab 运行时数据（供 TabBar/EditorToolbar/Editor 使用） */
+export function getPluginTabRuntime(tabId: string): PluginTabRuntime | undefined {
+  return pluginTabRuntime.get(tabId)
+}
+
+/** 最大同时打开的 tab 数量上限：超出时强制关闭最旧的非活动、非 dirty 的 tab */
+const MAX_OPEN_TABS = 20
 
 export interface EditorTab {
   id: string
@@ -25,26 +90,30 @@ export interface EditorTab {
     line: number
     column: number
   }
-  // View mode for markdown files: 'preview' (BlockNote) or 'source' (CodeMirror)
+  // 视图模式：'preview'(BlockNote) 或 'source'(CodeMirror)
   viewMode: 'preview' | 'source'
-  // Tab type: 'file' for normal files, 'diff' for git diff view, 'conflict' for conflict resolution
-  type?: 'file' | 'diff' | 'conflict'
+  // tab 类型：file/diff/conflict/plugin
+  type?: 'file' | 'diff' | 'conflict' | 'plugin'
   // For diff tabs: commit hash and diff content
   commitHash?: string
   diffContent?: string
   // For conflict tabs: conflict info
   conflictRepoPath?: string
   conflictRepoName?: string
-  // For conflict tabs: whether to auto-hide the file tree on open
+  // 冲突 tab：打开时是否自动隐藏文件树
   conflictAutoHideTree?: boolean
-  // For conflict tabs: the currently selected conflict file (relative path within repo)
+  // 冲突 tab：当前选中的冲突文件（仓库内相对路径）
   conflictSelectedFile?: string
-  // For conflict tabs: cursor line number in the local editor
+  // 冲突 tab：本地编辑器光标行号
   conflictCursorLine?: number
   /** 缓存的 frontmatter 数据（仅 .md 文件） */
   frontmatter?: NoteFrontmatter
   /** 属性面板编辑导致的脏状态，与编辑器内容脏状态独立 */
   frontmatterDirty?: boolean
+  /** 插件 tab：标识来源插件 ID（如 'com.swallownote.secret-disk'） */
+  pluginId?: string
+  /** 插件 tab：工具栏显示配置（未设置的字段默认显示） */
+  toolbarConfig?: EditorToolbarConfig
 }
 
 export interface EditorState {
@@ -87,19 +156,47 @@ export interface EditorState {
   removeCategoryFromTabs: (path: string) => void
 }
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+/** Auto-close the noteProperties panel when all tabs are closed. */
+function autoCloseNoteProperties() {
+  if (useEditorStore.getState().activeTabId !== null) return
+  queueMicrotask(async () => {
+    try {
+      const { useUIStore } = await import('@/stores/ui')
+      if (useUIStore.getState().rightPanelType === 'noteProperties') {
+        useUIStore.getState().setRightPanelType(null)
+      }
+    } catch { /* ignore — may fail in test environment */ }
+  })
+}
+
+// 启用 subscribeWithSelector，按切片变化触发，避免无关保存
+export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, get) => ({
   tabs: [],
   activeTabId: null,
   savingPaths: new Set<string>(),
   addTab: (tab) => {
+    // 达到最大打开 tab 上限时，先尝试关闭最旧的可关闭 tab，避免无限增长
+    const current = get()
+    if (current.tabs.length >= MAX_OPEN_TABS) {
+      // 仅关闭非活动、非 diff/conflict、非 dirty tab
+      const closable = current.tabs.find(t =>
+        t.id !== current.activeTabId &&
+        t.type !== 'diff' &&
+        t.type !== 'conflict' &&
+        !t.isDirty &&
+        !t.frontmatterDirty
+      )
+      if (closable) {
+        get().removeTab(closable.id)
+      }
+      // 无可关闭 tab 时允许超过上限，避免数据丢失
+    }
     set((state) => {
       const existing = state.tabs.find((t) => t.path === tab.path)
       if (existing) {
-        // If same path exists, always reuse the existing tab's id for consistency.
-        // Only update content when existing tab hasn't been loaded yet (undefined).
-        // Using === undefined instead of !content to avoid overwriting empty files ('').
+        // 同 path 复用既有 tab；仅未加载时更新 content（避免覆盖空文件）
         if (existing.content === undefined && tab.content !== undefined) {
-          // For .md files, parse frontmatter from the content
+          // .md 文件解析 frontmatter
           const isMarkdown = tab.path.toLowerCase().endsWith('.md')
           let content = tab.content
           let frontmatter = existing.frontmatter
@@ -126,7 +223,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
         return { activeTabId: existing.id }
       }
-      // For new .md tabs, parse frontmatter from content if present
+      // 新 .md tab 解析 frontmatter
       const isMarkdown = tab.path.toLowerCase().endsWith('.md')
       const newTab = { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }
       if (isMarkdown && tab.content !== undefined) {
@@ -135,9 +232,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         newTab.frontmatter = result.data
       }
       const newTabs = [...state.tabs, newTab]
-      // Notify plugins: a fresh tab was opened. We emit after set so the
-      // store update is committed before subscribers (which may read
-      // `state.tabs` from a parent store snapshot) observe the event.
+      // 提交后通知插件：新 tab 已打开
       queueMicrotask(() => emitNoteOpened(tab.id, tab.path))
       return {
         tabs: newTabs,
@@ -184,7 +279,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => {
       const existing = state.tabs.find((t) => t.id === conflictTabId)
       if (existing) {
-        // If tab already exists, update auto-hide and auto-select if provided
+        // tab 已存在时更新 auto-hide/auto-select
         const updatedTab = { ...existing }
         if (options?.autoHideTree !== undefined) updatedTab.conflictAutoHideTree = options.autoHideTree
         if (options?.autoSelectFile !== undefined) updatedTab.conflictSelectedFile = options.autoSelectFile
@@ -218,10 +313,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   removeTab: (id) => {
     set((state) => {
       const index = state.tabs.findIndex((t) => t.id === id)
-      // Capture the tab being removed so we can emit a `note:close`
-      // after the state update commits. We do NOT emit if the tab
-      // doesn't exist (e.g. already removed) – that would generate
-      // spurious close events for plugins tracking active notes.
+      // 捕获被移除的 tab 以在提交后发射 note:close（不存在则不发）
       const removedTab = index >= 0 ? state.tabs[index] : null
       const newTabs = state.tabs.filter((t) => t.id !== id)
       let newActiveId = state.activeTabId
@@ -237,21 +329,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
-    // Auto-close noteProperties panel when all tabs are closed
-    if (get().activeTabId === null) {
-      queueMicrotask(async () => {
-        try {
-          const { useUIStore } = await import('@/stores/ui')
-          if (useUIStore.getState().rightPanelType === 'noteProperties') {
-            useUIStore.getState().setRightPanelType(null)
-          }
-        } catch { /* ignore — may fail in test environment */ }
-      })
-    }
+    // 清理插件 tab 运行时数据（icon、onChange 回调）
+    unregisterPluginTabRuntime(id)
+    // 全部 tab 关闭时自动关属性面板
+    autoCloseNoteProperties()
   },
   removeTabs: (ids) => {
     const idSet = new Set(ids)
+    let removedTabs: EditorTab[] = []
     set((state) => {
+      removedTabs = state.tabs.filter((t) => idSet.has(t.id))
       const newTabs = state.tabs.filter((t) => !idSet.has(t.id))
       let newActiveId = state.activeTabId
       if (newActiveId && idSet.has(newActiveId)) {
@@ -259,22 +346,43 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
+    // 清理插件 tab 运行时数据
+    for (const id of ids) {
+      unregisterPluginTabRuntime(id)
+    }
+    // 为每个被移除的 tab 发射 note:close
+    for (const tab of removedTabs) {
+      queueMicrotask(() => emitNoteClosed(tab.id, tab.path))
+    }
+    // 全部 tab 关闭时自动关属性面板
+    autoCloseNoteProperties()
   },
   setActiveTab: (id) => {
     set((state) => {
       const prevActiveId = state.activeTabId
-      // Release content of non-active, non-dirty file tabs to save memory.
-      // 注意：必须同时检查 !t.frontmatterDirty，否则 frontmatterDirty=true 但 isDirty=false
-      // 的 tab 内容会被释放，后续保存时会用空内容覆盖原文件（saveAllDirtyTabs 防御的兜底场景）。
+      if (prevActiveId === id) return state
+      // 内存策略：保留活动 tab + 最近 5 个 tab 的 content
+      const recentTabIds = new Set<string>([id])
+      state.tabs
+        .filter(t => t.id !== id)
+        .slice(-5)
+        .forEach(t => recentTabIds.add(t.id))
       const tabs = state.tabs.map((t) => {
-        if (t.id === prevActiveId && t.id !== id && !t.isDirty && !t.frontmatterDirty && t.type !== 'diff' && t.type !== 'conflict' && t.content !== undefined) {
+        // 保留集合中的 tab content
+        if (recentTabIds.has(t.id)) return t
+        // 保留 dirty tab 的 content，避免丢失修改
+        if (t.isDirty || t.frontmatterDirty) return t
+        // diff/conflict/plugin tab 无法 reload，保留
+        if (t.type === 'diff' || t.type === 'conflict' || t.type === 'plugin') return t
+        // 释放 content/frontmatter，重置 isLoading 以便重载
+        if (t.content !== undefined || t.frontmatter !== undefined) {
           return { ...t, content: undefined as unknown as string, frontmatter: undefined, isLoading: false }
         }
         return t
       })
       return { tabs, activeTabId: id }
     })
-    // Auto-close noteProperties panel when switching to a non-.md file
+    // 切换到非 .md 文件时关属性面板
     const newTab = get().tabs.find((t) => t.id === id)
     if (newTab && !newTab.path.toLowerCase().endsWith('.md')) {
       queueMicrotask(async () => {
@@ -287,14 +395,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   loadTabContent: async (id, retryCount = 0, force = false) => {
     const tab = get().tabs.find((t) => t.id === id)
-    // Check if tab exists and needs loading
-    // tab.content === undefined means not loaded yet
-    // tab.content === '' means loaded but empty file
-    // force=true bypasses the content check to support reload (e.g. external changes)
+    // 检查 tab 是否需加载（undefined=未加载，''=空文件）
+    // force=true 跳过 content 检查以支持重载
     if (!tab || tab.isLoading) return
     if (!force && tab.content !== undefined) return
-    // Conflict and diff tabs don't have file content to load
-    if (tab.type === 'conflict' || tab.type === 'diff') return
+    // conflict/diff/plugin tab 无磁盘文件内容可加载
+    if (tab.type === 'conflict' || tab.type === 'diff' || tab.type === 'plugin') return
 
     set((state) => ({
       tabs: state.tabs.map((t) =>
@@ -331,7 +437,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         }
       } catch { /* ignore */ }
 
-      // For .md files, parse frontmatter and store body as content
+      // .md 文件解析 frontmatter，存储正文为 content
       const isMarkdown = tab.path.toLowerCase().endsWith('.md')
       let content: string
       let frontmatter: NoteFrontmatter | undefined
@@ -352,6 +458,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
                 frontmatter,
                 isLoading: false,
                 hasExternalChange: false,
+                // force 重载丢弃本地编辑，重置 dirty/edited
+                isDirty: force ? false : t.isDirty,
+                isEdited: force ? false : t.isEdited,
                 fileSize: rawContent.length > 1024 ? `${(rawContent.length / 1024).toFixed(1)}Kb` : `${rawContent.length}B`,
                 modifiedTime,
                 wordCount: countWords(content),
@@ -360,24 +469,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             : t
         ),
       }))
-      // Emit note:change so plugins receive the initial content after load
+      // 发射 note:change，让插件收到初始内容
       const loadedTab = get().tabs.find((t) => t.id === id)
       if (loadedTab) {
         queueMicrotask(() => emitNoteChanged(loadedTab.id, loadedTab.path, loadedTab.content ?? ''))
       }
     } catch (e) {
       console.error('Failed to load tab content after retries:', e)
-      // Instead of closing the tab, mark it as having external change
-      // This keeps the tab open and lets the user decide what to do.
-      // Set content to '' (loaded but empty) to prevent EditorView useEffect
-      // from infinitely retrying (content === undefined triggers reload).
+      // 不关闭 tab，标记外部变更；content 置 '' 避免无限重试
       set((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === id ? { ...t, content: '', isLoading: false, hasExternalChange: true } : t
         ),
       }))
-      // Only show error dialog for initial load (when content was not loaded before)
-      // Don't show for external file changes to avoid interrupting user
+      // 仅首次加载失败时弹错误对话框
       if (tab.content === undefined) {
         window.dispatchEvent(new CustomEvent('tab-load-error', {
           detail: { id, path: tab.path, name: tab.name }
@@ -390,19 +495,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const tab = state.tabs.find((t) => t.id === id)
       if (!tab) return state
       // 只有内容真正变化时才标记为 dirty
-      // Note: t.content can be undefined (not loaded yet) while content might be '' (empty file)
-      // Treat undefined and '' as equivalent to avoid falsely marking empty files as dirty
+      // undefined 与 '' 等价，避免空文件被误标 dirty
       const currentNormalized = tab.content ?? ''
       const newNormalized = content ?? ''
-      // Early return: if content hasn't changed, return the SAME state
-      // object so Zustand skips notifying all subscribers. This prevents
-      // unnecessary re-renders of every component subscribed to `tabs`.
+      // 内容未变时返回同一 state，避免无谓重渲染
       if (currentNormalized === newNormalized) return state
+      // 插件 tab：不标记 isDirty（插件自己负责保存）
+      // 仍更新 content，并通过 onChange 回调通知插件
+      const isPluginTab = tab.type === 'plugin'
       const tabs = state.tabs.map((t) =>
-        t.id === id ? { ...t, content, isDirty: true, isEdited: true } : t
+        t.id === id ? {
+          ...t,
+          content,
+          isDirty: isPluginTab ? t.isDirty : true,
+          isEdited: isPluginTab ? t.isEdited : true,
+        } : t
       )
-      // Emit note:changed only on a real content transition
+      // 仅内容真正变化时发射 note:changed
       queueMicrotask(() => emitNoteChanged(id, tab.path, content ?? ''))
+      // 插件 tab：调用 onChange 回调通知插件保存
+      if (isPluginTab) {
+        const runtime = pluginTabRuntime.get(id)
+        runtime?.onChange?.(content ?? '')
+      }
       return { tabs }
     })
   },
@@ -425,7 +540,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateTabPath: (oldPath, newPath, newName) => {
     set((state) => ({
       tabs: state.tabs.map((t) =>
-        // Update tabs whose path starts with oldPath (handles both file and directory moves)
+        // 更新 path 以 oldPath 开头的 tab（含目录移动）
         t.path === oldPath
           ? { ...t, path: newPath, name: newName }
           : t.path.startsWith(oldPath + '/')
@@ -435,16 +550,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ),
     }))
 
-    // 同步更新 frontmatter.categories：当目录/文件移动且原 categories 基于目录路径时，
-    // 将与原路径相关的分类路径替换为新路径对应的路径，并标记 frontmatterDirty=true。
-    // 使用 queueMicrotask + 动态 import 获取 rootPath，避免与 workspace store 形成循环依赖。
+    // 同步更新 frontmatter.categories（移动后路径替换）
     queueMicrotask(async () => {
       try {
         const { useWorkspaceStore } = await import('@/stores/workspace')
         const rootPath = useWorkspaceStore.getState().rootPath
         if (!rootPath) return
 
-        // categories 存储相对路径，需将绝对路径转为相对于 workspace root 的相对路径
+        // categories 存相对路径，需转绝对路径为相对路径
         const toRel = (absPath: string): string => {
           if (absPath.startsWith(rootPath + '/')) {
             return absPath.slice(rootPath.length + 1)
@@ -532,34 +645,46 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   restoreTabs: (tabsData, activeTabId) =>
     set({ tabs: tabsData, activeTabId }),
-  filterTabs: (predicate) =>
+  filterTabs: (predicate) => {
+    let removedTabs: EditorTab[] = []
     set((state) => {
       const keptTabs = state.tabs.filter(predicate)
       if (keptTabs.length === state.tabs.length) return state
-      
+
+      removedTabs = state.tabs.filter(t => !predicate(t))
       const keptIds = new Set(keptTabs.map(t => t.id))
       let newActiveId = state.activeTabId
-      
+
       if (state.activeTabId && !keptIds.has(state.activeTabId)) {
         newActiveId = keptTabs.length > 0 ? keptTabs[0].id : null
       }
-      
+
       return { tabs: keptTabs, activeTabId: newActiveId }
-    }),
+    })
+    // 为每个被过滤的 tab 发射 note:close
+    for (const tab of removedTabs) {
+      // 清理插件 tab 运行时数据，避免 runtime 残留
+      if (tab.type === 'plugin') {
+        unregisterPluginTabRuntime(tab.id)
+      }
+      queueMicrotask(() => emitNoteClosed(tab.id, tab.path))
+    }
+    // 全部 tab 关闭时自动关属性面板
+    autoCloseNoteProperties()
+  },
   saveAllDirtyTabs: async () => {
     const dirtyTabs = get().tabs.filter((t) => t.isDirty || t.frontmatterDirty)
     for (const tab of dirtyTabs) {
       try {
-        // For .md files, merge frontmatter with body before writing
+        // .md 文件写入前合并 frontmatter
         const isMarkdown = tab.path.toLowerCase().endsWith('.md')
-        // 防御：frontmatterDirty 可能导致 isDirty=false 的 tab 内容被释放（setActiveTab）
-        // 后仍被纳入保存流程，此时 content===undefined，写入会丢失正文。遇到此情况跳过写入。
+        // 防御：content===undefined 时跳过写入避免丢失正文
         if (tab.content === undefined && isMarkdown) {
           console.warn(`[saveAllDirtyTabs] Skipping save for tab with undefined content: ${tab.path}`)
           continue
         }
 
-        // Mark path as saving to prevent file-watcher from closing the tab
+        // 标记保存中，防止 file-watcher 关闭 tab
         set((state) => {
           const newSet = new Set(state.savingPaths)
           newSet.add(tab.path)
@@ -567,16 +692,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         })
 
         let writeContent = tab.content
-        // 记录保存前的正文基准，await 写入期间若用户再次编辑，content 会变化，
-        // 据此做 CAS 式判断，避免把用户新编辑误标为已保存导致内容丢失
+        // 保存前正文基准，用于 CAS 判断避免误标已保存
         const savingContent = tab.content
         let fm: NoteFrontmatter | undefined
         if (isMarkdown) {
           fm = { ...(tab.frontmatter || {}), updated: new Date().toISOString() }
-          // stripFrontmatter is defensive: tab.content normally holds only
-          // the body (loadTabContent strips frontmatter on load), but source
-          // mode edits may store the full file content including frontmatter.
-          // Calling stripFrontmatter on an already-stripped body is a no-op.
+          // 防御性剥离 frontmatter（源码模式可能含完整内容）
           const body = stripFrontmatter(tab.content ?? '')
           writeContent = serializeFrontmatter(fm, body)
         }
@@ -592,9 +713,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             console.error('Failed to index saved file:', tab.path, e)
           }
         }
-        // CAS 式保护：await 写入期间用户可能再次编辑使 isDirty=true。
-        // 仅当 content 仍与保存前一致（期间无新编辑）时才清除脏标记，
-        // 否则保留 isDirty=true，待下次保存处理，避免用户新编辑被误标为已保存
+        // CAS 保护：仅期间无新编辑才清脏标记
         const currentTab = get().tabs.find((t) => t.id === tab.id)
         if (currentTab && currentTab.content === savingContent) {
           set((state) => ({
@@ -603,17 +722,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             ),
           }))
         }
-        // Notify plugins: a dirty tab has been successfully persisted.
-        // We emit after the store commit so the `isDirty=false` state
-        // is observable by subscribers reading from the store.
+        // 提交后通知插件：脏 tab 已保存
         queueMicrotask(() => emitNoteSaved(tab.id, tab.path))
-        // Invalidate frontmatter cache so search/file-tree use fresh data
+        // 失效 frontmatter 缓存以刷新搜索/文件树
         if (isMarkdown) {
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
           invalidateFrontmatterCache(tab.path)
         }
         window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: tab.path } }))
-        // Auto commit if file is in a git repo (async, non-blocking)
+        // 若在 git 仓库则自动提交（异步非阻塞）
         try {
           await gitAutoCommit(tab.path)
         } catch { /* ignore */ }
@@ -621,7 +738,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         console.error('Failed to save tab:', tab.path, e)
         window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))
       } finally {
-        // Delay removing from savingPaths to allow file-watcher events to settle
+        // 延迟移除 savingPaths，等 file-watcher 平息
         const savedPath = tab.path
         setTimeout(() => {
           set((state) => {
@@ -727,4 +844,4 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }),
     }))
   },
-}))
+})))

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Settings Dialog — demonstrates manifest.settings",
   "type": "module",
-  "main": "./dist/plugin.js",
+  "main": "./dist/index.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

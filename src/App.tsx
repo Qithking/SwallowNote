@@ -56,6 +56,11 @@ function App() {
   useTheme()
   useKeyboardShortcuts()
   const { t } = useTranslation()
+  // 用 ref 跟踪最新的 t，避免同步定时器 effect 依赖 t 导致语言切换时重建定时器
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
   const settingsPanelVisible = useUIStore((s: UIState) => s.settingsPanelVisible)
   const rightPanelType = useUIStore((s: UIState) => s.rightPanelType)
   const sidebarWidth = useUIStore((s: UIState) => s.sidebarWidth)
@@ -66,9 +71,7 @@ function App() {
   const syncInterval = useUIStore((s: UIState) => s.syncInterval)
   const autoSyncPush = useUIStore((s: UIState) => s.autoSyncPush)
   const sidebarView = useUIStore((s: UIState) => s.sidebarView)
-  // Boolean selector — only re-renders App when a tab is added or removed,
-  // not when tab content changes (the previous `tabs` subscription caused
-  // the entire component tree to re-render on every keystroke).
+  // 布尔 selector：仅在 tab 增删时重渲染
   const hasTabs = useEditorStore((s) => s.tabs.length > 0)
   const cachedRepositories = useGitStore((s: GitState) => s.cachedRepositories)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
@@ -85,9 +88,7 @@ function App() {
   const actionTakenRef = useRef(false)
   // rAF 节流：拖拽面板宽度时每帧最多更新一次
   const rafRef = useRef<number | null>(null)
-  // 防止 StrictMode 双调用导致 init() 重复执行
-  // 开发模式下 StrictMode 会调用 effect 两次，导致 restoreSessionState、
-  // scanPlugins 等副作用并发执行，引发 MarkdownEditor 重复 mount
+  // StrictMode 双调用导致副作用重复执行
   const initRef = useRef(false)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
@@ -113,7 +114,9 @@ function App() {
       // Step 3: 设置加载完成后立即显示窗口，避免用户等待文件树加载
       try {
         await getCurrentWindow().show()
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.warn('[App] Failed to show window:', e)
+      }
 
       // 显示窗口后立即应用 macOS 圆角窗口样式
       // （从独立 useEffect 迁移至此，避免与 init 的 IPC 调用竞争后端主线程）
@@ -126,13 +129,12 @@ function App() {
           await enableModernWindowStyle({ cornerRadius: 12 })
         } else if (platform === 'windows') {
           await enableModernWindowStyle({ cornerRadius: 12 })
-          // Windows 11 provides rounded corners via DWM, but the web content
-          // also needs matching border-radius to prevent black corner artifacts
+          // Windows 11 圆角需匹配 border-radius 避免黑角
           document.documentElement.style.borderRadius = '8px'
           document.body.style.borderRadius = '8px'
         }
-      } catch {
-        // ignore errors
+      } catch (e) {
+        console.warn('[App] Failed to set window style:', e)
       }
 
       // Step 4: 窗口可见后加载文件树与恢复会话
@@ -207,11 +209,7 @@ function App() {
               console.warn('[App] failed to init plugin auto update:', err)
             }
 
-            // Background-check for plugin updates so the ActivityBar
-            // badge can show the update count without requiring the
-            // user to open the plugin manager.  loadRepoSources()
-            // populates repoUrl from SQLite; refreshIndex + refreshUpdates
-            // then fetch the marketplace index and compare versions.
+            // 后台检查插件更新以显示角标
             try {
               const { usePluginMarketStore } = await import('@/stores/plugin-market')
               const marketStore = usePluginMarketStore.getState()
@@ -250,6 +248,22 @@ function App() {
         emitAppExit()
       } catch { /* ignore */ }
 
+      // 退出前刷新所有插件 storage 缓存到磁盘，避免防抖/飞行中写入丢失
+      try {
+        const { flushAllPluginStorage } = await import('@/lib/plugin-host')
+        await flushAllPluginStorage()
+      } catch (e) {
+        console.warn('[App] flushAllPluginStorage on close failed', e)
+      }
+
+      // 先 flush 编辑器防抖内容避免丢失
+      try {
+        const { flushAllEditors } = await import('@/lib/editor-flush')
+        await flushAllEditors()
+      } catch (e) {
+        console.warn('[App] flushAllEditors on close failed', e)
+      }
+
       const { closeWithoutExit } = useUIStore.getState()
       const dirtyCount = useEditorStore.getState().getDirtyTabsCount()
       if (dirtyCount > 0) {
@@ -263,8 +277,7 @@ function App() {
         await saveSessionStateNow()
         await win.hide()
         const { setDockIconVisibility } = await import('@/lib/tauri')
-        // Cosmetic side effect — a failure here doesn't block close,
-        // but log it so the silent loss isn't completely invisible.
+        // 次要副作用，失败不阻塞退出
         setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
       } else {
         await saveSessionStateNow()
@@ -297,7 +310,7 @@ function App() {
     const unlisten = listen('file-watcher-event', (event) => {
       const { type, path } = event.payload as { type: string; path: string }
 
-      // Skip file events during Git sync to avoid interference with git pull/push operations
+      // Git sync 期间跳过文件事件避免干扰
       const gitStore = useGitStore.getState()
       if (gitStore.isPulling || gitStore.syncStatus.isSyncing) {
         return
@@ -312,8 +325,7 @@ function App() {
           if (tab.isDirty) {
             editorStore.markExternalChange(tab.id)
           } else {
-            // Force reload: loadTabContent skips when content !== undefined,
-            // but external modifications need to overwrite the cached content.
+            // 强制重载覆盖缓存内容
             editorStore.loadTabContent(tab.id, 0, true)
           }
         }
@@ -321,8 +333,7 @@ function App() {
         // Close tabs for removed files
         if (type === 'removed') {
           const editorStore = useEditorStore.getState()
-          // Skip if this path is currently being saved
-          // (atomic write: write to .tmp then rename can trigger a remove event on the original file)
+          // 原子写 .tmp→rename 可能触发 remove 事件
           if (editorStore.isPathSaving(path)) return
           // Check if the removed path matches any open tab (file) or is a parent of any tab (directory)
           const tabsToClose = editorStore.tabs.filter(tab =>
@@ -366,29 +377,39 @@ function App() {
 
   useEffect(() => {
     let saveTimer: ReturnType<typeof setTimeout> | null = null
-    
-    const handleTabsChange = () => {
+
+    const scheduleSave = () => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => {
         saveSessionStateNow().catch(console.error)
         saveTimer = null
       }, 500)
     }
-    
-    const unsubscribe = useEditorStore.subscribe(handleTabsChange)
-    
+
+    // 仅在 tabs 切片变化时触发保存，避免 cursorPosition 等无关状态变更无谓触发防抖保存
+    const unsubscribeTabs = useEditorStore.subscribe(s => s.tabs, scheduleSave)
+
+    // 面板宽度变化时也触发保存（拖拽缩放后即使无标签变化也能持久化）
+    const unsubscribeUI = useUIStore.subscribe((state, prevState) => {
+      if (state.sidebarWidth !== prevState.sidebarWidth ||
+          state.rightPanelWidth !== prevState.rightPanelWidth) {
+        scheduleSave()
+      }
+    })
+
     // Listen for save-session-now events (e.g., before install & restart)
     const handleSaveSessionNow = () => {
       saveSessionStateNow().catch(console.error)
     }
     window.addEventListener('save-session-now', handleSaveSessionNow)
-    
+
     return () => {
-      unsubscribe()
+      unsubscribeTabs()
+      unsubscribeUI()
       window.removeEventListener('save-session-now', handleSaveSessionNow)
       if (saveTimer) clearTimeout(saveTimer)
     }
-  }, [])
+  }, [saveSessionStateNow])
 
   // Auto sync: periodically pull all git repositories based on syncInterval setting
   const syncIntervalRef = useRef(syncInterval)
@@ -520,7 +541,7 @@ function App() {
         // Only show one consolidated toast for conflicts
         if (conflicted > 0) {
           const repoNames = results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.name).join(', ')
-          toast.warning(t('git.pullConflict', { repos: repoNames }))
+          toast.warning(tRef.current('git.pullConflict', { repos: repoNames }))
 
           // Do NOT auto-open conflict tabs — user must click conflict icon or repo to open
           // Sync conflict repos to database for persistence
@@ -547,7 +568,7 @@ function App() {
       clearTimeout(initialTimer)
       clearInterval(intervalId)
     }
-  }, [syncInterval, t])
+  }, [syncInterval])
 
   const handleSaveAndClose = async () => {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose
@@ -564,8 +585,7 @@ function App() {
     if (closeWithoutExit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
-      // Cosmetic side effect — a failure here doesn't block close,
-      // but log it so the silent loss isn't completely invisible.
+      // 次要副作用，失败不阻塞退出
       setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
     } else {
       await win.destroy()
@@ -587,8 +607,7 @@ function App() {
     if (closeWithoutExit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
-      // Cosmetic side effect — a failure here doesn't block close,
-      // but log it so the silent loss isn't completely invisible.
+      // 次要副作用，失败不阻塞退出
       setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
     } else {
       await win.destroy()
@@ -646,7 +665,9 @@ function App() {
     }
     setIsDraggingLeft(false)
     setIsDraggingRight(false)
-  }, [])
+    // 拖拽结束后保存会话状态（面板宽度等），避免崩溃或强制关闭后丢失
+    saveSessionStateNow().catch(console.error)
+  }, [saveSessionStateNow])
 
   // Disable text selection while dragging to prevent content being selected
   useEffect(() => {
@@ -696,11 +717,15 @@ function App() {
   // Check if the plugin manager is active
   const isPluginManagerActive = settingsPanelVisible && sidebarView === 'plugin:__plugin_manager'
 
+  const developerMode = useUIStore((s: UIState) => s.developerMode)
+
   // Disable the system default context menu across the entire app
   // Custom context menus (Radix UI ContextMenu) handle their own right-click logic internally
   const handleContextMenu = useCallback((_e: React.MouseEvent) => {
-    //_e.preventDefault()
-  }, [])
+    if (!developerMode) {
+      _e.preventDefault()
+    }
+  }, [developerMode])
 
   return (
     <TooltipProvider>
@@ -764,7 +789,7 @@ function App() {
                 )}
                 <ErrorBoundary fallback={
                   <div className="flex items-center justify-center flex-1 text-sm text-[var(--text-muted)]">
-                    编辑器加载失败，请关闭标签页重试
+                    {t('editor.loadFailed')}
                   </div>
                 }>
                   <EditorView />

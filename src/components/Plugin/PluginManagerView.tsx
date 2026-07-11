@@ -131,6 +131,9 @@ function PluginManagerView() {
   // doesn't remove a plugin the user meant to keep. Confirmed uninstalls
   // fall through to `handleUninstall`.
   const [uninstallConfirmPlugin, setUninstallConfirmPlugin] = useState<PluginDefinition | null>(null)
+  // Whether to also delete plugin data when uninstalling. Default
+  // false to protect user data — they must explicitly opt in.
+  const [deleteDataOnUninstall, setDeleteDataOnUninstall] = useState(false)
   // Detail dialog target for installed plugins. When set, the
   // PluginMarketDetail dialog opens with a synthetic PluginIndexEntry
   // constructed from the installed plugin's data.
@@ -467,7 +470,7 @@ function PluginManagerView() {
 
   const handleUninstall = useCallback(async (plugin: PluginDefinition) => {
     try {
-      await uninstallPlugin(plugin.id)
+      await uninstallPlugin(plugin.id, deleteDataOnUninstall)
       // Synchronously clear any UI state that references the
       // removed plugin so the user doesn't see a stale view during
       // the async handleReload below. We *don't* call
@@ -840,7 +843,10 @@ function PluginManagerView() {
       <AlertDialog
         open={uninstallConfirmPlugin !== null}
         onOpenChange={(open) => {
-          if (!open) setUninstallConfirmPlugin(null)
+          if (!open) {
+            setUninstallConfirmPlugin(null)
+            setDeleteDataOnUninstall(false)
+          }
         }}
       >
         <AlertDialogContent>
@@ -855,14 +861,30 @@ function PluginManagerView() {
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* Data deletion option */}
+          <div className="flex items-center justify-center gap-2 py-2">
+            <input
+              id="delete-plugin-data"
+              type="checkbox"
+              checked={deleteDataOnUninstall}
+              onChange={(e) => setDeleteDataOnUninstall(e.target.checked)}
+              className="h-4 w-4 shrink-0 cursor-pointer"
+            />
+            <label htmlFor="delete-plugin-data" className="cursor-pointer text-sm leading-5 text-muted-foreground">
+              {t('plugin.pa.uninstall.deleteData', { defaultValue: '同时删除插件数据（不可恢复）' })}
+            </label>
+          </div>
+
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setUninstallConfirmPlugin(null)}>
+            <AlertDialogCancel onClick={() => { setUninstallConfirmPlugin(null); setDeleteDataOnUninstall(false) }}>
               {t('plugin.pa.uninstall.cancel', { defaultValue: '取消' })}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 const target = uninstallConfirmPlugin
                 setUninstallConfirmPlugin(null)
+                setDeleteDataOnUninstall(false)
                 if (target) void handleUninstall(target)
               }}
             >

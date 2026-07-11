@@ -28,6 +28,12 @@ fn get_url_lock(url: &str) -> Arc<TokioMutex<()>> {
     let locks = URL_LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
     // 锁中毒时直接恢复（不会发生在正常流程中），避免 panic 影响下载主流程
     let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
+    // 清理策略：map 超过阈值时移除无持有者的旧 entry，避免无限增长。
+    // strong_count == 1 表示仅 map 自身持有，无其他下载任务在用，可安全回收。
+    // 阈值收紧为 200（原 1000 偏高），更及时地回收无持有者 entry。
+    if map.len() > 200 {
+        map.retain(|_, arc| Arc::strong_count(arc) > 1);
+    }
     map.entry(url.to_string())
         .or_insert_with(|| Arc::new(TokioMutex::new(())))
         .clone()
@@ -42,7 +48,8 @@ fn shared_http_client() -> &'static reqwest::Client {
             // 安全：禁止自动跟随重定向，改由 fetch_with_redirect 手动逐跳校验后再跟随，
             // 防止公网 URL 通过 302 跳到 127.0.0.1 等内网地址绕过 SSRF 校验
             .redirect(reqwest::redirect::Policy::none())
-            // 连接池配置：默认即可（max_idle_per_host=32）
+            // 连接池配置：每 host 最多保留 8 个空闲连接（默认 32 偏高，收缩以降低内存占用）
+            .pool_max_idle_per_host(8)
             .pool_idle_timeout(Duration::from_secs(90))
             // 单次连接空闲超时
             .tcp_keepalive(Duration::from_secs(60))
@@ -64,6 +71,8 @@ const RETRY_COUNT: usize = 3;
 const RETRY_BACKOFF_MS: u64 = 300;
 /// 手动跟随重定向的最大次数，超过则视为失败，避免无限重定向。
 const MAX_REDIRECTS: usize = 5;
+/// 单张图片下载大小上限（20 MiB），流式写盘时累计字节超出即失败，避免内存/磁盘被恶意大文件撑爆。
+const MAX_DOWNLOAD_BYTES: u64 = 20 * 1024 * 1024;
 
 /// 浏览器请求头 Accept：按 q 值递减匹配，CDN/防盗链多按此协商。
 const BROWSER_ACCEPT: &str =
@@ -635,7 +644,7 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
         return ok_result(url, local_path, relative_path, file_name, 0);
     }
 
-    // 7. 【锁内】请求图片（含重试）+ 读取字节
+    // 7. 【锁内】请求图片（含重试）。仅读取响应头获取 Content-Type，body 稍后流式写盘
     let response = match fetch_image_with_retry(&req.url).await {
         Ok(r) => r,
         Err(e) => return err_result(url, e),
@@ -645,13 +654,9 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let bytes = match response.bytes().await {
-        Ok(b) => b,
-        Err(e) => return err_result(url, format!("read body failed: {}", e)),
-    };
-    let bytes_len = bytes.len() as u64;
 
     // 8. URL 无扩展名时，用 Content-Type 推断 ext 并更新 file_name
+    //    （提前到流式下载前，以便先确定最终 local_path 再分块写盘，避免 body 读入内存）
     if ext.is_empty() {
         ext = infer_ext(&req.url, content_type.as_deref());
         file_name = generate_file_name(&req.url, &ext);
@@ -682,19 +687,50 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
         };
     }
 
-    // 11. 【锁内】原子写入：先写 .tmp 文件，成功后重命名，避免残留不完整文件
+    // 11. 【锁内】流式下载并分块写盘到 .tmp 文件，限制单文件 20MB，超出返回错误。
+    //     避免一次性 response.bytes() 将整个响应读入内存；下载中途失败或超限时清理临时文件。
     let tmp_path = format!("{}.tmp", local_path);
-    if let Err(e) = tokio::fs::write(&tmp_path, &bytes).await {
-        return RemoteImageResult {
-            url,
-            ok: false,
-            local_path: None,
-            relative_path: None,
-            file_name: Some(file_name),
-            error: Some(format!("write temp file failed: {}", e)),
-            bytes: 0,
+    let mut bytes_len: u64 = 0;
+    let mut file = match tokio::fs::File::create(&tmp_path).await {
+        Ok(f) => f,
+        Err(e) => return err_result(url, format!("create temp file failed: {}", e)),
+    };
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    let mut stream = response.bytes_stream();
+    let mut oversized = false;
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return err_result(url, format!("read body failed: {}", e));
+            }
         };
+        bytes_len += chunk.len() as u64;
+        if bytes_len > MAX_DOWNLOAD_BYTES {
+            oversized = true;
+            break;
+        }
+        if let Err(e) = file.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return err_result(url, format!("write temp file failed: {}", e));
+        }
     }
+    // 落盘后再 rename，确保原子性
+    if let Err(e) = file.flush().await {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return err_result(url, format!("flush temp file failed: {}", e));
+    }
+    if oversized {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        return err_result(
+            url,
+            format!("download exceeds size limit ({} bytes)", MAX_DOWNLOAD_BYTES),
+        );
+    }
+
+    // 12. 【锁内】原子重命名 .tmp -> 最终文件，避免残留不完整文件
     if let Err(e) = tokio::fs::rename(&tmp_path, &local_path).await {
         // 重命名失败时清理临时文件
         let _ = tokio::fs::remove_file(&tmp_path).await;
@@ -709,7 +745,7 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
         };
     }
 
-    // 12. 计算相对路径并返回成功
+    // 13. 计算相对路径并返回成功
     let relative_path = compute_relative_path(&local_path, &req.file_dir, &req.root_path);
     ok_result(url, local_path, relative_path, file_name, bytes_len)
 }

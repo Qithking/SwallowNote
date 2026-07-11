@@ -27,7 +27,7 @@ fn set_dock_icon_visibility(visible: bool) -> Result<(), String> {
     set_dock_icon_visibility_inner(visible)
 }
 
-/// Inner implementation for setting Dock icon visibility
+/// Dock 图标可见性切换内部实现
 #[cfg(target_os = "macos")]
 #[allow(deprecated, unexpected_cfgs)]
 fn set_dock_icon_visibility_inner(visible: bool) -> Result<(), String> {
@@ -59,14 +59,13 @@ fn set_dock_icon_visibility_inner(_visible: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Show Dock icon on macOS - used by tray menu/tray icon click
-/// This function is a no-op on non-macOS platforms
+/// macOS 显示 Dock 图标，供托盘菜单/图标点击使用
+/// 非 macOS 平台无操作
 fn show_dock_icon() {
     let _ = set_dock_icon_visibility_inner(true);
 }
 
-/// 1x1 透明 RGBA 图标，用作 tray 图标加载失败时的兜底，避免在
-/// `tauri.conf.json` 缺 `bundle.icon` 等场景下 panic 整应用。
+/// tray 图标加载失败的 1x1 透明兜底
 fn default_tray_icon() -> tauri::image::Image<'static> {
     let rgba = vec![0u8, 0, 0, 0]; // 透明 1x1
     tauri::image::Image::new_owned(rgba, 1, 1)
@@ -81,7 +80,7 @@ pub fn run() {
             Some(vec![]),
         ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // When a second instance is launched, focus the existing window
+            // 第二实例启动时聚焦已有窗口
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -119,6 +118,7 @@ pub fn run() {
             commands::git::git_force_push,
             commands::git::git_force_push_with_credentials,
             commands::git::git_force_pull,
+            commands::git::git_force_pull_with_credentials,
             commands::git::git_credential_save,
             commands::git::git_credential_get,
             commands::git::git_credential_delete,
@@ -134,6 +134,7 @@ pub fn run() {
             commands::git::git_clone_with_credentials,
             commands::git::git_clone_cancel,
             commands::git::git_clone_status,
+            commands::git::cleanup_askpass_scripts,
             commands::git::scan_git_repos,
             commands::git::git_get_conflict_files,
             commands::git::git_get_conflict_local_content,
@@ -220,7 +221,7 @@ commands::upgrade::download_latest_release,
             commands::frontmatter::create_category,
         ])
         .setup(|app| {
-            // 获取 app_data_dir，失败时优雅降级（跳过 DB 初始化），避免 panic 导致启动崩溃
+            // 获取 app_data_dir，失败时优雅降级跳过 DB 初始化
             let app_data_dir = match app.path().app_data_dir() {
                 Ok(d) => d,
                 Err(e) => {
@@ -230,7 +231,10 @@ commands::upgrade::download_latest_release,
             };
             std::fs::create_dir_all(&app_data_dir).ok();
 
-            // Initialize backend i18n translations
+            // 应用启动时清理上次崩溃可能残留的 askpass 脚本，防止明文凭证泄露
+            commands::git::cleanup_stale_askpass_scripts();
+
+            // 初始化后端 i18n 翻译
             crate::i18n::init_translations();
 
             // 仅在成功获取 app_data_dir 时初始化 DB
@@ -257,10 +261,12 @@ commands::upgrade::download_latest_release,
             app.handle().manage(commands::git::new_clone_pid_state());
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
             // 每插件后端子进程状态；启动为空，首次 invoke_plugin 时懒加载。
-            app.handle().manage(commands::plugin_invoke::new_shared_plugin_process_state());
+            let plugin_process_state = commands::plugin_invoke::new_shared_plugin_process_state();
+            // 启动空闲回收定时器：每 5 分钟扫描，kill 超过 10 分钟未用的插件后端进程
+            commands::plugin_invoke::start_idle_reaper(plugin_process_state.clone());
+            app.handle().manage(plugin_process_state);
 
-            // AI proxy is no longer auto-started on launch to save memory.
-            // It will be started on-demand when the user opens the AI panel.
+            // AI 代理按需启动以节省内存
 
             let show_item = MenuItemBuilder::with_id("show", crate::i18n::t("tray.showWindow")).build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", crate::i18n::t("tray.quit")).build(app)?;
@@ -321,6 +327,32 @@ commands::upgrade::download_latest_release,
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 应用退出请求时：停止 frontmatter 索引线程，释放独立数据库连接
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                services::frontmatter_index::stop_index_thread();
+                // 退出前执行 PRAGMA optimize，优化 SQLite 查询计划
+                if let Some(db) = app_handle.try_state::<crate::db::Database>() {
+                    if let Ok(conn) = db.conn.lock() {
+                        if let Err(e) = conn.execute_batch("PRAGMA optimize;") {
+                            eprintln!("[lib] PRAGMA optimize failed: {}", e);
+                        }
+                    }
+                }
+                // 发送 shutdown 信号停止 AI 代理
+                if let Some(holder) =
+                    app_handle.try_state::<commands::ai::SharedAiProxyState>()
+                {
+                    let mut guard = holder
+                        .server
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    if let Some(server) = guard.take() {
+                        let _ = server.shutdown_tx.send(());
+                    }
+                }
+            }
+        });
 }

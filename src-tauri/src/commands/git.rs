@@ -39,13 +39,22 @@ pub fn git_clone_cancel(pid_state: State<'_, ClonePidState>) -> Result<bool, Str
     if let Some(pid) = pid {
         #[cfg(unix)]
         {
-            // Send SIGTERM to the git process group. Use negative PID to signal
-            // the entire process group, which also kills any child processes
-            // (e.g. git-remote-https, pack-objects) that git may have spawned.
-            let result = unsafe { libc::kill(-(pid as i32), libc::SIGTERM) };
-            if result != 0 {
-                // Fallback: try killing just the process itself
-                let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            // 先用信号 0 检查进程是否仍存在，避免 pid 复用导致误杀其他进程。
+            // kill(pid, 0) 返回 0 表示进程存在；返回 -1 且 errno == ESRCH 表示进程不存在。
+            let check = unsafe { libc::kill(pid as i32, 0) };
+            if check == 0 {
+                // 进程存在，发送 SIGTERM 到整个进程组（负 PID），
+                // 同时终止 git 派生的子进程（git-remote-https、pack-objects 等）。
+                let result = unsafe { libc::kill(-(pid as i32), libc::SIGTERM) };
+                if result != 0 {
+                    // 回退：仅 kill 进程本身
+                    let _ = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+                }
+                Ok(true)
+            } else {
+                // 进程已不存在（ESRCH），跳过 kill，避免 pid 复用误杀
+                eprintln!("[INFO] git_clone_cancel: pid {} no longer exists, skipping kill", pid);
+                Ok(false)
             }
         }
         #[cfg(not(unix))]
@@ -56,8 +65,8 @@ pub fn git_clone_cancel(pid_state: State<'_, ClonePidState>) -> Result<bool, Str
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status();
+            Ok(true)
         }
-        Ok(true)
     } else {
         Ok(false)
     }
@@ -140,7 +149,8 @@ pub async fn git_init(path: String) -> Result<(), String> {
 /// Get git status by running system git commands
 #[tauri::command]
 pub async fn git_status(path: String) -> Result<GitStatus, String> {
-    let branch = get_branch(&path).unwrap_or_else(|_| "unknown".to_string());
+    // 分支获取失败时返回空字符串，前端可据此判断获取失败（区别于 "unknown" 等真实分支名）
+    let branch = get_branch(&path).unwrap_or_else(|_| "".to_string());
     // 不再吞掉 run_git 错误：git 失败时向上传播，避免前端误以为"无改动"。
     let modified = run_git(&path, &["diff", "--name-only"])?;
     let staged_modified = run_git(&path, &["diff", "--cached", "--name-only"])?;
@@ -195,11 +205,24 @@ pub async fn git_diff(path: String, file_path: String) -> Result<String, String>
 /// Stage all changes and commit
 #[tauri::command]
 pub async fn git_commit(path: String, message: String) -> Result<(), String> {
+    // Auto-fix detached HEAD before committing
+    fix_detached_head(&path)?;
+
     // Stage all changes
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
 
     // Commit
-    run_git(&path, &["commit", "-m", &message]).map_err(|e| format!("Failed to commit: {}", e))?;
+    match run_git(&path, &["commit", "-m", &message]) {
+        Ok(_) => {}
+        Err(e) => {
+            let err_lower = e.to_lowercase();
+            if !err_lower.contains("nothing to commit")
+                && !err_lower.contains("working tree clean")
+                && !err_lower.contains("no changes added to commit") {
+                return Err(format!("Failed to commit: {}", e));
+            }
+        }
+    }
 
     Ok(())
 }
@@ -262,7 +285,7 @@ pub async fn git_pull(path: String) -> Result<(), String> {
     match result {
         Ok(_) => {
             // Fix detached HEAD if it occurred during pull
-            fix_detached_head(&path);
+            let _ = fix_detached_head(&path);
             Ok(())
         },
         Err(e) => {
@@ -294,13 +317,62 @@ impl Drop for TempScriptGuard {
     }
 }
 
-/// Pull changes from remote with provided credentials
-#[tauri::command]
-pub async fn git_pull_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
-    // Create a temporary askpass script with a unique name to avoid conflicts
+/// 清理临时目录中残留的 askpass 脚本。
+/// 应用启动时调用，删除因崩溃等异常退出而残留的 `swallownote_*_askpass_*.sh`（Windows 为 `.bat`）文件。
+/// 删除时忽略错误，避免因单个文件锁定等问题中断整个清理流程。
+pub fn cleanup_stale_askpass_scripts() {
+    let temp_dir = std::env::temp_dir();
+    let entries = match std::fs::read_dir(&temp_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let file_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        // 匹配 swallownote_ 前缀且包含 _askpass_ 的脚本文件
+        if !file_name.starts_with("swallownote_") || !file_name.contains("_askpass_") {
+            continue;
+        }
+        // 平台相关的扩展名过滤
+        #[cfg(target_os = "windows")]
+        {
+            if !file_name.ends_with(".bat") && !file_name.ends_with(".sh") {
+                continue;
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            if !file_name.ends_with(".sh") {
+                continue;
+            }
+        }
+        // 删除残留脚本，忽略错误
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+/// 创建临时 askpass 脚本并返回路径与 RAII 守卫。
+/// - Unix: 脚本内嵌凭证，权限 0600，RAII 自动清理。
+/// - Windows: 脚本不含凭证，从环境变量 GIT_USERNAME/GIT_PASSWORD 读取，RAII 自动清理。
+///   即使脚本残留也不会泄露凭证。
+fn create_askpass_script(
+    prefix: &str,
+    username: &str,
+    password: &str,
+) -> Result<(String, TempScriptGuard), String> {
     let temp_dir = std::env::temp_dir();
     let unique_id = uuid::Uuid::new_v4().to_string();
-    let askpass_script = temp_dir.join(format!("swallownote_pull_askpass_{}.sh", unique_id));
+
+    #[cfg(not(target_os = "windows"))]
+    let askpass_script = temp_dir.join(format!("swallownote_{}_askpass_{}.sh", prefix, unique_id));
+    #[cfg(target_os = "windows")]
+    let askpass_script = temp_dir.join(format!("swallownote_{}_askpass_{}.bat", prefix, unique_id));
 
     #[cfg(not(target_os = "windows"))]
     let script_content = format!(
@@ -309,18 +381,13 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
         password.replace('\'', "'\\''")
     );
 
+    // Windows 下脚本不含凭证，从环境变量读取，残留也不泄露凭证
     #[cfg(target_os = "windows")]
-    let script_content = format!(
-        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
-        username.replace('"', "\"\""),
-        password.replace('"', "\"\"")
-    );
+    let script_content = "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo %GIT_USERNAME%\n) else (\n  echo %GIT_PASSWORD%\n)".to_string();
 
     std::fs::write(&askpass_script, &script_content)
         .map_err(|e| format!("Failed to create askpass script: {}", e))?;
-    // 脚本已写入磁盘，立即建立 RAII 守卫：后续 set_permissions 或 spawn git 失败时，
-    // Drop 会自动删除脚本，避免明文凭证残留。
-    let _askpass_guard = TempScriptGuard(askpass_script.clone());
+    let guard = TempScriptGuard(askpass_script.clone());
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -333,19 +400,45 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
             .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
     }
 
-    let askpass_path = askpass_script.to_string_lossy().to_string();
+    Ok((askpass_script.to_string_lossy().to_string(), guard))
+}
 
-    let result = run_git_with_env(
-        &path,
-        &["pull", "--rebase"],
-        &[
-            ("GIT_ASKPASS", askpass_path.as_str()),
-            ("GIT_TERMINAL_PROMPT", "0"),
-        ],
-    );
+/// 构建 askpass 相关环境变量。
+/// Windows 下额外传入 GIT_USERNAME/GIT_PASSWORD，供通用 askpass 脚本读取。
+fn build_askpass_env<'a>(
+    askpass_path: &'a str,
+    username: &'a str,
+    password: &'a str,
+) -> Vec<(&'a str, &'a str)> {
+    // vars 仅在 Windows 下被 push，非 Windows 平台编译器会告警 unused_mut，故加 allow。
+    #[allow(unused_mut)]
+    let mut vars: Vec<(&'a str, &'a str)> = vec![
+        ("GIT_ASKPASS", askpass_path),
+        ("GIT_TERMINAL_PROMPT", "0"),
+    ];
+    #[cfg(target_os = "windows")]
+    {
+        vars.push(("GIT_USERNAME", username));
+        vars.push(("GIT_PASSWORD", password));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (username, password);
+    }
+    vars
+}
+
+/// Pull changes from remote with provided credentials
+#[tauri::command]
+pub async fn git_pull_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
+    // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
+    let (askpass_path, _askpass_guard) = create_askpass_script("pull", &username, &password)?;
+    let env_vars = build_askpass_env(&askpass_path, &username, &password);
+
+    let result = run_git_with_env(&path, &["pull", "--rebase"], &env_vars);
 
     // Clean up the askpass script immediately
-    let _ = std::fs::remove_file(&askpass_script);
+    let _ = std::fs::remove_file(&askpass_path);
 
     match result {
         Ok(_) => Ok(()),
@@ -355,6 +448,10 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
                 // Restore conflicted files to local versions (remove conflict markers from working tree)
                 restore_conflicted_files_to_local(&path);
                 Err(format!("REBASE_CONFLICT:{}", e))
+            } else if is_auth_error(&e) {
+                // Auth failure — let the frontend prompt for credentials
+                cleanup_stale_rebase_state(&path);
+                Err(format!("AUTH_REQUIRED:{}", e))
             } else {
                 // Non-conflict error: clean up stale rebase state that pull --rebase may have left
                 cleanup_stale_rebase_state(&path);
@@ -421,70 +518,100 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
         cleanup_stale_rebase_state(&path);
     }
 
-    // Create a temporary askpass script with a unique name to avoid conflicts
-    let temp_dir = std::env::temp_dir();
-    let unique_id = uuid::Uuid::new_v4().to_string();
-    let askpass_script = temp_dir.join(format!("swallownote_askpass_{}.sh", unique_id));
+    // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
+    let (askpass_path, _askpass_guard) = create_askpass_script("askpass", &username, &password)?;
+    let env_vars = build_askpass_env(&askpass_path, &username, &password);
 
-    #[cfg(not(target_os = "windows"))]
-    let script_content = format!(
-        "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
-        username.replace('\'', "'\\''"),
-        password.replace('\'', "'\\''")
-    );
-
-    #[cfg(target_os = "windows")]
-    let script_content = format!(
-        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
-        username.replace('"', "\"\""),
-        password.replace('"', "\"\"")
-    );
-
-    std::fs::write(&askpass_script, &script_content)
-        .map_err(|e| format!("Failed to create askpass script: {}", e))?;
-    // 脚本已写入磁盘，立即建立 RAII 守卫：后续 set_permissions 或 spawn git 失败时，
-    // Drop 会自动删除脚本，避免明文凭证残留。
-    let _askpass_guard = TempScriptGuard(askpass_script.clone());
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&askpass_script)
-            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
-            .permissions();
-        // Set restrictive permissions: only owner can read/execute
-        perms.set_mode(0o600);
-        std::fs::set_permissions(&askpass_script, perms)
-            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
-    }
-
-    let askpass_path = askpass_script.to_string_lossy().to_string();
-
-    let result = run_git_with_env(
-        &path,
-        &["push"],
-        &[
-            ("GIT_ASKPASS", askpass_path.as_str()),
-            ("GIT_TERMINAL_PROMPT", "0"),
-        ],
-    );
+    let result = run_git_with_env(&path, &["push"], &env_vars);
 
     // Clean up the askpass script immediately
-    let _ = std::fs::remove_file(&askpass_script);
+    let _ = std::fs::remove_file(&askpass_path);
 
     match result {
         Ok(_) => Ok(()),
-        Err(e) => Err(format!("Failed to push: {}", e)),
+        Err(e) => {
+            let err_lower = e.to_lowercase();
+            // detached HEAD 时 `git push` 没有上游分支，会报
+            // "fatal: You are not currently on a branch"。此时改为
+            // `push origin HEAD:refs/heads/<branch>` 显式指定目标分支。
+            if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                if let Some(branch) = resolve_push_target_branch(&path) {
+                    eprintln!("[INFO] git_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    // Recreate askpass script for the retry
+                    let (retry_path, _retry_guard) = create_askpass_script("askpass", &username, &password)?;
+                    let retry_env = build_askpass_env(&retry_path, &username, &password);
+                    let retry = run_git_with_env(
+                        &path,
+                        &["push", "origin", &format!("HEAD:refs/heads/{}", branch)],
+                        &retry_env,
+                    );
+                    let _ = std::fs::remove_file(&retry_path);
+                    return match retry {
+                        Ok(_) => Ok(()),
+                        Err(retry_err) => Err(format!("Failed to push: {}", retry_err)),
+                    };
+                }
+            }
+            Err(format!("Failed to push: {}", e))
+        }
     }
 }
 
 /// Force push commits to remote (overwrites remote history)
+/// 推送前先 commit 未提交的改动，确保本地改动被包含在推送中。
 #[tauri::command]
 pub async fn git_force_push(path: String) -> Result<(), String> {
+    // 修复 detached HEAD（必须在 commit 之前，否则 commit 可能失败）
+    fix_detached_head(&path)?;
+
+    // 检查是否有未提交的改动，有则先 commit
+    let status_output = run_git(&path, &["status", "--porcelain"])?;
+    if !status_output.trim().is_empty() {
+        run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
+        let commit_result = run_git(&path, &["commit", "-m", "Force sync"]);
+        if let Err(e) = commit_result {
+            let err_msg = e.to_lowercase();
+            // "nothing to commit" 不是错误，继续推送
+            if !err_msg.contains("nothing to commit")
+                && !err_msg.contains("working tree clean")
+                && !err_msg.contains("no changes added to commit")
+            {
+                return Err(format!("Failed to commit before force push: {}", e));
+            }
+        }
+    }
+
     let result = run_git(&path, &["push", "--force"]);
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
+            let err_lower = e.to_lowercase();
+            // detached HEAD 时 `git push --force` 没有上游分支，会报
+            // "fatal: You are not currently on a branch"。此时改为
+            // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
+            if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                if let Some(branch) = resolve_push_target_branch(&path) {
+                    eprintln!("[INFO] git_force_push: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    let retry = run_git(
+                        &path,
+                        &["push", "--force", "origin", &format!("HEAD:refs/heads/{}", branch)],
+                    );
+                    return match retry {
+                        Ok(_) => Ok(()),
+                        Err(retry_err) => {
+                            if is_auth_error(&retry_err) {
+                                Err(format!("AUTH_REQUIRED:{}", retry_err))
+                            } else {
+                                Err(format!("Failed to force push: {}", retry_err))
+                            }
+                        }
+                    };
+                }
+                return Err(format!(
+                    "Failed to force push: repository is in detached HEAD state and no target branch could be resolved: {}",
+                    e
+                ));
+            }
             if is_auth_error(&e) {
                 Err(format!("AUTH_REQUIRED:{}", e))
             } else {
@@ -495,59 +622,77 @@ pub async fn git_force_push(path: String) -> Result<(), String> {
 }
 
 /// Force push with provided credentials (username and password/token)
+/// 推送前先 commit 未提交的改动，确保本地改动被包含在推送中。
 #[tauri::command]
 pub async fn git_force_push_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
-    let temp_dir = std::env::temp_dir();
-    let unique_id = uuid::Uuid::new_v4().to_string();
-    let askpass_script = temp_dir.join(format!("swallownote_force_push_askpass_{}.sh", unique_id));
+    // 修复 detached HEAD（必须在 commit 之前）
+    fix_detached_head(&path)?;
 
-    #[cfg(not(target_os = "windows"))]
-    let script_content = format!(
-        "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
-        username.replace('\'', "'\\''"),
-        password.replace('\'', "'\\''")
-    );
-
-    #[cfg(target_os = "windows")]
-    let script_content = format!(
-        "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
-        username.replace('"', "\"\""),
-        password.replace('"', "\"\"")
-    );
-
-    std::fs::write(&askpass_script, &script_content)
-        .map_err(|e| format!("Failed to create askpass script: {}", e))?;
-    // 脚本已写入磁盘，立即建立 RAII 守卫：后续 set_permissions 或 spawn git 失败时，
-    // Drop 会自动删除脚本，避免明文凭证残留。
-    let _askpass_guard = TempScriptGuard(askpass_script.clone());
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&askpass_script)
-            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
-            .permissions();
-        perms.set_mode(0o600);
-        std::fs::set_permissions(&askpass_script, perms)
-            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+    // 检查是否有未提交的改动，有则先 commit
+    let status_output = run_git(&path, &["status", "--porcelain"])?;
+    if !status_output.trim().is_empty() {
+        run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
+        let commit_result = run_git(&path, &["commit", "-m", "Force sync"]);
+        if let Err(e) = commit_result {
+            let err_msg = e.to_lowercase();
+            if !err_msg.contains("nothing to commit")
+                && !err_msg.contains("working tree clean")
+                && !err_msg.contains("no changes added to commit")
+            {
+                return Err(format!("Failed to commit before force push: {}", e));
+            }
+        }
     }
 
-    let askpass_path = askpass_script.to_string_lossy().to_string();
+    // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
+    let (askpass_path, _askpass_guard) = create_askpass_script("force_push", &username, &password)?;
+    let env_vars = build_askpass_env(&askpass_path, &username, &password);
 
-    let result = run_git_with_env(
-        &path,
-        &["push", "--force"],
-        &[
-            ("GIT_ASKPASS", askpass_path.as_str()),
-            ("GIT_TERMINAL_PROMPT", "0"),
-        ],
-    );
+    let result = run_git_with_env(&path, &["push", "--force"], &env_vars);
 
-    let _ = std::fs::remove_file(&askpass_script);
+    let _ = std::fs::remove_file(&askpass_path);
 
     match result {
         Ok(_) => Ok(()),
-        Err(e) => Err(format!("Failed to force push: {}", e)),
+        Err(e) => {
+            let err_lower = e.to_lowercase();
+            // detached HEAD 时 `git push --force` 没有上游分支，会报
+            // "fatal: You are not currently on a branch"。此时改为
+            // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
+            if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                if let Some(branch) = resolve_push_target_branch(&path) {
+                    eprintln!("[INFO] git_force_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    // Recreate askpass script for the retry
+                    let (retry_path, _retry_guard) = create_askpass_script("force_push", &username, &password)?;
+                    let retry_env = build_askpass_env(&retry_path, &username, &password);
+                    let retry = run_git_with_env(
+                        &path,
+                        &["push", "--force", "origin", &format!("HEAD:refs/heads/{}", branch)],
+                        &retry_env,
+                    );
+                    let _ = std::fs::remove_file(&retry_path);
+                    return match retry {
+                        Ok(_) => Ok(()),
+                        Err(retry_err) => {
+                            if is_auth_error(&retry_err) {
+                                Err(format!("AUTH_REQUIRED:{}", retry_err))
+                            } else {
+                                Err(format!("Failed to force push: {}", retry_err))
+                            }
+                        }
+                    };
+                }
+                return Err(format!(
+                    "Failed to force push: repository is in detached HEAD state and no target branch could be resolved: {}",
+                    e
+                ));
+            }
+            if is_auth_error(&e) {
+                Err(format!("AUTH_REQUIRED:{}", e))
+            } else {
+                Err(format!("Failed to force push: {}", e))
+            }
+        }
     }
 }
 
@@ -561,11 +706,67 @@ pub async fn git_force_pull(path: String) -> Result<(), String> {
         return Ok(()); // No remote, nothing to pull
     }
 
+    // Fix detached HEAD before proceeding
+    // 如果修复失败，后续 get_branch 可能返回 "HEAD" 导致 reset --hard origin/HEAD 失败
+    fix_detached_head(&path).map_err(|e| format!("Failed to fix detached HEAD before force pull: {}", e))?;
+
     // Get current branch
     let branch = get_branch(&path)?;
 
     // Fetch from remote
-    run_git(&path, &["fetch", "origin"]).map_err(|e| format!("Failed to fetch: {}", e))?;
+    let fetch_result = run_git(&path, &["fetch", "origin"]);
+    if let Err(e) = fetch_result {
+        if is_auth_error(&e) {
+            return Err(format!("AUTH_REQUIRED:{}", e));
+        }
+        return Err(format!("Failed to fetch: {}", e));
+    }
+
+    // Reset to remote branch, discarding all local changes
+    let remote_ref = format!("origin/{}", branch);
+    run_git(&path, &["reset", "--hard", &remote_ref])
+        .map_err(|e| format!("Failed to reset: {}", e))?;
+
+    // Clean untracked files and directories
+    run_git(&path, &["clean", "-fd"]).map_err(|e| format!("Failed to clean: {}", e))?;
+
+    Ok(())
+}
+
+/// Force pull (reset to remote) with provided credentials
+#[tauri::command]
+pub async fn git_force_pull_with_credentials(
+    path: String,
+    username: String,
+    password: String,
+) -> Result<(), String> {
+    // Check if remote exists
+    let remote_url = get_remote_url(&path);
+    if remote_url.is_err() {
+        return Ok(()); // No remote, nothing to pull
+    }
+
+    // Fix detached HEAD before proceeding
+    // 如果修复失败，后续 get_branch 可能返回 "HEAD" 导致 reset --hard origin/HEAD 失败
+    fix_detached_head(&path).map_err(|e| format!("Failed to fix detached HEAD before force pull: {}", e))?;
+
+    // Get current branch
+    let branch = get_branch(&path)?;
+
+    // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
+    let (askpass_path, _askpass_guard) = create_askpass_script("force_pull", &username, &password)?;
+    let env_vars = build_askpass_env(&askpass_path, &username, &password);
+
+    // Fetch from remote with credentials
+    let fetch_result = run_git_with_env(&path, &["fetch", "origin"], &env_vars);
+    let _ = std::fs::remove_file(&askpass_path);
+
+    if let Err(e) = fetch_result {
+        if is_auth_error(&e) {
+            return Err(format!("AUTH_REQUIRED:{}", e));
+        }
+        return Err(format!("Failed to fetch: {}", e));
+    }
 
     // Reset to remote branch, discarding all local changes
     let remote_ref = format!("origin/{}", branch);
@@ -582,21 +783,29 @@ pub async fn git_force_pull(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn git_commit_and_push(path: String, message: String) -> Result<(), String> {
     // Auto-fix detached HEAD before committing
-    fix_detached_head(&path);
+    fix_detached_head(&path)?;
 
     // Stage all changes including submodules
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
 
-    // Check if there are submodule changes that need special handling
-    let status_output = run_git(&path, &["status"])?;
-    
-    // Check for submodule with modified content (submodule internal changes)
-    // Use precise patterns: "modified content" is what git outputs for dirty submodules
-    // and "new commits" / "modified refs" indicate submodule pointer changes
-    let has_submodule_modified = status_output.contains("modified content")
-        || (status_output.contains("(new commits)") && status_output.contains("submodule"))
-        || (status_output.contains("(modified refs)") && status_output.contains("submodule"));
-    
+    // 使用 --porcelain 输出避免依赖本地化文本（如 "modified content"），保证跨语言环境稳定。
+    // 通过将 porcelain 变更路径与 .gitmodules 中的子模块路径比对，判定子模块是否有改动。
+    let status_output = run_git(&path, &["status", "--porcelain"])?;
+    let gitmodules_path = std::path::Path::new(&path).join(".gitmodules");
+    let has_submodule_modified = gitmodules_path.exists()
+        && parse_gitmodules(&gitmodules_path)
+            .map(|submodule_paths| {
+                status_output.lines().any(|line| {
+                    // porcelain v1 格式：XY <path>，前两位为状态码，第三位为空格。
+                    // 变更行长度至少为 3；取第三位之后的路径部分与子模块路径比对。
+                    // trim_matches('"') 处理含空格等特殊字符时 git 自动加引号的情况。
+                    if line.as_bytes().len() < 3 { return false; }
+                    let entry_path = line[3..].trim().trim_matches('"');
+                    submodule_paths.iter().any(|sp| sp == entry_path)
+                })
+            })
+            .unwrap_or(false);
+
     if has_submodule_modified {
         // First try to commit changes in submodules
         match commit_submodules(&path, &message) {
@@ -666,6 +875,9 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             return Err(format!("Pull failed: {}", e));
         }
         
+        // Fix detached HEAD that rebase may have caused
+        fix_detached_head(&path)?;
+
         // Check again after pull - if we're now in a conflict state, don't push
         if is_rebase_or_merge_in_progress(&path) {
             if has_real_conflicts(&path) {
@@ -676,11 +888,38 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
         }
 
         let push_result = run_git(&path, &["push"]);
-        if let Err(e) = push_result {
-            if is_auth_error(&e) {
-                return Err(format!("AUTH_REQUIRED:{}", e));
+        match push_result {
+            Ok(_) => {}
+            Err(e) => {
+                let err_lower = e.to_lowercase();
+                // detached HEAD fallback
+                if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
+                    if let Some(branch) = resolve_push_target_branch(&path) {
+                        eprintln!("[INFO] git_commit_and_push: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                        let retry = run_git(&path, &["push", "origin", &format!("HEAD:refs/heads/{}", branch)]);
+                        if let Err(retry_err) = retry {
+                            let retry_lower = retry_err.to_lowercase();
+                            if retry_lower.contains("not currently on a branch") || retry_lower.contains("detached head") {
+                                // Still detached after retry — return original error
+                                return Err(format!("Failed to push: {}", e));
+                            }
+                            if is_auth_error(&retry_err) {
+                                return Err(format!("AUTH_REQUIRED:{}", retry_err));
+                            }
+                            return Err(format!("Failed to push: {}", retry_err));
+                        }
+                    } else {
+                        if is_auth_error(&e) {
+                            return Err(format!("AUTH_REQUIRED:{}", e));
+                        }
+                        return Err(format!("Failed to push: {}", e));
+                    }
+                } else if is_auth_error(&e) {
+                    return Err(format!("AUTH_REQUIRED:{}", e));
+                } else {
+                    return Err(format!("Failed to push: {}", e));
+                }
             }
-            return Err(format!("Failed to push: {}", e));
         }
     }
 
@@ -688,39 +927,41 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
 }
 
 fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
-    // Get list of submodules from .gitmodules for more reliable path extraction
+    // 从 .gitmodules 获取子模块路径列表
     let gitmodules_path = std::path::Path::new(path).join(".gitmodules");
     if !gitmodules_path.exists() {
-        // No submodules configured, nothing to do
+        // 无 .gitmodules，说明没有子模块配置，直接返回
         return Ok(());
     }
-    
-    // Parse .gitmodules to get submodule paths
+
     let submodule_paths = parse_gitmodules(&gitmodules_path)?;
-    
+
     for submodule_rel_path in submodule_paths {
         let submodule_full_path = format!("{}/{}", path, submodule_rel_path);
-        
-        // Check if submodule directory exists
+
+        // 子模块目录不存在则跳过
         if !std::path::Path::new(&submodule_full_path).exists() {
             continue;
         }
-        
-        // Check if submodule has uncommitted changes
+
+        // 递归处理嵌套子模块：先提交最内层子模块的变更，再逐层向外提交。
+        commit_submodules(&submodule_full_path, message)?;
+
+        // 检查当前子模块是否有未提交变更
         let submodule_status = run_git(&submodule_full_path, &["status", "--porcelain"])?;
         if !submodule_status.trim().is_empty() {
-            // Stage and commit in submodule
+            // 在子模块内暂存并提交
             run_git(&submodule_full_path, &["add", "-A"])?;
             if let Err(e) = run_git(&submodule_full_path, &["commit", "-m", message]) {
-                // If submodule commit fails (no changes), that's okay
+                // 子模块无改动（nothing to commit）不算错误
                 if !e.contains("nothing to commit") && !e.contains("working tree clean") {
                     return Err(e);
                 }
             }
         }
     }
-    
-    // Now stage the submodule reference changes in parent
+
+    // 在父仓库中暂存子模块引用变更
     run_git(path, &["add", "-A"])?;
     Ok(())
 }
@@ -751,7 +992,7 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
     }
 
     // Auto-fix detached HEAD by switching back to the correct branch
-    fix_detached_head(repo_path);
+    fix_detached_head(repo_path)?;
 
     let file_name = Path::new(&file_path)
         .file_name()
@@ -977,11 +1218,11 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
         }
     }
 
-    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let repo_path = current.to_str().ok_or(i18n::t("backend.git.invalidRepoPath"))?;
     let relative_path = Path::new(&file_path)
         .strip_prefix(current)
-        .map_err(|e| format!("Invalid relative path: {}", e))?;
-    let relative_path_str = relative_path.to_str().ok_or("Invalid path encoding")?;
+        .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
+    let relative_path_str = relative_path.to_str().ok_or(i18n::t("backend.git.invalidPathEncoding"))?;
 
     // Check if remote exists
     let remote_url = get_remote_url(repo_path);
@@ -994,7 +1235,7 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
         if is_auth_error(&e) {
             format!("AUTH_REQUIRED:{}", e)
         } else {
-            format!("Failed to fetch: {}", e)
+            format!("{}: {}", i18n::t("backend.git.fetchFailed"), e)
         }
     })?;
 
@@ -1020,7 +1261,7 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
     };
     match diff_status {
         Ok(status) if status.success() => { /* 无本地改动，可安全 checkout */ }
-        // 仅退出码 1 视为"有改动"，拒绝覆盖
+        // 仅退出码 1 视为"有改动"，拒绝覆盖（保留 LOCAL_CHANGES: 前缀供前端识别）
         Ok(status) if status.code() == Some(1) => {
             return Err(format!("LOCAL_CHANGES: {}", relative_path_str));
         }
@@ -1029,17 +1270,17 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
             let code = status
                 .code()
                 .map(|c| c.to_string())
-                .unwrap_or_else(|| "terminated by signal".to_string());
-            return Err(format!("Failed to check local changes: git diff exit code {}", code));
+                .unwrap_or_else(|| i18n::t("backend.git.terminatedBySignal"));
+            return Err(format!("{}: git diff exit code {}", i18n::t("backend.git.checkLocalChangesFailed"), code));
         }
         Err(e) => {
-            return Err(format!("Failed to check local changes: {}", e));
+            return Err(format!("{}: {}", i18n::t("backend.git.checkLocalChangesFailed"), e));
         }
     }
 
     // Also checkout the file from remote to update the working tree
     run_git(repo_path, &["checkout", &format!("origin/{}", branch), "--", relative_path_str])
-        .map_err(|e| format!("Failed to checkout file: {}", e))?;
+        .map_err(|e| format!("{}: {}", i18n::t("backend.git.checkoutFileFailed"), e))?;
 
     Ok(output)
 }
@@ -1275,6 +1516,25 @@ fn has_real_conflicts(repo_path: &str) -> bool {
 /// but left behind .git/rebase-merge or .git/MERGE_HEAD files without actual unmerged files.
 fn cleanup_stale_rebase_state(repo_path: &str) {
     eprintln!("[INFO] Cleaning up stale rebase/merge state in {}", repo_path);
+
+    // 检查是否为交互式 rebase：rebase-merge/done 文件存在且非空说明用户正在进行交互式 rebase，
+    // 不应自动 abort，以免丢失用户尚未完成的 rebase 进度。
+    let rebase_merge_done = Path::new(&repo_path).join(".git/rebase-merge/done");
+    if rebase_merge_done.exists() {
+        if let Ok(content) = std::fs::read_to_string(&rebase_merge_done) {
+            if !content.trim().is_empty() {
+                eprintln!("[INFO] cleanup_stale_rebase_state: interactive rebase in progress (done file non-empty), skipping abort in {}", repo_path);
+                return;
+            }
+        }
+    }
+
+    // 存在真实冲突文件时不 abort，避免丢失未解决的冲突状态
+    if has_real_conflicts(repo_path) {
+        eprintln!("[INFO] cleanup_stale_rebase_state: real conflicts exist, skipping abort in {}", repo_path);
+        return;
+    }
+
     let _ = run_git(repo_path, &["rebase", "--abort"]);
     let _ = run_git(repo_path, &["merge", "--abort"]);
 }
@@ -1375,23 +1635,24 @@ fn restore_conflicted_files_to_local(repo_path: &str) {
 /// Fix detached HEAD state by switching back to the correct branch
 /// This handles the case where a rebase completed but left the repo in detached HEAD
 /// Only fixes if there's no active rebase/merge in progress
-fn fix_detached_head(repo_path: &str) {
+/// 返回 Err 表示检测到 detached HEAD 但切换分支失败；返回 Ok 表示无需修复或修复成功。
+fn fix_detached_head(repo_path: &str) -> Result<(), String> {
     // Don't interfere with active rebase/merge
     let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
     let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
     let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
     if rebase_merge.exists() || rebase_apply.exists() || merge_head.exists() {
-        return;
+        return Ok(());
     }
 
     // Check if we're in detached HEAD state
     let branch = match run_git(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
         Ok(b) => b,
-        Err(_) => return,
+        Err(_) => return Ok(()),
     };
 
     if branch != "HEAD" {
-        return; // Not detached
+        return Ok(()); // Not detached
     }
 
     eprintln!("[INFO] fix_detached_head: detected detached HEAD in {}", repo_path);
@@ -1399,49 +1660,56 @@ fn fix_detached_head(repo_path: &str) {
     // Try to find the correct branch to switch to
     if let Some(target_branch) = get_rebase_branch(repo_path) {
         eprintln!("[INFO] fix_detached_head: switching to branch {}", target_branch);
-        match run_git(repo_path, &["checkout", &target_branch]) {
-            Ok(_) => eprintln!("[INFO] fix_detached_head: successfully switched to {}", target_branch),
-            Err(e) => eprintln!("[WARN] fix_detached_head: failed to switch to {}: {}", target_branch, e),
-        }
-    } else {
-        // Fallback: try checking out the most recent local branch
-        // Use git branch to find branches that point to current HEAD
-        if let Ok(head_hash) = run_git(repo_path, &["rev-parse", "HEAD"]) {
-            if let Ok(branches) = run_git(repo_path, &["branch", "--format=%(refname:short)=%(objectname)"]) {
-                for line in branches.lines() {
-                    let parts: Vec<&str> = line.splitn(2, '=').collect();
-                    if parts.len() == 2 && parts[1].trim() == head_hash.trim() {
-                        let target = parts[0].trim();
-                        eprintln!("[INFO] fix_detached_head: found matching branch {}, switching", target);
-                        match run_git(repo_path, &["checkout", target]) {
-                            Ok(_) => {
-                                eprintln!("[INFO] fix_detached_head: successfully switched to {}", target);
-                                return;
-                            }
-                            Err(e) => {
-                                eprintln!("[WARN] fix_detached_head: failed to switch to {}: {}", target, e);
-                                continue;
-                            }
+        run_git(repo_path, &["checkout", &target_branch])
+            .map_err(|e| format!("Failed to fix detached HEAD: {}", e))?;
+        eprintln!("[INFO] fix_detached_head: successfully switched to {}", target_branch);
+        return Ok(());
+    }
+
+    // Fallback: try checking out the most recent local branch
+    // Use git branch to find branches that point to current HEAD
+    if let Ok(head_hash) = run_git(repo_path, &["rev-parse", "HEAD"]) {
+        if let Ok(branches) = run_git(repo_path, &["branch", "--format=%(refname:short)=%(objectname)"]) {
+            for line in branches.lines() {
+                let parts: Vec<&str> = line.splitn(2, '=').collect();
+                if parts.len() == 2 && parts[1].trim() == head_hash.trim() {
+                    let target = parts[0].trim();
+                    eprintln!("[INFO] fix_detached_head: found matching branch {}, switching", target);
+                    match run_git(repo_path, &["checkout", target]) {
+                        Ok(_) => {
+                            eprintln!("[INFO] fix_detached_head: successfully switched to {}", target);
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            eprintln!("[WARN] fix_detached_head: failed to switch to {}: {}", target, e);
+                            continue;
                         }
                     }
                 }
             }
         }
-        eprintln!("[WARN] fix_detached_head: could not find a branch matching current HEAD in {}", repo_path);
     }
+    // 未找到匹配分支，不视为错误（仓库可能本就应在 detached HEAD 状态）
+    eprintln!("[WARN] fix_detached_head: could not find a branch matching current HEAD in {}", repo_path);
+    Ok(())
 }
 
 /// Scan directory for all git repositories
 #[tauri::command]
 pub async fn scan_git_repos(root_path: String) -> Result<Vec<GitRepositoryInfo>, String> {
-    let root = Path::new(&root_path);
-    if !root.exists() {
-        return Err(format!("Path does not exist: {}", root_path));
-    }
+    // 扫描涉及大量同步文件 I/O 与 git 子进程调用，放入 spawn_blocking 避免阻塞 tokio 工作线程。
+    tokio::task::spawn_blocking(move || {
+        let root = Path::new(&root_path);
+        if !root.exists() {
+            return Err(format!("Path does not exist: {}", root_path));
+        }
 
-    let mut repos = Vec::new();
-    scan_dir_recursive(root, &mut repos, None)?;
-    Ok(repos)
+        let mut repos = Vec::new();
+        scan_dir_recursive(root, &mut repos, None)?;
+        Ok(repos)
+    })
+    .await
+    .map_err(|e| format!("Scan task panicked: {}", e))?
 }
 
 fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_path: Option<String>) -> Result<(), String> {
@@ -1545,23 +1813,39 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_pat
     Ok(())
 }
 
-/// Parse .gitmodules file to extract submodule paths
+/// Parse .gitmodules file to extract submodule paths.
+/// 使用 `git config -f` 解析，比手工分行匹配更健壮：可容忍 `path=value`、
+/// `path = value`、`path\t=\tvalue` 等多种写法以及注释、引号等差异。
 fn parse_gitmodules(gitmodules_path: &Path) -> Result<Vec<String>, String> {
-    let content = std::fs::read_to_string(gitmodules_path)
-        .map_err(|e| format!("Failed to read .gitmodules: {}", e))?;
-    
-    let mut paths = Vec::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.starts_with("path = ") {
-            let path = line.trim_start_matches("path = ").trim();
-            if !path.is_empty() {
-                paths.push(path.to_string());
+    // .gitmodules 的父目录（仓库根）作为 git 命令的工作目录
+    let dir = gitmodules_path
+        .parent()
+        .and_then(|p| p.to_str())
+        .ok_or("Invalid .gitmodules path")?;
+    let gitmodules_str = gitmodules_path
+        .to_str()
+        .ok_or("Invalid .gitmodules path encoding")?;
+    // --get-regexp 匹配 key（形如 submodule.<name>.path），输出 "<key> <value>"
+    match run_git(dir, &["config", "-f", gitmodules_str, "--get-regexp", r"submodule\..*\.path"]) {
+        Ok(output) => {
+            let mut paths = Vec::new();
+            for line in output.lines() {
+                // 输出格式：<key> <value>，例如 "submodule.foo.path modules/foo"
+                // 取第一个空格之后的部分作为子模块路径
+                if let Some(idx) = line.find(' ') {
+                    let p = line[idx..].trim();
+                    if !p.is_empty() {
+                        paths.push(p.to_string());
+                    }
+                }
             }
+            Ok(paths)
+        }
+        Err(_) => {
+            // git config --get-regexp 在无匹配时退出码为 1（非真实错误），返回空列表。
+            Ok(Vec::new())
         }
     }
-    
-    Ok(paths)
 }
 
 fn get_remote_url(path: &str) -> Result<String, String> {
@@ -1879,9 +2163,24 @@ pub async fn git_get_conflict_remote_content(repo_path: String, file_path: Strin
 /// side: "local" or "remote"
 #[tauri::command]
 pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, side: String) -> Result<(), String> {
-    let rel_path = Path::new(&file_path)
-        .strip_prefix(Path::new(&repo_path))
-        .map_err(|e| format!("Invalid relative path: {}", e))?;
+    // strip_prefix 失败时用 canonicalize 规范化两个路径后再 strip，处理符号链接、相对路径等情况
+    // 用 match + to_path_buf 取得所有权，避免 or_else 闭包返回引用局部变量导致的借用错误。
+    let rel_path = match Path::new(&file_path).strip_prefix(Path::new(&repo_path)) {
+        Ok(p) => p.to_path_buf(),
+        Err(_) => {
+            // 规范化后重试：解决因路径形式不一致（如 /var vs /private/var）导致 strip_prefix 失败
+            let canon_file = std::fs::canonicalize(&file_path)
+                .map_err(|e| format!("Failed to resolve file path '{}': {}", file_path, e))?;
+            let canon_repo = std::fs::canonicalize(&repo_path)
+                .map_err(|e| format!("Failed to resolve repo path '{}': {}", repo_path, e))?;
+            canon_file
+                .strip_prefix(&canon_repo)
+                .map(|p| p.to_path_buf())
+                .map_err(|e| {
+                    format!("File path '{}' is not within repository '{}': {}", file_path, repo_path, e)
+                })?
+        }
+    };
     let rel_path_str = rel_path.to_str().ok_or("Invalid path encoding")?;
 
     // Validate: reject path traversal attempts
@@ -1930,14 +2229,14 @@ fn check_and_continue_rebase(repo_path: &str) -> Result<(), String> {
                 // User can continue manually
             } else {
                 // Rebase continued successfully - fix detached HEAD if needed
-                fix_detached_head(repo_path);
+                let _ = fix_detached_head(repo_path);
             }
         } else {
             let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
             if merge_head.exists() {
                 run_git(repo_path, &["commit", "--no-edit"])?;
                 // Fix detached HEAD after merge commit
-                fix_detached_head(repo_path);
+                let _ = fix_detached_head(repo_path);
             }
         }
     }
@@ -2016,35 +2315,52 @@ fn unescape_git_path(path: &str) -> String {
     let bytes = path.as_bytes();
 
     while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 3 < bytes.len() {
-            // Try to parse octal escape: \NNN
-            if let (Some(d1), Some(d2), Some(d3)) = (
-                char::from(bytes[i + 1]).to_digit(8),
-                char::from(bytes[i + 2]).to_digit(8),
-                char::from(bytes[i + 3]).to_digit(8),
-            ) {
-                let byte_val = (d1 << 6 | d2 << 3 | d3) as u8;
-                // Collect consecutive escaped bytes to form valid UTF-8
-                let mut byte_buf = vec![byte_val];
-                let mut j = i + 4;
-                while j + 3 < bytes.len() && bytes[j] == b'\\' {
-                    if let (Some(nd1), Some(nd2), Some(nd3)) = (
-                        char::from(bytes[j + 1]).to_digit(8),
-                        char::from(bytes[j + 2]).to_digit(8),
-                        char::from(bytes[j + 3]).to_digit(8),
-                    ) {
-                        let next_byte = (nd1 << 6 | nd2 << 3 | nd3) as u8;
-                        byte_buf.push(next_byte);
-                        j += 4;
-                    } else {
-                        break;
-                    }
+        if bytes[i] == b'\\' {
+            // 先处理 \\ 和 \" 反转义（必须在八进制转义之前判断，避免 \\\NNN 被误解析）
+            if i + 1 < bytes.len() {
+                if bytes[i + 1] == b'\\' {
+                    // \\ → \
+                    result.push('\\');
+                    i += 2;
+                    continue;
                 }
-                // Decode the collected bytes as UTF-8
-                let decoded = String::from_utf8_lossy(&byte_buf);
-                result.push_str(&decoded);
-                i = j;
-                continue;
+                if bytes[i + 1] == b'"' {
+                    // \" → "
+                    result.push('"');
+                    i += 2;
+                    continue;
+                }
+            }
+            // Try to parse octal escape: \NNN
+            if i + 3 < bytes.len() {
+                if let (Some(d1), Some(d2), Some(d3)) = (
+                    char::from(bytes[i + 1]).to_digit(8),
+                    char::from(bytes[i + 2]).to_digit(8),
+                    char::from(bytes[i + 3]).to_digit(8),
+                ) {
+                    let byte_val = (d1 << 6 | d2 << 3 | d3) as u8;
+                    // Collect consecutive escaped bytes to form valid UTF-8
+                    let mut byte_buf = vec![byte_val];
+                    let mut j = i + 4;
+                    while j + 3 < bytes.len() && bytes[j] == b'\\' {
+                        if let (Some(nd1), Some(nd2), Some(nd3)) = (
+                            char::from(bytes[j + 1]).to_digit(8),
+                            char::from(bytes[j + 2]).to_digit(8),
+                            char::from(bytes[j + 3]).to_digit(8),
+                        ) {
+                            let next_byte = (nd1 << 6 | nd2 << 3 | nd3) as u8;
+                            byte_buf.push(next_byte);
+                            j += 4;
+                        } else {
+                            break;
+                        }
+                    }
+                    // Decode the collected bytes as UTF-8
+                    let decoded = String::from_utf8_lossy(&byte_buf);
+                    result.push_str(&decoded);
+                    i = j;
+                    continue;
+                }
             }
         }
         // Regular character
@@ -2169,11 +2485,16 @@ async fn do_git_clone(
         return Err(format!("{}: {}", i18n::t("backend.git.targetPathExists"), local_path));
     }
 
+    // 并发 clone 防护：检查是否已有 clone 进行中，并在同一锁范围内设置 url/local_path，
+    // 避免 check-then-set 竞态导致两个 clone 同时进入。
     // Store the URL and local_path in shared state *before* emitting the
     // started event, so a frontend page refresh can recover them via
     // `git_clone_status`.
     {
         let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
+        if guard.pid.is_some() {
+            return Err("已有克隆任务正在进行中，请等待完成或取消后再试".to_string());
+        }
         guard.url = url.to_string();
         guard.local_path = local_path.to_string();
     }
@@ -2188,46 +2509,12 @@ async fn do_git_clone(
     }));
 
     // If credentials provided, set up GIT_ASKPASS
-    // RAII 守卫提前声明在外层作用域，使其存活至函数末尾：覆盖 set_permissions / spawn / wait 等所有失败路径。
+    // RAII 守卫提前声明在外层作用域，使其存活至函数末尾：覆盖 spawn / wait 等所有失败路径。
     let mut _askpass_guard: Option<TempScriptGuard> = None;
     let askpass_script_path = if let (Some(username), Some(password)) = (username, password) {
-        let temp_dir = std::env::temp_dir();
-        let unique_id = uuid::Uuid::new_v4().to_string();
-        let askpass_script = temp_dir.join(format!("swallownote_clone_askpass_{}.sh", unique_id));
-
-        #[cfg(not(target_os = "windows"))]
-        let script_content = format!(
-            "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
-            username.replace('\'', "'\\''"),
-            password.replace('\'', "'\\''")
-        );
-
-        #[cfg(target_os = "windows")]
-        let script_content = format!(
-            // Windows cmd 的 echo 会自动追加 \r\n，会导致 git 把凭证末尾的 \r 当作密码一部分而认证失败；
-            // 改用 `<NUL set /p=` 输出不带换行的字符串，与其他 askpass 脚本保持一致。
-            "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  <NUL set /p={}\n) else (\n  <NUL set /p={}\n)",
-            username.replace('"', "\"\""),
-            password.replace('"', "\"\"")
-        );
-
-        std::fs::write(&askpass_script, &script_content)
-            .map_err(|e| format!("Failed to create askpass script: {}", e))?;
-        // 脚本写入成功，建立守卫：此后任何 `?` 提前返回都会触发 Drop 删除脚本
-        _askpass_guard = Some(TempScriptGuard(askpass_script.clone()));
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&askpass_script)
-                .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
-                .permissions();
-            perms.set_mode(0o600);
-            std::fs::set_permissions(&askpass_script, perms)
-                .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
-        }
-
-        Some(askpass_script.to_string_lossy().to_string())
+        let (path, guard) = create_askpass_script("clone", username, password)?;
+        _askpass_guard = Some(guard);
+        Some(path)
     } else {
         None
     };
@@ -2245,6 +2532,14 @@ async fn do_git_clone(
 
     if let Some(ref askpass_path) = askpass_script_path {
         cmd.env("GIT_ASKPASS", askpass_path);
+        // Windows 下通过环境变量传递凭证，供通用 askpass 脚本读取
+        #[cfg(target_os = "windows")]
+        {
+            if let (Some(u), Some(p)) = (username, password) {
+                cmd.env("GIT_USERNAME", u);
+                cmd.env("GIT_PASSWORD", p);
+            }
+        }
     }
 
     let mut child = cmd
@@ -2583,6 +2878,12 @@ pub async fn check_and_update_conflict_repo(
     }
 }
 
+/// 前端可调用的清理残留 askpass 脚本命令
+#[tauri::command]
+pub fn cleanup_askpass_scripts() {
+    cleanup_stale_askpass_scripts();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2647,5 +2948,124 @@ mod tests {
         // Should have some removed parts in old and added parts in new
         assert!(result.old_parts.iter().any(|p| p.removed), "old should have removed parts");
         assert!(result.new_parts.iter().any(|p| p.added), "new should have added parts");
+    }
+
+    // ===== 纯函数单元测试 =====
+
+    #[test]
+    fn test_is_conflict_error_conflict_keywords() {
+        assert!(is_conflict_error("CONFLICT (content): Merge conflict in file.txt"));
+        assert!(is_conflict_error("error: could not apply abc123"));
+        assert!(is_conflict_error("Auto-merging file.rs\nCONFLICT (content): Merge conflict"));
+        assert!(is_conflict_error("Please resolve them and commit the result"));
+        assert!(is_conflict_error("Fix conflicts and then commit the result"));
+        assert!(is_conflict_error("After resolving the conflicts, run git rebase --continue"));
+        assert!(is_conflict_error("Failed to merge in the changes"));
+        assert!(is_conflict_error("Pull is not possible because you have unmerged files"));
+    }
+
+    #[test]
+    fn test_is_conflict_error_non_conflict() {
+        assert!(!is_conflict_error("Everything up-to-date"));
+        assert!(!is_conflict_error("Successfully rebased"));
+        assert!(!is_conflict_error("authentication failed"));
+        assert!(!is_conflict_error("fatal: not a git repository"));
+        assert!(!is_conflict_error(""));
+    }
+
+    #[test]
+    fn test_is_conflict_error_rebase_uncommitted() {
+        // "cannot rebase" + "uncommitted changes" 的组合才算冲突
+        assert!(is_conflict_error("cannot rebase: you have uncommitted changes"));
+        assert!(!is_conflict_error("cannot rebase onto main branch"));
+        assert!(!is_conflict_error("uncommitted changes detected"));
+    }
+
+    #[test]
+    fn test_is_auth_error_auth_keywords() {
+        assert!(is_auth_error("Authentication failed for repo"));
+        assert!(is_auth_error("fatal: could not read Username for 'https://github.com'"));
+        assert!(is_auth_error("fatal: could not read Password for 'https://github.com'"));
+        assert!(is_auth_error("Permission denied (publickey)"));
+        assert!(is_auth_error("Permission denied (keyboard-interactive)"));
+        assert!(is_auth_error("Access denied"));
+        assert!(is_auth_error("fatal: could not read from remote repository"));
+        assert!(is_auth_error("HTTP 403 Forbidden"));
+        assert!(is_auth_error("Invalid username or password"));
+        assert!(is_auth_error("Logon failed"));
+        assert!(is_auth_error("Authentication required but no credential provided"));
+    }
+
+    #[test]
+    fn test_is_auth_error_non_auth() {
+        assert!(!is_auth_error("Everything up-to-date"));
+        assert!(!is_auth_error("CONFLICT (content): Merge conflict"));
+        assert!(!is_auth_error(""));
+        assert!(!is_auth_error("fatal: not a git repository"));
+    }
+
+    #[test]
+    fn test_is_auth_error_unable_to_access_with_403() {
+        // "fatal: unable to access" + 403 才算认证错误
+        assert!(is_auth_error("fatal: unable to access 'https://github.com/repo': The requested URL returned error: 403"));
+        assert!(is_auth_error("fatal: unable to access: 401 Unauthorized"));
+        assert!(is_auth_error("fatal: unable to access: authentication required"));
+        assert!(is_auth_error("fatal: unable to access: credential helper error"));
+        // 无 403/401/auth/credential 的 unable to access 不算认证错误
+        assert!(!is_auth_error("fatal: unable to access: Connection timed out"));
+    }
+
+    #[test]
+    fn test_unescape_git_path_plain() {
+        // 普通路径不做转义处理
+        assert_eq!(unescape_git_path("src/main.rs"), "src/main.rs");
+        assert_eq!(unescape_git_path("path/to/file.txt"), "path/to/file.txt");
+    }
+
+    #[test]
+    fn test_unescape_git_path_octal_utf8() {
+        // 中文路径 \346\210\221 = "我" (3 字节 UTF-8)
+        let escaped = "\\346\\210\\221.md";
+        assert_eq!(unescape_git_path(escaped), "我.md");
+    }
+
+    #[test]
+    fn test_unescape_git_path_backslash() {
+        // \\ → \
+        assert_eq!(unescape_git_path("path\\\\to\\\\file"), "path\\to\\file");
+    }
+
+    #[test]
+    fn test_unescape_git_path_escaped_quote() {
+        // \" → "
+        let escaped = "\\\"quoted\\\".md";
+        assert_eq!(unescape_git_path(escaped), "\"quoted\".md");
+    }
+
+    #[test]
+    fn test_unescape_git_path_mixed() {
+        // 混合转义：反斜杠 + 八进制 UTF-8
+        let escaped = "path\\\\\\346\\210\\221.txt";
+        assert_eq!(unescape_git_path(escaped), "path\\我.txt");
+    }
+
+    #[test]
+    fn test_unescape_git_path_quoted_path() {
+        // git quotepath 输出形如 "\346\210\221.md"，首尾引号由调用方 trim，
+        // unescape_git_path 只负责转义还原
+        let escaped = "\\346\\210\\221\\347\\232\\204\\347\\254\\224\\350\\256\\260.md";
+        assert_eq!(unescape_git_path(escaped), "我的笔记.md");
+    }
+
+    #[test]
+    fn test_unescape_git_path_trailing_backslash() {
+        // 末尾单独的 \ 无后续字符，原样保留
+        assert_eq!(unescape_git_path("path\\"), "path\\");
+    }
+
+    #[test]
+    fn test_unescape_git_path_incomplete_octal() {
+        // \NN 不够 3 位时不做八进制转义，原样保留
+        assert_eq!(unescape_git_path("\\34"), "\\34");
     }
 }

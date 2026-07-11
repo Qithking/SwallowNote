@@ -63,7 +63,7 @@ export function TitleBarRecentPopover() {
   const loadHistory = async () => {
     try {
       const paths = await getFolderHistory()
-      // Deduplicate by normalized path (handle case where same path stored with different separators)
+      // 按规范化路径去重
       const seen = new Set<string>()
       const deduped = paths.filter(p => {
         const normalized = p.replace(/\\/g, '/').toLowerCase()
@@ -149,10 +149,7 @@ export function TitleBarRecentPopover() {
   const handleOpenCloneDialog = () => {
     setIsOpen(false)
     setShowCloneDialog(true)
-    // If a clone is in progress, restore the form values from the store
-    // so the user sees the ongoing clone info instead of a blank form.
-    // Use getState() to always read the latest store values, avoiding
-    // stale closures from the window event listener.
+    // 克隆进行中时从 store 恢复表单值
     const cloneState = useCloneStore.getState()
     if (cloneState.isCloning) {
       setCloneUrl(cloneState.cloneUrl)
@@ -203,8 +200,7 @@ export function TitleBarRecentPopover() {
       return
     }
 
-    // startClone handles the backend call, progress events, and folder
-    // opening. The dialog stays open to show progress.
+    // startClone 处理后端调用并保持对话框显示进度
     const success = await startClone(
       cloneUrl.trim(),
       cloneLocalPath.trim(),

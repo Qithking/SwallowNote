@@ -7,19 +7,23 @@ pub fn save_folder(db: &Database, path: &str) -> Result<()> {
         eprintln!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
-    
-    conn.execute(
+    // 用 unchecked_transaction 包裹 INSERT + DELETE，保证“写入当前 + 裁剪历史”原子提交，
+    // 避免裁剪失败导致历史表超出 50 条上限。
+    let tx = conn.unchecked_transaction()?;
+
+    tx.execute(
         "INSERT OR REPLACE INTO folder_history (path, opened_at) VALUES (?1, datetime('now'))",
         [path],
     )?;
-    
-    conn.execute(
+
+    tx.execute(
         "DELETE FROM folder_history WHERE id NOT IN (
             SELECT id FROM folder_history ORDER BY opened_at DESC LIMIT 50
         )",
         [],
     )?;
-    
+
+    tx.commit()?;
     Ok(())
 }
 

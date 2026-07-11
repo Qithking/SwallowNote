@@ -1,0 +1,14 @@
+{
+  "id": "com.example.toolbar-button",
+  "name": "Toolbar Button Demo",
+  "description": "Demonstrates editorToolbar iconPosition with custom toolbarButton component",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "publishedAt": "2026-07-10",
+  "iconPosition": "editorToolbar",
+  "contentPosition": "editorArea",
+  "order": 100,
+  "enabled": true,
+  "hasBackend": false,
+  "entry": "index.tsx"
+}

@@ -15,6 +15,9 @@
 | `settings:change` | `{ key, value }` | 用户修改任意设置项 |
 | `app:ready` | `{}` | 应用启动完成 |
 | `app:exit` | `{}` | 应用开始关闭 |
+| `plugin-settings:change` | `{ pluginId, values }` | 某插件自身的设置被修改后（`values` 为该插件完整设置 map） |
+| `editor:registered` | `{ pluginId, extension }` | 插件调用 `registerEditor` 注册文件编辑器后 |
+| `editor:unregistered` | `{ pluginId, extension }` | 插件调用 `unregisterEditor` 注销文件编辑器后 |
 
 ## 获取当前笔记内容：`activeNoteContent` vs `note:change`
 
@@ -36,6 +39,20 @@
 SDK 的 `usePluginEvent` 和 `usePluginEvents` hook 同样不再手动添加 `__pluginId`——宿主的事件总线包装层已透明处理。
 
 > 这意味着插件卸载时，宿主可通过 `__pluginId` 批量清理该插件注册的所有 handler，无需插件自行维护引用。
+
+## `removeAllListenersForPlugin`
+
+宿主在卸载插件时自动调用 `events.removeAllListenersForPlugin(pluginId)`，批量移除该插件注册的所有事件监听器。插件作者**无需手动调用**此方法——它是宿主清理链路的一部分：
+
+```
+unregisterPlugin(pluginId)
+  ├─ onUnload(ctx)                          // 生命周期钩子
+  ├─ removeAllListenersForPlugin(pluginId)  // 自动清理事件监听
+  ├─ clearPluginMenuItems(pluginId)         // 自动清理菜单项
+  └─ clearPluginCommands(pluginId)          // 自动清理命令
+```
+
+> **最佳实践**：插件在 `onUnload` 中仍应显式调用 `unsubscribe()` 清理自己的订阅，作为"双重保险"。即使忘记清理，宿主也会兜底。
 
 ## 订阅方式
 
@@ -163,10 +180,40 @@ function onUnload(ctx: { pluginId: string }) {
 
 > 上面的 `as any` 仅是示例。生产环境建议把 unsubscribe 存到 module 级 closure。
 
+## emit 助手（dev 预览 / host 透传）
+
+事件总线是**单向**的：宿主负责 emit，插件只订阅。插件在独立预览模式（`npm run dev`）或需要主动广播事件时，可使用 SDK 提供的 `emitXxx` 助手。这些助手会优先走 host 注入的 `emit` override，未注入时回退到 SDK 内置的 stub 总线。
+
+> 生产环境中 `editor:registered` / `editor:unregistered` 由宿主在调用 `registerEditor` / `unregisterEditor` 时自动 emit，插件**不需要**也**没有**对应的 emit 助手。
+
+| 助手 | 对应事件 | 参数 |
+| --- | --- | --- |
+| `emitNoteOpened` | `note:open` | `(noteId, path)` |
+| `emitNoteClosed` | `note:close` | `(noteId, path)` |
+| `emitNoteSaved` | `note:save` | `(noteId, path)` |
+| `emitNoteChanged` | `note:change` | `(noteId, path, content)` |
+| `emitThemeChanged` | `theme:change` | `(theme)` |
+| `emitLocaleChanged` | `locale:change` | `(locale)` |
+| `emitSettingChanged` | `settings:change` | `(key, value)` |
+| `emitAppReady` | `app:ready` | `()` |
+| `emitAppExit` | `app:exit` | `()` |
+| `emitPluginSettingsChanged` | `plugin-settings:change` | `(pluginId, values)` |
+
+```typescript
+// 独立开发推荐从 SDK 导入
+import { emitNoteOpened, emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
+
+// 在预览脚本里模拟宿主事件
+emitNoteOpened('note-1', '/notes/intro.md')
+emitPluginSettingsChanged('com.example.my-plugin', { apiKey: 'sk-xxx' })
+```
+
+> host 已注入 `emit` override 时，调用 emit 助手会经过宿主的 `assertPermission(pluginId, 'events', ...)` 校验；若插件缺少 `events` 权限，emit 会被静默丢弃并打印 `console.warn`，不会抛异常。
+
 ## 源码引用
 
 - 事件类型：[src/types/plugin.ts](../../src/types/plugin.ts) `PluginEvent` / `PluginEventPayloadMap`
-- emit helper：[src/lib/plugin-host.ts](../../src/lib/plugin-host.ts) `emitNoteOpened` / `emitThemeChanged` / ...
+- emit helper：[src/lib/plugin-host.ts](../../src/lib/plugin-host.ts) `emitNoteOpened` / `emitThemeChanged` / ...；SDK 镜像见 [docs/plugin-sdk/src/index.ts](../plugin-sdk/src/index.ts) `emitXxx`
 - React hook：[src/lib/plugin-hooks.ts](../../src/lib/plugin-hooks.ts) `usePluginEvent` / `usePluginEvents`
 - bus 实现：[src/lib/plugin-host.ts](../../src/lib/plugin-host.ts) `PluginEventBusImpl`
 - emit 注入点：[src/stores/editor.ts](../../src/stores/editor.ts) / [src/stores/ui.ts](../../src/stores/ui.ts) / [src/App.tsx](../../src/App.tsx)

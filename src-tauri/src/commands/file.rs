@@ -111,9 +111,7 @@ fn is_hidden_windows(metadata: &std::fs::Metadata) -> bool {
     metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
 }
 
-/// Core synchronous directory listing logic.
-/// Extracted as a standalone function so it can be called from `spawn_blocking`
-/// without blocking the Tokio async runtime.
+/// 同步目录列表逻辑，供 spawn_blocking 调用
 fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) -> Result<Vec<FileNode>, String> {
     if !path.exists() {
         return Err(format!("Path does not exist: {}", path.display()));
@@ -122,10 +120,7 @@ fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) 
         return Err(format!("Path is not a directory: {}", path.display()));
     }
 
-    // 用 jwalk 并行预取 metadata；max_depth(1)+sort 保证单层一致排序。
-    // jwalk 默认 skip_hidden=true 会过滤掉所有点开头的文件/目录，这会导致
-    // show_all_files=true 时隐藏文件仍然不显示。这里显式关闭 jwalk 的隐藏过滤，
-    // 交给下方应用层逻辑根据 show_all_files 统一处理。
+    // jwalk 并行预取；显式关闭 hidden 过滤交由应用层处理
     let mut nodes: Vec<FileNode> = Vec::new();
 
     for entry_result in jwalk::WalkDir::new(path)
@@ -197,8 +192,7 @@ fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) 
         });
     }
 
-    // jwalk with sort(true) already sorts by file name, but we need
-    // directories-first ordering which jwalk doesn't provide directly
+    // jwalk 仅按名排序，需手动实现目录优先
     nodes.sort_by(|a, b| {
         match (a.is_directory, b.is_directory) {
             (true, false) => std::cmp::Ordering::Less,
@@ -220,9 +214,7 @@ pub async fn list_directory(
     let show_all_files = show_all_files.unwrap_or(false);
     let markdown_only = markdown_only.unwrap_or(false);
 
-    // Offload synchronous filesystem I/O to a blocking thread so we don't
-    // stall the Tokio async runtime. This is critical when multiple directories
-    // are being listed concurrently (e.g. expanding several tree nodes at once).
+    // 同步 FS I/O 移到 blocking 线程，避免阻塞 Tokio
     tokio::task::spawn_blocking(move || list_directory_inner(&path, show_all_files, markdown_only))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -244,8 +236,7 @@ pub async fn list_directories_batch(
     let show_all_files = show_all_files.unwrap_or(false);
     let markdown_only = markdown_only.unwrap_or(false);
 
-    // Create one spawn_blocking task per directory so they run in parallel
-    // on the blocking thread pool.
+    // 每目录一个 spawn_blocking 并行执行
     let handles: Vec<_> = paths
         .into_iter()
         .map(|p| {
@@ -282,6 +273,19 @@ pub async fn read_file(path: String) -> Result<String, String> {
         return Err(format!("Path is not a file: {}", path.display()));
     }
 
+    // 读取前检查文件大小，超过 10MB 拒绝读取，避免一次性读入大文件导致内存峰值
+    const MAX_READ_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+    let metadata = std::fs::metadata(&path)
+        .map_err(|e| format!("Failed to read metadata: {}", e))?;
+    if metadata.len() > MAX_READ_SIZE {
+        return Err(format!(
+            "File too large ({} bytes, max {} bytes): {}",
+            metadata.len(),
+            MAX_READ_SIZE,
+            path.display()
+        ));
+    }
+
     tokio::fs::read_to_string(&path)
         .await
         .map_err(|e| format!("Failed to read file: {}", e))
@@ -298,9 +302,7 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to create parent directory: {}", e))?;
     }
 
-    // On Windows, renaming over an existing file triggers a Remove event in file watchers,
-    // which causes the editor tab to close unexpectedly. Use direct write on Windows to avoid this.
-    // On macOS/Linux, atomic write (write to temp + rename) is preferred for data safety.
+    // Windows 直接写避免 tab 误关；其他平台用原子写
     #[cfg(target_os = "windows")]
     {
         tokio::fs::write(&path, &content)
@@ -468,9 +470,7 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        // Use AppleScript Cocoa bridge to call NSPasteboard directly.
-        // This avoids deprecated AppleScript "set the clipboard to" and flaky JXA.
-        // Escape double-quotes for AppleScript string literal.
+        // 用 Cocoa bridge 调 NSPasteboard，避免 JXA 抖动
         let escaped_path = path.display().to_string()
             .replace('\\', "\\\\")
             .replace('"', "\\\"");
@@ -546,9 +546,7 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
 pub async fn read_clipboard_file_paths() -> Result<Vec<String>, String> {
     #[cfg(target_os = "macos")]
     {
-        // Use NSPasteboard via osascript to read file URLs from the clipboard.
-        // Use AppleScript's text item delimiters with linefeed to properly handle
-        // paths that contain commas (which would otherwise be misinterpreted as list separators).
+        // osascript 读 NSPasteboard，用 linefeed 分隔避免逗号歧义
         let output = StdCommand::new("osascript")
             .arg("-e")
             .arg("use framework \"Foundation\"")
@@ -690,8 +688,7 @@ if ($files) { $files -join '|' } else { '' }
                 }
                 // Remove file:// prefix and decode URI
                 let path_str = if trimmed.starts_with("file://") {
-                    // percent-decode：收集原始字节后再 String::from_utf8，
-                    // 避免逐字节 `byte as char` 破坏多字节 UTF-8（如中文路径）。
+                    // percent-decode 用 from_utf8 保护多字节字符
                     let uri = &trimmed[7..];
                     let src = uri.as_bytes();
                     let mut bytes: Vec<u8> = Vec::with_capacity(src.len());
@@ -759,12 +756,7 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt;
 
-        // explorer /select,"<file>" → 在资源管理器中定位并选中该文件
-        // explorer "<dir>"          → 在资源管理器中打开该目录
-        //
-        // canonicalize 拿到带反斜杠的绝对路径并去除 \\?\ 扩展长度前缀，
-        // 用双引号包裹路径避免含空格时被 explorer 截断，
-        // 用 raw_arg 避免 Rust 对内嵌引号做额外转义。
+        // explorer /select 定位文件；canonicalize 去前缀+双引号包裹
         let abs_path = std::fs::canonicalize(&path)
             .map_err(|e| format!("Failed to get absolute path: {}", e))?;
         let path_str = abs_path.to_string_lossy().to_string();
@@ -842,7 +834,7 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
     let file_matches: Arc<Mutex<std::collections::HashMap<String, Vec<LineMatch>>>> = 
         Arc::new(Mutex::new(std::collections::HashMap::new()));
 
-    // Run the blocking file I/O on a separate thread to avoid blocking the tokio runtime
+    // 同上，blocking 线程执行
     let file_matches_clone = file_matches.clone();
     tokio::task::spawn_blocking(move || {
         fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
@@ -888,12 +880,14 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
             
             if let Ok(file) = std::fs::File::open(&path) {
                 let reader = BufReader::new(file);
-                let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
-                
+                // 流式逐行读取 + 正则匹配，避免一次性 collect 全部行到 Vec 造成内存峰值
                 let mut line_matches: Vec<LineMatch> = Vec::new();
-                
-                for (idx, line) in lines.iter().enumerate() {
-                    for mat in regex.find_iter(line) {
+                for (idx, line) in reader.lines().enumerate() {
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(_) => continue, // 读取出错的行跳过，继续处理后续行
+                    };
+                    for mat in regex.find_iter(&line) {
                         line_matches.push(LineMatch {
                             line_number: idx + 1,
                             content: line.clone(),

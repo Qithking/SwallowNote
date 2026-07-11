@@ -67,14 +67,11 @@ function AIView() {
   const [hasMoreHistory, setHasMoreHistory] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const historyLoadedRef = useRef(false)
-  // Tracks whether chat history has finished loading.
-  // Context-menu requests must wait for history to load before sending,
-  // otherwise setMessages(historyMessages) will overwrite the newly sent message.
+  // 标记历史是否加载完成，避免覆盖新消息
   const historyReadyRef = useRef(false)
   const [aiRolePrompts, setAiRolePrompts] = useState<AiRolePrompt[]>([])
   const [activeRoleKey, setActiveRoleKey] = useState('chat')
-  // Map from message ID to display text for context-menu-triggered messages
-  // (so the chat bubble shows "[润色] src/App.tsx (L10-L25)" instead of the entire file content)
+  // 右键消息的展示文本映射，避免显示全文
   const contextMenuDisplayTexts = useRef<Map<string, string>>(new Map())
 
   // 待映射的展示文本：以发送时生成的稳定 correlation id 为 key（Task 21）
@@ -104,7 +101,7 @@ function AIView() {
   const replaceContent = useEditorStore((s) => s.replaceContent)
   const editorTabs = useEditorStore((s) => s.tabs)
   const editorActiveTabId = useEditorStore((s) => s.activeTabId)
-  const { rootPath } = useWorkspaceStore()
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
 
   // 使用 ref 让 mount-only useEffect 能读取到最新的 aiPort / activeAiModelId，
   // 避免空依赖数组导致的 stale closure（Task 19）
@@ -164,6 +161,32 @@ function AIView() {
     }
   }, [messages, scrollToBottom])
 
+  // 集中清理按 id 索引的辅助容器：裁剪 messages 时同步释放对应数据，
+  // 避免这些容器只增不删导致内存泄漏（P0）
+  const pruneAuxiliaryRefs = (trimmedIds: string[]) => {
+    for (const id of trimmedIds) {
+      savedMessageIds.current.delete(id)
+      contextMenuDisplayTexts.current.delete(id)
+      displayTextMappedIds.current.delete(id)
+    }
+    // messageTimestamps 是 useState，需通过 setter 构造新对象以触发渲染
+    if (trimmedIds.length > 0) {
+      const idSet = new Set(trimmedIds)
+      setMessageTimestamps((prev) => {
+        const next: Record<string, string> = {}
+        let changed = false
+        for (const key in prev) {
+          if (idSet.has(key)) {
+            changed = true
+          } else {
+            next[key] = prev[key]
+          }
+        }
+        return changed ? next : prev
+      })
+    }
+  }
+
   // Trim in-memory messages when they exceed the limit to prevent unbounded memory growth
   useEffect(() => {
     if (messages.length <= MAX_IN_MEMORY_MESSAGES) return
@@ -196,6 +219,13 @@ function AIView() {
       // flush 全部成功后才裁剪；若 effect 已被清理（依赖变化）则跳过 setMessages 避免竞态
       if (cancelled) return
       const trimmed = messages.slice(messages.length - MAX_IN_MEMORY_MESSAGES)
+      // 裁剪 messages 时同步清理辅助数据结构，避免按 id/count 索引的容器只增不删导致内存泄漏（P0）
+      pruneAuxiliaryRefs(toDiscard.map((m) => m.id))
+      // 裁剪后 messages 数组重排，所有基于旧 messages.length 记录的 countAtSend 索引均已失效
+      // （key 是发送时的 messages.length，裁剪后该索引指向的消息已变化，继续匹配会误赋 timestamp），
+      // 因此直接清空整个 Map。正在发送中的消息会丢失时间戳显示，但裁剪仅在消息累积超上限时触发，
+      // 极少与发送中消息重叠，且时间戳丢失不影响功能。下游 useEffect 已处理空 Map 情况。
+      pendingUserTimestampsByCount.current.clear()
       setMessages(trimmed)
     }
     flushAndTrim()
@@ -392,6 +422,15 @@ function AIView() {
 
   // Track pending user timestamps: maps a snapshot of messages.length at send time to the timestamp
   const pendingUserTimestampsByCount = useRef<Map<number, string>>(new Map())
+  // pendingUserTimestampsByCount 的 LRU 上限：超过 50 条时删除最旧的 key，避免无界增长
+  const MAX_PENDING_TIMESTAMPS = 50
+  const trimPendingTimestampsLRU = () => {
+    while (pendingUserTimestampsByCount.current.size > MAX_PENDING_TIMESTAMPS) {
+      const oldest = pendingUserTimestampsByCount.current.keys().next().value
+      if (oldest === undefined) break
+      pendingUserTimestampsByCount.current.delete(oldest)
+    }
+  }
 
   // Effect: assign timestamps to new user messages once they appear in the messages array
   useEffect(() => {
@@ -463,6 +502,7 @@ function AIView() {
       const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
       const countBeforeSend = messages.length
       pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
+      trimPendingTimestampsLRU()
 
       // 生成稳定 correlation id 作为 key，避免 messages.length 索引错位（Task 21）
       const correlationId = crypto.randomUUID()
@@ -523,6 +563,7 @@ function AIView() {
     const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
     const countBeforeSend = messages.length
     pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
+    trimPendingTimestampsLRU()
 
     // Get system prompt for the active role
     const activePrompt = aiRolePrompts.find((p) => p.role_key === activeRoleKey)

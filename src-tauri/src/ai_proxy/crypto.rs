@@ -8,9 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const APP_SALT: &[u8] = b"SwallowNote-AI-Key-Encryption-Salt-v1";
 
-/// 获取不到系统唯一 ID 时的最终回退：用 PID + 纳秒时间戳 + 随机数生成临时 ID。
-/// 避免所有用户共享同一常量密钥（旧实现固定返回 "swallownote-*-fallback"，
-/// 会导致跨用户密钥相同，存在可预测风险）。
+/// 无系统 ID 时的回退：PID + 纳秒 + 随机数
 fn fallback_machine_id() -> String {
     let pid = std::process::id();
     let ts = SystemTime::now()
@@ -21,18 +19,12 @@ fn fallback_machine_id() -> String {
     format!("swallownote-fallback-{}-{}-{}", pid, ts, rnd)
 }
 
-/// 获取应用数据目录（跨平台）。
-/// macOS: ~/Library/Application Support/SwallowNote
-/// Windows: %APPDATA%/SwallowNote
-/// Linux: ~/.local/share/SwallowNote
+/// 获取应用数据目录（跨平台）
 fn get_app_data_dir() -> Option<std::path::PathBuf> {
     dirs::data_dir().map(|d| d.join("SwallowNote"))
 }
 
-/// 获取或创建持久化的 fallback machine id。
-/// 首次调用时生成新 id 并写入 app_data_dir 缓存文件，后续启动复用同一值，
-/// 确保 API key 可跨重启解密。不同机器的 app_data_dir 路径不同，读不到对方文件，
-/// 从而保证加密文件换机器不可解密。
+/// 持久化 fallback machine id，确保 API key 跨重启解密
 fn get_or_create_fallback_machine_id() -> String {
     let app_data_dir = match get_app_data_dir() {
         Some(dir) => dir,
@@ -118,9 +110,7 @@ fn get_machine_id() -> String {
     }
     #[cfg(target_os = "windows")]
     {
-        // Read MachineGuid from Windows Registry instead of spawning `wmic`.
-        // Spawning console processes like `wmic` creates visible console windows
-        // even with CREATE_NO_WINDOW on some Windows configurations.
+        // 从注册表读 MachineGuid，避免 wmic 弹窗
         match winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE)
             .open_subkey(r"SOFTWARE\Microsoft\Cryptography")
         {

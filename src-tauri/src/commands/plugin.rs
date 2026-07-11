@@ -26,6 +26,9 @@ const EXPORT_SCHEMA_VERSION: u32 = 1;
 // 单个 storage entry 大小上限（16 MiB），防止恶意 bundle OOM。超限条目跳过。
 const MAX_PLUGIN_CONFIG_SIZE: u64 = 16 * 1024 * 1024;
 
+// 安装包 zip 文件大小上限（100 MiB），读入内存前校验，防止超大文件 OOM。
+const MAX_PLUGIN_ZIP_SIZE: u64 = 100 * 1024 * 1024;
+
 /// Metadata for a plugin package, returned to the frontend.
 ///
 /// Fields that are only populated at runtime (not present in the
@@ -544,6 +547,16 @@ pub fn install_plugin(
     let _ = fs::remove_dir_all(&temp_plugin_dir);
 
     // SHA-256 校验必须在解压前完成，防止 TOCTOU 窗口。
+    // 读入内存前先校验文件大小上限，避免超大 zip 导致 OOM。
+    let zip_size = fs::metadata(&zip_path)
+        .map_err(|e| PluginError::Io(format!("Failed to stat zip file: {}", e)))?
+        .len();
+    if zip_size > MAX_PLUGIN_ZIP_SIZE {
+        return Err(PluginError::Security(format!(
+            "zip file too large: {} bytes (limit {} bytes)",
+            zip_size, MAX_PLUGIN_ZIP_SIZE
+        )));
+    }
     let mut zip_bytes = Vec::new();
     fs::File::open(&zip_path)
         .map_err(|e| PluginError::Io(format!("Failed to open zip file: {}", e)))?
@@ -683,6 +696,7 @@ pub async fn uninstall_plugin(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, crate::commands::plugin_invoke::SharedPluginProcessState>,
     plugin_id: String,
+    delete_data: Option<bool>,
 ) -> Result<(), PluginError> {
     // Reject path-traversal ids before we touch the filesystem. The
     // canonicalize + starts_with check below would also catch it, but
@@ -724,6 +738,28 @@ pub async fn uninstall_plugin(
     }
 
     fs::remove_dir_all(&plugin_dir).map_err(|e| PluginError::Io(format!("Failed to remove plugin: {}", e)))?;
+
+    // If user chose to delete plugin data, remove the data directory as well.
+    if delete_data == Some(true) {
+        let data_dir = app_data_dir.join("plugin-data").join(&plugin_id);
+        if data_dir.exists() {
+            // Security check: ensure we're only deleting within the plugin-data directory
+            let canonical_app_data = app_data_dir
+                .canonicalize()
+                .map_err(|e| PluginError::Io(format!("Failed to resolve app data path: {}", e)))?;
+            let canonical_data_dir = data_dir
+                .canonicalize()
+                .map_err(|e| PluginError::Io(format!("Failed to resolve plugin data path: {}", e)))?;
+            let plugin_data_root = canonical_app_data.join("plugin-data");
+            if canonical_data_dir.starts_with(&plugin_data_root) {
+                if let Err(e) = fs::remove_dir_all(&data_dir) {
+                    eprintln!("[plugin] failed to remove plugin data dir for '{}': {}", plugin_id, e);
+                }
+            } else {
+                eprintln!("[plugin] security: plugin data dir for '{}' is outside plugin-data root, skipping deletion", plugin_id);
+            }
+        }
+    }
 
     // Drop the settings table for this plugin. Best-effort: if the
     // DB is locked, a stray row is harmless (the next install with
@@ -1521,8 +1557,7 @@ pub async fn check_plugin_updates(
 }
 
 /**
- * Install `version` for `plugin_id` and point `current` at it.
- * `storage.json` is preserved across the swap.
+ * 安装指定版本并切换 current，保留 storage.json
  */
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -1550,9 +1585,7 @@ pub async fn update_plugin(
 }
 
 /**
- * Swap the `current` symlink back to a previously-installed version
- * under `.versions/<version>/`. `storage.json` is untouched. Returns
- * the metadata of the now-active version.
+ * 回滚 current 到 .versions/<v>/，返回激活版本元数据
  */
 #[tauri::command]
 pub fn rollback_plugin(
@@ -1611,8 +1644,7 @@ pub fn rollback_plugin(
 }
 
 /**
- * Enumerate every `.versions/<v>/` directory for a plugin, marking
- * the one currently pointed at by `current` / `.current_version`.
+ * 枚举所有已安装版本，标记当前激活版本
  */
 #[tauri::command]
 pub fn list_plugin_versions(

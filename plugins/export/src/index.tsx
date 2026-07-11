@@ -15,7 +15,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import type { PluginManifest, PluginPanelProps, ToolbarButtonProps } from '@swallow-note/plugin-sdk'
-// Re-export setHost so the host can install SDK overrides at runtime.
+// 导出 setHost 供宿主运行时安装 SDK overrides
 export { setHost } from '@swallow-note/plugin-sdk'
 import { save } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
@@ -26,11 +26,11 @@ import { domToCanvas } from 'modern-screenshot'
 import { compactMarkdown } from './markdown-normalize'
 import { getStrings } from './i18n'
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// ─── 常量 ───
 
-/// Width in CSS pixels that matches an A4 page at 96 dpi.
+/// A4 页宽（96 dpi 下的 CSS 像素）
 const A4_WIDTH_PX = 794
-/// Height of an A4 page in CSS pixels at 96 dpi (297 mm).
+/// A4 页高（96 dpi，297mm）
 const A4_HEIGHT_PX = 1123
 
 /**
@@ -43,12 +43,7 @@ const A4_HEIGHT_PX = 1123
  * application codes here.
  */
 const ERR_MARKDOWN_TOO_LARGE = 1001
-// Note: only `ERR_MARKDOWN_TOO_LARGE` is currently branched on
-// (see `runExport` catch block). The other backend codes
-// (`ERR_DOCX_GENERATION`, etc.) fall through to the format-
-// specific default toast. Add a new constant here and a matching
-// `if (code === ...)` branch if you want to surface a more
-// specific message for a new error type.
+// 仅 ERR_MARKDOWN_TOO_LARGE 有分支处理，其余错误码回退默认 toast
 
 /**
  * Read the user's current locale without depending on
@@ -103,12 +98,11 @@ function extractErrCode(err: unknown): { code: number; message: string } {
       message: codeMatch[2].trim(),
     }
   }
-  // Fallback: legacy messages without the prefix (frontend-only
-  // errors, transport-level errors from the host, etc.).
+  // 回退：无前缀的旧消息（前端错误、宿主传输错误等）
   return { code: 0, message: raw }
 }
 
-// ─── Icon component ──────────────────────────────────────────────────────────
+// ─── 图标组件 ───
 
 function ExportIcon({ size = 18 }: { size?: number }): ReactNode {
   return (
@@ -132,36 +126,53 @@ function ExportIcon({ size = 18 }: { size?: number }): ReactNode {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
+ * Encode a UTF-8 string to a base64 string.
+ *
+ * Uses `btoa` with chunked `String.fromCharCode` to avoid stack
+ * overflow on large strings. The chunk size of 8192 is well within
+ * the call stack limit (~65K on most engines) and keeps memory
+ * usage bounded — a 1 MB string produces ~122 chunks.
+ *
+ * This is the **primary** encoder for text content (HTML export).
+ * We intentionally avoid `FileReader.readAsDataURL` here because
+ * its behaviour in Tauri 2.0's WKWebView is unreliable — in some
+ * cases it returns the data URL with the `data:…;base64,` prefix
+ * still attached, causing the Rust backend's base64 decoder to
+ * reject the input with "Invalid symbol" errors.
+ */
+function strToBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str)
+  let binary = ''
+  const chunkSize = 8192
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[])
+  }
+  return btoa(binary)
+}
+
+/**
  * Encode a `Uint8Array` to a base64 string.
  *
- * The naïve `btoa(String.fromCharCode(...bytes))` blows the JS call
- * stack at around 120 KB, and even the chunked variant
- * `String.fromCharCode.apply(null, Array.from(chunk))` repeatedly
- * stacks 32K frames per call — some V8 builds report
- * `RangeError: Maximum call stack size exceeded` for multi-megabyte
- * PDF buffers. We delegate to `FileReader.readAsDataURL`, which
- * copies bytes through the browser's native encoder without
- * touching the JS stack. The `data:*;base64,` prefix is stripped
- * before returning so the result is a pure base64 string the
- * rest of the pipeline can pass to `write_binary_file`.
+ * Uses `btoa` with chunked `String.fromCharCode` — the same strategy
+ * as `strToBase64` but operates on raw bytes. This is used for PDF
+ * export where the data is already a `Uint8Array`.
+ *
+ * The previous implementation used `FileReader.readAsDataURL` to
+ * avoid stack overflow on multi-megabyte buffers, but it was
+ * unreliable in Tauri's WebView. The chunked approach below is
+ * synchronous, deterministic, and handles multi-MB buffers without
+ * stack issues (chunk size 8192 keeps each `apply` call well within
+ * the ~65K frame limit).
  */
-function uint8ToBase64(bytes: Uint8Array): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result as string
-      const comma = dataUrl.indexOf(',')
-      resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl)
-    }
-    reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'))
-    // `Uint8Array<ArrayBufferLike>` (the default for `new
-    // Uint8Array(buf)`) is structurally compatible with
-    // `BlobPart`, but recent TS DOM lib versions narrowed the
-    // type to exclude `SharedArrayBuffer`. The cast satisfies
-    // the strictest lib check while the runtime behaviour is
-    // identical to passing the bytes directly.
-    reader.readAsDataURL(new Blob([bytes as BlobPart]))
-  })
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 8192
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[])
+  }
+  return btoa(binary)
 }
 
 /// Maximum total size of all embedded images, in bytes. We
@@ -229,7 +240,7 @@ async function collectImageAssets(
       if (totalBytes + blob.size > MAX_EMBEDDED_IMAGE_BYTES) continue
       const buf = await blob.arrayBuffer()
       const bytes = new Uint8Array(buf)
-      out[url] = await uint8ToBase64(bytes)
+      out[url] = uint8ToBase64(bytes)
       totalBytes += bytes.byteLength
     } catch (e) {
       // Single-image failures are non-fatal; the rest of the
@@ -503,7 +514,7 @@ async function renderBlockToPng(
       canvas.toBlob((b) => resolve(b!), 'image/png')
     })
     const buf = await blob.arrayBuffer()
-    return await uint8ToBase64(new Uint8Array(buf))
+    return uint8ToBase64(new Uint8Array(buf))
   } finally {
     document.body.removeChild(container)
   }
@@ -574,13 +585,19 @@ async function renderCustomBlocksForPdf(root: HTMLElement): Promise<void> {
     if (!source.trim()) continue
 
     try {
+      // Use root.ownerDocument so elements are created in the
+      // same document context as the root (which may be an
+      // iframe's contentDocument). Using the global `document`
+      // would create elements in the host document, causing
+      // cross-document adoption issues.
+      const doc = root.ownerDocument
       if (lang === 'mermaid' && mermaid) {
         // mermaid needs a unique id per render; we generate a
         // short random suffix to avoid clashes when the same
         // document is exported multiple times in one session.
         const id = `mermaid-export-${Math.random().toString(36).slice(2, 8)}`
         const { svg } = await mermaid.default.render(id, source)
-        const wrap = document.createElement('div')
+        const wrap = doc.createElement('div')
         wrap.className = 'export-mermaid'
         wrap.innerHTML = svg
         codeEl.parentElement?.replaceWith(wrap)
@@ -594,7 +611,7 @@ async function renderCustomBlocksForPdf(root: HTMLElement): Promise<void> {
           displayMode: true,
           throwOnError: false,
         })
-        const wrap = document.createElement('div')
+        const wrap = doc.createElement('div')
         wrap.className = 'export-katex'
         wrap.innerHTML = html
         codeEl.parentElement?.replaceWith(wrap)
@@ -605,7 +622,7 @@ async function renderCustomBlocksForPdf(root: HTMLElement): Promise<void> {
         // a 200ms timer to let markmap's internal d3 transition
         // settle before the canvas snapshot.
         const { Markmap } = markmap
-        const svg = document.createElementNS(
+        const svg = doc.createElementNS(
           'http://www.w3.org/2000/svg',
           'svg',
         )
@@ -615,7 +632,7 @@ async function renderCustomBlocksForPdf(root: HTMLElement): Promise<void> {
         const mm = Markmap.create(svg, undefined, source)
         await mm.fit()
         await new Promise((r) => setTimeout(r, 200))
-        const wrap = document.createElement('div')
+        const wrap = doc.createElement('div')
         wrap.className = 'export-markmap-wrap'
         wrap.appendChild(svg)
         codeEl.parentElement?.replaceWith(wrap)
@@ -632,13 +649,17 @@ async function renderCustomBlocksForPdf(root: HTMLElement): Promise<void> {
  * Render the HTML produced by the backend into a multi-page PDF
  * buffer. The implementation:
  *
- *  1. Mounts the HTML into a hidden fixed-position container so the
- *     layout is computed without disrupting the editor.
+ *  1. Parses the backend's full HTML document with `DOMParser`,
+ *     extracts the `<style>` and `<body>` children, and mounts
+ *     them into an off-screen container div. The CSS `body`
+ *     selector is rewritten to target the container (via a unique
+ *     class) so the styles apply correctly without affecting the
+ *     host document's real `<body>`.
  *  2. Rewrites image references to Tauri's asset protocol (so
  *     `![](relative/path.png)` actually loads).
  *  3. Awaits every `<img>` load (with a single shared 8s deadline)
  *     so the screenshot doesn't capture half-rendered images.
- *  4. Groups the body's direct children into A4-sized pages by
+ *  4. Groups the container's direct children into A4-sized pages by
  *     measuring each child's height and breaking when the running
  *     total exceeds one page's content area. Children that are
  *     themselves taller than a page (e.g. a `<pre>` with hundreds
@@ -651,8 +672,25 @@ async function renderCustomBlocksForPdf(root: HTMLElement): Promise<void> {
  *     same per-canvas memory as a 1-page export — a single-canvas
  *     strategy would OOM the webview on long documents.
  *
+ * **Key design decisions:**
+ *  - **No `visibility: hidden`**: `domToCanvas` copies computed
+ *    styles to its internal clone; `visibility: hidden` produces
+ *    a blank canvas. The container is moved off-screen with
+ *    `transform: translateX(-200vw)` instead (paint-only, no
+ *    layout reflow, so Tauri's resize detection never fires).
+ *  - **No iframe**: `domToCanvas` renders via SVG foreignObject
+ *    serialization, which fails silently on elements from iframe
+ *    documents. Using the host document avoids cross-document
+ *    issues entirely.
+ *  - **`DOMParser` + CSS rewrite**: The backend returns a full
+ *    `<!DOCTYPE html>` document. Setting it as `innerHTML` creates
+ *    nested `<body>` elements and the CSS `body { }` selector
+ *    matches the host's body. We parse the HTML, extract `<style>`
+ *    and `<body>` children, and rewrite `body` → `.export-root`
+ *    in the CSS so it targets our container.
+ *
  * The function is intentionally side-effect free w.r.t. the
- * editor: every container it creates is removed in `finally`.
+ * editor: every element it creates is removed in `finally`.
  */
 async function generatePdfFromHtml(
   htmlContent: string,
@@ -662,27 +700,39 @@ async function generatePdfFromHtml(
   // bottom padding. Children that don't fit trigger a page break.
   const PAGE_INNER_HEIGHT = A4_HEIGHT_PX - 40
 
-  // Mount the full HTML into a hidden fixed-position container so
-  // the layout is computed without disrupting the editor. The
-  // <style> rules in the template's <head> are in scope for the
-  // entire document, which is what we want — they style the cloned
-  // children we render per page below.
-  //
-  // **Off-screen strategy (the previous `left: -9999px` was a
-  // trap)**: a layout-changing offset like `left: -9999px` makes
-  // the browser repaint the page geometry, and Tauri 2.0's
-  // `Window::on_window_event` then misidentifies the resulting
-  // scroll-area re-layout as a window-resize event, aborting
-  // the export with "Application size must not change during
-  // operation". We move the container off-screen with a
-  // `transform: translateX(-200vw)` instead — transforms are
-  // paint-only (no layout reflow, no scroll-area change), so
-  // Tauri's resize detection never fires. `visibility: hidden`
-  // and `pointer-events: none` are belt-and-braces so the
-  // container can't accidentally steal focus or hover events.
-  // `getBoundingClientRect` still returns the un-transformed
-  // layout rect, so the page-grouping logic below is unaffected.
+  // Unique class for CSS scoping. The backend's CSS has
+  // `body { width:794px; margin:0 auto; padding:20px; … }` which
+  // we rewrite to `.export-root { … }` so it targets our container
+  // instead of the host document's real `<body>`.
+  const ROOT_CLASS = 'export-root'
+
+  // Parse the backend's full HTML document. DOMParser gives us a
+  // clean document fragment without triggering scripts or loading
+  // resources, and lets us extract <style> and <body> children
+  // individually instead of creating nested <html>/<head>/<body>
+  // elements inside a div.
+  const parsed = new DOMParser().parseFromString(htmlContent, 'text/html')
+  const styleEl = parsed.querySelector('style')
+  const parsedBody = parsed.body
+
+  // Rewrite the CSS: replace `body` selector with our container
+  // class so styles apply to the container, not the host body.
+  // We only replace the selector, not the rules themselves.
+  let cssText = styleEl?.textContent ?? ''
+  cssText = cssText.replace(/\bbody\s*\{/g, `.${ROOT_CLASS} {`)
+
+  // Create the style element that will be scoped to our container.
+  const scopedStyle = document.createElement('style')
+  scopedStyle.textContent = cssText
+
+  // Off-screen container: `transform: translateX(-200vw)` is
+  // paint-only (no layout reflow), so Tauri's resize detection
+  // never fires. NO `visibility: hidden` — domToCanvas copies
+  // computed styles to its clone, and `visibility: hidden` makes
+  // the clone invisible, producing a blank canvas. The container
+  // is already off-screen via the transform.
   const container = document.createElement('div')
+  container.className = ROOT_CLASS
   container.style.cssText = [
     'position: fixed',
     'left: 0',
@@ -692,9 +742,19 @@ async function generatePdfFromHtml(
     'z-index: -1',
     'background: #fff',
     'pointer-events: none',
-    'visibility: hidden',
+    // Inline the body styles as fallback in case CSS rewrite
+    // missed something (belt-and-braces).
+    'margin: 0 auto',
+    'padding: 20px',
+    'box-sizing: border-box',
   ].join(';')
-  container.innerHTML = htmlContent
+
+  // Inject the scoped style and body children into the container.
+  container.appendChild(scopedStyle)
+  // Import nodes from the parsed document into the host document.
+  for (const child of Array.from(parsedBody.children)) {
+    container.appendChild(document.importNode(child, true))
+  }
   document.body.appendChild(container)
 
   // Page containers that we need to remove in the finally block.
@@ -704,15 +764,9 @@ async function generatePdfFromHtml(
     // Pre-flight: rewrite <img> refs and wait for them to load.
     resolveImageSources(container, notePath)
     // Custom-block post-process: render every mermaid / katex /
-    // markmap fenced block into the hidden container so the
-    // canvas snapshot picks up the figure instead of the raw
-    // source. The renderer libraries are dynamically imported
-    // from `devDependencies` (see `renderCustomBlocksForPdf`),
-    // so this only pays the module-resolution cost on the
-    // first export that contains such a block. The whole call
-    // is wrapped in try/catch so a broken diagram never blocks
-    // the rest of the PDF — we fall through to the unmodified
-    // `<pre>` and let the screenshot capture the source.
+    // markmap fenced block so the canvas snapshot picks up the
+    // figure instead of the raw source. Wrapped in try/catch so
+    // a broken diagram never blocks the rest of the PDF.
     try {
       await renderCustomBlocksForPdf(container)
     } catch (e) {
@@ -720,18 +774,11 @@ async function generatePdfFromHtml(
     }
     await waitForImages(container)
 
-    // Locate the document body produced by the markdown-to-html
-    // template. If absent, fall back to the wrapper itself.
-    const body =
-      (container.querySelector('body') as HTMLElement | null) || container
-
-    // Group body's direct children into pages by height. Each
-    // group of children, when laid out one after the other, must
-    // fit within PAGE_INNER_HEIGHT. Children that are themselves
-    // taller than a page (e.g. a single huge code block) are
-    // sub-split by `splitOversizedChild` so we never silently
-    // overflow-clip an entire block.
-    const children = Array.from(body.children) as HTMLElement[]
+    // Group container's direct children into pages by height.
+    // Skip the <style> element we injected — it's not content.
+    const children = Array.from(container.children).filter(
+      (el) => el.tagName !== 'STYLE',
+    ) as HTMLElement[]
     const pages: HTMLElement[][] = (() => {
       const result: HTMLElement[][] = []
       let current: HTMLElement[] = []
@@ -739,14 +786,11 @@ async function generatePdfFromHtml(
       for (const child of children) {
         const h = child.getBoundingClientRect().height
         if (h > PAGE_INNER_HEIGHT) {
-          // Flush whatever we were accumulating first so the
-          // oversized child starts on its own fresh page.
           if (current.length > 0) {
             result.push(current)
             current = []
             currentHeight = 0
           }
-          // Split the oversized child into multi-page chunks.
           for (const part of splitOversizedChild(child, PAGE_INNER_HEIGHT)) {
             result.push([part])
           }
@@ -769,41 +813,29 @@ async function generatePdfFromHtml(
     const pdfHeight = pdf.internal.pageSize.getHeight()
 
     for (let i = 0; i < pages.length; i++) {
-      // Each page is rendered in its own fixed-position container.
-      // The container's height is bounded by A4_HEIGHT_PX so the
-      // resulting canvas is also bounded — this is the core of the
-      // multi-segment strategy. `overflow: hidden` clips content
-      // that doesn't fit, which is what we want for a fixed-size
-      // page anyway.
-      //
-      // Same off-screen strategy as the master container above:
-      // `transform: translateX(-200vw)` is paint-only, so the
-      // browser's layout / scroll-area stays unchanged and Tauri's
-      // resize-event detection can't flag the export.
+      // Each page is its own container with bounded height so the
+      // canvas is bounded — this is the core of the multi-segment
+      // strategy. `overflow: hidden` clips content that doesn't fit.
+      // NO `visibility: hidden` — the element must be visible for
+      // domToCanvas. The parent container is already off-screen.
       const pageEl = document.createElement('div')
+      pageEl.className = ROOT_CLASS
       pageEl.style.cssText = [
-        'position: fixed',
-        'left: 0',
-        'top: 0',
-        'transform: translateX(-200vw)',
+        'position: relative',
         `width: ${A4_WIDTH_PX}px`,
         `height: ${A4_HEIGHT_PX}px`,
         'background: #fff',
         'padding: 20px',
         'box-sizing: border-box',
         'overflow: hidden',
-        'z-index: -1',
-        'pointer-events: none',
-        'visibility: hidden',
       ].join(';')
-      // Deep-clone the children. The CSS rules from the master's
-      // <head><style> apply globally to the document, so the
-      // cloned children pick up the same fonts/colors/margins
-      // they had in the master.
+      // Deep-clone the children. The scoped <style> rules are in
+      // the host document's scope, so cloned children pick up the
+      // same fonts/colors/margins they had in the master.
       for (const child of pages[i]) {
         pageEl.appendChild(child.cloneNode(true))
       }
-      document.body.appendChild(pageEl)
+      container.appendChild(pageEl)
       pageContainers.push(pageEl)
 
       // cloneNode(true) creates fresh <img> elements that haven't
@@ -820,11 +852,6 @@ async function generatePdfFromHtml(
       })
       const imgData = canvas.toDataURL('image/png')
       const imgWidth = pdfWidth
-      // The captured canvas is at most A4_HEIGHT_PX * scale tall
-      // (because the page container is bounded). We still compute
-      // the proportional height and clamp it to pdfHeight in case
-      // the captured image is shorter than the page (e.g. trailing
-      // whitespace).
       const imgHeight = (canvas.height * pdfWidth) / canvas.width
       pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, Math.min(imgHeight, pdfHeight))
 
@@ -951,20 +978,18 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
           return
         }
         const filePath = (selected as string).replace(/\\/g, '/')
-        // DOCX / PDF come back as base64 strings (or Uint8Array for
-        // PDF) from the backend. HTML comes back as a raw HTML
-        // string. `uint8ToBase64` is now async (FileReader)
-        // — the previous `String.fromCharCode.apply` path
-        // stack-overflowed on multi-megabyte PDF buffers.
-        // 注意：`write_binary_file` 后端强制 base64 解码。DOCX 返回的
-        // 字符串已是 base64，可直接写入；但 HTML 返回的是原始 HTML
-        // 文本，必须先编码为 Uint8Array 再转 base64，否则后端解码失败。
-        // PDF 返回 Uint8Array，走 `uint8ToBase64` 分支。
+        // `write_binary_file` 后端强制 base64 解码。
+        // - DOCX: 后端返回的已是 base64 字符串，直接写入。
+        // - HTML: 后端返回原始 HTML 文本，用 `strToBase64` 编码。
+        //   不用 `uint8ToBase64(TextEncoder.encode(...))` 因为
+        //   `strToBase64` 更直接（内部已做 UTF-8 编码）。
+        // - PDF: 前端生成的 `Uint8Array`，走 `uint8ToBase64`。
+        //   两者均使用 chunked `btoa`，同步且不依赖 FileReader。
         const b64 = typeof result === 'string'
           ? (format === 'html'
-              ? await uint8ToBase64(new TextEncoder().encode(result))
+              ? strToBase64(result)
               : result)
-          : await uint8ToBase64(result)
+          : uint8ToBase64(result)
         await invoke('write_binary_file', { path: filePath, data: b64 })
         toast.success(strings.exportSuccess, { id: toastId })
       } catch (err) {

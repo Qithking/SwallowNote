@@ -4,11 +4,6 @@
 import { create } from 'zustand'
 import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, removeConflictRepoRecord, syncConflictRepoRecords, gitGetConflictFiles, type ConflictRepoRecord } from '@/lib/tauri'
 
-export interface GitBranch {
-  name: string
-  isCurrent: boolean
-}
-
 export type RepoStatus = 'normal' | 'conflict' | 'error'
 
 export interface GitRepository {
@@ -18,7 +13,6 @@ export interface GitRepository {
   hasUncommittedChanges: boolean
   uncommittedCount: number
   currentBranch: string
-  branches: GitBranch[]
   isSubmodule: boolean
   parentPath: string | null
   status: RepoStatus
@@ -32,7 +26,6 @@ export function mapRepoInfoToRepository(info: GitRepositoryInfo): GitRepository 
     hasUncommittedChanges: info.has_uncommitted_changes,
     uncommittedCount: info.uncommitted_count,
     currentBranch: info.current_branch,
-    branches: [],
     isSubmodule: info.is_submodule,
     parentPath: info.parent_path,
     status: 'normal',
@@ -71,7 +64,7 @@ export interface GitState {
   cachedRepositories: GitRepository[]
   activeRepository: string | null  // 当前选中的仓库路径
   conflictRepos: ConflictRepoRecord[]  // 持久化的冲突仓库记录
-  conflictFilesMap: Record<string, string[]>  // 冲突仓库的冲突文件绝对路径映射 (repo_path -> [abs_path, ...])
+  conflictFilesMap: Record<string, string[]>  // repo_path -> 冲突文件绝对路径列表
   isGitLoading: boolean
   isPulling: boolean
   scanProgress: { current: number; total: number; message: string } | null
@@ -149,48 +142,63 @@ export const useGitStore = create<GitState>((set) => ({
     const reposWithRemote = repos.filter(r => r.remoteUrl)
     if (reposWithRemote.length === 0) return []
 
+    // 防重入：如果正在拉取中，直接返回空数组
+    if (useGitStore.getState().isPulling) return []
+
     set({ isPulling: true })
     try {
-      // Execute all pull operations in parallel
-      const pullPromises = reposWithRemote.map(async (repo) => {
-        try {
-          await gitPull(repo.path)
-          return { path: repo.path, name: repo.name, success: true }
-        } catch (e) {
-          const errorMessage = String(e).trim()
-          // If auth required, try saved credentials from keyring
-          if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+      // 限制并发数 4，避免过多 git 进程
+      const CONCURRENCY = 4
+      const results: PullResult[] = []
+      for (let i = 0; i < reposWithRemote.length; i += CONCURRENCY) {
+        const batch = reposWithRemote.slice(i, i + CONCURRENCY)
+        const batchResults = await Promise.allSettled(
+          batch.map(async (repo): Promise<PullResult> => {
             try {
-              const savedCred = await gitCredentialGet(repo.path)
-              if (savedCred) {
+              await gitPull(repo.path)
+              return { path: repo.path, name: repo.name, success: true }
+            } catch (e) {
+              const errorMessage = String(e).trim()
+              // 需要认证时尝试 keyring 中的凭证
+              if (errorMessage.startsWith('AUTH_REQUIRED:')) {
                 try {
-                  await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
-                  return { path: repo.path, name: repo.name, success: true }
-                } catch (credPullError) {
-                  // Check if conflict occurred with credentials pull
-                  const credErrorMessage = String(credPullError).trim()
-                  if (credErrorMessage.startsWith('REBASE_CONFLICT:')) {
-                    return { path: repo.path, name: repo.name, success: false, error: credErrorMessage, isConflict: true }
+                  const savedCred = await gitCredentialGet(repo.path)
+                  if (savedCred) {
+                    try {
+                      await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
+                      return { path: repo.path, name: repo.name, success: true }
+                    } catch (credPullError) {
+                      // 检查凭证拉取是否产生冲突
+                      const credErrorMessage = String(credPullError).trim()
+                      if (credErrorMessage.startsWith('REBASE_CONFLICT:')) {
+                        return { path: repo.path, name: repo.name, success: false, error: credErrorMessage, isConflict: true }
+                      }
+                      // 凭证拉取失败（非冲突）直接返回，避免丢失真实原因
+                      return { path: repo.path, name: repo.name, success: false, error: credErrorMessage }
+                    }
                   }
-                  // 凭证拉取失败（非冲突），直接返回凭证错误信息，
-                  // 不 fallthrough 到下方基于原始 errorMessage 的 REBASE_CONFLICT 检查，
-                  // 否则真实的凭证失败原因会丢失
-                  return { path: repo.path, name: repo.name, success: false, error: credErrorMessage }
+                } catch {
+                  // Failed to get saved credentials
                 }
               }
-            } catch {
-              // Failed to get saved credentials
+              // Check for rebase conflict
+              if (errorMessage.startsWith('REBASE_CONFLICT:')) {
+                return { path: repo.path, name: repo.name, success: false, error: errorMessage, isConflict: true }
+              }
+              return { path: repo.path, name: repo.name, success: false, error: errorMessage }
             }
+          })
+        )
+        // 将本批结果收集到总结果数组中
+        for (const r of batchResults) {
+          if (r.status === 'fulfilled') {
+            results.push(r.value)
+          } else {
+            // 理论上不会走到这里（内部已 try/catch），兜底处理
+            results.push({ path: '', name: '', success: false, error: String(r.reason) })
           }
-          // Check for rebase conflict
-          if (errorMessage.startsWith('REBASE_CONFLICT:')) {
-            return { path: repo.path, name: repo.name, success: false, error: errorMessage, isConflict: true }
-          }
-          return { path: repo.path, name: repo.name, success: false, error: errorMessage }
         }
-      })
-
-      const results = await Promise.all(pullPromises)
+      }
       return results
     } finally {
       set({ isPulling: false })
@@ -199,7 +207,7 @@ export const useGitStore = create<GitState>((set) => ({
   loadConflictRepos: async () => {
     try {
       const records = await getConflictRepoRecords()
-      // Load conflict files for each conflict repo and clean up stale records
+      // 加载各冲突仓库的冲突文件并清理过期记录
       const newConflictFilesMap: Record<string, string[]> = {}
       const staleRepoPaths: string[] = []
       await Promise.all(records.map(async (record) => {
@@ -213,12 +221,12 @@ export const useGitStore = create<GitState>((set) => ({
             newConflictFilesMap[record.repo_path] = []
           }
         } catch {
-          // If we can't get conflict files for a repo, skip it
+          // 获取冲突文件失败则跳过该仓库
           newConflictFilesMap[record.repo_path] = []
         }
       }))
 
-      // Remove stale DB records (repos with no actual conflict files)
+      // 移除过期 DB 记录（无实际冲突文件的仓库）
       if (staleRepoPaths.length > 0) {
         await Promise.all(staleRepoPaths.map(async (path) => {
           try {
@@ -232,7 +240,7 @@ export const useGitStore = create<GitState>((set) => ({
       // Filter out stale records from the list
       const validRecords = records.filter((r) => !staleRepoPaths.includes(r.repo_path))
       set({ conflictRepos: validRecords, conflictFilesMap: newConflictFilesMap })
-      // Also update repository statuses based on valid conflict records
+      // 同时基于有效冲突记录更新仓库状态
       set((state) => ({
         repositories: state.repositories.map((repo) => {
           const isConflict = validRecords.some((r) => r.repo_path === repo.path)
@@ -249,12 +257,12 @@ export const useGitStore = create<GitState>((set) => ({
   },
   syncConflictReposFromPullResults: async (pullResults: PullResult[]) => {
     try {
-      // Build conflict repo list from pull results
+      // 从 pull 结果构建冲突仓库列表
       const conflictEntries: [string, string, number][] = pullResults
         .filter((r) => r.isConflict)
         .map((r) => [r.path, r.name, 0] as [string, string, number])
 
-      // Also include existing conflict repos that weren't in this pull
+      // 包含本次 pull 未涉及的既有冲突仓库
       const existingConflictPaths = new Set(conflictEntries.map(([p]) => p))
       const { conflictRepos } = useGitStore.getState()
       for (const record of conflictRepos) {

@@ -41,6 +41,9 @@ const EVENT_COLORS: Record<PluginEvent, string> = {
   'settings:change': '#6b7280',
   'app:ready': '#22c55e',
   'app:exit': '#dc2626',
+  'plugin-settings:change': '#0ea5e9',
+  'editor:registered': '#8b5cf6',
+  'editor:unregistered': '#f43f5e',
 }
 
 const ALL_EVENTS = [
@@ -53,6 +56,9 @@ const ALL_EVENTS = [
   'settings:change',
   'app:ready',
   'app:exit',
+  'plugin-settings:change',
+  'editor:registered',
+  'editor:unregistered',
 ] as const satisfies readonly PluginEvent[]
 
 // ─── Panel ────────────────────────────────────────────────────────────────────

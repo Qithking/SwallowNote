@@ -130,7 +130,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const { workspaceFolders } = get()
     const newFolders = workspaceFolders.filter(f => f !== path)
     set({ workspaceFolders: newFolders })
-    
+
+    // Remove from file tree and close tabs belonging to the removed folder
+    const fileTreeStore = useFileTreeStore.getState()
+    fileTreeStore.removeRoot(path)
+    const { filterTabs } = useEditorStore.getState()
+    filterTabs((tab: EditorTab) => !tab.path.startsWith(path + '/'))
+
     await unwatchDirectory(path)
     
     await get().saveWorkspaceFile(true)

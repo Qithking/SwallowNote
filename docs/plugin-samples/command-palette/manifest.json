@@ -1,0 +1,14 @@
+{
+  "id": "com.example.command-palette",
+  "name": "Command Palette Demo",
+  "description": "Demonstrates contributing commands to the palette",
+  "version": "0.1.0",
+  "author": "SwallowNote",
+  "publishedAt": "2026-07-10",
+  "iconPosition": "sidebar",
+  "contentPosition": "fullPanel",
+  "order": 100,
+  "enabled": true,
+  "hasBackend": false,
+  "entry": "index.tsx"
+}

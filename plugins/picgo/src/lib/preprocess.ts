@@ -1,16 +1,4 @@
-/**
- * Image preprocessing.
- *
- * - MIME guard: rejects anything that isn't an `image/*` blob.
- * - Size guard: rejects blobs larger than `maxFileSizeMB`.
- * - Canvas re-encode: when `uploadFormat` differs from the
- *   blob's MIME, the image is re-encoded via a hidden `<canvas>`
- *   (webp → quality 0.92, jpg → quality 0.85, png → lossless).
- *
- * Returns a `{ file, filename }` pair where the filename's
- * extension is rewritten to match the new MIME so the remote
- * host serves it under the right content-type.
- */
+/** 图片预处理：MIME/大小校验 + canvas 转码 */
 import type { UploadFormat } from '../types'
 
 export interface PreprocessInput {
@@ -62,8 +50,7 @@ function loadImage(blob: Blob): Promise<HTMLImageElement> {
     const url = URL.createObjectURL(blob)
     const img = new Image()
     img.onload = () => {
-      // The element keeps the bitmap; revoke the URL on next tick
-      // to give the loader a moment to fully consume it.
+      // 延迟释放 URL，确保加载完成
       setTimeout(() => URL.revokeObjectURL(url), 0)
       resolve(img)
     }
@@ -138,9 +125,7 @@ export async function preprocessImage(
     return { file, filename, mime: targetMime }
   }
 
-  // Re-encode. The original file's extension may not match the
-  // requested format — replace it so the remote host serves the
-  // right content-type.
+  // 转码并替换扩展名，匹配目标 MIME
   const transcoded = await transcode(file, uploadFormat)
   return {
     file: transcoded,

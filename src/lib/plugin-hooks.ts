@@ -1,19 +1,4 @@
-/**
- * React hook wrappers around the plugin host APIs.
- *
- * All hooks in this file are **thin re-exports** of
- * `@swallow-note/plugin-sdk`. The original implementations lived
- * here and were duplicated against the SDK's; the SDK versions are
- * the canonical source of truth now (single-file self-contained,
- * stub-aware, host-takeover aware). We keep this file as a
- * compatibility layer so any host-side import (`@/lib/plugin-hooks`)
- * keeps working — but plugins should import from the SDK directly.
- *
- * The host retains a small number of host-only exports:
- *  - `usePluginCommands` — depends on the host's live command
- *    registry snapshot, not the SDK's stub.
- *  - `usePluginServices` — SDK-equivalent, kept here for compat.
- */
+/** 插件宿主 API 的 React hook 兼容层（薄封装 SDK） */
 import type { PluginCommand, PluginEvent, PluginEventPayloadMap } from '@/types/plugin'
 import {
   usePluginStorage as sdkUsePluginStorage,
@@ -33,19 +18,13 @@ export const usePluginStorage = sdkUsePluginStorage
 export const usePluginEvent = sdkUsePluginEvent
 export const usePluginServices = sdkUsePluginServices
 
-/**
- * `usePluginEvents` is a re-export, but the host's typing is
- * slightly different (the host accepts a stricter `(event, payload)`
- * pair signature). Wrap to preserve the original signature so
- * existing call sites in core-plugins keep working.
- */
+/** 包装以保留宿主严格的 (event, payload) 签名 */
 export function usePluginEvents<E extends PluginEvent>(
   panel: PluginPanelProps,
   events: readonly E[],
   handler: (event: E, payload: PluginEventPayloadMap[E]) => void
 ): void {
-  // SDK signature takes `event: E, payload: unknown`; the host's
-  // stricter signature is just a generic-narrowing wrapper.
+  // SDK 用 unknown payload，宿主签名是泛型收窄包装
   sdkUsePluginEvents(
     panel,
     events,
@@ -53,30 +32,9 @@ export function usePluginEvents<E extends PluginEvent>(
   )
 }
 
-// ─── Command palette hook (host-only) ────────────────────────────────────────
+// 命令面板 hook（仅宿主）
 
-/**
- * Live snapshot of every plugin command currently registered.
- *
- * The host's `pluginCommandRegistry` is a singleton that lives
- * outside React; this hook re-renders on every register /
- * unregister / clearPlugin by subscribing to the registry's
- * notifier. Callers (the command palette, the settings panel)
- * use this to render plugin contributions without having to
- * import the registry singleton directly.
- *
- * Filters out entries whose `when()` predicate returns false
- * (e.g. a "Commit" command hiding outside a git workspace). The
- * registry keeps the hidden entry so a later re-render with a
- * changed `when()` flips visibility back on without re-registering.
- *
- * Note: this is the *host* version — it queries the live host
- * registry. The SDK's `usePluginCommands` is the equivalent
- * standalone hook (works in plugin previews); for any code that
- * wants to run inside the host and see *all* commands (including
- * ones plugins registered through the host's permission-checked
- * registry), use this version.
- */
+/** 已注册插件命令的实时快照（订阅注册表变更） */
 export function usePluginCommands(): PluginCommand[] {
   const [commands, setCommands] = useState<PluginCommand[]>(() =>
     listPluginCommands()
@@ -103,6 +61,5 @@ export function usePluginCommands(): PluginCommand[] {
   return commands
 }
 
-// Re-export the type so existing imports of this file's types
-// keep resolving without an extra import line.
+// 类型再导出，保持现有导入可用
 export type { PluginPanelProps, PluginEventBus }

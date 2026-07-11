@@ -4,6 +4,7 @@
  */
 import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { X, Plus, Trash2 } from 'lucide-react'
 import { useEditorStore, useCategoryStore } from '@/stores'
 import type { CategoryNode } from '@/stores/category'
@@ -163,7 +164,7 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
   const categories = frontmatter.categories ?? []
 
   const handleCategoriesChange = useCallback(
-    (newCategories: string[]) => {
+    async (newCategories: string[]) => {
       // 找出新增的分类路径
       const added = newCategories.filter((c) => !categories.includes(c))
 
@@ -184,9 +185,12 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
 
         for (const cat of added) {
           if (!categoryExists(tree, cat)) {
-            invoke('create_category', { path: cat }).catch((e) => {
+            try {
+              await invoke('create_category', { path: cat })
+            } catch (e) {
               console.error('Failed to create category from properties:', cat, e)
-            })
+              toast.error(`创建分类失败: ${cat}`)
+            }
           }
         }
       }

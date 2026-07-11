@@ -31,7 +31,7 @@ npm run build
 
 ```
 dist/
-├── plugin.js          # 38 kB IIFE bundle（gzip 后 12 kB）
+├── index.js           # ES module bundle（gzip 后约 12 kB）
 └── manifest.json      # 从 src/plugin/manifest.json 拷贝
 ```
 
@@ -92,7 +92,9 @@ plugin-template/
    import { usePluginStorage } from '@/lib/plugin-hooks'
 
    // 改后
-   import { type PluginDefinition, usePluginStorage } from '@swallow-note/plugin-sdk'
+   import { type PluginManifest, usePluginStorage } from '@swallow-note/plugin-sdk'
+   // 必须 re-export setHost，宿主通过它注入真实实现
+   export { setHost } from '@swallow-note/plugin-sdk'
    ```
 
 3. 把 `@/lib/...` 运行时 import 替换为 SDK 的 re-export

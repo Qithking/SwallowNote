@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 const PAGE_SIZE = 50
 
@@ -196,9 +197,10 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       console.error('Failed to pull latest:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)
       if (errorMsg === 'NO_REMOTE') {
-        alert(t('history.noRemote'))
+        // 使用 toast 替代原生 alert，与 GitView/SettingsView 等模块保持一致的提示风格
+        toast.error(t('history.noRemote'))
       } else {
-        alert(t('history.pullLatestFailed', { error: errorMsg }))
+        toast.error(t('history.pullLatestFailed', { error: errorMsg }))
       }
     } finally {
       setPullingLatest(false)
@@ -229,9 +231,10 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       console.error('Failed to force upload:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)
       if (errorMsg === 'NO_REMOTE') {
-        alert(t('history.noRemote'))
+        // 使用 toast 替代原生 alert，与 pullLatest 分支保持一致
+        toast.error(t('history.noRemote'))
       } else {
-        alert(t('history.forceUploadFailed', { error: errorMsg }))
+        toast.error(t('history.forceUploadFailed', { error: errorMsg }))
       }
     } finally {
       setForceUploading(false)

@@ -8,14 +8,17 @@ pub fn save_session_state(db: &Database, states: &HashMap<String, String>) -> Re
         eprintln!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
-    
+    // 事务包裹批量 INSERT 保证原子性
+    let tx = conn.unchecked_transaction()?;
+
     for (key, value) in states {
-        conn.execute(
+        tx.execute(
             "INSERT OR REPLACE INTO session_state (key, value) VALUES (?1, ?2)",
             [key, value],
         )?;
     }
-    
+
+    tx.commit()?;
     Ok(())
 }
 

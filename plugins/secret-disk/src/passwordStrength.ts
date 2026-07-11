@@ -1,0 +1,81 @@
+/** 密码强度校验工具：长度+字母+数字，分 weak/medium/strong 三级 */
+
+/** 密码长度限制 */
+export const PASSWORD_MIN_LEN = 8
+export const PASSWORD_MAX_LEN = 256
+
+/** 校验结果 */
+export interface PasswordValidation {
+  /** 是否满足最低提交要求 */
+  valid: boolean
+  /** 错误信息（valid=false 时有值） */
+  error?: string
+  /** 强度等级（valid=true 时有值） */
+  strength?: PasswordStrength
+}
+
+type PasswordStrength = 'weak' | 'medium' | 'strong'
+
+/** 特殊字符正则 */
+const SPECIAL_CHAR_RE = /[^a-zA-Z0-9\s]/
+
+/** 校验密码并返回详细结果 */
+export function validatePassword(password: string): PasswordValidation {
+  const len = password.length
+
+  // 长度校验
+  if (len < PASSWORD_MIN_LEN) {
+    return { valid: false, error: `密码长度不能少于 ${PASSWORD_MIN_LEN} 个字符` }
+  }
+  if (len > PASSWORD_MAX_LEN) {
+    return { valid: false, error: `密码长度不能超过 ${PASSWORD_MAX_LEN} 个字符` }
+  }
+
+  // 字符类型校验
+  const hasLetter = /[a-zA-Z]/.test(password)
+  const hasDigit = /[0-9]/.test(password)
+  if (!hasLetter || !hasDigit) {
+    return {
+      valid: false,
+      error: '密码必须同时包含字母和数字',
+      strength: 'weak',
+    }
+  }
+
+  // 强度评级
+  const hasSpecial = SPECIAL_CHAR_RE.test(password)
+  let strength: PasswordStrength
+  if (len >= 16 || (len >= 12 && hasLetter && hasDigit && hasSpecial)) {
+    strength = 'strong'
+  } else if (len >= 12 && hasLetter && hasDigit) {
+    strength = 'medium'
+  } else {
+    strength = 'weak'
+  }
+
+  return { valid: true, strength }
+}
+
+/** 强度等级对应的中文标签 */
+export function strengthLabel(strength: PasswordStrength): string {
+  switch (strength) {
+    case 'weak':
+      return '弱'
+    case 'medium':
+      return '中'
+    case 'strong':
+      return '强'
+  }
+}
+
+/** 强度等级对应的颜色 */
+export function strengthColor(strength: PasswordStrength): string {
+  switch (strength) {
+    case 'weak':
+      return '#ef4444' // 红色
+    case 'medium':
+      return '#f59e0b' // 橙色
+    case 'strong':
+      return '#22c55e' // 绿色
+  }
+}

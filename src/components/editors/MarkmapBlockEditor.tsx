@@ -33,6 +33,37 @@ type MarkmapInstance = {
   zoom: { transform: (node: SVGSVGElement, transform: { k: number; x: number; y: number }) => void }
 }
 
+// markmap root 解析结果 LRU 缓存：key=diagram 源码，value=transformer.transform 返回的 root
+const markmapRootCache = new Map<string, any>()
+const MARKMAP_ROOT_CACHE_MAX = 50
+
+/** 解析 markdown 为 markmap root，命中缓存则复用，避免相同源码重复解析 */
+function transformMarkmapRoot(
+  Transformer: typeof import('markmap-lib')['Transformer'],
+  diagram: string,
+): any {
+  const cached = markmapRootCache.get(diagram)
+  if (cached) {
+    // LRU：命中时移到末尾（最近使用），避免频繁条目被过早淘汰
+    markmapRootCache.delete(diagram)
+    markmapRootCache.set(diagram, cached)
+    // 深拷贝避免多个 markmap 实例（主视图与对话框）共享同一 root，防止
+    // markmap-view 内部 mutate root 时互相干扰。root 是纯数据对象，无函数/
+    // Date 等特殊类型，用 JSON 方式深拷贝即可。
+    return JSON.parse(JSON.stringify(cached)) as typeof cached
+  }
+  const transformer = new Transformer()
+  const root = transformer.transform(diagram).root
+  markmapRootCache.set(diagram, root)
+  if (markmapRootCache.size > MARKMAP_ROOT_CACHE_MAX) {
+    const oldest = markmapRootCache.keys().next().value
+    if (oldest !== undefined) markmapRootCache.delete(oldest)
+  }
+  // 未命中时也返回深拷贝，保持缓存中的 root 始终为 pristine 副本，
+  // 避免首个调用方 mutate 污染缓存（与命中路径一致）
+  return JSON.parse(JSON.stringify(root)) as typeof root
+}
+
 export function MarkmapBlockEditor({ diagram, source, width, height, scale, block, editor }: MarkmapBlockEditorProps) {
   const { t } = useTranslation()
   const svgRef = useRef<SVGSVGElement>(null)
@@ -70,8 +101,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
         ])
         if (!active || !svgRef.current) return
 
-        const transformer = new Transformer()
-        const { root } = transformer.transform(diagram)
+        const root = transformMarkmapRoot(Transformer, diagram)
         const instance = Markmap.create(svgRef.current) as unknown as MarkmapInstance
         await instance.setData(root ?? { type: 'heading', depth: 0, value: '' })
 
@@ -141,8 +171,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
         ])
         if (!active || !dialogSvgRef.current) return
 
-        const transformer = new Transformer()
-        const { root } = transformer.transform(diagram)
+        const root = transformMarkmapRoot(Transformer, diagram)
         const instance = Markmap.create(dialogSvgRef.current) as unknown as MarkmapInstance
         await instance.setData(root ?? { type: 'heading', depth: 0, value: '' })
         await instance.fit()

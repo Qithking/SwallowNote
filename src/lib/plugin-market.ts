@@ -1,4 +1,4 @@
-/** 插件市场客户端（Phase 9.2）。职责：拉取索引、IndexedDB 缓存 zip、提供 verifyZipFrontmatter。ed25519 验签在 Rust 宿主侧。 */
+/** 插件市场客户端：拉取索引、缓存 zip */
 import type {
   PluginIndex,
   PluginIndexEntry,
@@ -12,7 +12,7 @@ const ZIP_STORE_NAME = 'plugin-zips'
 const INDEX_DB = 'swallow-plugin-market'
 const INDEX_DB_VERSION = 1
 
-// ─── Low-level IndexedDB helpers ──────────────────────────────────────────────
+// IndexedDB 辅助
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -39,9 +39,7 @@ interface CachedZip {
   downloadUrl: string
 }
 
-/**
- * 从缓存读 zip。Bug 7：每次读取重新校验 sha256，不匹配则驱逐。
- */
+/** 从缓存读 zip，校验 sha256 不匹配则驱逐 */
 async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
   if (typeof indexedDB === 'undefined') return null
   try {
@@ -60,18 +58,13 @@ async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
         try {
           const actual = await sha256Hex(rec.bytes)
           if (actual.toLowerCase() !== sha256.toLowerCase()) {
-            // Mismatched — the record is corrupted or
-            // tampered. Evict and report a miss so the
-            // caller re-downloads from the network.
+            // 损坏或篡改，驱逐并重下
             store.delete(sha256)
             resolve(null)
             return
           }
         } catch {
-          // `crypto.subtle` failed (e.g. detached ArrayBuffer
-          // in an older webview). Treat as a miss rather
-          // than refusing the install — the host's verify
-          // pipeline will still catch any real tampering.
+          // crypto.subtle 失败按 miss 处理
           resolve(null)
           return
         }
@@ -84,10 +77,9 @@ async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
   }
 }
 
-/**
- * Persist a zip to the cache. Best-effort: a failure (e.g. quota
- * exceeded) is swallowed because the caller can always re-fetch.
- */
+/** 写入 zip 缓存，LRU 上限 20 */
+const ZIP_CACHE_LIMIT = 20
+
 async function writeZipToCache(
   sha256: string,
   bytes: ArrayBuffer,
@@ -106,15 +98,33 @@ async function writeZipToCache(
         downloadUrl,
       }
       store.put(rec)
+
+      // LRU 淘汰：写入后若总数超过上限，按 fetchedAt 升序删除最旧条目
+      const countReq = store.count()
+      countReq.onsuccess = () => {
+        if (countReq.result > ZIP_CACHE_LIMIT) {
+          const getAllReq = store.getAll()
+          getAllReq.onsuccess = () => {
+            const all = getAllReq.result as CachedZip[]
+            // 升序后删除多出的最旧条目
+            all.sort((a, b) => a.fetchedAt - b.fetchedAt)
+            const toEvict = all.length - ZIP_CACHE_LIMIT
+            for (let i = 0; i < toEvict; i++) {
+              store.delete(all[i].sha256)
+            }
+          }
+        }
+      }
+
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
   } catch {
-    /* swallow — see comment above */
+    /* 忽略错误 */
   }
 }
 
-// ─── Public API ──────────────────────────────────────────────────────────────
+// 公共 API
 
 /** 拉取并解析 PluginIndex，snake_case 转 camelCase。 */
 export async function fetchPluginIndex(url: string): Promise<PluginIndex> {
@@ -129,10 +139,7 @@ export async function fetchPluginIndex(url: string): Promise<PluginIndex> {
   return normaliseIndex(raw)
 }
 
-/**
- * Fetch with progress tracking. Returns the response text and
- * calls `onProgress` with download percentage (0-100).
- */
+/** 带进度的 fetch，回调百分比 */
 export async function fetchWithProgress(
   url: string,
   onProgress: (percent: number) => void
@@ -149,7 +156,7 @@ export async function fetchWithProgress(
   const contentLength = res.headers.get('content-length')
   const total = contentLength ? parseInt(contentLength, 10) : 0
 
-  // If no content-length or body, fall back to normal fetch
+  // 无 content-length 退回普通 fetch
   if (!total || !res.body) {
     const text = await res.text()
     onProgress(100)
@@ -171,7 +178,7 @@ export async function fetchWithProgress(
     onProgress(percent)
   }
 
-  // Concatenate chunks
+  // 合并分块
   const allChunks = new Uint8Array(received)
   let position = 0
   for (const chunk of chunks) {
@@ -195,16 +202,12 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return out
 }
 
-/**
- * 用 new URL(downloadUrl, repoUrl) 解析相对路径。Bug 6：仅允许 http/https scheme。
- */
+/** 解析下载 URL，仅允许 http/https */
 function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
   if (!downloadUrl) return downloadUrl
   let parsed: URL
   try {
-    // Absolute URL → returned as-is. Relative URL → resolved
-    // against the repo URL, mirroring how a `<base href="…">`
-    // tag would behave in a browser loading the index document.
+    // 绝对 URL 原样返回，相对 URL 基于 repoUrl 解析
     parsed = new URL(downloadUrl, repoUrl)
   } catch {
     // 解析失败时回退原字符串。
@@ -224,13 +227,11 @@ export async function downloadPluginZip(
   entry: PluginIndexEntry,
   repoUrl: string,
 ): Promise<ArrayBuffer> {
-  // 1) Cache lookup. Cheap and bypasses the network entirely.
+  // 1) 查缓存，绕过网络
   const cached = await readZipFromCache(entry.sha256)
   if (cached) return cached
 
-  // 2) Network download. The URL is resolved against `repoUrl`
-  //    so `./export/foo.zip` in the index becomes
-  //    `<repo>/export/foo.zip`, not `<tauri-localhost>/export/foo.zip`.
+  // 2) 基于 repoUrl 解析后下载
   const url = resolveDownloadUrl(entry.downloadUrl, repoUrl)
   const res = await fetch(url, { cache: 'no-store' })
   if (!res.ok) {
@@ -240,8 +241,7 @@ export async function downloadPluginZip(
   }
   const bytes = await res.arrayBuffer()
 
-  // 3) Cache *only* if the digest matches. A mismatched zip is
-  //    malicious or corrupted — never persist it.
+  // 3) 仅摘要匹配才缓存
   const actual = await sha256Hex(bytes)
   if (actual.toLowerCase() === entry.sha256.toLowerCase()) {
     await writeZipToCache(entry.sha256, bytes, entry.downloadUrl)
@@ -263,10 +263,7 @@ export async function downloadPluginVersion(
   const cached = await readZipFromCache(version.sha256)
   if (cached) return cached
 
-  // Same relative-URL trap as `downloadPluginZip`: the per-
-  // version `downloadUrl` is also documented as relative to
-  // the index, so we have to re-anchor it to `repoUrl` before
-  // handing the string to `fetch`.
+  // 同上，相对 URL 需重新锚定到 repoUrl
   const url = resolveDownloadUrl(version.downloadUrl, repoUrl)
   const res = await fetch(url, { cache: 'no-store' })
   if (!res.ok) {
@@ -276,8 +273,7 @@ export async function downloadPluginVersion(
   }
   const bytes = await res.arrayBuffer()
 
-  // Same G1 invariant as the latest-version path: never persist a
-  // mismatched digest.
+  // 同样不持久化摘要不匹配的 zip
   const actual = await sha256Hex(bytes)
   if (actual.toLowerCase() === version.sha256.toLowerCase()) {
     await writeZipToCache(version.sha256, bytes, version.downloadUrl)
@@ -290,10 +286,7 @@ export async function downloadPluginVersion(
   return bytes
 }
 
-/**
- * Resolve which pubkey to use for an entry. Falls back to the
- * repo-level key when the entry leaves `pubkeyB64` empty.
- */
+/** 解析条目公钥，缺省回退 repo 级 */
 export function effectivePubkey(
   index: PluginIndex,
   entry: PluginIndexEntry
@@ -301,7 +294,7 @@ export function effectivePubkey(
   return entry.pubkeyB64 || index.pubkeyB64
 }
 
-// ─── Wire-shape normalisation ─────────────────────────────────────────────────
+// 字段规范化
 
 /** snake_case 转 camelCase。 */
 export function normaliseIndex(raw: any): PluginIndex {
@@ -403,7 +396,7 @@ function normalisePluginVersion(raw: any): PluginVersionInfo {
   }
 }
 
-// ─── Tauri command wrappers ───────────────────────────────────────────────────
+// Tauri 命令封装
 
 import { invoke } from '@tauri-apps/api/core'
 
@@ -443,7 +436,7 @@ export async function listPluginVersions(pluginId: string): Promise<PluginVersio
   return Array.isArray(raw) ? raw.map(normalisePluginVersion) : []
 }
 
-// ─── In-memory index cache (per repo URL) ─────────────────────────────────────
+// 内存索引缓存
 
 const inMemoryIndexCache = new Map<string, { index: PluginIndex; at: number }>()
 const IN_MEMORY_TTL_MS = 60_000
@@ -460,10 +453,17 @@ export async function fetchPluginIndexCached(url: string): Promise<PluginIndex> 
   return index
 }
 
-/** Drop the in-memory index cache. Useful after a successful install. */
+/** 失效内存索引缓存 */
 export function invalidateIndexCache(url?: string): void {
   if (url) {
     inMemoryIndexCache.delete(url)
+    // 遍历清理已过期的条目
+    const now = Date.now()
+    for (const [key, entry] of inMemoryIndexCache) {
+      if (now - entry.at >= IN_MEMORY_TTL_MS) {
+        inMemoryIndexCache.delete(key)
+      }
+    }
   } else {
     inMemoryIndexCache.clear()
   }

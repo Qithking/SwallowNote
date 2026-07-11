@@ -2,12 +2,11 @@ import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { ChevronRight, Folder, FolderOpen, RefreshCw, Plus, Pencil, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { useCategoryStore, type CategoryNode } from '@/stores'
 import { useEditorStore } from '@/stores'
 import { cn } from '@/lib/utils'
 import { getFileIcon } from '@/lib/utils/fileIcon'
-import { loadFileContent } from '@/lib/api'
-import { countWords } from '@/lib/utils/wordCount'
 import { FullPathTooltip } from '@/components/Search/FullPathTooltip'
 import {
   ContextMenu,
@@ -75,19 +74,15 @@ export function CategoryView() {
 
   const openFile = useCallback(async (filePath: string) => {
     try {
-      const content = await loadFileContent(filePath)
       const fileName = filePath.split('/').pop() || filePath
       addTab({
         id: filePath,
         path: filePath,
         name: fileName,
-        content,
+        content: undefined as unknown as string, // 延迟加载，由 loadTabContent 负责加载和解析
         isDirty: false,
         isEdited: false,
         viewMode: 'preview',
-        fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
-        modifiedTime: new Date().toLocaleString(),
-        wordCount: countWords(content),
       })
     } catch (e) {
       console.error('Failed to open file:', e)
@@ -169,10 +164,13 @@ export function CategoryView() {
     const trimmed = newItem.name.trim()
     const fullPath = newItem.parentPath ? `${newItem.parentPath}/${trimmed}` : trimmed
 
-    // 持久化空分类到 categories 表，等待完成后再刷新
-    await invoke('create_category', { path: fullPath }).catch((e) => {
+    // 持久化空分类到 categories 表，失败时提示用户；成功后再刷新树
+    try {
+      await invoke('create_category', { path: fullPath })
+    } catch (e) {
       console.error('Failed to create category:', fullPath, e)
-    })
+      toast.error(`创建分类失败: ${fullPath}`)
+    }
 
     await useCategoryStore.getState().loadTree()
     setNewItem(null)

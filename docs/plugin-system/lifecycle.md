@@ -59,10 +59,28 @@ interface PluginContext {
 }
 ```
 
+### `invokeBackend` 在不同模式下的行为
+
+`PluginContext.invokeBackend` 的具体实现由构造 context 的代码决定：
+
+- **host 模式**（生产）：宿主构造的 `PluginContext` 把 `invokeBackend` 桥接到 `@tauri-apps/api/core` 的 `invoke`，正常调用 Rust 后端命令。
+- **standalone 模式**（`npm run dev` 独立预览，无 Tauri runtime）：SDK 的 `buildPluginContext(plugin)` 返回的 `invokeBackend` 会先检查 host 是否注入了 `invokeBackend` override；若未注入，则打印 `console.warn` 并返回 `null`，方便插件在无 Rust 后端时也能跑通 UI 预览。
+
+```typescript
+// SDK 中的 standalone 兜底实现（简化）
+import { buildPluginContext } from '@swallow-note/plugin-sdk'
+
+const ctx = buildPluginContext({ id: 'com.example.demo', pluginPath: '/tmp/demo' })
+const result = await ctx.invokeBackend('count_words', { text: 'hi' })
+// host 未注入时：打印 warn，result === null
+```
+
+> 因此生命周期钩子里调用 `invokeBackend` 时应处理 `null` 兜底（standalone 模式）。如果钩子需要调用后端，建议在 `onMount`/`onActivate` 中调用（此时面板已挂载，可通过 `panel.invokeBackend` 调用），而非在 `onLoad` 中。详见 [backend.md](./backend.md)。
+
 ## 完整示例
 
 ```typescript
-import type { PluginDefinition, PluginContext, PluginPanelProps } from '@/types/plugin'
+import type { PluginManifest, PluginContext, PluginPanelProps } from '@swallow-note/plugin-sdk'
 import { getPluginStorage, pluginEventBus } from '@/lib/plugin-host'
 import { registerContextMenu } from '@/lib/plugin-menu'
 
@@ -110,11 +128,14 @@ function onUnload(): void {
   // 右键菜单 / 存储 cache 会被 host 自动清理（但显式清理是好习惯）
 }
 
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   id: 'com.example.lifecycle',
   name: 'Lifecycle Demo',
   // ...
-  hooks: { onLoad, onMount, onUnmount, onUnload },
+  onLoad,
+  onMount,
+  onUnmount,
+  onUnload,
 }
 
 export default manifest
@@ -137,6 +158,32 @@ async function runLifecycleHook(hook, ctx) {
 ```
 
 → **钩子抛异常不会阻塞宿主**，但建议在钩子内部用 `try / catch` 处理可恢复错误。
+
+## 超时机制
+
+宿主为每个生命周期钩子设置了 **5 秒超时**（`timeoutMs`，可通过 `RunLifecycleHookOptions` 配置）：
+
+- 钩子在 5 秒内完成：正常继续
+- 钩子超时：宿主记录 `PluginLifecycleTimeoutError`，标记插件为"不健康"状态，但不阻塞其他插件加载
+- 超时后钩子的 Promise 仍会继续执行（不会被 abort），但其结果被忽略
+
+> **最佳实践**：`onLoad` / `onUnload` 中的异步操作（如 `store.set`、`invokeBackend`）如果可能超过 5 秒，考虑改为"启动后台任务 + 立即返回"模式。
+
+## 钩子内能做什么、不能做什么
+
+| 操作 | onLoad | onEnable | onMount | onActivate | onUnload | onDisable | onUnmount | onDeactivate |
+|------|--------|----------|---------|------------|----------|-----------|-----------|-------------|
+| registerContextMenu | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| registerCommand | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| registerEditor | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| store.get/set | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| events.on | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| getSetting/setSetting | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ctx.invokeBackend | ⚠️ host 可用 | ⚠️ host 可用 | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
+| panel.invokeBackend | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| React state (useState) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+> ⚠️ = host 模式可用但 standalone 模式返回 null；❌ = 不可用或无意义
 
 ## React 集成
 

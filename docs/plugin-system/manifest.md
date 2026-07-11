@@ -2,17 +2,17 @@
 
 `manifest` 是插件导出的核心对象，宿主通过它了解插件的身份、视觉位置、可选能力。
 
-## 必填字段
+## 核心字段
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | `string` | 全局唯一标识，建议反向域名（如 `com.example.my-plugin`）。卸载后再次安装会复用同一存储目录。 |
-| `name` | `string` | 卡片标题、菜单、设置页面中的显示名。 |
-| `description` | `string` | 一句话说明。卡片副标题 + 设置 dialog header。 |
-| `version` | `string` | 语义化版本号，仅做展示用。 |
-| `author` | `string` | 插件作者。 |
-| `icon` | `ComponentType<{ size?: number }> \| ReactNode` | 触发器图标。`sidebar` 时显示在 ActivityBar，`editorToolbar` 时显示在编辑器工具栏。 |
-| `panel` | `ComponentType<PluginPanelProps> \| ReactNode` | 主面板内容。 |
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | :---: | --- |
+| `id` | `string` | ✅ | 全局唯一标识，建议反向域名（如 `com.example.my-plugin`）。卸载后再次安装会复用同一存储目录。 |
+| `name` | `string` | ✅ | 卡片标题、菜单、设置页面中的显示名。 |
+| `description` | `string` | ❌ | 一句话说明。卡片副标题 + 设置 dialog header。 |
+| `version` | `string` | ❌ | 语义化版本号，仅做展示用。 |
+| `author` | `string` | ❌ | 插件作者。 |
+| `icon` | `ComponentType<{ size?: number }> \| ReactNode` | ❌ | 触发器图标。`sidebar` 时显示在 ActivityBar，`editorToolbar` 时显示在编辑器工具栏。 |
+| `panel` | `ComponentType<PluginPanelProps> \| ReactNode` | ❌ | 主面板内容。 |
 
 ## 位置字段
 
@@ -31,18 +31,62 @@
 
 > **最佳实践**：`sidebar` + `fullPanel` 是最常见的组合（ActivityBar 图标 + 全屏内容）。`leftPanel` / `rightPanel` 用于需要常驻的辅助面板（Git 状态、AI 对话等）。
 
-## 元数据字段
+## 可选字段
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `publishedAt` | `string` (ISO 8601) | 首次发布日期。仅展示用。 |
-| `order` | `number` | 触发器在同 `iconPosition` 内的排序，数字越小越靠前。 |
-| `enabled` | `boolean` | 初始启用状态。宿主加载后会同步到运行时。 |
-| `hasBackend` | `boolean` | 是否携带 Rust 后端。支持 `true` / `false`，默认为 `false`（省略时等同 `false`）。如果为 `true`，插件目录必须包含 `backend/` 子目录。 |
-| `pluginPath` | `string` | **由 loader 填充**，留空即可。 |
-| `hooks` | `object` | 生命周期钩子（见 [lifecycle.md](./lifecycle.md)） |
-| `settings` | `ComponentType<PluginPanelProps> \| ReactNode` | 可选设置组件（见 [settings.md](./settings.md)） |
-| `permissions` | `PluginPermission[]` | 声明插件需要的权限（见下方） |
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | :---: | --- |
+| `toolbarButton` | `ComponentType<ToolbarButtonProps> \| ReactNode` | ❌ | 可选自定义工具栏按钮组件，替代默认图标按钮。详见下方 [ToolbarButtonProps](#toolbarbuttonprops)。 |
+| `editorFileExtensions` | `string[]` | ❌ | 可渲染的文件扩展名（带点小写，如 `['.smm']`）。同一扩展名仅允许一个插件注册，需声明 `'editor'` 权限。 |
+| `editorComponent` | `ComponentType<{ content: string; onChange: (content: string) => void }>` | ❌ | 匹配 `editorFileExtensions` 的文件渲染组件，接收 `content` 与 `onChange`。 |
+| `publishedAt` | `string` (ISO 8601) | ❌ | 首次发布日期。仅展示用。 |
+| `order` | `number` | ❌ | 触发器在同 `iconPosition` 内的排序，数字越小越靠前。 |
+| `enabled` | `boolean` | ❌ | 初始启用状态。宿主加载后会同步到运行时。 |
+| `hasBackend` | `boolean` | ❌ | 是否携带 Rust 后端。支持 `true` / `false`，默认为 `false`（省略时等同 `false`）。如果为 `true`，插件目录必须包含 `backend/` 子目录。 |
+| `pluginPath` | `string` | ❌ | **由 loader 填充**，留空即可。 |
+| `hooks` | `object` | ❌ | 生命周期钩子（见 [lifecycle.md](./lifecycle.md)） |
+| `settings` | `ComponentType<PluginPanelProps> \| ReactNode` | ❌ | 可选设置组件（见 [settings.md](./settings.md)） |
+| `permissions` | `PluginPermission[]` | ❌ | 声明插件需要的权限（见下方） |
+| `dependencies` | `PluginDependency[]` | ❌ | 插件间依赖声明。安装时由 `resolveDependencies` 消费，详见下方 [PluginDependency](#plugindependency)。 |
+| `commandPalette` | `string[]` | ❌ | 贡献给命令面板的命令 id 列表。命令通过 SDK 的 `registerCommand` 注册，此处仅做声明性索引，供冲突检测使用。 |
+| `autoUpdate` | `boolean` | ❌ | 用户 opt-in 的自动更新标志，持久化在 localStorage。宿主 store 持有权威值，清单字段仅作初始镜像。 |
+
+### PluginDependency
+
+```typescript
+interface PluginDependency {
+  id: string       // 依赖的插件 id
+  version: string  // semver 范围，空或 * 匹配任意
+}
+```
+
+### 依赖声明的作用
+
+`dependencies` 字段用于声明插件间的依赖关系。当前实现中（解析器见 [src/lib/plugin-dependencies.ts](../../src/lib/plugin-dependencies.ts) 的 `resolveDependencies`）：
+
+- **安装时检查**：宿主在安装插件时会检查 `dependencies` 中声明的依赖是否已安装。如果依赖缺失或已安装版本不满足声明的 semver 范围，安装会被拒绝并提示用户先安装/升级依赖。
+- **加载顺序**：`resolveDependencies` 返回拓扑安装序（`installOrder`），宿主据此确定加载顺序，确保被依赖的插件先加载。同时会做循环依赖检测，发现环时拒绝安装。
+- **不支持直接 API 调用**：当前不支持插件间直接调用对方的 API。插件间通信只能通过事件总线（`pluginEventBus`）间接进行。
+
+示例：插件 A 依赖插件 B 的事件
+
+```typescript
+import { pluginEventBus } from '@/lib/plugin-host'
+// 独立开发：from '@swallow-note/plugin-sdk'
+
+const manifest: PluginManifest = {
+  id: 'plugin-a',
+  name: 'Plugin A',
+  dependencies: [{ id: 'plugin-b', version: '^1.0.0' }],
+  onLoad(ctx) {
+    // 插件 B 会 emit 事件，插件 A 订阅
+    pluginEventBus.on('plugin-settings:change', (payload) => {
+      if (payload.pluginId === 'plugin-b') {
+        console.log('依赖插件 B 的设置变更:', payload.values)
+      }
+    })
+  },
+}
+```
 
 ## 权限字段（`permissions`）
 
@@ -50,7 +94,7 @@
 
 | 取值 | 含义 | 何时被检查 |
 | --- | --- | --- |
-| `'storage'` | 持久化键值存储 | `store.get / set / delete / clear / keys` 全部调用 |
+| `'storage'` | 持久化键值存储 | `store.get / set / delete / clear / keys / entries` 全部调用 |
 | `'events'` | 订阅宿主事件 | `events.on('note:open', ...)` 等订阅时 |
 | `'context-menu'` | 贡献右键菜单项 | `registerContextMenu(...)` 注册时 |
 | `'backend'` | 调用 Rust 后端 | `invokeBackend('cmd', args)` 调用时 |
@@ -59,6 +103,7 @@
 | `'network'` | 网络请求 | 未来 net API 启用时 |
 | `'clipboard'` | 剪贴板读写 | 未来 clipboard API 启用时 |
 | `'notifications'` | 系统通知 | 未来 notifications API 启用时 |
+| `'editor'` | 注册自定义文件编辑器 | `registerEditor(pluginId, extension, component)` 注册时 |
 
 ```typescript
 const manifest: PluginManifest = {
@@ -79,9 +124,9 @@ const manifest: PluginManifest = {
 ## 完整 manifest 示例
 
 ```typescript
-import type { PluginDefinition } from '@/types/plugin'
+import type { PluginManifest } from '@swallow-note/plugin-sdk'
 
-const manifest: PluginDefinition = {
+const manifest: PluginManifest = {
   // 身份
   id: 'com.example.my-plugin',
   name: 'My Plugin',
@@ -100,16 +145,20 @@ const manifest: PluginDefinition = {
   icon: MyIcon,
   panel: MyPanel,
 
-  // 可选
+  // 可选能力
   settings: MySettingsDialog,
-  hooks: {
-    onLoad: async (ctx) => { /* ... */ },
-    onUnload: (ctx) => { /* ... */ },
-  },
+  toolbarButton: MyToolbarButton,           // 自定义工具栏按钮（替代默认图标）
+  editorFileExtensions: ['.smm'],           // 声明可渲染的扩展名（需 'editor' 权限）
+  editorComponent: MyEditor,                // 匹配扩展名时挂载的编辑器组件
+  commandPalette: ['my-plugin:run'],        // 贡献的命令面板 id
 
-  // 运行时（loader 填充）
-  pluginPath: '',
-  hasBackend: false,
+  // 依赖与更新
+  dependencies: [{ id: 'com.example.core', version: '^1.0.0' }],
+  autoUpdate: true,
+
+  // 生命周期钩子为扁平字段（非 hooks 对象）
+  onLoad: async (ctx) => { /* ... */ },
+  onUnload: (ctx) => { /* ... */ },
 }
 
 export default manifest
@@ -118,6 +167,10 @@ export default manifest
 ## Rust 端元数据：`manifest.json`
 
 > 这是 Rust 端读取的 JSON 元数据文件，与上面的 JS manifest 配套。**只放需要 Rust 知道的字段**（id / name / version / hasBackend / entry）。
+
+**字段命名约定**：`manifest.json` 使用 **camelCase**（如 `iconPosition`、`contentPosition`、`hasBackend`、`publishedAt`），因为该文件主要由前端 TypeScript 读取。打包时，各插件的 `vite.config.ts` 会读取 `manifest.json`，把字段转成 **snake_case**（如 `icon_position`、`content_position`、`has_backend`、`published_at`），并以 `// @swallow-manifest { ... }` 注释形式注入到 `dist/index.js` 顶部。Rust 端 `parse_manifest_from_index_js` 解析该注释，用 `serde::Deserialize` 反序列化为 `PluginMetadataRust` 结构体（字段为 snake_case，以匹配 Rust 命名习惯）。
+
+下面示例展示的是 **Rust serde 消费格式**（snake_case），即 `// @swallow-manifest` 注释里的形态；前端开发者手写的 `manifest.json` 请用 camelCase。
 
 ```json
 {
@@ -148,6 +201,13 @@ export default manifest
 | `events` | `PluginEventBus` | 宿主事件总线，可订阅主题/笔记/语言/设置变更 |
 | `activeNoteContent` | `string` | 当前活动笔记的内容（Markdown 字符串）。无活动笔记时为空字符串 |
 | `activeNotePath` | `string` | 当前活动笔记的文件路径。无活动笔记时为空字符串 |
+| `getSetting` | `<T>(key: string) => Promise<T \| null>` | 按 schema 读取单个设置值，缺失时回退到 schema 默认值并返回 `null` |
+| `setSetting` | `<T>(key: string, value: T) => Promise<void>` | 持久化单个设置键（写穿 SQLite） |
+| `getAllSettings` | `() => Promise<Record<string, unknown>>` | 读取所有设置为扁平 key/value map，缺失键回退到 schema 默认值 |
+| `onSettingsChange` | `(handler: (settings: Record<string, unknown>) => void) => () => void` | 订阅设置变化，返回取消订阅函数 |
+| `getActiveNoteFrontmatter` | `() => Record<string, unknown> \| null` | 获取当前笔记的 frontmatter 对象，无活动笔记时返回 `null` |
+| `setActiveNoteFrontmatter` | `(data: Record<string, unknown>) => void` | 合并更新当前笔记的 frontmatter，无活动笔记时为空操作 |
+| `onNoteFrontmatterChanged` | `(callback: (data: Record<string, unknown>) => void) => () => void` | 监听 frontmatter 变更事件，返回取消订阅函数 |
 
 ### ToolbarButtonProps
 
@@ -163,8 +223,18 @@ export default manifest
 | `deactivate` | `() => void` | 停用插件（隐藏面板） |
 | `activeNoteContent` | `string` | 当前活动笔记的内容（Markdown 字符串）。无活动笔记时为空字符串 |
 | `activeNotePath` | `string` | 当前活动笔记的文件路径。无活动笔记时为空字符串 |
+| `activeNoteName` | `string` | 活动笔记文件名（末段），无活动笔记时为空字符串 |
+| `activeNoteExt` | `string` | 活动笔记扩展名（小写无点，如 `md`），无活动笔记或无扩展名时为空字符串 |
+| `isActiveNoteMarkdown` | `boolean` | 活动笔记是否为 Markdown 文件（`.md`/`.markdown`） |
+| `getSetting` | `<T>(key: string) => Promise<T \| null>` | 按 schema 读取单个设置值，详见 [PluginPanelProps](#pluginpanelprops) |
+| `setSetting` | `<T>(key: string, value: T) => Promise<void>` | 持久化单个设置键 |
+| `getAllSettings` | `() => Promise<Record<string, unknown>>` | 读取所有设置 |
+| `onSettingsChange` | `(handler: (settings: Record<string, unknown>) => void) => () => void` | 订阅设置变化 |
+| `getActiveNoteFrontmatter` | `() => Record<string, unknown> \| null` | 获取活动笔记 frontmatter |
+| `setActiveNoteFrontmatter` | `(data: Record<string, unknown>) => void` | 合并更新活动笔记 frontmatter |
+| `onNoteFrontmatterChanged` | `(callback: (data: Record<string, unknown>) => void) => () => void` | 监听 frontmatter 变更 |
 
-> **提示**：`activeNoteContent` 和 `activeNotePath` 是宿主实时注入的只读字段，插件无需订阅事件即可获取当前笔记信息。当用户切换笔记时，宿主会自动更新这些值并触发组件重渲染。
+> **提示**：`activeNoteContent` 和 `activeNotePath` 是宿主实时注入的只读字段，插件无需订阅事件即可获取当前笔记信息。当用户切换笔记时，宿主会自动更新这些值并触发组件重渲染。`ToolbarButtonProps` 额外提供 `activeNoteName` / `activeNoteExt` / `isActiveNoteMarkdown`，便于工具栏按钮按文件类型切换行为（如仅在 `.md` 文件上高亮）。
 
 ## 源码引用
 

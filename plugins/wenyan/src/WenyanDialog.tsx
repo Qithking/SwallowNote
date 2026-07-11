@@ -1,10 +1,4 @@
-/**
- * Wenyan Typesetting Dialog — 90vw×90vh modal for preview and copy.
- *
- * Layout:
- *   - Left sidebar (240px): theme picker, hl-theme picker, toggles
- *   - Right main area: preview iframe + copy button
- */
+/** 文颜排版对话框：90vw×90vh 预览 + 复制模态框 */
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'

@@ -18,8 +18,38 @@ import {
   RefreshCw,
   Zap,
   Puzzle,
+  Trash2,
+  Edit3,
+  Copy,
+  Scissors,
+  ClipboardPaste,
+  Download,
+  Upload,
+  Search,
+  Eye,
+  Code,
+  Terminal,
+  Play,
+  Square,
+  Pause,
+  FolderPlus,
+  FilePlus,
+  GitBranch,
+  GitCommit,
+  GitMerge,
+  Star,
+  Heart,
+  Bookmark,
+  Link,
+  ExternalLink,
+  Plus,
+  Minus,
+  Check,
+  X,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useUIStore } from '@/stores'
+import { useShallow } from 'zustand/react/shallow'
 import { usePluginCommands } from '@/lib/plugin-hooks'
 import {
   Dialog,
@@ -53,26 +83,64 @@ interface CommandItem {
   action: () => void
 }
 
+/** 插件 iconName → lucide 图标的映射表。
+ *  与 PluginContextMenuItems 的 ICON_MAP 保持一致，
+ *  缺失时回退到 Zap（命令面板默认图标）。 */
+const PLUGIN_ICON_MAP: Record<string, LucideIcon> = {
+  FileText,
+  Settings,
+  Trash2,
+  Edit3,
+  Copy,
+  Scissors,
+  ClipboardPaste,
+  Save,
+  Download,
+  Upload,
+  Search,
+  Eye,
+  Code,
+  Terminal,
+  Play,
+  Square,
+  Pause,
+  RefreshCw,
+  FolderPlus,
+  FilePlus,
+  GitBranch,
+  GitCommit,
+  GitMerge,
+  Star,
+  Heart,
+  Bookmark,
+  Link,
+  ExternalLink,
+  Plus,
+  Minus,
+  Check,
+  X,
+}
+
 function pluginIconFor(command: PluginCommand): typeof Zap {
-  // We don't bundle every lucide icon by name; fall back to a
-  // generic "zap" glyph when the plugin asked for an icon the
-  // host doesn't recognise. The iconName field is a hint, not a
-  // contract — a future iteration can add a real name→component
-  // map if the UX warrants it.
-  void command.iconName
-  return Zap
+  // 通过映射表解析插件声明的 iconName，未命中时回退到 Zap
+  return PLUGIN_ICON_MAP[command.iconName ?? ''] ?? Zap
 }
 
 function CommandPalette() {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const { commandPaletteVisible, toggleCommandPalette, pluginCommandShortcuts, customShortcuts } = useUIStore()
+  // useShallow 选择性订阅，避免全量订阅 useUIStore 导致的重渲染
+  const { commandPaletteVisible, toggleCommandPalette, pluginCommandShortcuts, customShortcuts } = useUIStore(
+    useShallow((s) => ({
+      commandPaletteVisible: s.commandPaletteVisible,
+      toggleCommandPalette: s.toggleCommandPalette,
+      pluginCommandShortcuts: s.pluginCommandShortcuts,
+      customShortcuts: s.customShortcuts,
+    })),
+  )
   const pluginCommands = usePluginCommands()
 
-  // Lookup plugin id by command id so we can show the bound
-  // shortcut. The list snapshot from `usePluginCommands` already
-  // filters by `when()`, so we just need to project the
-  // `<pluginId>:<commandId>` key.
+  // 通过 command id 查找 plugin id 以显示绑定快捷键
   const pluginCommandItems = useMemo<CommandItem[]>(() => {
     return pluginCommands.map((cmd) => {
       const pluginCmd = cmd as PluginCommand & { __pluginId: string }
@@ -172,9 +240,7 @@ function CommandPalette() {
     }
   }
 
-  // Group helpers. We render one CommandGroup per category so
-  // plugins that share a category cluster together; built-ins
-  // keep their original Navigation/Edit/View layout.
+  // 按分组渲染 CommandGroup，同类插件聚合
   const navigation = commands.filter((c) => c.group === 'navigation')
   const edit = commands.filter((c) => c.group === 'edit')
   const view = commands.filter((c) => c.group === 'view')

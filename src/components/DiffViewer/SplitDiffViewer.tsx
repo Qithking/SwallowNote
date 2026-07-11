@@ -235,6 +235,8 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
   }, [filename])
 
   // Detect dark mode
+  // 注：isDark 为一次性计算（const），不触发 MergeView 重建，
+  // 主题切换通过 CSS 变量自动适配，避免重建丢失用户编辑内容与滚动位置
   const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
 
   // ── Create / recreate MergeView when content changes ──
@@ -395,10 +397,12 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
             mergeViewRef.current.b.dispatch({
               effects: langCompartment.reconfigure(exts as Extension),
             })
-          } catch {
-            // Language extension failed to apply — editor still works without syntax highlighting
+          } catch (e) {
+            console.warn('[SplitDiffViewer] Failed to apply language extension:', e)
           }
         }
+      }).catch((e: unknown) => {
+        console.warn('[SplitDiffViewer] Failed to load language extension:', e)
       })
 
       // Restore initial cursor position if specified

@@ -1,15 +1,4 @@
-/**
- * Main right-panel for the picgo plugin.
- *
- * Layout:
- *   - Top: provider info bar with a one-click provider switcher
- *     (mirrored into `getAllSettings` for downstream calls)
- *   - 3 tabs: Upload / History / Settings
- *   - Toasts are dispatched via the shared `toast` function and
- *     rendered by the host's global <Toaster /> in App.tsx; the
- *     plugin does not mount its own Toaster (the host bridge only
- *     exposes `toast`, not `Toaster`).
- */
+/** picgo 主面板：provider 切换 + 上传/历史/设置三标签 */
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PluginPanelProps } from '@swallow-note/plugin-sdk'
@@ -120,16 +109,10 @@ export function PicgoPanel(props: PluginPanelProps): ReactNode {
         )}
       </div>
 
-      {/* Settings reference (unused but kept so React's tree
-          doesn't drop it; the host provides a Settings panel
-          component separately). */}
+      {/* settings 引用占位 */}
       {settings ? null : null}
 
-      {/* Toasts are dispatched via the shared `toast` function
-          (imported indirectly through `../components/Toast`). The
-          host mounts its own global <Toaster /> in App.tsx, so
-          there's no need (and no way — the host bridge only
-          exposes `toast`, not `Toaster`) to render a local one. */}
+      {/* toast 由宿主全局 Toaster 渲染 */}
     </div>
   )
 }

@@ -7,7 +7,7 @@ import { useUIStore } from './ui'
 import { pathExists } from '@/lib/tauri'
 import { updateNodesWithChildren, findNodeByPath } from '@/lib/utils/treeUtils'
 
-// 正在加载的目录路径 → Promise，防止同一目录并发重复加载（in-flight 去重）
+// 正在加载的目录路径 → Promise（in-flight 去重）
 const loadingPromises = new Map<string, ReturnType<typeof loadDirectory>>()
 
 /** 去重包装：同一目录正在加载时直接返回同一 Promise，避免重复 IPC */
@@ -24,7 +24,7 @@ function loadDirectoryDedup(
   return promise
 }
 
-// refreshNode 防抖定时器（按 path 合并，150ms 内多次调用只执行最后一次）
+// refreshNode 防抖定时器（按 path 合并）
 const refreshDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export interface FileNode {
@@ -102,8 +102,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
     if (newExpanded.has(path)) {
       newExpanded.delete(path)
-      // Release children of collapsed directories to save memory
-      // Children will be reloaded on next expand
+      // 折叠时释放子节点以节省内存（展开时重载）
       const node = findNodeByPath(path, currentNodes)
       if (node && node.isDirectory && node.children && node.children.length > 0) {
         set({
@@ -117,19 +116,18 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
 
     newExpanded.add(path)
-    // Set expanded immediately so the user sees visual feedback (arrow rotation)
+    // 立即设置 expanded 提供视觉反馈
     set({ expanded: newExpanded })
 
-    // Load children if not loaded yet (use latest state after setting expanded)
+    // 未加载 children 时加载（用最新状态）
     const { nodes } = get()
     const node = findNodeByPath(path, nodes)
     if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
-      // Mark this node as loading for UI feedback
+      // 标记节点加载中，提供 UI 反馈
       set({ nodes: setNodeLoading(nodes, path, true) })
       try {
         const children = await loadDirectoryDedup(path, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
-        // Use get().nodes to get the latest state after async operation,
-        // preventing stale state from overwriting concurrent changes
+        // 用 get().nodes 取最新状态，避免覆盖并发修改
         const currentNodes = get().nodes
         set({ nodes: updateNodesWithChildren(currentNodes, path, children) })
       } catch (e) {
@@ -218,8 +216,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
     const filterParams = getFilterParams()
 
-    // Load all new roots in parallel using individual loadDirectory calls
-    // (batch API is optimized for refreshing existing expanded directories)
+    // 并行加载新 root（batch API 适用于刷新已展开目录）
     const results = await Promise.all(
       pathsToLoad.map(async (rootPath) => {
         try {
@@ -287,7 +284,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     try {
       await tryLoad()
     } catch (e) {
-      // 首次失败，延迟 200ms 重试一次（应对网络盘/权限偶发问题）
+      // 首次失败延迟 200ms 重试（应对网络盘/权限问题）
       console.warn('refreshNode failed, retrying:', e)
       await new Promise(resolve => setTimeout(resolve, 200))
       try {
@@ -299,7 +296,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   },
 
   refreshNodeDebounced: (path) => {
-    // 按 path 合并防抖：150ms 内多次调用只执行最后一次，避免 file-watcher 事件风暴
+    // 按 path 合并防抖（150ms），避免事件风暴
     const existing = refreshDebounceTimers.get(path)
     if (existing) clearTimeout(existing)
     const timer = setTimeout(() => {
@@ -313,9 +310,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const { expanded, nodes } = get()
     const filterParams = getFilterParams()
 
-    // 过滤 expanded set，清理已删除 root 的残留路径。
-    // 仅保留属于当前某个 root 的路径（root 自身或其子目录），
-    // 避免已移除 root 下的子目录路径长期残留导致无效刷新。
+    // 清理已删除 root 的残留路径，避免无效刷新
     const rootPaths = nodes.map(n => n.path)
     const validExpanded = new Set<string>()
     for (const path of expanded) {
@@ -327,7 +322,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       set({ expanded: validExpanded })
     }
 
-    // Collect paths of expanded directories that actually exist in the tree
+    // 收集树中实际存在的已展开目录路径
     const pathsToRefresh: string[] = []
     for (const path of validExpanded) {
       const node = findNodeByPath(path, nodes)
@@ -338,8 +333,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
     if (pathsToRefresh.length === 0) return
 
-    // Use batch API to load all directories in a single IPC call
-    // This is significantly faster than N separate IPC calls
+    // 用 batch API 单次 IPC 加载所有目录
     try {
       const results = await loadDirectoriesBatch(
         pathsToRefresh,
@@ -353,7 +347,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       set({ nodes: currentNodes })
     } catch (e) {
       console.error('Batch refresh failed, falling back to sequential:', e)
-      // Fallback: refresh directories individually in parallel
+      // 兜底：并行逐个刷新目录
       let currentNodes = get().nodes
       const individualResults = await Promise.all(
         pathsToRefresh.map(async (path) => {
@@ -378,7 +372,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   revealPath: async (filePath, rootPath) => {
     if (!filePath || !rootPath) return
 
-    // 容错：若文件已不存在（外部删除等），不设置 selectedPath 到无效路径
+    // 文件不存在时不设置无效 selectedPath
     try {
       const exists = await pathExists(filePath)
       if (!exists) return
@@ -393,15 +387,15 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     // Ensure root directory is expanded
     newExpanded.add(rootPath)
 
-    // Check if we need to load children for any missing directories
+    // 检查是否需加载缺失目录的 children
     const relativePath = filePath.substring(rootPath.length + 1)
     const parts = relativePath.split('/')
     let currentPath = rootPath
 
-    // Collect directories that need loading, starting from root
+    // 从 root 起收集需加载的目录
     const dirsToLoad: string[] = []
 
-    // Check if root directory needs loading（节点不在树中也需加载）
+    // 检查 root 是否需加载（不在树中也需加载）
     const rootNode = findNodeByPath(rootPath, nodes)
     if (!rootNode || (rootNode.isDirectory && (!rootNode.children || rootNode.children.length === 0))) {
       dirsToLoad.push(rootPath)
@@ -410,7 +404,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     for (let i = 0; i < parts.length - 1; i++) {
       currentPath = currentPath + '/' + parts[i]
       newExpanded.add(currentPath)
-      // 节点不在树中（父目录未加载）或 children 为空时，都需要加载
+      // 节点不在树中或 children 为空时需加载
       const node = findNodeByPath(currentPath, nodes)
       if (!node || (node.isDirectory && (!node.children || node.children.length === 0))) {
         dirsToLoad.push(currentPath)
@@ -420,7 +414,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     // 1. 先 set expanded（箭头视觉反馈，不等加载完成）
     set({ expanded: newExpanded })
 
-    // 2. 批量加载，每个目录加载完立即 set（用户看到目录逐步展开）
+    // 2. 批量加载，每个加载完立即 set
     if (dirsToLoad.length > 0) {
       const filterParams = getFilterParams()
       try {
@@ -451,22 +445,25 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     // 3. 最后 set selectedPath 并滚动
     set({ selectedPath: filePath })
 
-    // queueMicrotask runs after current stack + React render, after which DOM is updated
+    // 微任务在 React 渲染后执行，此时 DOM 已更新
     queueMicrotask(() => requestAnimationFrame(() => scrollToFileElement(filePath)))
   },
 
-  clearAll: () => set({ nodes: [], expanded: new Set(), selectedPath: null, multiSelectedPaths: new Set(), lastClickedPath: null, isLoading: false }),
+  clearAll: () => {
+    // 清理 pending 防抖定时器，避免 clearAll 后误触发
+    for (const timer of refreshDebounceTimers.values()) {
+      clearTimeout(timer)
+    }
+    refreshDebounceTimers.clear()
+    set({ nodes: [], expanded: new Set(), selectedPath: null, multiSelectedPaths: new Set(), lastClickedPath: null, isLoading: false })
+  },
   clearExpanded: () => set({ expanded: new Set() }),
   restoreTreeState: async (expandedPaths, selectedPath) => {
     set({ expanded: new Set(expandedPaths), selectedPath })
 
     if (expandedPaths.length === 0) return
 
-    // Sort expanded paths by depth so we expand shallow directories first.
-    // This is critical because a deeper path like /a/b/c can only be found
-    // in the tree *after* its parent /a/b has been loaded.  By processing
-    // level-by-level we guarantee that every directory node is discoverable
-    // when we need to load its children.
+    // 按深度排序，浅层优先，确保父目录先加载
     const sortedPaths = [...expandedPaths].sort(
       (a, b) => a.split('/').length - b.split('/').length,
     )
@@ -474,8 +471,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const filterParams = getFilterParams()
     let currentNodes = get().nodes
 
-    // Group paths by depth so we can batch-load all directories at the same
-    // depth in a single IPC call, parallelising across directories.
+    // 按深度分组，同深度批量加载
     const depthGroups = new Map<number, string[]>()
     for (const dirPath of sortedPaths) {
       const depth = dirPath.split('/').length
@@ -483,14 +479,11 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       depthGroups.get(depth)!.push(dirPath)
     }
 
-    // Process each depth level sequentially; within a level all directories
-    // are loaded in parallel via loadDirectoriesBatch.
+    // 逐层处理，层内并行加载
     for (const [, dirPaths] of [...depthGroups.entries()].sort(
       ([a], [b]) => a - b,
     )) {
-      // Filter to only directories that exist in the tree AND don't have
-      // children loaded yet.  After each depth level is processed, the nodes
-      // for the next level will be discoverable.
+      // 仅加载树中存在且未加载 children 的目录
       const dirsToLoad: string[] = []
       for (const dirPath of dirPaths) {
         const node = findNodeByPath(dirPath, currentNodes)
@@ -529,8 +522,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         }
       }
 
-      // Update the store after each depth level so that the next level can
-      // discover newly-loaded child nodes, and the UI renders progressively.
+      // 每层完成后更新 store，便于下层发现新节点
       set({ nodes: currentNodes })
     }
   },
@@ -560,9 +552,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 }))
 
 function scrollToFileElement(path: string) {
-  // Use data attribute to locate the file tree scroll container.
-  // Previously used `.overflow-auto` which matched the Sidebar's outer
-  // container (wrong rect) instead of FileTreeView's virtual list parent.
+  // 用 data 属性定位文件树滚动容器
   const container = document.querySelector('[data-file-tree-scroll]')
   if (!container) return
 

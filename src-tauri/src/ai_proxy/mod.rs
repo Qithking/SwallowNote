@@ -65,9 +65,7 @@ pub client: Client,
 impl AiProxyState {
 pub fn new(settings: AiSettings) -> Self {
 let client = Client::builder()
-// Set a generous connect+read timeout so streaming responses are not
-// killed prematurely, but a completely stalled upstream still eventually
-// errors out instead of hanging forever.
+// 宽松超时：流式响应不被中断，停滞最终报错
 .timeout(std::time::Duration::from_secs(300))
 .build()
 .unwrap_or_else(|_| Client::new());

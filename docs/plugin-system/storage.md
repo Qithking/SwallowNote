@@ -10,6 +10,8 @@ interface PluginStorage {
   set<T = unknown>(key: string, value: T): Promise<void>
   delete(key: string): Promise<void>
   clear(): Promise<void>
+  keys(): Promise<string[]>                              // 列出当前插件命名空间所有 key（字典序）
+  entries(): Promise<Array<{ key: string; size: number }>> // 所有 key 及 JSON 字节大小，按 size 降序
 }
 ```
 
@@ -60,6 +62,29 @@ await store.clear()  // 删掉本插件所有键
 ```
 
 > 模块级 API 适合在 `onLoad` / `onUnload` 中调用，或者在事件 handler 中读写。
+
+### 列举键与体积审计：`keys()` / `entries()`
+
+`keys()` 返回当前插件命名空间下所有 key（字典序）；`entries()` 在此基础上附带每个值的 JSON 字节大小，并**按 size 降序**排列，便于定位占用空间最大的键。两者都是只读快照，调用方不应修改返回数组。
+
+```typescript
+const store = getPluginStorage('com.example.my-plugin')
+
+// 列出所有 key
+const allKeys = await store.keys()
+console.log(allKeys) // ['draft', 'history', 'lastLogin']
+
+// 体积审计：找出最大的几个键
+const entries = await store.entries()
+for (const { key, size } of entries) {
+  console.log(`${key}: ${size} bytes`)
+}
+// history: 4096 bytes
+// draft: 512 bytes
+// lastLogin: 48 bytes
+```
+
+> 典型用途：在设置面板里展示存储占用、调试时排查异常膨胀的键、导出前预览内容。`size` 为 `JSON.stringify(value).length`，仅作估算，不等同于磁盘占用。
 
 ### 3. 异步并发
 

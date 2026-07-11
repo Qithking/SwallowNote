@@ -9,6 +9,7 @@ import { usePluginEditors, pluginEditorRegistry, getEditorForExtension } from '@
 import { MarkdownEditor } from './editors/MarkdownEditor'
 import { CodeEditor } from './editors/CodeEditor'
 import { serializeFrontmatter, parseFrontmatter } from '@/lib/utils/frontmatter'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 const MindMapEditor = lazy(() => import('./editors/MindMapEditor').then(m => ({ default: m.MindMapEditor })))
 const DiffViewer = lazy(() => import('./DiffViewer/DiffViewer'))
 const ConflictResolver = lazy(() => import('./DiffViewer/ConflictResolver'))
@@ -327,7 +328,8 @@ export function EditorView() {
 
     // Check if content needs to be loaded
     // content === undefined means not loaded yet (empty string is valid content)
-    const needsLoad = activeTab.content === undefined && !activeTab.isLoading
+    // 插件 tab 的内容由插件通过 openEditorTab 提供，不走文件系统加载流程
+    const needsLoad = activeTab.content === undefined && !activeTab.isLoading && activeTab.type !== 'plugin'
 
     if (needsLoad) {
       // Small delay to ensure UI is ready
@@ -404,7 +406,12 @@ export function EditorView() {
     )
   }
 
-  const fileType = detectFileType(activeTab.name, activeTab.content, pluginEditorRegistry.getActivePluginExtensions())
+  // 插件 tab：内容由插件通过 openEditorTab 提供，强制按 markdown 类型渲染，
+  // 复用下方 markdown 分支的 CodeEditor/MarkdownEditor 切换逻辑。
+  // updateTabContent 在 store 层已处理 plugin tab 的 onChange 回调通知插件保存。
+  const fileType = activeTab.type === 'plugin'
+    ? 'markdown'
+    : detectFileType(activeTab.name, activeTab.content, pluginEditorRegistry.getActivePluginExtensions())
   const viewMode = activeTab.viewMode
 
   const handleContentChange = (content: string) => {
@@ -422,38 +429,48 @@ export function EditorView() {
       {fileType === 'markdown' && (
         <div className="flex-1 overflow-hidden">
           {viewMode === 'source' ? (
-            <CodeEditor
-              content={sourceContent ?? ''}
-              filename={activeTab.name}
-              onChange={handleSourceContentChange}
-              className="flex-1"
-            />
+            <ErrorBoundary key={activeTab.id}>
+              <CodeEditor
+                key={activeTab.id}
+                content={sourceContent ?? ''}
+                filename={activeTab.name}
+                onChange={handleSourceContentChange}
+                className="flex-1"
+              />
+            </ErrorBoundary>
           ) : (
-            <MarkdownEditor
-              key={activeTab.id}
-              content={activeTab.content}
-              onChange={handleContentChange}
-            />
+            <ErrorBoundary key={activeTab.id}>
+              <MarkdownEditor
+                key={activeTab.id}
+                content={activeTab.content}
+                onChange={handleContentChange}
+              />
+            </ErrorBoundary>
           )}
         </div>
       )}
 
       {fileType === 'code' && (
         <div className="flex-1 flex overflow-hidden">
-          <CodeEditor
-            content={activeTab.content}
-            filename={activeTab.name}
-            onChange={handleContentChange}
-            className="flex-1"
-          />
+          <ErrorBoundary key={activeTab.id}>
+            <CodeEditor
+              key={activeTab.id}
+              content={activeTab.content}
+              filename={activeTab.name}
+              onChange={handleContentChange}
+              className="flex-1"
+            />
+          </ErrorBoundary>
         </div>
       )}
 
       {fileType === 'binary' && (
-        <UnsupportedEditor
-          filename={activeTab.name}
-          reason={t('editor.binaryFile')}
-        />
+        <ErrorBoundary>
+          <UnsupportedEditor
+            filename={activeTab.name}
+            reason={t('editor.binaryFile')}
+          />
+        </ErrorBoundary>
       )}
 
       {fileType === 'mindmap' && (() => {
@@ -490,12 +507,13 @@ export function EditorView() {
         return (
           <div className="flex-1 flex overflow-hidden">
             <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-              <Editor
-                key={`${activeTab.id}:${isShim ? 'shim' : 'plugin'}:${editorRegistryRev}`}
-                content={activeTab.content}
-                onChange={handleContentChange}
-                {...(isShim ? { filename: activeTab.name } : {})}
-              />
+              <ErrorBoundary key={`${activeTab.id}:${isShim ? 'shim' : 'plugin'}:${editorRegistryRev}`}>
+                <Editor
+                  content={activeTab.content}
+                  onChange={handleContentChange}
+                  {...(isShim ? { filename: activeTab.name } : {})}
+                />
+              </ErrorBoundary>
             </Suspense>
           </div>
         )

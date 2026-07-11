@@ -3,9 +3,10 @@
  * Renders Mermaid diagrams in BlockNote editor.
  * Adapted from tolaria's MermaidDiagram component.
  */
-import { useEffect, useId, useMemo, useState, useRef, useLayoutEffect } from 'react'
+import { useEffect, useState, useRef, useLayoutEffect } from 'react'
 import { Maximize2 } from 'lucide-react'
-import { useTranslation } from 'react-i18next'  
+import { useTranslation } from 'react-i18next'
+import DOMPurify from 'dompurify'
 import {
   Dialog,
   DialogContent,
@@ -15,8 +16,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useBlockResize } from '@/hooks/useBlockResize'
 import { BlockResizeHandles } from './BlockResizeHandles'
-
-type MermaidApi = typeof import('mermaid')['default']
+import { renderMermaidDiagram } from '@/lib/mermaid-render'
 
 interface MermaidBlockEditorProps {
   diagram: string
@@ -33,92 +33,20 @@ interface RenderState {
   error: boolean
 }
 
-let initialized = false
-let renderQueue = Promise.resolve()
-
-const MERMAID_RENDER_HOST_STYLE = [
-  'position:absolute',
-  'left:-10000px',
-  'top:-10000px',
-  'width:800px',
-  'height:600px',
-  'overflow:visible',
-].join(';')
-
-function renderIdFromReactId(reactId: string): string {
-  const safeId = reactId.replace(/[^a-zA-Z0-9_-]/g, '')
-  return `swallownote-mermaid-${safeId || 'diagram'}`
-}
-
-function initializeMermaid(mermaid: MermaidApi) {
-  if (initialized) return
-
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: 'loose',
-    theme: 'default',
-    suppressErrorRendering: false,
-    themeVariables: {
-      fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-    },
-    gantt: {
-      titleTopMargin: 15,
-      barHeight: 20,
-      barGap: 4,
-      topPadding: 50,
-      rightPadding: 75,
-      leftPadding: 75,
-      fontSize: 11,
-    },
-  })
-  initialized = true
-}
-
-function appendMermaidRenderHost(): HTMLDivElement {
-  const host = document.createElement('div')
-  host.setAttribute('data-swallownote-mermaid-render-host', '')
-  host.style.cssText = MERMAID_RENDER_HOST_STYLE
-  document.body.appendChild(host)
-  return host
-}
-
-function removeMermaidRenderArtifacts(renderId: string, host: HTMLElement): void {
-  host.remove()
-  document.getElementById(renderId)?.remove()
-  document.getElementById(`d${renderId}`)?.remove()
-  document.getElementById(`i${renderId}`)?.remove()
-}
-
-async function renderMermaidDiagram({
-  diagram,
-  renderId,
-}: {
-  diagram: string
-  renderId: string
-}): Promise<string> {
-  const render = async () => {
-    const mermaid = (await import('mermaid')).default
-    initializeMermaid(mermaid)
-    const renderHost = appendMermaidRenderHost()
-    try {
-      const result = await mermaid.render(renderId, diagram, renderHost)
-      return result.svg
-    } finally {
-      removeMermaidRenderArtifacts(renderId, renderHost)
-    }
-  }
-  const nextRender = renderQueue.then(render, render)
-  renderQueue = nextRender.then(() => undefined, () => undefined)
-  return nextRender
-}
-
 /** Safe SVG renderer that parses and sanitizes SVG content */
 function SafeSvgDiv({ svg, className, responsive }: { svg: string; className?: string; responsive?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
     if (!ref.current) return
-    const parsed = new DOMParser().parseFromString(svg, 'text/html')
+    // 用 DOMPurify 净化 mermaid（loose 模式）渲染出的 SVG，
+    // 保留 width/height/style/viewBox 等安全属性用于控制图表大小，
+    // 过滤 <script>、onerror 等危险内容，消除 XSS 风险
+    const sanitized = DOMPurify.sanitize(svg, {
+      USE_PROFILES: { svg: true, svgFilters: true, html: true },
+      ADD_ATTR: ['width', 'height', 'style', 'viewBox', 'preserveAspectRatio'],
+    })
+    const parsed = new DOMParser().parseFromString(sanitized, 'text/html')
     const svgNode = parsed.body.querySelector('svg')
     if (svgNode) {
       const imported = document.importNode(svgNode, true) as SVGElement
@@ -154,8 +82,6 @@ function SafeSvgDiv({ svg, className, responsive }: { svg: string; className?: s
 
 export function MermaidBlockEditor({ diagram, source, width, height, block, editor }: MermaidBlockEditorProps) {
   const { t } = useTranslation()
-  const reactId = useId()
-  const renderId = useMemo(() => renderIdFromReactId(reactId), [reactId])
   const [state, setState] = useState<RenderState>({ diagram: '', svg: '', error: false })
   
   // Resize state (unified hook)
@@ -172,7 +98,7 @@ export function MermaidBlockEditor({ diagram, source, width, height, block, edit
     let active = true
     if (!diagram.trim()) return () => { active = false }
 
-    renderMermaidDiagram({ diagram, renderId })
+    renderMermaidDiagram(diagram, 'loose')
       .then((svg) => {
         if (active) setState({ diagram, svg, error: false })
       })
@@ -181,7 +107,7 @@ export function MermaidBlockEditor({ diagram, source, width, height, block, edit
       })
 
     return () => { active = false }
-  }, [diagram, renderId])
+  }, [diagram])
 
   const currentState = state.diagram === diagram ? state : { diagram, svg: '', error: false }
 

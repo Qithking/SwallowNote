@@ -413,12 +413,13 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     if (!selectedFile) return
     setIsResolving(true)
     try {
-      // If there are unsaved changes, save them first
+      // If there are unsaved changes, save them first — 优先使用编辑器实时内容，避免 state 过期
       if (hasUnsavedChanges) {
+        const contentToSave = splitDiffRef.current?.getLocalContent() ?? editedLocalContent
         await gitSaveConflictFileContent(
           selectedFile.repoPath,
           selectedFile.file.abs_path,
-          editedLocalContent
+          contentToSave,
         )
       }
 

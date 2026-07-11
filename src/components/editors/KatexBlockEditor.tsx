@@ -46,7 +46,19 @@ async function getKatex() {
   return katexModule.default
 }
 
+// KaTeX 渲染结果 LRU 缓存：key=`${display?'d':'i'}\0${formula}`，仅缓存成功结果
+const katexRenderCache = new Map<string, { html: string; error: string | null }>()
+const KATEX_CACHE_MAX = 50
+
 function renderKatex(formula: string, display: boolean): Promise<{ html: string; error: string | null }> {
+  const cacheKey = `${display ? 'd' : 'i'}\0${formula}`
+  const hit = katexRenderCache.get(cacheKey)
+  if (hit) {
+    // LRU：命中时移到末尾（最近使用）
+    katexRenderCache.delete(cacheKey)
+    katexRenderCache.set(cacheKey, hit)
+    return Promise.resolve(hit)
+  }
   return getKatex().then((katex) => {
     try {
       const html = katex.renderToString(formula, {
@@ -56,7 +68,13 @@ function renderKatex(formula: string, display: boolean): Promise<{ html: string;
         strict: 'ignore',
         trust: false,
       })
-      return { html, error: null }
+      const result = { html, error: null }
+      katexRenderCache.set(cacheKey, result)
+      if (katexRenderCache.size > KATEX_CACHE_MAX) {
+        const oldest = katexRenderCache.keys().next().value
+        if (oldest !== undefined) katexRenderCache.delete(oldest)
+      }
+      return result
     } catch (e) {
       return { html: '', error: e instanceof Error ? e.message : String(e) }
     }

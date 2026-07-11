@@ -48,13 +48,17 @@ pub fn remove_source(conn: &Connection, url: &str) -> Result<()> {
 }
 
 pub fn set_active_source(conn: &Connection, url: &str) -> Result<()> {
+    // 用 unchecked_transaction 包裹两条 UPDATE，保证“全部取消激活 + 激活目标”原子提交，
+    // 避免中途失败导致所有源都被取消激活的无活跃源状态。
+    let tx = conn.unchecked_transaction()?;
     // First deactivate all
-    conn.execute("UPDATE plugin_market_sources SET is_active = 0", [])?;
+    tx.execute("UPDATE plugin_market_sources SET is_active = 0", [])?;
     // Then activate the target
-    conn.execute(
+    tx.execute(
         "UPDATE plugin_market_sources SET is_active = 1 WHERE url = ?1",
         params![url],
     )?;
+    tx.commit()?;
     Ok(())
 }
 

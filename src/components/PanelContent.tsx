@@ -71,8 +71,7 @@ export function RightPanelContent() {
 function PluginRightPanelContent({ rightPanelType }: { rightPanelType: string }) {
   const allPlugins = usePluginStore((s) => s.plugins)
 
-  // String selectors use Object.is — only trigger a re-render when the
-  // actual value changes, not when the `tabs` array reference changes.
+  // 字符串 selector 用 Object.is，仅值变化时重渲染
   const activeTabContent = useEditorStore(
     (s) => s.tabs.find((t) => t.id === s.activeTabId)?.content ?? '',
   )
@@ -90,8 +89,7 @@ function PluginRightPanelContent({ rightPanelType }: { rightPanelType: string })
     plugin.id,
     isActive,
     () => {
-      // Symmetric close path: hide the right panel and clear the
-      // active plugin id, matching the ActivityBar/TitleBar close paths.
+      // 对称关闭：隐藏面板并清除激活插件 id
       useUIStore.getState().setRightPanelType(null)
       usePluginStore.getState().setActivePlugin(null, 'rightPanel')
     },

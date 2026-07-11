@@ -1,7 +1,7 @@
 use crate::db;
 use once_cell::sync::OnceCell;
 use rusqlite::OpenFlags;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
@@ -15,6 +15,8 @@ enum IndexTask {
     FileChanged { path: String },
     /// 单文件删除：移除记录
     FileRemoved { path: String },
+    /// 停止索引线程
+    Shutdown,
 }
 
 /// 全局发送端，供外部提交任务（有界通道，容量 256，防止内存膨胀）
@@ -63,8 +65,7 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
             // 启动后延迟，避免与 UI 初始化竞争
             std::thread::sleep(Duration::from_millis(STARTUP_DELAY_MS));
 
-            // 启动时同步分类：补全历史数据中缺失的父路径
-            // （从 setup 主线程迁移至此后台线程执行，避免阻塞应用启动）
+            // 启动时同步分类：补全缺失的父路径
             if let Err(e) = db::md_frontmatter::sync_all_categories_from_frontmatter(&db_instance) {
                 eprintln!("[frontmatter-index] Failed to sync categories on startup: {}", e);
             }
@@ -80,6 +81,8 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
                     IndexTask::FileRemoved { path } => {
                         handle_file_removed(&db_instance, &path);
                     }
+                    // 收到停止信号：退出循环，db_instance 在线程闭包作用域结束时自动 drop 连接
+                    IndexTask::Shutdown => break,
                 }
             }
         })
@@ -120,6 +123,14 @@ pub fn submit_file_removed(path: String) {
     submit_task(IndexTask::FileRemoved { path }, "file_removed");
 }
 
+/// 停止索引线程：发送 Shutdown，线程退出释放连接
+pub fn stop_index_thread() {
+    if let Some(sender) = INDEX_SENDER.get() {
+        // send 在通道满时会阻塞；Shutdown 为退出关键信号，阻塞投递可接受
+        let _ = sender.send(IndexTask::Shutdown);
+    }
+}
+
 /// 发射索引进度事件
 fn emit_progress(app_handle: &AppHandle, current: usize, total: usize) {
     let _ = app_handle.emit(
@@ -143,58 +154,57 @@ fn emit_complete(app_handle: &AppHandle) {
     );
 }
 
-/// 处理目录扫描：流式遍历 + 批量 modified_at 比对 + 增量 upsert
+/// 处理目录扫描：分批比对 + 增量 upsert + 清理孤立记录
 fn handle_scan_directory(db: &db::Database, dir_path: &str, app_handle: &AppHandle) {
     let root = Path::new(dir_path);
     if !root.exists() || !root.is_dir() {
         return;
     }
 
-    // 第一遍：快速计数 .md 文件总数（不存路径，内存最优）
-    let total = count_md_files(root);
-    if total == 0 {
-        emit_complete(app_handle);
-        return;
-    }
-
-    // 一次性加载所有 modified_at 到 HashMap（一次查询替代 N 次逐条查询）
-    let modified_map: HashMap<String, String> =
-        crate::db::md_frontmatter::get_all_modified_at(db).unwrap_or_default();
-
-    // 第二遍：流式遍历 + 增量处理
-    let mut processed: usize = 0;
-    let mut batch_count: usize = 0;
-
+    // 第一遍：遍历目录收集所有 .md 文件路径（同时完成计数，替代原 count_md_files）
+    let mut all_paths: Vec<String> = Vec::new();
     for entry_result in jwalk::WalkDir::new(root) {
         let entry = match entry_result {
             Ok(e) => e,
             Err(_) => continue,
         };
-
         if entry.file_type().is_dir() {
             continue;
         }
-
         let file_name = entry.file_name().to_string_lossy().to_string();
         let lower_name = file_name.to_lowercase();
-
         if !lower_name.ends_with(".md") && !lower_name.ends_with(".markdown") {
             continue;
         }
-
         if file_name.starts_with('.') {
             continue;
         }
-
         let path_str = entry.path().to_string_lossy().to_string().replace('\\', "/");
+        all_paths.push(path_str);
+    }
 
-        let modified_at = match entry.metadata() {
+    let total = all_paths.len();
+    if total == 0 {
+        emit_complete(app_handle);
+        return;
+    }
+
+    // 按需分批查询 modified_at（替代全表加载）
+    let modified_map: HashMap<String, String> =
+        crate::db::md_frontmatter::get_modified_at_for_paths(db, &all_paths).unwrap_or_default();
+
+    // 第二遍：遍历路径列表 + 增量处理
+    let mut processed: usize = 0;
+    let mut batch_count: usize = 0;
+
+    for path_str in &all_paths {
+        let modified_at = match std::fs::metadata(Path::new(path_str.as_str())) {
             Ok(meta) => format_mtime(meta.modified()),
             Err(_) => continue,
         };
 
         // 增量判断：HashMap 查找替代逐条数据库查询
-        if let Some(db_modified) = modified_map.get(&path_str) {
+        if let Some(db_modified) = modified_map.get(path_str.as_str()) {
             if *db_modified == modified_at {
                 processed += 1;
                 if processed.is_multiple_of(BATCH_SIZE) || processed == total {
@@ -205,7 +215,7 @@ fn handle_scan_directory(db: &db::Database, dir_path: &str, app_handle: &AppHand
         }
 
         // 解析并 upsert
-        parse_and_upsert(db, &path_str, &modified_at);
+        parse_and_upsert(db, path_str.as_str(), &modified_at);
 
         processed += 1;
 
@@ -222,36 +232,23 @@ fn handle_scan_directory(db: &db::Database, dir_path: &str, app_handle: &AppHand
         }
     }
 
-    emit_complete(app_handle);
-}
-
-/// 快速计数目录下 .md 文件数量（不存储路径，内存最优）
-fn count_md_files(root: &Path) -> usize {
-    let mut count: usize = 0;
-    for entry_result in jwalk::WalkDir::new(root) {
-        let entry = match entry_result {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        if entry.file_type().is_dir() {
-            continue;
+    // 扫描后对账清理孤立记录，应对原子保存残留
+    let valid_paths: HashSet<String> = all_paths.iter().cloned().collect();
+    {
+        // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+        let conn = db.conn.lock().unwrap_or_else(|e| {
+            eprintln!("[frontmatter-index] mutex poisoned: {}", e);
+            e.into_inner()
+        });
+        // 按 dir_prefix 限定清理范围，避免误删其他工作区
+        // 归一化为正斜杠，与 all_paths 及数据库存储格式保持一致（Windows 兼容）
+        let normalized_dir = dir_path.replace('\\', "/");
+        if let Err(e) = crate::db::md_frontmatter::purge_orphan_records(&conn, &valid_paths, &normalized_dir) {
+            eprintln!("[frontmatter_index] purge_orphan_records failed: {}", e);
         }
-
-        let file_name = entry.file_name().to_string_lossy().to_string();
-        let lower_name = file_name.to_lowercase();
-
-        if !lower_name.ends_with(".md") && !lower_name.ends_with(".markdown") {
-            continue;
-        }
-
-        if file_name.starts_with('.') {
-            continue;
-        }
-
-        count += 1;
     }
-    count
+
+    emit_complete(app_handle);
 }
 
 /// 处理单文件变更
@@ -276,9 +273,7 @@ fn handle_file_changed(db: &db::Database, file_path: &str) {
     parse_and_upsert(db, file_path, &modified_at);
 }
 
-/// 处理单文件删除
-/// 注意：原子保存（先写 .tmp 再 rename）会触发 rename 事件，新路径对应的文件仍然存在。
-/// 如果文件依旧存在，说明是 rename target，不应删除 frontmatter，避免覆盖同步保存结果。
+/// 文件仍存在时跳过删除（应对 rename target）
 fn handle_file_removed(db: &db::Database, file_path: &str) {
     if Path::new(file_path).exists() {
         return;
@@ -288,7 +283,8 @@ fn handle_file_removed(db: &db::Database, file_path: &str) {
 
 /// 读取文件、解析 frontmatter 并 upsert 到数据库
 fn parse_and_upsert(db: &db::Database, file_path: &str, modified_at: &str) {
-    let content = match std::fs::read_to_string(file_path) {
+    // 流式读取：仅读到 frontmatter 结束（第二个 ---），避免一次性读入整个大文件
+    let content = match read_frontmatter_only(file_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[frontmatter-index] Failed to read {}: {}", file_path, e);
@@ -307,6 +303,39 @@ fn parse_and_upsert(db: &db::Database, file_path: &str, modified_at: &str) {
     ) {
         eprintln!("[frontmatter-index] Failed to upsert {}: {}", file_path, e);
     }
+}
+
+/// 流式读取 frontmatter 区域，避免全量读大文件
+fn read_frontmatter_only(file_path: &str) -> std::io::Result<String> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(file_path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut buf = String::new();
+    let mut is_first_line = true;
+    for line in reader.lines() {
+        let mut line = line?;
+        if is_first_line {
+            // 首行去除 UTF-8 BOM（保持行为一致）
+            if let Some(stripped) = line.strip_prefix('\u{FEFF}') {
+                line = stripped.to_string();
+            }
+            // 首行不以 --- 开头：无 frontmatter，立即返回，避免读入整个大文件
+            if !line.starts_with("---") {
+                buf.push_str(&line);
+                buf.push('\n');
+                return Ok(buf);
+            }
+            is_first_line = false;
+        } else if line.trim_end() == "---" {
+            // 闭合 --- 停止；trim_end 兼容 CRLF
+            buf.push_str(&line);
+            buf.push('\n');
+            break;
+        }
+        buf.push_str(&line);
+        buf.push('\n');
+    }
+    Ok(buf)
 }
 
 /// 从 Markdown 内容中提取 YAML frontmatter

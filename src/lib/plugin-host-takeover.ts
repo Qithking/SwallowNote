@@ -1,4 +1,4 @@
-/** 插件宿主接管：将 SDK 的 in-process stub 替换为宿主的权限检查实现。Inline 插件跳过接管。 */
+/** 插件宿主接管：将 SDK 的 in-process stub 替换为宿主实现。 */
 import type {
   PluginContext,
   PluginDefinition,
@@ -31,6 +31,7 @@ import {
   getEditorForExtension,
   getActivePluginExtensions,
 } from '@/stores/pluginEditor'
+import { useEditorStore, registerPluginTabRuntime } from '@/stores/editor'
 import { assertPermission } from './plugin-permission-guard'
 import { writePluginSettings } from './tauri'
 import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
@@ -41,8 +42,30 @@ export const DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS = 5000
 
 /** 动态导入的插件模块引用；inline 插件为 undefined。 */
 export interface PluginWithModule extends PluginDefinition {
-  /** Dynamic-import result; only present for plugins loaded from disk. */
+  /** 动态导入结果，仅磁盘插件有 */
   __pluginModule?: { setHost?: (overrides: HostOverrides) => () => void }
+}
+
+/** 插件持久化的 setHost restore 函数映射。 */
+const hostTakeoverRestoreMap = new Map<string, () => void>()
+
+/** 安装持久化 host takeover */
+export function installHostTakeover(plugin: PluginDefinition): void {
+  const mod = (plugin as PluginWithModule).__pluginModule
+  if (!mod?.setHost) return
+  // 避免重复安装
+  if (hostTakeoverRestoreMap.has(plugin.id)) return
+  const restore = mod.setHost(buildOverridesForPlugin(plugin))
+  hostTakeoverRestoreMap.set(plugin.id, restore)
+}
+
+/** 卸载插件的持久化 host takeover。插件卸载时调用。 */
+export function uninstallHostTakeover(pluginId: string): void {
+  const restore = hostTakeoverRestoreMap.get(pluginId)
+  if (restore) {
+    restore()
+    hostTakeoverRestoreMap.delete(pluginId)
+  }
 }
 
 /** 构建 SDK 用的 HostOverrides。 */
@@ -55,10 +78,7 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
     unregisterContextMenu: (id, itemId) => unregisterContextMenu(id, itemId),
     clearPluginMenuItems: (id) => clearPluginMenuItems(id),
     getContextMenuItems: (loc, ctx) => getContextMenuItems(loc, ctx),
-    // Command-palette contributions (Task 9 / G9). The permission
-    // gate re-checks `events` (the same permission that covers
-    // host-event subscriptions) so a plugin that can't subscribe to
-    // host events also can't add command palette entries.
+    // 复用 events 权限门禁
     registerCommand: (id, command) => registerCommand(id, command),
     unregisterCommand: (id, commandId) => unregisterCommand(id, commandId),
     clearPluginCommands: (id) => clearPluginCommands(id),
@@ -71,7 +91,7 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
     },
     // invokeBackend 经 SDK 路径调用。
     invokeBackend: async (cmd, args) => {
-      // 熔断插件拒绝 IPC 调用，防止超时后后台钩子继续触发后端副作用。
+      // 熔断插件拒绝 IPC，防超时后后台钩子副作用
       if (isPluginTripped(pluginId)) {
         throw new Error(
           `[plugin-host-takeover] invokeBackend refused: plugin "${pluginId}" is tripped (lifecycle hook timed out)`
@@ -116,48 +136,23 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       return { ...view.values }
     },
     __pluginSettings_subscribe: (handler) => {
-      // 订阅通过 per-plugin bus 走 events 权限门。
+      // 订阅通过 per-plugin bus 走 events 权限门
       const tagged = handler as unknown as { __pluginId?: string }
       tagged.__pluginId = pluginId
-      // 通过 per-plugin bus 订阅。
       return pluginEvents.on('plugin-settings:change', (payload) => {
         handler(payload)
       })
     },
-    /**
-     * File-editor registry bridge. The host's `registerEditor`
-     * is the production path; the SDK's stub is bypassed because
-     * `currentHostOverrides().registerEditor` short-circuits the
-     * stub layer. The host-side registry performs the real
-     * permission check (defence in depth — the SDK's
-     * `__assertPluginPermission` override is the first gate)
-     * and rejects duplicate extensions with a toast + throw.
-     */
+    /** 桥接到宿主 registerEditor，做权限校验与去重。 */
     registerEditor: (id, extension, component) => {
-      // The SDK calls
-      //   currentHostOverrides().registerEditor?.(pluginId, extension, component)
-      // so the host override's signature must accept the same
-      // three arguments. We close over `pluginId` from the
-      // surrounding scope to avoid trusting the plugin to
-      // declare its own id (a malicious plugin could pass
-      // someone else's id and steal the extension). The `id`
-      // parameter is therefore ignored and `pluginId` wins;
-      // we still destructure it to keep the type-checker
-      // happy.
+      // 忽略插件传入 id，用闭包 pluginId 防冒充
       void id
       return registerEditor(pluginId, extension, component)
     },
     unregisterEditor: () => unregisterEditor(pluginId),
     getEditorForExtension: (extension) => {
       const entry = getEditorForExtension(extension)
-      // The host-side registry stores a plain
-      // `PluginEditorEntry`; the SDK's `HostOverrides` type
-      // wants the same shape, so we return it as-is. Callers
-      // that consumed the SDK's stub expect a strongly-typed
-      // component; the host-bridged component is the same
-      // React component type, so the type compatibility holds
-      // at the call site (the SDK's getEditorForExtension
-      // narrows it back).
+      // 类型形状一致，原样返回
       return entry
         ? {
             pluginId: entry.pluginId,
@@ -166,28 +161,47 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
         : null
     },
     getActivePluginExtensions: () => getActivePluginExtensions(),
-    /**
-     * Permission gate for the editor registry. The SDK's
-     * `registerEditor` calls this before any mutation; we
-     * delegate to the host's `assertPermission` so the
-     * authoritative grant (in
-     * `plugin_permissions_<id>` localStorage) is the source
-     * of truth. A denial throws `PluginPermissionDeniedError`,
-     * which the SDK re-throws verbatim.
-     */
+    /** openEditorTab 桥接：注册运行时数据并 addTab。 */
+    openEditorTab: (id, props) => {
+      void id // 忽略插件传入的 id，使用闭包中可信的 pluginId
+      registerPluginTabRuntime(props.id, {
+        icon: props.icon,
+        onChange: props.onChange,
+      })
+      useEditorStore.getState().addTab({
+        id: props.id,
+        // 虚拟路径：用于 addTab 去重，不指向真实文件系统
+        path: `plugin://${pluginId}/${props.id}`,
+        name: props.name,
+        content: props.content,
+        isDirty: false,
+        isEdited: false,
+        viewMode: 'preview',
+        type: 'plugin',
+        pluginId,
+        toolbarConfig: props.toolbarConfig,
+      })
+    },
+    /** closePluginTabs 桥接：filterTabs 过滤 pluginId。 */
+    closePluginTabs: (id) => {
+      void id // 忽略插件传入的 id，使用闭包中可信的 pluginId
+      useEditorStore.getState().filterTabs((tab) => tab.pluginId !== pluginId)
+    },
+    /** closeEditorTab 桥接：校验归属后 removeTab。 */
+    closeEditorTab: (id, tabId) => {
+      void id // 忽略插件传入的 id，使用闭包中可信的 pluginId
+      const tab = useEditorStore.getState().tabs.find((t) => t.id === tabId)
+      if (tab && tab.pluginId === pluginId) {
+        useEditorStore.getState().removeTab(tabId)
+      }
+    },
+    /** 委托宿主 assertPermission，拒绝时抛错。 */
     __assertPluginPermission: (
       targetPluginId: string,
       permission: PluginPermission,
       operation: string,
     ) => {
-      // We re-assert against the host's authoritative
-      // permission gate. The `targetPluginId` is the id the
-      // SDK received from the plugin's own call — we still
-      // run the check against it because the SDK's
-      // `__assertPluginPermission` is per-call (the registry
-      // itself does a second pass). A plugin that somehow
-      // impersonated another id would still be caught by the
-      // registry's own `usePluginStore` check.
+      // 再次权限校验，注册表自带二次检查兜底
       assertPermission(targetPluginId, permission, operation)
     },
   }
@@ -198,11 +212,7 @@ export interface RunPluginLifecycleHookOptions {
   timeoutMs?: number
 }
 
-/**
- * 运行生命周期钩子并安装接管。Inline 插件跳过。
- * 超时后标记 unhealthy、自动禁用，并置位熔断标志以阻止超时后仍在后台运行的
- * hookPromise 继续产生事件派发 / storage 写入 / IPC 调用等副作用。
- */
+/** 运行生命周期钩子并安装接管，超时标记 unhealthy。 */
 export async function runPluginLifecycleHook(
   plugin: PluginDefinition,
   hook: PluginLifecycleHook | undefined,
@@ -211,15 +221,9 @@ export async function runPluginLifecycleHook(
   options: RunPluginLifecycleHookOptions = {}
 ): Promise<void> {
   if (!hook) return
-  // 注意：不在每轮钩子调用前清除熔断标志。上一轮超时的 hookPromise 仍在后台
-  // 运行（Promise.race 只让 await 提前返回，原 promise 不会中止），若在此清除，
-  // 旧 hookPromise 后续的 storage.set / invokeBackend 会绕过熔断检查（P0 NEW-4）。
-  // 熔断标志改由用户手动重新启用插件时清除（见 plugin store 的 setPluginEnabled）。
-  const mod = (plugin as PluginWithModule).__pluginModule
-  const restore = mod?.setHost ? mod.setHost(buildOverridesForPlugin(plugin)) : undefined
+  // 不在每轮钩子前清熔断标志，避免旧 hookPromise 绕过检查
   const timeoutMs = options.timeoutMs ?? DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS
 
-  // 用 timedOut 标志而非 rejection，确保 finally 中的 restore 执行。
   let timeoutId: ReturnType<typeof setTimeout> | undefined
   let timedOut = false
   const hookPromise = runLifecycleHook(hook, context, hookName)
@@ -250,7 +254,6 @@ export async function runPluginLifecycleHook(
     }
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId)
-    restore?.()
   }
 }
 

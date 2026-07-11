@@ -98,6 +98,15 @@ function walkBlocks(blocks: any[], visitor: (block: any) => any): any[] {
   return result
 }
 
+// 模块级单例，避免每次 parseContent 都创建新实例
+let _sharedParseEditor: ReturnType<typeof BlockNoteEditor.create> | null = null
+function getSharedParseEditor() {
+  if (!_sharedParseEditor) {
+    _sharedParseEditor = BlockNoteEditor.create()
+  }
+  return _sharedParseEditor
+}
+
 interface MarkdownEditorProps {
   content: string
   onChange?: (content: string) => void
@@ -112,13 +121,15 @@ function BlockNoteInner({
   onChange?: (content: string) => void
 }) {
   const uploadPath = useUIStore((state) => state.uploadPath)
-  const { rootPath } = useWorkspaceStore()
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
   const activeTabId = useEditorStore((s) => s.activeTabId)
   const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
   const activeTabName = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.name ?? '')
   const addTab = useEditorStore((s) => s.addTab)
   const { t } = useTranslation()
   const {
+    normalPaddingVertical,
+    normalPaddingHorizontal,
     widePaddingVertical,
     widePaddingHorizontal,
   } = useEditorSettingsStore()
@@ -126,7 +137,7 @@ function BlockNoteInner({
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
   // Cache the last onChange result so getFullContent can return it synchronously
-  const lastContentRef = useRef<string>('')
+  const lastContentRef = useRef<string | null>('')
   // Refs to access latest values inside stable callbacks (editor is created once)
   const activeTabPathRef = useRef(activeTabPath)
   activeTabPathRef.current = activeTabPath
@@ -134,20 +145,28 @@ function BlockNoteInner({
   addTabRef.current = addTab
 
   useEffect(() => {
-    if (noteWidth !== 'wide') return
     const apply = () => {
       const container = editorContainerRef.current
       if (!container) return
       const scrollArea = container.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement
       if (!scrollArea) return
-      scrollArea.style.paddingTop = `${widePaddingVertical}px`
-      scrollArea.style.paddingBottom = `${widePaddingVertical}px`
-      scrollArea.style.paddingLeft = `${widePaddingHorizontal}px`
-      scrollArea.style.paddingRight = `${widePaddingHorizontal}px`
+      if (noteWidth === 'wide') {
+        // 宽模式：应用 wide padding 内联样式
+        scrollArea.style.paddingTop = `${widePaddingVertical}px`
+        scrollArea.style.paddingBottom = `${widePaddingVertical}px`
+        scrollArea.style.paddingLeft = `${widePaddingHorizontal}px`
+        scrollArea.style.paddingRight = `${widePaddingHorizontal}px`
+      } else {
+        // 普通模式：应用用户配置的 normalPadding（保留原业务逻辑）
+        scrollArea.style.paddingTop = `${normalPaddingVertical}px`
+        scrollArea.style.paddingBottom = `${normalPaddingVertical}px`
+        scrollArea.style.paddingLeft = `${normalPaddingHorizontal}px`
+        scrollArea.style.paddingRight = `${normalPaddingHorizontal}px`
+      }
     }
     const timer = setTimeout(apply, 100)
     return () => clearTimeout(timer)
-  }, [noteWidth, widePaddingVertical, widePaddingHorizontal])
+  }, [noteWidth, normalPaddingVertical, normalPaddingHorizontal, widePaddingVertical, widePaddingHorizontal])
 
   // codeBlock from @blocknote/code-block provides syntax highlighting via Shiki
   // In newer versions, we need to create the code block spec using createCodeBlockSpec
@@ -1050,15 +1069,22 @@ function BlockNoteInner({
     return registerFlushFn(flushPendingContent)
   }, [flushPendingContent])
 
-  // Cleanup debounce timer on unmount.
+  // Cleanup debounce timer on unmount — flush pending content to avoid data loss on tab switch.
+  // 注：serializeAndNotify 是 async，cleanup 无法 await，此处为 fire-and-forget。
+  // tab 切换主路径已由 flushAllEditors()（在 setActiveTab 前 await）保护；
+  // app 退出场景由 App.tsx 的 close-requested 监听器调用 flushAllEditors() 兜底。
   useEffect(() => {
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current)
         debounceTimerRef.current = null
+        // 兜底：触发序列化（async，不阻塞 cleanup）
+        serializeAndNotify()
       }
+      // 释放缓存的文档内容，避免 tab 切换后闭包持有大字符串
+      lastContentRef.current = null
     }
-  }, [])
+  }, [serializeAndNotify])
 
   // Build initial TOC when editor mounts or tab switches.
   // Subsequent TOC updates are handled by the debounced serializeAndNotify.
@@ -1132,8 +1158,9 @@ function BlockNoteInner({
       if (tiptapEditor) {
         return tiptapEditor.state.doc.textContent || ''
       }
-    // eslint-disable-next-line no-empty
-    } catch {}
+    } catch (e) {
+      console.warn('[MarkdownEditor] Failed to get editor text content:', e)
+    }
     return ''
   }, [editor])
 
@@ -1569,7 +1596,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
         // already-stripped body is a no-op, so this is always safe.
         const body = stripFrontmatter(content)
 
-        const tempEditor = BlockNoteEditor.create()
+        const tempEditor = getSharedParseEditor()
         let blocks: PartialBlock[] = []
 
         try {

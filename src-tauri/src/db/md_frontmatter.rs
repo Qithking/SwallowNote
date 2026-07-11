@@ -1,7 +1,7 @@
 use crate::db::Database;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 标准前端 frontmatter 字段
 const STANDARD_KEYS: &[&str] = &[
@@ -356,10 +356,16 @@ pub fn query_by_prefix(db: &Database, path_prefix: &str) -> Result<Vec<Frontmatt
     });
     let mut stmt = conn.prepare(
         "SELECT id, file_path, title, created, updated, tags, categories, author, status, pinned, extra_yaml, raw_yaml, modified_at, indexed_at
-         FROM md_frontmatter WHERE file_path LIKE ?1",
+         FROM md_frontmatter WHERE file_path LIKE ?1 ESCAPE '\\'",
     )?;
 
-    let pattern = format!("{}%", path_prefix.trim_end_matches('/'));
+    // 转义 LIKE 通配符（\、%、_），防止路径前缀含这些字符时被当作通配符导致跨目录误匹配
+    let escaped = path_prefix
+        .trim_end_matches('/')
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let pattern = format!("{}%", escaped);
     let rows = stmt.query_map([&pattern], |row| {
         Ok(FrontmatterRecord {
             id: row.get(0)?,
@@ -404,7 +410,10 @@ pub fn get_modified_at(db: &Database, file_path: &str) -> Result<Option<String>>
     }
 }
 
-/// 一次性获取所有记录的 file_path -> modified_at 映射（用于批量增量判断，避免逐条查询）
+/// 一次性获取所有记录的 file_path -> modified_at 映射。
+/// 注意：handle_scan_directory 已改用 get_modified_at_for_paths 按需分批查询，
+/// 此函数保留供后续可能的批量场景或外部调用使用。
+#[allow(dead_code)]
 pub fn get_all_modified_at(db: &Database) -> Result<HashMap<String, String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
@@ -422,6 +431,83 @@ pub fn get_all_modified_at(db: &Database) -> Result<HashMap<String, String>> {
         map.insert(path, modified);
     }
     Ok(map)
+}
+
+/// 批量查询给定路径集合的 file_path -> modified_at 映射。
+/// 分批每批 500 个路径，规避 SQLite 的 IN 子句参数数量限制（默认 999）。
+/// 用于扫描目录时按需查询，替代一次性全表加载 get_all_modified_at。
+pub fn get_modified_at_for_paths(db: &Database, paths: &[String]) -> Result<HashMap<String, String>> {
+    // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
+    let conn = db.conn.lock().unwrap_or_else(|e| {
+        eprintln!("[DB] mutex poisoned: {}", e);
+        e.into_inner()
+    });
+    let mut map = HashMap::new();
+    if paths.is_empty() {
+        return Ok(map);
+    }
+    // 每批 500 个路径，留出余量以避开 SQLite IN 子句参数上限
+    const BATCH: usize = 500;
+    for chunk in paths.chunks(BATCH) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!(
+            "SELECT file_path, modified_at FROM md_frontmatter WHERE file_path IN ({})",
+            placeholders
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (path, modified) = row?;
+            map.insert(path, modified);
+        }
+    }
+    Ok(map)
+}
+
+/// 对账清理：删除 md_frontmatter 中不在 valid_paths 集合内的孤立记录。
+/// 采用方案 A：先读取 dir_prefix 目录前缀范围内的 file_path，在 Rust 中 diff 出孤立路径，再逐条删除。
+/// （分批 NOT IN 会导致跨批误删，故不采用。）
+/// 修复跨工作区误删：md_frontmatter 表全局共享，扫描工作区 A 时若清理全表会误删工作区 B 的记录。
+/// 通过 dir_prefix 限制查询范围，只清理当前扫描目录下的孤立记录，不影响其他工作区/目录。
+/// 返回被删除的记录数。
+pub fn purge_orphan_records(
+    conn: &Connection,
+    valid_paths: &HashSet<String>,
+    dir_prefix: &str,
+) -> Result<usize> {
+    // 末尾斜杠统一处理：trim 后加 /%，确保只匹配 dir_prefix 下的子路径，
+    // 避免出现 "/Users/x/notes%" 误匹配 "/Users/x/notes123/..."，或 dir_path 末尾带 / 时产生 //
+    // 转义 LIKE 通配符（\、%、_），防止目录名含这些字符时被当作通配符导致跨目录误删
+    let escaped = dir_prefix
+        .trim_end_matches('/')
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let like_pattern = format!("{}/%", escaped);
+    let orphan_paths: Vec<String> = {
+        let mut stmt =
+            conn.prepare("SELECT file_path FROM md_frontmatter WHERE file_path LIKE ?1 ESCAPE '\\'")?;
+        // 先把 query_map 结果绑定到 rows，再消费迭代器，避免 stmt 与临时值在块末尾 drop 顺序冲突
+        let rows = stmt.query_map(params![like_pattern], |row| row.get::<_, String>(0))?;
+        rows.filter_map(|r| r.ok())
+            // 仅保留 db 中存在、但当前有效路径集合中不存在的记录
+            .filter(|path| !valid_paths.contains(path))
+            .collect()
+    };
+    // 用事务包裹逐条 DELETE，保证原子提交，避免部分删除导致状态不一致。
+    // 参考 rename_category 的事务用法（unchecked_transaction 在已存在事务中不会报错，更稳健）。
+    let tx = conn.unchecked_transaction()?;
+    let mut deleted = 0;
+    for path in &orphan_paths {
+        deleted += tx.execute(
+            "DELETE FROM md_frontmatter WHERE file_path = ?1",
+            params![path],
+        )?;
+    }
+    tx.commit()?;
+    Ok(deleted)
 }
 
 /// 通用 YAML 属性搜索 frontmatter 记录
@@ -696,9 +782,15 @@ pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<
     // Phase 1: 读取匹配行（锁内）
     let rows_data: Vec<(i64, String)> = {
         let mut stmt = conn.prepare(
-            "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
+            "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2 ESCAPE '\\')",
         )?;
-        let prefix_pattern = format!("{}/%", old_path);
+        // 转义 LIKE 通配符（\、%、_），防止分类路径含这些字符时被当作通配符导致跨分类误匹配。
+        // value = ?1 走精确匹配无需转义；value LIKE ?2 走前缀匹配必须转义。
+        let escaped_old = old_path
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let prefix_pattern = format!("{}/%", escaped_old);
         let rows = stmt.query_map(params![old_path, prefix_pattern], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -730,13 +822,17 @@ pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<
         }
     }
 
-    // Phase 3: 批量 UPDATE（与 Phase 1 同一锁持有，确保读-写原子）
+    // Phase 3: 批量 UPDATE（事务内，原子提交，参考 delete_category 的事务用法）
+    // 用 unchecked_transaction 包裹批量 UPDATE，保证所有分类路径重命名要么全部成功，要么全部回滚，
+    // 避免部分记录更新成功导致分类路径不一致。
+    let tx = conn.unchecked_transaction()?;
     for (new_categories_str, id) in &updates {
-        conn.execute(
+        tx.execute(
             "UPDATE md_frontmatter SET categories = ?1 WHERE id = ?2",
             params![new_categories_str, id],
         )?;
     }
+    tx.commit()?;
     Ok(updates.len())
 }
 
@@ -755,12 +851,19 @@ pub fn delete_category(db: &Database, path: &str) -> Result<usize> {
     // 选用 unchecked_transaction 而非 transaction：前者在已存在事务中不会报错，更适合此处。
     let tx = conn.unchecked_transaction()?;
 
+    // 转义 LIKE 通配符（\、%、_），防止分类路径含这些字符时被当作通配符导致跨分类误删。
+    // value = ?1 / path = ?1 走精确匹配无需转义；value LIKE ?2 / path LIKE ?2 走前缀匹配必须转义。
+    let escaped_path = path
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let prefix_pattern = format!("{}/%", escaped_path);
+
     // Phase 1: 读取匹配行（锁内）
     let rows_data: Vec<(i64, String)> = {
         let mut stmt = tx.prepare(
-            "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2)",
+            "SELECT id, categories FROM md_frontmatter WHERE EXISTS (SELECT 1 FROM json_each(categories) WHERE value = ?1 OR value LIKE ?2 ESCAPE '\\')",
         )?;
-        let prefix_pattern = format!("{}/%", path);
         let rows = stmt.query_map(params![path, prefix_pattern], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -802,8 +905,8 @@ pub fn delete_category(db: &Database, path: &str) -> Result<usize> {
             )?;
         }
     }
-    // 从 categories 表中删除该分类及其子分类
-    tx.execute("DELETE FROM categories WHERE path = ?1 OR path LIKE ?2", params![path, format!("{}/%", path)])?;
+    // 从 categories 表中删除该分类及其子分类（复用上方已转义的 prefix_pattern，避免重复转义）
+    tx.execute("DELETE FROM categories WHERE path = ?1 OR path LIKE ?2 ESCAPE '\\'", params![path, prefix_pattern])?;
 
     tx.commit()?;
     Ok(updates.len())

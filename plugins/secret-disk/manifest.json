@@ -1,0 +1,19 @@
+{
+  "id": "com.swallownote.secret-disk",
+  "name": "密盘",
+  "description": "加密的私有笔记空间，所有数据以 markdown 存储于严格加密的 SQLite 数据库（.swl）。",
+  "version": "0.1.5",
+  "author": "SwallowNote",
+  "publishedAt": "2026-07-06T07:55:40Z",
+  "iconPosition": "sidebar",
+  "contentPosition": "leftPanel",
+  "order": 60,
+  "enabled": true,
+  "hasBackend": true,
+  "entry": "src/index.tsx",
+  "permissions": [
+    "storage",
+    "events",
+    "backend"
+  ]
+}

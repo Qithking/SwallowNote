@@ -18,7 +18,8 @@
   "editor": {
     "untitled": "Untitled",
     "preview": "Preview",
-    "split": "Split View"
+    "split": "Split View",
+    "loadFailed": "Editor failed to load. Please close the tab and retry."
   },
   "fileTree": {
     "newFile": "New File",
@@ -61,11 +62,15 @@
     "shortcuts": "Shortcuts",
     "about": "About",
     "plugins": "Plugins",
+    "development": "Development",
+    "development.developerMode": "Developer Mode",
+    "development.developerMode.desc": "Disable right-click menu when enabled, mainly used for debugging",
     "plugins.configs": "Plugin Configs",
     "plugins.configs.desc": "Export and import the storage of every installed plugin as a single bundle. Use this to back up settings before reinstalling, or to move state between machines.",
     "plugins.configs.export": "Export plugin configs",
     "plugins.configs.import": "Import plugin configs",
     "plugins.configs.exportSuccess": "Exported {{count}} plugin config(s)",
+    "plugins.configs.exportFailed": "Failed to export plugin configs",
     "plugins.configs.importSuccess": "Imported {{imported}} of {{total}} plugin config(s); skipped {{skipped}}",
     "plugins.configs.importNone": "Bundle contains no importable entries",
     "plugins.configs.versionMismatch": "Bundle is for SwallowNote v{{bundleVersion}} (schema v{{bundleSchema}}); this build expects schema v{{expected}}",
@@ -78,6 +83,8 @@
     "general.closeWithoutExit.desc": "App continues running in background after closing the window, exit via tray icon",
     "general.language": "Language",
     "general.language.desc": "Switch interface display language, restart required to take effect",
+    "general.language.en": "English",
+    "general.language.zhCN": "Chinese (Simplified)",
     "general.noteWidth": "Default Note Width",
     "general.noteWidth.desc": "Choose default content area width layout for the editor",
     "general.noteWidth.normal": "Normal",
@@ -296,7 +303,8 @@
     "success": "Success",
     "no": "No",
     "yes": "Yes",
-    "settings": "Settings"
+    "settings": "Settings",
+    "retry": "Retry"
   },
   "activityBar": {
     "explorer": "Explorer",
@@ -338,8 +346,10 @@
     "copyPath": "Copy Path",
     "copyRelativePath": "Copy Relative Path",
     "showInExplorer": "Show in File Explorer",
-    "revealInTree": "Reveal in File Tree"
-  },
+"revealInTree": "Reveal in File Tree",
+"refresh": "Refresh",
+"refreshConfirm": "This file has unsaved changes. Refreshing will discard local changes and reload from disk. Continue?"
+},
   "fileTree": {
     "newFile": "New File",
     "newFolder": "New Folder",
@@ -528,7 +538,12 @@
     "passwordOrToken": "Password / Access Token",
     "passwordPlaceholder": "Enter password or Personal Access Token",
     "pushWithCredential": "Authenticate & Push",
+    "pullWithCredential": "Authenticate & Pull",
     "rememberCredential": "Remember credentials",
+    "forgetCredential": "Forget Credential",
+    "forgetCredentialConfirm": "Are you sure you want to forget the saved credentials for {{repo}}?",
+    "forgetCredentialSuccess": "Credentials cleared",
+    "forgetCredentialFailed": "Failed to forget credentials: {{error}}",
     "scanning": "Scanning...",
     "scanningPath": "Scanning {{path}}...",
     "pullSuccess": "Pulled {{count}} repo(s)",
@@ -725,7 +740,14 @@
       "cloneCompleted": "Clone completed",
       "cloneFailed": "Clone failed",
       "targetPathExists": "Target path already exists",
-      "submoduleUncommitted": "Submodule has uncommitted changes, please commit inside submodule first"
+      "submoduleUncommitted": "Submodule has uncommitted changes, please commit inside submodule first",
+      "invalidRepoPath": "Invalid repo path",
+      "invalidPathEncoding": "Invalid path encoding",
+      "invalidRelativePath": "Invalid relative path",
+      "fetchFailed": "Failed to fetch",
+      "checkLocalChangesFailed": "Failed to check local changes",
+      "checkoutFileFailed": "Failed to checkout file",
+      "terminatedBySignal": "terminated by signal"
     }
   },
   "tray": {

@@ -4,9 +4,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
@@ -78,12 +78,17 @@ pub(crate) struct PluginProcess {
     child: Arc<Mutex<Option<Child>>>,
     /// JSON-RPC id counter (monotonic, per-process).
     next_id: AtomicU64,
+    /// 连续超时计数：达到阈值后熔断该插件后端，避免僵尸进程长期占用 CPU/内存。
+    /// 调用成功时会归零，因此统计的是「连续超时」次数。
+    timeout_count: AtomicU32,
     /// Pending requests keyed by id.
     pending: PendingMap,
     /// Background reader task. Aborted on shutdown.
     _reader: JoinHandle<()>,
     /// Background stderr logger. Aborted on shutdown.
     _stderr: JoinHandle<()>,
+    /// 最后一次调用时间，供空闲回收定时器判断是否 kill（超过 10 分钟未用则回收）
+    last_used_at: std::sync::Mutex<Instant>,
 }
 
 /// Shared state registered with Tauri.
@@ -92,6 +97,67 @@ pub type SharedPluginProcessState = Arc<Mutex<HashMap<String, Arc<PluginProcess>
 /// Create an empty shared state for use in `setup`.
 pub fn new_shared_plugin_process_state() -> SharedPluginProcessState {
     Arc::new(Mutex::new(HashMap::new()))
+}
+
+/// 启动后台定时器：每 5 分钟扫描一次插件子进程，kill 超过 10 分钟未使用的进程并从 map 移除。
+/// 在 Tauri setup 中调用（tauri::async_runtime::spawn 确保在 runtime 内执行）。
+pub fn start_idle_reaper(state: SharedPluginProcessState) {
+    tauri::async_runtime::spawn(async move {
+        // 每 5 分钟扫描一次
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        // 空闲阈值：10 分钟未使用则回收
+        let idle_threshold = Duration::from_secs(600);
+        loop {
+            interval.tick().await;
+            // 先收集需要回收的 plugin_id，再释放 map 锁后逐个 kill，避免持锁调用 kill_plugin_backend 导致死锁
+            let mut to_reap: Vec<String> = Vec::new();
+            {
+                let map = state.lock().await;
+                for (plugin_id, proc) in map.iter() {
+                    // mutex 中毒时优雅降级，避免后台定时任务 panic 静默退出
+                    let last_used = *proc.last_used_at.lock().unwrap_or_else(|e| e.into_inner());
+                    if last_used.elapsed() > idle_threshold {
+                        to_reap.push(plugin_id.clone());
+                    }
+                }
+            }
+            for plugin_id in to_reap {
+                // 二次检查：重新获取 state 锁，确认该进程仍超时空闲，并原子地 remove，
+                // 显著缩小竞态窗口。残留窗口：invoke_plugin 在 get_or_spawn 拿到 proc 后、
+                // pending.insert 前，reaper 恰好 remove + drain pending，新插入的 tx 无人唤醒，
+                // 调用方将等待完整 INVOKE_TIMEOUT（30s）超时。该窗口极窄（reaper 每 5 分钟
+                // 触发、仅对 10 分钟未用进程生效），且有 30s 超时兜底，不会死锁。
+                // 此外 reader 任务在 child stdout EOF 时也会 drain pending（二次兜底），
+                // 因此真正孤立需 reader 已退出，实际命中概率更低。
+                // 持锁仅做「检查 + remove」，不调用 kill_plugin_backend，避免 map 锁嵌套死锁；
+                // 实际 kill 在锁外由 kill_removed_proc 完成。
+                let proc_to_kill = {
+                    let mut map = state.lock().await;
+                    if let Some(proc) = map.get(&plugin_id) {
+                        // mutex 中毒时优雅降级，避免后台定时任务 panic 静默退出
+                        let last_used = *proc.last_used_at.lock().unwrap_or_else(|e| e.into_inner());
+                        if last_used.elapsed() > idle_threshold {
+                            // 仍超时：原子 remove，拿出 proc 供锁外 kill
+                            map.remove(&plugin_id)
+                        } else {
+                            // 已被重新使用（elapsed <= 600s），跳过 kill
+                            None
+                        }
+                    } else {
+                        // 已被其他路径 remove，跳过
+                        None
+                    }
+                };
+                if let Some(proc) = proc_to_kill {
+                    kill_removed_proc(&proc, &plugin_id).await;
+                    eprintln!(
+                        "[plugin_invoke] idle plugin backend reaped (plugin_id={})",
+                        plugin_id
+                    );
+                }
+            }
+        }
+    });
 }
 
 // 构建 async Command；Windows 设 CREATE_NO_WINDOW，启用 kill_on_drop。
@@ -141,6 +207,7 @@ fn resolve_backend_binary(plugin_id: &str, plugin_path: &str) -> Option<PathBuf>
 async fn spawn_plugin_process(
     plugin_id: String,
     plugin_path: String,
+    app_data_dir: &std::path::Path,
 ) -> Result<Arc<PluginProcess>, PluginError> {
     let binary = resolve_backend_binary(&plugin_id, &plugin_path)
         .ok_or_else(|| PluginError::NotFound(format!("plugin backend not found (plugin_id={})", plugin_id)))?;
@@ -150,6 +217,10 @@ async fn spawn_plugin_process(
     // check it's running for the right plugin. Plugin authors can
     // ignore it.
     cmd.arg(&plugin_id);
+    // Pass the app data directory via env var so the plugin backend can
+    // store persistent data in a location separate from the plugin
+    // installation directory (which gets deleted on uninstall).
+    cmd.env("SWALLOWNOTE_APP_DATA_DIR", app_data_dir);
 
     let mut child: Child = cmd
         .spawn()
@@ -241,9 +312,11 @@ async fn spawn_plugin_process(
         stdin: Arc::new(Mutex::new(Some(stdin))),
         child: Arc::new(Mutex::new(Some(child))),
         next_id: AtomicU64::new(1),
+        timeout_count: AtomicU32::new(0),
         pending,
         _reader: reader,
         _stderr: stderr_task,
+        last_used_at: std::sync::Mutex::new(Instant::now()),
     }))
 }
 
@@ -279,7 +352,7 @@ async fn get_or_spawn(
     let plugin_path = super::plugin::active_version_dir(&plugin_root)
         .ok_or_else(|| PluginError::NotFound(format!("plugin version directory not found (plugin_id={})", plugin_id)))?;
     let plugin_path_str = plugin_path.to_string_lossy().to_string();
-    let proc = spawn_plugin_process(plugin_id.to_string(), plugin_path_str).await?;
+    let proc = spawn_plugin_process(plugin_id.to_string(), plugin_path_str, app_data_dir).await?;
     guard.insert(plugin_id.to_string(), Arc::clone(&proc));
     Ok(proc)
 }
@@ -306,6 +379,10 @@ pub async fn invoke_plugin(
         .map_err(|e| PluginError::Io(format!("Failed to resolve app data dir: {}", e)))?;
 
     let proc = get_or_spawn(state.inner(), &plugin_id, &app_data_dir).await?;
+
+    // 更新最后使用时间，供空闲回收定时器判断（新 spawn 的进程已是 now，此处覆盖也无妨）
+    // mutex 中毒时优雅降级，与 start_idle_reaper 保持一致
+    *proc.last_used_at.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
 
     let id = proc.next_id.fetch_add(1, Ordering::Relaxed);
     let request = serde_json::json!({
@@ -360,7 +437,11 @@ pub async fn invoke_plugin(
     // Await the response, with timeout. We use tokio::select! so the
     // timeout fires even if the child is hung.
     let response = match tokio::time::timeout(INVOKE_TIMEOUT, rx).await {
-        Ok(Ok(resp)) => resp,
+        Ok(Ok(resp)) => {
+            // 调用成功，重置连续超时计数，保证统计的是「连续」超时而非历史累计。
+            proc.timeout_count.store(0, Ordering::Relaxed);
+            resp
+        }
         Ok(Err(_canceled)) => {
             // The reader task sent and the channel was consumed; this
             // branch is unreachable in practice because we own the
@@ -373,6 +454,27 @@ pub async fn invoke_plugin(
             // will fail silently when (if) a late response arrives.
             let mut pending = proc.pending.lock().await;
             pending.remove(&id);
+            drop(pending);
+            // 超时诊断日志：便于定位是哪个插件/命令卡住。
+            let prev = proc.timeout_count.fetch_add(1, Ordering::Relaxed);
+            eprintln!(
+                "[plugin_invoke] plugin '{}' command '{}' timed out after {}s (consecutive timeout #{})",
+                proc.plugin_id,
+                command,
+                INVOKE_TIMEOUT.as_secs(),
+                prev + 1
+            );
+            // 熔断策略：连续超时达到阈值时主动 kill 后端进程，回收 CPU/内存，
+            // 避免频繁超时的插件累积僵尸进程；下一次调用会由 get_or_spawn 重新拉起。
+            const TIMEOUT_THRESHOLD: u32 = 3;
+            if prev + 1 >= TIMEOUT_THRESHOLD {
+                eprintln!(
+                    "[plugin_invoke] plugin '{}' reached consecutive timeout threshold ({}), killing backend to reclaim resources",
+                    proc.plugin_id, TIMEOUT_THRESHOLD
+                );
+                proc.timeout_count.store(0, Ordering::Relaxed);
+                let _ = kill_plugin_backend(state.inner(), &proc.plugin_id).await;
+            }
             return Err(PluginError::Timeout {
                 secs: INVOKE_TIMEOUT.as_secs(),
                 plugin_id: proc.plugin_id.clone(),
@@ -382,6 +484,36 @@ pub async fn invoke_plugin(
     };
 
     response.body
+}
+
+/// 对已从 state map 中 remove 出来的进程执行实际 kill + 唤醒 pending。
+/// 不再操作 state map，避免与 kill_plugin_backend / idle_reaper 的 map 锁嵌套。
+/// 抽出此函数是为了让 idle_reaper 能在锁内原子地「二次检查 last_used_at + remove」，
+/// 然后释放锁再调用本函数执行 kill，真正消除「二次检查通过后、kill 前被 invoke_plugin 复用」的竞态。
+async fn kill_removed_proc(proc: &Arc<PluginProcess>, plugin_id: &str) {
+    // 取出 child 以便 start_kill + 等待退出，确保 fd 释放。
+    let child_arc = proc.child.clone();
+    let mut guard = child_arc.lock().await;
+    if let Some(mut child) = guard.take() {
+        let _ = child.start_kill();
+        // Give the child a brief grace period to release any
+        // open file handles on the plugin dir; bounded so we
+        // don't block uninstall indefinitely on a wedged process.
+        let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+    }
+    // Also wake any pending oneshots with a "process killed" error
+    // so callers blocked on `invoke_plugin` unblock instead of
+    // hitting their full 30s timeout.
+    let mut pending = proc.pending.lock().await;
+    for (_, tx) in pending.drain() {
+        let _ = tx.send(JsonRpcResponse {
+            id: 0,
+            body: Err(PluginError::Process(format!(
+                "plugin backend killed (plugin_id={})",
+                plugin_id
+            ))),
+        });
+    }
 }
 
 // Kill 并移除 plugin_id 的后端进程。返回 true 表示杀掉了存活进程。
@@ -408,34 +540,14 @@ pub async fn kill_plugin_backend(
         }
     }
 
+    // 锁内仅做 remove，锁外调用 kill_removed_proc 执行实际 kill，
+    // 避免 map 锁与 child/pending 锁嵌套。
     let proc = {
         let mut map = state.lock().await;
         map.remove(plugin_id)
     };
     if let Some(proc) = proc {
-        // 取出 child 以便 start_kill + 等待退出，确保 fd 释放。
-        let child_arc = proc.child.clone();
-        let mut guard = child_arc.lock().await;
-        if let Some(mut child) = guard.take() {
-            let _ = child.start_kill();
-            // Give the child a brief grace period to release any
-            // open file handles on the plugin dir; bounded so we
-            // don't block uninstall indefinitely on a wedged process.
-            let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
-        }
-        // Also wake any pending oneshots with a "process killed" error
-        // so callers blocked on `invoke_plugin` unblock instead of
-        // hitting their full 30s timeout.
-        let mut pending = proc.pending.lock().await;
-        for (_, tx) in pending.drain() {
-            let _ = tx.send(JsonRpcResponse {
-                id: 0,
-                body: Err(PluginError::Process(format!(
-                    "plugin backend killed (plugin_id={})",
-                    plugin_id
-                ))),
-            });
-        }
+        kill_removed_proc(&proc, plugin_id).await;
         return Ok(true);
     }
     Ok(false)

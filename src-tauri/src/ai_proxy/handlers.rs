@@ -200,10 +200,7 @@ pub async fn chat_handler(
     let mut finished = false;
     // SSE 缓冲区大小上限：防止恶意上游持续发送不含换行符的数据导致 OOM
     const MAX_BUFFER_SIZE: usize = 64 * 1024;
-    // 跨 chunk 行缓冲区：SSE 的 data 行可能被 TCP 分块切断，
-    // 需要缓存不完整的行，等待下一个 chunk 拼接后再解析。
-    // 使用 Vec<u8> 存储原始字节，避免多字节 UTF-8 字符被 TCP 分块切断后
-    // 被 from_utf8_lossy 替换为 U+FFFD 导致中文损坏
+    // 跨 chunk 字节缓冲，避免 UTF-8 切断损坏中文
     let mut buffer: Vec<u8> = Vec::new();
 
     let stream = response.bytes_stream().map(move |chunk_result| {
@@ -225,11 +222,9 @@ pub async fn chat_handler(
         }
         let mut events: Vec<Result<Event, Infallible>> = Vec::new();
 
-        // 循环取出每个以 '\n' 结尾的完整行，最后一段不完整的行保留在 buffer 中
-        // 这样即使 data 行被 TCP 分块切断，也能在后续 chunk 到达后完整解析
+        // 按 \n 切行，不完整的留待下一 chunk
         while let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
-            // 取出完整行（含换行符）的原始字节，再转为字符串。
-            // 整行此时已是完整 UTF-8 序列，from_utf8 失败时用 lossy 兜底
+            // 完整行转字符串，lossy 兜底
             let line_bytes: Vec<u8> = buffer.drain(..=newline_pos).collect();
             let line = match String::from_utf8(line_bytes) {
                 Ok(s) => s,
