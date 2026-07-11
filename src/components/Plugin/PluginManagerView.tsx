@@ -883,7 +883,6 @@ function PluginManagerView() {
             <AlertDialogAction
               onClick={() => {
                 const target = uninstallConfirmPlugin
-                const shouldDelete = deleteDataOnUninstall
                 setUninstallConfirmPlugin(null)
                 setDeleteDataOnUninstall(false)
                 if (target) void handleUninstall(target)
