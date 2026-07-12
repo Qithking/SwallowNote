@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-28T05:13:58Z",
+  "updated_at": "2026-07-12T00:00:00Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -34,9 +34,9 @@
         "html"
       ],
       "download_url": "./export/com.swallownote.export.zip",
-      "sha256": "97a39f4d5fe8f4529938514158ea5ea91061a6093e8ad1b287834f4075556418",
-      "changelog": "v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
-      "published_at": "2026-06-23T12:45:11Z",
+      "sha256": "97ab40f8ad2fdd1e8e7a8728f8c69552ff11c1171eafaac2da92d806485d46d5",
+      "changelog": "v0.2.4: 同步 manifest 与构建产物；v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
+      "published_at": "2026-06-30T07:16:12Z",
       "dependencies": []
     },
     {
@@ -62,7 +62,7 @@
       "id": "com.swallownote.picgo",
       "name": "图床",
       "version": "0.1.2",
-      "description": "基于 PicGo 的图床插件，支持 SM.MS / Imgur / GitHub / 自定义 HTTP 端点，本地图片一键上传并插入到笔记",
+      "description": "将本地/剪贴板图片一键上传到云端图床（SM.MS / Imgur / GitHub / 自定义端点），并插入到当前笔记。",
       "author": "SwallowNote",
       "tags": [
         "image-host",
@@ -77,6 +77,25 @@
       "sha256": "8802dc4974d91a4b32ab4e9a05d06760f12431aa3944345a656bee40e1f920a2",
       "changelog": "初版发布：4 个 provider（SM.MS / Imgur / GitHub / Custom）、右侧面板 UI、上传历史、客户端转码、文件名策略、链接格式",
       "published_at": "2026-06-18T07:45:57Z",
+      "dependencies": []
+    },
+    {
+      "id": "com.swallownote.secret-disk",
+      "name": "密盘",
+      "version": "0.1.5",
+      "description": "加密的私有笔记空间，所有数据以 markdown 存储于严格加密的 SQLite 数据库（.swl）。",
+      "author": "SwallowNote",
+      "tags": [
+        "secret-disk",
+        "encryption",
+        "privacy",
+        "sqlite",
+        "markdown"
+      ],
+      "download_url": "./secret-disk/com.swallownote.secret-disk.zip",
+      "sha256": "d7f3b3ced181f9070c7d20d8ce69f679d43ee25965b31646d80c477266abe91c",
+      "changelog": "初版发布：加密的私有笔记空间，支持 SQLite 加密存储、密码管理、主编辑器打开密盘笔记、文件树右键操作及安全增强",
+      "published_at": "2026-07-06T07:55:40Z",
       "dependencies": []
     }
   ]
