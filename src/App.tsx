@@ -740,8 +740,15 @@ function App() {
   return (
     <TooltipProvider>
       <div
-        className="h-screen w-screen flex flex-col p-px rounded-[12px]"
-        style={{ background: 'var(--theme-color)', color: 'var(--text-primary)', fontSize: 'var(--font-size)' }}
+        className="fixed inset-0 flex flex-col p-px rounded-[12px] box-border"
+        style={{
+          background: 'var(--theme-color)',
+          color: 'var(--text-primary)',
+          fontSize: 'var(--font-size)',
+          // Windows 11 DWM 圆角会裁剪窗口最外层 1px，用内阴影做保险边框，
+          // 避免右边/下边出现“缺边”现象
+          boxShadow: 'inset 0 0 0 1px var(--border-color)'
+        }}
         onContextMenu={handleContextMenu}
       >
         <div className="flex-1 flex flex-col overflow-hidden rounded-[11px]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))'}}>
