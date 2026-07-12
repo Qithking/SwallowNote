@@ -845,7 +845,13 @@ const GitView = memo(function GitView() {
         const gitStore = useGitStore.getState()
         await gitStore.syncConflictReposFromPullResults(results)
       } else if (failed > 0) {
-        showToast(t('git.pullResult', { success: succeeded, fail: failed }), 'error')
+        // G-06 修复：批量 pull 遇到 detached HEAD 时给出更明确的提示
+        const detachedNames = results.filter((r: PullResult) => r.isDetachedHead).map((r: PullResult) => r.name).join(', ')
+        if (detachedNames) {
+          showToast(t('git.pullDetachedHead', { defaultValue: '{{repos}}: 仓库处于 detached HEAD 状态，请先切换到分支再拉取', repos: detachedNames }), 'error')
+        } else {
+          showToast(t('git.pullResult', { success: succeeded, fail: failed }), 'error')
+        }
       } else if (succeeded > 0) {
         showToast(t('git.pullSuccess', { count: succeeded }), 'success')
       }

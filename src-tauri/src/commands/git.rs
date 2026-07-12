@@ -313,6 +313,12 @@ pub async fn git_pull(path: String) -> Result<(), String> {
         return Ok(());
     }
 
+    // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
+    // 按用户场景，clone 后默认分支存在且未手动切换分支，应用应自动把 HEAD 挂回分支，无需用户操作。
+    if is_detached_head(&path) {
+        fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
+    }
+
     // 检查 rebase/merge 状态：有真实冲突则报错；仅 stale 状态则清理后继续。永不自动 resolve/continue。
     if is_rebase_or_merge_in_progress(&path) {
         if has_real_conflicts(&path) {
@@ -487,6 +493,12 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
     let remote_url = get_remote_url(&path)?;
     if remote_url.is_none() {
         return Ok(());
+    }
+
+    // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
+    // 按用户场景自动把 HEAD 挂回分支，无需用户操作。
+    if is_detached_head(&path) {
+        fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
     }
 
     // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
@@ -847,9 +859,10 @@ pub async fn git_force_pull_with_credentials(
 /// Commit and push in one command
 #[tauri::command]
 pub async fn git_commit_and_push(path: String, message: String) -> Result<CommitPushResult, String> {
-    // G-06 修复：检测 detached HEAD，不自动切换分支，返回错误码让前端提示用户
+    // G-06 修复：检测到 detached HEAD 时自动修复，按用户场景无需用户手动切换分支。
+    // 若无法自动修复，fix_detached_head 会返回错误，提交前失败比提交中失败更安全。
     if is_detached_head(&path) {
-        return Err("DETACHED_HEAD:Repository is in detached HEAD state. Please checkout a branch first.".to_string());
+        fix_detached_head(&path).map_err(|e| format!("Failed to prepare commit: {}", e))?;
     }
 
     // Stage all changes including submodules
@@ -1773,15 +1786,19 @@ fn restore_conflicted_files_to_local(repo_path: &str) {
     }
 }
 
-/// Fix detached HEAD state by switching back to the correct branch
-/// This handles the case where a rebase completed but left the repo in detached HEAD
-/// Only fixes if there's no active rebase/merge in progress
-/// 返回 Err 表示检测到 detached HEAD 但切换分支失败；返回 Ok 表示无需修复或修复成功。
+/// Fix detached HEAD state by switching back to the correct branch.
+/// 用户场景：clone 后默认分支存在且全程没有手动切换分支，应用应自动把 detached HEAD 挂回分支，
+/// 不需要用户手动执行 `git checkout`。
 ///
-/// G-18 风险评估：此函数在 git_pull 和 git_commit_and_push 的 pull 成功后调用。
-/// 若同一仓库并发执行 pull 和 commit_and_push，可能同时调用 fix_detached_head，
-/// 导致 git checkout 竞争。但前端 git 操作通常由 UI 触发，同一仓库并发概率极低；
-/// auto sync 场景下每个仓库独立处理，不存在竞争。因此不做加锁处理，仅记录此风险。
+/// 修复优先级：
+/// 1. 若处于 rebase/merge 进行中，不干扰，直接返回 Ok。
+/// 2. 若 HEAD 已附在本地分支上，无需修复。
+/// 3. 尝试从 rebase 状态记录中恢复目标分支。
+/// 4. 按远程默认分支（refs/remotes/origin/HEAD）切回对应本地分支；
+///    若本地分支不存在，则自动创建并跟踪远程分支。
+/// 5. 回退到在本地分支中查找指向当前 HEAD 的分支并切换。
+///
+/// 返回 Err 表示检测到 detached HEAD 但无法自动修复；返回 Ok 表示无需修复或修复成功。
 fn fix_detached_head(repo_path: &str) -> Result<(), String> {
     // Don't interfere with active rebase/merge
     let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
@@ -1803,7 +1820,7 @@ fn fix_detached_head(repo_path: &str) -> Result<(), String> {
 
     eprintln!("[INFO] fix_detached_head: detected detached HEAD in {}", repo_path);
 
-    // Try to find the correct branch to switch to
+    // 3. Try to find the correct branch from rebase state
     if let Some(target_branch) = get_rebase_branch(repo_path) {
         eprintln!("[INFO] fix_detached_head: switching to branch {}", target_branch);
         run_git(repo_path, &["checkout", &target_branch])
@@ -1812,8 +1829,30 @@ fn fix_detached_head(repo_path: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    // Fallback: try checking out the most recent local branch
-    // Use git branch to find branches that point to current HEAD
+    // 4. 按远程默认分支恢复：切换到对应本地分支，不存在则创建并跟踪远程
+    if let Ok(remote_default) = run_git(repo_path, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+        let remote_default = remote_default.trim();
+        if let Some(local_branch) = remote_default.strip_prefix("origin/") {
+            let local_ref = format!("refs/heads/{}", local_branch);
+            let has_local = run_git(repo_path, &["show-ref", "--verify", &local_ref]).is_ok();
+            if has_local {
+                eprintln!("[INFO] fix_detached_head: switching to local branch {}", local_branch);
+                run_git(repo_path, &["checkout", local_branch])
+                    .map_err(|e| format!("Failed to fix detached HEAD: {}", e))?;
+            } else {
+                eprintln!(
+                    "[INFO] fix_detached_head: creating local branch {} tracking {}",
+                    local_branch, remote_default
+                );
+                run_git(repo_path, &["checkout", "-b", local_branch, remote_default])
+                    .map_err(|e| format!("Failed to fix detached HEAD: {}", e))?;
+            }
+            eprintln!("[INFO] fix_detached_head: successfully attached HEAD to {}", local_branch);
+            return Ok(());
+        }
+    }
+
+    // 5. Fallback: try checking out a local branch that points to current HEAD
     if let Ok(head_hash) = run_git(repo_path, &["rev-parse", "HEAD"]) {
         if let Ok(branches) = run_git(repo_path, &["branch", "--format=%(refname:short)=%(objectname)"]) {
             for line in branches.lines() {
@@ -1835,9 +1874,11 @@ fn fix_detached_head(repo_path: &str) -> Result<(), String> {
             }
         }
     }
-    // 未找到匹配分支，不视为错误（仓库可能本就应在 detached HEAD 状态）
-    eprintln!("[WARN] fix_detached_head: could not find a branch matching current HEAD in {}", repo_path);
-    Ok(())
+
+    Err(format!(
+        "DETACHED_HEAD:Repository is in detached HEAD state and could not be automatically fixed in {}.",
+        repo_path
+    ))
 }
 
 /// G-06 修复：检测仓库是否处于 detached HEAD 状态（不自动切换分支）。

@@ -549,6 +549,7 @@
     "pullSuccess": "已拉取 {{count}} 个仓库",
     "pullResult": "拉取完成：成功 {{success}} 个，失败 {{fail}} 个",
     "pullConflict": "仓库 {{repos}} 存在合并冲突，请手动解决冲突后再同步",
+    "pullDetachedHead": "{{repos}}: 仓库处于 detached HEAD 状态，请先切换到分支再拉取",
     "forcePush": "强制推送",
     "forcePushDesc": "强制推送本地提交到远程仓库，覆盖远程历史",
     "forcePull": "强制拉取",
