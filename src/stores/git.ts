@@ -49,6 +49,7 @@ export interface PullResult {
   success: boolean
   error?: string
   isConflict?: boolean
+  isDetachedHead?: boolean
 }
 
 export interface SyncStatus {
@@ -184,6 +185,10 @@ export const useGitStore = create<GitState>((set) => ({
               // Check for rebase conflict
               if (errorMessage.startsWith('REBASE_CONFLICT:')) {
                 return { path: repo.path, name: repo.name, success: false, error: errorMessage, isConflict: true }
+              }
+              // G-06 修复：detached HEAD 时 pull 无法执行，标记专门状态以便前端提示
+              if (errorMessage.startsWith('DETACHED_HEAD:')) {
+                return { path: repo.path, name: repo.name, success: false, error: errorMessage, isDetachedHead: true }
               }
               return { path: repo.path, name: repo.name, success: false, error: errorMessage }
             }

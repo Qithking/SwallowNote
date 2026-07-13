@@ -549,6 +549,7 @@
     "pullSuccess": "Pulled {{count}} repo(s)",
     "pullResult": "Pull completed: {{success}} succeeded, {{fail}} failed",
     "pullConflict": "Repos {{repos}} have merge conflicts. Please resolve conflicts manually before syncing",
+    "pullDetachedHead": "{{repos}}: repository is in detached HEAD state, please checkout a branch first",
     "forcePush": "Force Push",
     "forcePushDesc": "Force push local commits to remote, overwriting remote history",
     "forcePull": "Force Pull",

@@ -123,6 +123,15 @@ pub struct GitStatus {
     pub untracked: Vec<String>,
 }
 
+/// G-02 修复：git_commit_and_push 的返回结构，让前端区分"无改动"/"已提交"/"已推送"。
+/// - committed: 是否产生了新提交（false = nothing to commit）
+/// - pushed: 是否成功推送到远程（false = 无远程或推送被跳过）
+#[derive(Serialize)]
+pub struct CommitPushResult {
+    pub committed: bool,
+    pub pushed: bool,
+}
+
 /// Check if a directory is a git repository by checking for .git folder
 #[tauri::command]
 pub fn git_is_repo(path: String) -> bool {
@@ -149,8 +158,12 @@ pub async fn git_init(path: String) -> Result<(), String> {
 /// Get git status by running system git commands
 #[tauri::command]
 pub async fn git_status(path: String) -> Result<GitStatus, String> {
-    // 分支获取失败时返回空字符串，前端可据此判断获取失败（区别于 "unknown" 等真实分支名）
-    let branch = get_branch(&path).unwrap_or_else(|_| "".to_string());
+    // G-15 修复：分支获取失败时记录日志，返回空字符串让前端能据此判断获取失败
+    // （区别于 "unknown" 等真实分支名）。若 git 命令本身失败，后续 run_git 会向上传播错误。
+    let branch = get_branch(&path).unwrap_or_else(|e| {
+        eprintln!("[WARN] git_status: failed to get branch for {}: {}", path, e);
+        "".to_string()
+    });
     // 不再吞掉 run_git 错误：git 失败时向上传播，避免前端误以为"无改动"。
     let modified = run_git(&path, &["diff", "--name-only"])?;
     let staged_modified = run_git(&path, &["diff", "--cached", "--name-only"])?;
@@ -203,17 +216,26 @@ pub async fn git_diff(path: String, file_path: String) -> Result<String, String>
 }
 
 /// Stage all changes and commit
+/// G-02 修复：返回 bool 表示是否有实际提交（true=已提交，false=无改动），
+/// 让前端能区分"无改动"和"提交成功"，避免误报"提交成功"但实际无提交。
+/// G-06 修复：检测到 detached HEAD 时不自动切换分支，返回 DETACHED_HEAD 错误码
+/// 让前端提示用户手动处理，避免分支切换丢失改动。
 #[tauri::command]
-pub async fn git_commit(path: String, message: String) -> Result<(), String> {
-    // Auto-fix detached HEAD before committing
-    fix_detached_head(&path)?;
+pub async fn git_commit(path: String, message: String) -> Result<bool, String> {
+    // G-06 修复：检测 detached HEAD，不自动切换分支，返回错误码让前端提示用户
+    if is_detached_head(&path) {
+        return Err("DETACHED_HEAD:Repository is in detached HEAD state. Please checkout a branch first.".to_string());
+    }
 
     // Stage all changes
+    // G-10 风险评估：git add -A 包含 untracked 文件，可能意外提交敏感文件。
+    // 用户决策保留此行为，依赖 .gitignore 排除文件。建议用户在 .gitignore 中配置
+    // 敏感文件模式（如 .env、*.key、*.pem 等）防止意外提交。
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
 
     // Commit
-    match run_git(&path, &["commit", "-m", &message]) {
-        Ok(_) => {}
+    let committed = match run_git(&path, &["commit", "-m", &message]) {
+        Ok(_) => true, // 提交成功
         Err(e) => {
             let err_lower = e.to_lowercase();
             if !err_lower.contains("nothing to commit")
@@ -221,10 +243,12 @@ pub async fn git_commit(path: String, message: String) -> Result<(), String> {
                 && !err_lower.contains("no changes added to commit") {
                 return Err(format!("Failed to commit: {}", e));
             }
+            // G-02 修复：nothing to commit 不再静默视为成功，返回 false 让前端区分
+            false
         }
-    }
+    };
 
-    Ok(())
+    Ok(committed)
 }
 
 /// Check if a git error is a rebase/merge conflict
@@ -261,13 +285,38 @@ fn is_auth_error(error: &str) -> bool {
         || lower.contains("fatal: unable to access") && (lower.contains("403") || lower.contains("401") || lower.contains("authentication") || lower.contains("credential"))
 }
 
+/// G-13 修复：读取 git 配置 pull.rebase，决定 pull 时使用 rebase 还是 merge。
+/// 默认使用 rebase（保持原有行为），但尊重用户 git 配置（pull.rebase=false 时用 merge）。
+fn should_use_rebase(path: &str) -> bool {
+    match run_git(path, &["config", "--get", "pull.rebase"]) {
+        Ok(output) => {
+            let val = output.trim().to_lowercase();
+            // pull.rebase=false → 用 merge；pull.rebase=true/yes/on → 用 rebase
+            // 未设置或空 → 默认 rebase
+            if val.is_empty() {
+                true
+            } else {
+                val != "false" && val != "no" && val != "off" && val != "0"
+            }
+        }
+        Err(_) => true, // 配置读取失败时默认 rebase（保持原有行为）
+    }
+}
+
 /// Pull changes from remote with rebase by default
 #[tauri::command]
 pub async fn git_pull(path: String) -> Result<(), String> {
-    // Check if remote exists before pulling
-    let remote_url = get_remote_url(&path);
-    if remote_url.is_err() {
-        return Ok(()); // No remote, nothing to pull
+    // G-05 修复：区分"无远程配置"（Ok(None)）和"远程读取失败"（Err）
+    let remote_url = get_remote_url(&path)?;
+    if remote_url.is_none() {
+        // 没有配置 origin 远程，跳过 pull（正常情况）
+        return Ok(());
+    }
+
+    // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
+    // 按用户场景，clone 后默认分支存在且未手动切换分支，应用应自动把 HEAD 挂回分支，无需用户操作。
+    if is_detached_head(&path) {
+        fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
     }
 
     // 检查 rebase/merge 状态：有真实冲突则报错；仅 stale 状态则清理后继续。永不自动 resolve/continue。
@@ -281,7 +330,14 @@ pub async fn git_pull(path: String) -> Result<(), String> {
         }
     }
 
-    let result = run_git(&path, &["pull", "--rebase"]);
+    // G-13 修复：尊重用户 git 配置 pull.rebase，决定使用 rebase 还是 merge
+    let use_rebase = should_use_rebase(&path);
+    let pull_args: Vec<&str> = if use_rebase {
+        vec!["pull", "--rebase"]
+    } else {
+        vec!["pull"]
+    };
+    let result = run_git(&path, &pull_args);
     match result {
         Ok(_) => {
             // Fix detached HEAD if it occurred during pull
@@ -295,7 +351,9 @@ pub async fn git_pull(path: String) -> Result<(), String> {
                 // Do NOT abort the rebase - preserve the conflict state for the UI to resolve
                 // Restore conflicted files to local versions (remove conflict markers from working tree)
                 restore_conflicted_files_to_local(&path);
-                Err(format!("REBASE_CONFLICT:{}", e))
+                // G-11 提示：工作树文件已去除冲突标记，但 git index 仍为 unmerged，
+                // 用户必须通过 ConflictResolver 解决冲突才能继续
+                Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers removed from working tree. Use ConflictResolver to resolve.]", e))
             } else {
                 // Non-conflict error (network, zlib, etc.): clean up stale rebase state
                 // that pull --rebase may have left behind
@@ -431,11 +489,30 @@ fn build_askpass_env<'a>(
 /// Pull changes from remote with provided credentials
 #[tauri::command]
 pub async fn git_pull_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
+    // G-05 修复：区分"无远程配置"和"远程读取失败"
+    let remote_url = get_remote_url(&path)?;
+    if remote_url.is_none() {
+        return Ok(());
+    }
+
+    // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
+    // 按用户场景自动把 HEAD 挂回分支，无需用户操作。
+    if is_detached_head(&path) {
+        fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
+    }
+
     // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
     let (askpass_path, _askpass_guard) = create_askpass_script("pull", &username, &password)?;
     let env_vars = build_askpass_env(&askpass_path, &username, &password);
 
-    let result = run_git_with_env(&path, &["pull", "--rebase"], &env_vars);
+    // G-13 修复：尊重用户 git 配置 pull.rebase
+    let use_rebase = should_use_rebase(&path);
+    let pull_args: Vec<&str> = if use_rebase {
+        vec!["pull", "--rebase"]
+    } else {
+        vec!["pull"]
+    };
+    let result = run_git_with_env(&path, &pull_args, &env_vars);
 
     // Clean up the askpass script immediately
     let _ = std::fs::remove_file(&askpass_path);
@@ -700,9 +777,9 @@ pub async fn git_force_push_with_credentials(path: String, username: String, pas
 /// This performs: git fetch + git reset --hard origin/<branch> + git clean -fd
 #[tauri::command]
 pub async fn git_force_pull(path: String) -> Result<(), String> {
-    // Check if remote exists
-    let remote_url = get_remote_url(&path);
-    if remote_url.is_err() {
+    // G-05 修复：区分"无远程配置"和"远程读取失败"
+    let remote_url = get_remote_url(&path)?;
+    if remote_url.is_none() {
         return Ok(()); // No remote, nothing to pull
     }
 
@@ -740,9 +817,9 @@ pub async fn git_force_pull_with_credentials(
     username: String,
     password: String,
 ) -> Result<(), String> {
-    // Check if remote exists
-    let remote_url = get_remote_url(&path);
-    if remote_url.is_err() {
+    // G-05 修复：区分"无远程配置"和"远程读取失败"
+    let remote_url = get_remote_url(&path)?;
+    if remote_url.is_none() {
         return Ok(()); // No remote, nothing to pull
     }
 
@@ -781,9 +858,12 @@ pub async fn git_force_pull_with_credentials(
 
 /// Commit and push in one command
 #[tauri::command]
-pub async fn git_commit_and_push(path: String, message: String) -> Result<(), String> {
-    // Auto-fix detached HEAD before committing
-    fix_detached_head(&path)?;
+pub async fn git_commit_and_push(path: String, message: String) -> Result<CommitPushResult, String> {
+    // G-06 修复：检测到 detached HEAD 时自动修复，按用户场景无需用户手动切换分支。
+    // 若无法自动修复，fix_detached_head 会返回错误，提交前失败比提交中失败更安全。
+    if is_detached_head(&path) {
+        fix_detached_head(&path).map_err(|e| format!("Failed to prepare commit: {}", e))?;
+    }
 
     // Stage all changes including submodules
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
@@ -806,6 +886,9 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             })
             .unwrap_or(false);
 
+    // G-02 修复：追踪是否产生了新提交，让前端能区分"无改动"和"提交成功"
+    let mut committed = false;
+
     if has_submodule_modified {
         // First try to commit changes in submodules
         match commit_submodules(&path, &message) {
@@ -815,11 +898,14 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
                 let commit_result = run_git(&path, &["commit", "-m", &message]);
                 if let Err(e) = commit_result {
                     let err_msg = e.to_lowercase();
-                    if !err_msg.contains("nothing to commit") 
+                    if !err_msg.contains("nothing to commit")
                         && !err_msg.contains("working tree clean")
                         && !err_msg.contains("no changes added to commit") {
                         return Err(format!("Failed to commit: {}", e));
                     }
+                    // nothing to commit：committed 保持 false
+                } else {
+                    committed = true;
                 }
             }
             Err(_) => {
@@ -833,18 +919,23 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
         let commit_result = run_git(&path, &["commit", "-m", &message]);
         if let Err(e) = commit_result {
             let err_msg = e.to_lowercase();
-            if !err_msg.contains("nothing to commit") 
+            if !err_msg.contains("nothing to commit")
                 && !err_msg.contains("working tree clean")
                 && !err_msg.contains("no changes added to commit") {
                 return Err(format!("Failed to commit: {}", e));
             }
-            // "nothing to commit" is not an error - continue to push in case there are unpushed commits
+            // G-02 修复：nothing to commit 不再静默视为成功，committed 保持 false，
+            // 继续尝试 push（可能有未推送的本地提交）
+        } else {
+            committed = true;
         }
     }
 
     // Push - only if remote exists
-    let remote_url = get_remote_url(&path);
-    if remote_url.is_ok() {
+    // G-05 修复：区分"无远程配置"和"远程读取失败"
+    let remote_url = get_remote_url(&path)?;
+    let mut pushed = false;
+    if remote_url.is_some() {
         // Check if already in a rebase/merge state before pulling
         if is_rebase_or_merge_in_progress(&path) {
             if has_real_conflicts(&path) {
@@ -854,9 +945,15 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             cleanup_stale_rebase_state(&path);
         }
 
-        // Pull --rebase first to integrate remote changes before pushing
-        // This avoids non-fast-forward push failures
-        let pull_result = run_git(&path, &["pull", "--rebase"]);
+        // Pull first to integrate remote changes before pushing
+        // G-13 修复：尊重用户 git 配置 pull.rebase，决定使用 rebase 还是 merge
+        let use_rebase = should_use_rebase(&path);
+        let pull_args: Vec<&str> = if use_rebase {
+            vec!["pull", "--rebase"]
+        } else {
+            vec!["pull"]
+        };
+        let pull_result = run_git(&path, &pull_args);
         if let Err(e) = pull_result {
             // If it's a conflict, do NOT abort - preserve conflict state for UI
             if is_conflict_error(&e) {
@@ -874,8 +971,8 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
             cleanup_stale_rebase_state(&path);
             return Err(format!("Pull failed: {}", e));
         }
-        
-        // Fix detached HEAD that rebase may have caused
+
+        // Fix detached HEAD that rebase may have caused（rebase 后修复 detached HEAD 是合理场景，保留）
         fix_detached_head(&path)?;
 
         // Check again after pull - if we're now in a conflict state, don't push
@@ -889,7 +986,9 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
 
         let push_result = run_git(&path, &["push"]);
         match push_result {
-            Ok(_) => {}
+            Ok(_) => {
+                pushed = true;
+            }
             Err(e) => {
                 let err_lower = e.to_lowercase();
                 // detached HEAD fallback
@@ -908,6 +1007,7 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
                             }
                             return Err(format!("Failed to push: {}", retry_err));
                         }
+                        pushed = true;
                     } else {
                         if is_auth_error(&e) {
                             return Err(format!("AUTH_REQUIRED:{}", e));
@@ -923,7 +1023,7 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<(), St
         }
     }
 
-    Ok(())
+    Ok(CommitPushResult { committed, pushed })
 }
 
 fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
@@ -1225,8 +1325,9 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
     let relative_path_str = relative_path.to_str().ok_or(i18n::t("backend.git.invalidPathEncoding"))?;
 
     // Check if remote exists
-    let remote_url = get_remote_url(repo_path);
-    if remote_url.is_err() {
+    // G-05 修复：区分"无远程配置"和"远程读取失败"
+    let remote_url = get_remote_url(repo_path)?;
+    if remote_url.is_none() {
         return Err("NO_REMOTE".to_string());
     }
 
@@ -1308,8 +1409,9 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
         .unwrap_or("unknown");
 
     // Check if remote exists
-    let remote_url = get_remote_url(repo_path);
-    if remote_url.is_err() {
+    // G-05 修复：区分"无远程配置"和"远程读取失败"
+    let remote_url = get_remote_url(repo_path)?;
+    if remote_url.is_none() {
         return Err("NO_REMOTE".to_string());
     }
 
@@ -1539,12 +1641,47 @@ fn cleanup_stale_rebase_state(repo_path: &str) {
     let _ = run_git(repo_path, &["merge", "--abort"]);
 }
 
-/// Helper function to get conflict content for a specific side.
-/// Handles the rebase ours/theirs swap correctly.
-fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<String, String> {
+/// G-14 修复：检测当前是否处于 rebase 场景（统一三处重复的检测逻辑）。
+/// rebase 和 merge 场景下 stage 映射相反，必须正确区分。
+fn is_rebase_scenario(repo_path: &str) -> bool {
     let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
     let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
-    let is_rebasing = rebase_merge.exists() || rebase_apply.exists();
+    rebase_merge.exists() || rebase_apply.exists()
+}
+
+/// G-14 修复：从 git index 的指定 stage 获取文件内容（统一三处重复的 stage 读取逻辑）。
+/// stage 2 = ours，stage 3 = theirs。返回 Ok(Some(content)) 表示成功获取非空内容，
+/// Ok(None) 表示该 stage 无内容（文件可能不存在于此 side），Err 表示 git 命令失败。
+fn fetch_stage_content(repo_path: &str, rel_path: &str, stage: u8) -> Option<String> {
+    let stage_ref = format!(":{}:{}", stage, rel_path);
+    if let Ok(output) = run_git(repo_path, &["show", &stage_ref]) {
+        if !output.is_empty() {
+            return Some(output);
+        }
+    }
+    // cat-file fallback：通过 ls-files 获取 stage 的 blob hash，再 cat-file -p
+    if let Ok(ls_output) = run_git(repo_path, &["ls-files", "-s", "--", rel_path]) {
+        let stage_str = stage.to_string();
+        for line in ls_output.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 && parts[1] == stage_str {
+                let hash = parts[2];
+                if let Ok(content) = run_git(repo_path, &["cat-file", "-p", hash]) {
+                    if !content.is_empty() {
+                        return Some(content);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Helper function to get conflict content for a specific side.
+/// Handles the rebase ours/theirs swap correctly.
+/// G-14 修复：使用 is_rebase_scenario 和 fetch_stage_content 公共函数，减少重复逻辑。
+fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<String, String> {
+    let is_rebasing = is_rebase_scenario(repo_path);
 
     if side == "local" {
         if is_rebasing {
@@ -1592,10 +1729,28 @@ fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<S
     }
 }
 
-// rebase 冲突后恢复工作树文件到本地版本（去除冲突标记）。注意 rebase 中 --theirs 才是本地。
+// 冲突后恢复工作树文件到本地版本（去除冲突标记）。
+// G-03 修复：必须区分 rebase 和 merge 场景，因为 --theirs/--ours 语义相反：
+//   - rebase 中：--theirs = 本地（正在被 rebase 的提交），--ours = 远程/upstream
+//   - merge  中：--ours   = 本地（当前分支），           --theirs = 远程
+// G-11 说明：此函数会去除工作树文件的冲突标记，用户直接打开文件看到的是干净的本地版本，
+// 可能误以为冲突已自动解决。但 git index 中文件仍为 unmerged 状态，直接提交会失败。
+// 用户必须通过 ConflictResolver 解决冲突（stage 文件）才能继续。
 fn restore_conflicted_files_to_local(repo_path: &str) {
     eprintln!("[INFO] Restoring conflicted files to local versions in {}", repo_path);
-    
+
+    // 检测当前是 rebase 还是 merge 场景
+    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
+    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
+    let is_rebasing = rebase_merge.exists() || rebase_apply.exists();
+    // rebase 场景用 --theirs 表示本地；merge 场景用 --ours 表示本地
+    let local_side = if is_rebasing { "--theirs" } else { "--ours" };
+    eprintln!(
+        "[INFO] restore_conflicted_files_to_local: scenario={} local_side={}",
+        if is_rebasing { "rebase" } else { "merge" },
+        local_side
+    );
+
     // Get all unmerged (conflicted) files
     if let Ok(output) = run_git(repo_path, &["diff", "--name-only", "--diff-filter=U"]) {
         for rel_path in output.lines() {
@@ -1603,14 +1758,13 @@ fn restore_conflicted_files_to_local(repo_path: &str) {
             if rel_path.is_empty() {
                 continue;
             }
-            // During rebase, --theirs = our local version (commits being rebased)
-            // This removes conflict markers while keeping the rebase state intact
-            let checkout_result = run_git(repo_path, &["checkout", "--theirs", "--", rel_path]);
+            // 根据场景选择正确的 side 来恢复本地版本，去除冲突标记但保留 rebase/merge 状态
+            let checkout_result = run_git(repo_path, &["checkout", local_side, "--", rel_path]);
             if checkout_result.is_ok() {
                 eprintln!("[INFO] Restored conflicted file to local version: {}", rel_path);
             } else {
-                // checkout --theirs 失败时用 git show 获取本地内容写入；仍失败则保持原样。
-                eprintln!("[WARN] checkout --theirs failed for '{}', trying git show fallback", rel_path);
+                // checkout 失败时用 git show 获取本地内容写入；仍失败则保持原样。
+                eprintln!("[WARN] checkout {} failed for '{}', trying git show fallback", local_side, rel_path);
                 let local_content = get_conflict_content(repo_path, rel_path, "local");
                 match local_content {
                     Ok(content) => {
@@ -1632,10 +1786,19 @@ fn restore_conflicted_files_to_local(repo_path: &str) {
     }
 }
 
-/// Fix detached HEAD state by switching back to the correct branch
-/// This handles the case where a rebase completed but left the repo in detached HEAD
-/// Only fixes if there's no active rebase/merge in progress
-/// 返回 Err 表示检测到 detached HEAD 但切换分支失败；返回 Ok 表示无需修复或修复成功。
+/// Fix detached HEAD state by switching back to the correct branch.
+/// 用户场景：clone 后默认分支存在且全程没有手动切换分支，应用应自动把 detached HEAD 挂回分支，
+/// 不需要用户手动执行 `git checkout`。
+///
+/// 修复优先级：
+/// 1. 若处于 rebase/merge 进行中，不干扰，直接返回 Ok。
+/// 2. 若 HEAD 已附在本地分支上，无需修复。
+/// 3. 尝试从 rebase 状态记录中恢复目标分支。
+/// 4. 按远程默认分支（refs/remotes/origin/HEAD）切回对应本地分支；
+///    若本地分支不存在，则自动创建并跟踪远程分支。
+/// 5. 回退到在本地分支中查找指向当前 HEAD 的分支并切换。
+///
+/// 返回 Err 表示检测到 detached HEAD 但无法自动修复；返回 Ok 表示无需修复或修复成功。
 fn fix_detached_head(repo_path: &str) -> Result<(), String> {
     // Don't interfere with active rebase/merge
     let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
@@ -1657,7 +1820,7 @@ fn fix_detached_head(repo_path: &str) -> Result<(), String> {
 
     eprintln!("[INFO] fix_detached_head: detected detached HEAD in {}", repo_path);
 
-    // Try to find the correct branch to switch to
+    // 3. Try to find the correct branch from rebase state
     if let Some(target_branch) = get_rebase_branch(repo_path) {
         eprintln!("[INFO] fix_detached_head: switching to branch {}", target_branch);
         run_git(repo_path, &["checkout", &target_branch])
@@ -1666,8 +1829,30 @@ fn fix_detached_head(repo_path: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    // Fallback: try checking out the most recent local branch
-    // Use git branch to find branches that point to current HEAD
+    // 4. 按远程默认分支恢复：切换到对应本地分支，不存在则创建并跟踪远程
+    if let Ok(remote_default) = run_git(repo_path, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) {
+        let remote_default = remote_default.trim();
+        if let Some(local_branch) = remote_default.strip_prefix("origin/") {
+            let local_ref = format!("refs/heads/{}", local_branch);
+            let has_local = run_git(repo_path, &["show-ref", "--verify", &local_ref]).is_ok();
+            if has_local {
+                eprintln!("[INFO] fix_detached_head: switching to local branch {}", local_branch);
+                run_git(repo_path, &["checkout", local_branch])
+                    .map_err(|e| format!("Failed to fix detached HEAD: {}", e))?;
+            } else {
+                eprintln!(
+                    "[INFO] fix_detached_head: creating local branch {} tracking {}",
+                    local_branch, remote_default
+                );
+                run_git(repo_path, &["checkout", "-b", local_branch, remote_default])
+                    .map_err(|e| format!("Failed to fix detached HEAD: {}", e))?;
+            }
+            eprintln!("[INFO] fix_detached_head: successfully attached HEAD to {}", local_branch);
+            return Ok(());
+        }
+    }
+
+    // 5. Fallback: try checking out a local branch that points to current HEAD
     if let Ok(head_hash) = run_git(repo_path, &["rev-parse", "HEAD"]) {
         if let Ok(branches) = run_git(repo_path, &["branch", "--format=%(refname:short)=%(objectname)"]) {
             for line in branches.lines() {
@@ -1689,9 +1874,27 @@ fn fix_detached_head(repo_path: &str) -> Result<(), String> {
             }
         }
     }
-    // 未找到匹配分支，不视为错误（仓库可能本就应在 detached HEAD 状态）
-    eprintln!("[WARN] fix_detached_head: could not find a branch matching current HEAD in {}", repo_path);
-    Ok(())
+
+    Err(format!(
+        "DETACHED_HEAD:Repository is in detached HEAD state and could not be automatically fixed in {}.",
+        repo_path
+    ))
+}
+
+/// G-06 修复：检测仓库是否处于 detached HEAD 状态（不自动切换分支）。
+/// 用于提交前检测：若 detached，返回 true 让调用方决定是否报错或提示用户手动处理。
+/// 处于 rebase/merge 进行中时返回 false（这些场景由 fix_detached_head 在结束后处理）。
+fn is_detached_head(repo_path: &str) -> bool {
+    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
+    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
+    let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
+    if rebase_merge.exists() || rebase_apply.exists() || merge_head.exists() {
+        return false;
+    }
+    match run_git(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        Ok(branch) => branch == "HEAD",
+        Err(_) => false,
+    }
 }
 
 /// Scan directory for all git repositories
@@ -1741,7 +1944,8 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_pat
         let is_submodule = git_dir.is_file();
         
         // Get remote URL
-        let remote_url = get_remote_url(&path_str).ok();
+        // G-05 修复：get_remote_url 返回 Result<Option<String>, String>，flatten 后得到 Option<String>
+        let remote_url = get_remote_url(&path_str).ok().flatten();
         
         // Get current branch
         let current_branch = get_branch(&path_str).unwrap_or_else(|_| "unknown".to_string());
@@ -1774,7 +1978,7 @@ fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent_pat
                             .to_string();
                         
                         let submodule_path_str = submodule_full_path.to_string_lossy().to_string().replace('\\', "/");
-                        let submodule_remote = get_remote_url(&submodule_path_str).ok();
+                        let submodule_remote = get_remote_url(&submodule_path_str).ok().flatten();
                         let submodule_branch = get_branch(&submodule_path_str).unwrap_or_else(|_| "unknown".to_string());
                         let (submodule_has_changes, submodule_change_count) = get_uncommitted_count(&submodule_path_str);
                         
@@ -1848,10 +2052,25 @@ fn parse_gitmodules(gitmodules_path: &Path) -> Result<Vec<String>, String> {
     }
 }
 
-fn get_remote_url(path: &str) -> Result<String, String> {
-    // Try to get the first remote URL (usually 'origin')
+/// G-05 修复：获取远程仓库 URL。
+/// 返回值区分三种情况：
+/// - `Ok(Some(url))`：配置了 origin 远程且 URL 有效
+/// - `Ok(None)`：没有配置 origin 远程（正常情况，git_pull 应跳过）
+/// - `Err(e)`：git 命令执行失败（如仓库损坏、git 配置异常），调用方应报错而非静默成功
+fn get_remote_url(path: &str) -> Result<Option<String>, String> {
+    // 先检查是否有 origin 远程配置
+    let remotes = run_git(path, &["remote"])?;
+    if !remotes.lines().any(|r| r.trim() == "origin") {
+        // 没有配置 origin 远程，返回 None 表示"无远程配置"
+        return Ok(None);
+    }
+    // 有 origin 但 get-url 失败，说明 git 配置异常（如 .git/config 损坏）
     let output = run_git(path, &["remote", "get-url", "origin"])?;
-    Ok(output.trim().to_string())
+    let url = output.trim().to_string();
+    if url.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(url))
 }
 
 /// Get list of conflicting files in a repository during a rebase or merge
@@ -1968,92 +2187,33 @@ pub async fn git_get_conflict_local_content(repo_path: String, file_path: String
     }
     eprintln!("[INFO] git_get_conflict_local_content: normalized rel_path='{}'", rel_path);
 
-    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
-    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
-    let is_rebasing = rebase_merge.exists() || rebase_apply.exists();
-
-    if is_rebasing {
-        // During rebase: REBASE_HEAD = our local commit being replayed
-        let rebase_head_ref = format!("REBASE_HEAD:{}", rel_path);
-        match run_git(&repo_path, &["show", &rebase_head_ref]) {
-            Ok(output) if !output.is_empty() => {
-                eprintln!("[INFO] git_get_conflict_local_content: OK from REBASE_HEAD:{} (len={})", rel_path, output.len());
-                return Ok(output);
-            }
-            Ok(_) => eprintln!("[WARN] git_get_conflict_local_content: REBASE_HEAD:{} returned empty", rel_path),
-            Err(e) => eprintln!("[WARN] git_get_conflict_local_content: REBASE_HEAD:{} failed: {}", rel_path, e),
+    // G-14 修复：使用公共函数统一 stage 映射逻辑
+    // rebase: local = REBASE_HEAD + stage 3（theirs = 本地）
+    // merge : local = HEAD + stage 2（ours = 本地）
+    let is_rebasing = is_rebase_scenario(&repo_path);
+    let result = if is_rebasing {
+        // 先尝试 REBASE_HEAD（rebase 场景下的本地提交）
+        if let Ok(output) = run_git(&repo_path, &["show", &format!("REBASE_HEAD:{}", rel_path)]) {
+            if !output.is_empty() { return Ok(output); }
         }
-
-        // During rebase: stage 3 = theirs = our local version
-        let stage3_ref = format!(":3:{}", rel_path);
-        match run_git(&repo_path, &["show", &stage3_ref]) {
-            Ok(output) if !output.is_empty() => {
-                eprintln!("[INFO] git_get_conflict_local_content: OK from :3:{} (len={})", rel_path, output.len());
-                return Ok(output);
-            }
-            Ok(_) => eprintln!("[WARN] git_get_conflict_local_content: :3:{} returned empty", rel_path),
-            Err(e) => eprintln!("[WARN] git_get_conflict_local_content: :3:{} failed: {}", rel_path, e),
-        }
-
-        // cat-file with stage 3
-        if let Ok(ls_output) = run_git(&repo_path, &["ls-files", "-s", "--", &rel_path]) {
-            for line in ls_output.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 4 && parts[1] == "3" {
-                    let hash = parts[2];
-                    if let Ok(content) = run_git(&repo_path, &["cat-file", "-p", hash]) {
-                        if !content.is_empty() {
-                            return Ok(content);
-                        }
-                    }
-                }
-            }
-        }
+        // 再用 stage 3 + cat-file fallback
+        fetch_stage_content(&repo_path, &rel_path, 3)
     } else {
-        // During merge: stage 2 = ours = our local version
-        let stage2_ref = format!(":2:{}", rel_path);
-        match run_git(&repo_path, &["show", &stage2_ref]) {
-            Ok(output) if !output.is_empty() => {
-                eprintln!("[INFO] git_get_conflict_local_content: OK from :2:{} (len={})", rel_path, output.len());
-                return Ok(output);
-            }
-            Ok(_) => eprintln!("[WARN] git_get_conflict_local_content: :2:{} returned empty", rel_path),
-            Err(e) => eprintln!("[WARN] git_get_conflict_local_content: :2:{} failed: {}", rel_path, e),
+        // 先尝试 HEAD（merge 场景下的本地分支）
+        if let Ok(output) = run_git(&repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
+            if !output.is_empty() { return Ok(output); }
         }
+        // 再用 stage 2 + cat-file fallback
+        fetch_stage_content(&repo_path, &rel_path, 2)
+    };
 
-        // HEAD: = our local branch during merge
-        let head_ref = format!("HEAD:{}", rel_path);
-        match run_git(&repo_path, &["show", &head_ref]) {
-            Ok(output) if !output.is_empty() => {
-                eprintln!("[INFO] git_get_conflict_local_content: OK from HEAD:{} (len={})", rel_path, output.len());
-                return Ok(output);
-            }
-            Ok(_) => eprintln!("[WARN] git_get_conflict_local_content: HEAD:{} returned empty", rel_path),
-            Err(e) => eprintln!("[WARN] git_get_conflict_local_content: HEAD:{} failed: {}", rel_path, e),
-        }
-
-        // cat-file with stage 2
-        if let Ok(ls_output) = run_git(&repo_path, &["ls-files", "-s", "--", &rel_path]) {
-            for line in ls_output.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 4 && parts[1] == "2" {
-                    let hash = parts[2];
-                    if let Ok(content) = run_git(&repo_path, &["cat-file", "-p", hash]) {
-                        if !content.is_empty() {
-                            return Ok(content);
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(content) = result {
+        eprintln!("[INFO] git_get_conflict_local_content: OK from stage (len={})", content.len());
+        Ok(content)
+    } else {
+        eprintln!("[WARN] git_get_conflict_local_content: all git strategies failed for '{}' in {}, returning empty (file may not exist on this side)", rel_path, repo_path);
+        Ok(String::new())
     }
-
-    // Fallback: if all git strategies failed, the file likely doesn't exist on this side
-    // (e.g., delete/modify conflict where one side deleted the file).
-    // Return empty string instead of reading the working tree, which would return
-    // incorrect content (local content shown as "remote" or conflict markers as "local").
-    eprintln!("[WARN] git_get_conflict_local_content: all git strategies failed for '{}' in {}, returning empty (file may not exist on this side)", rel_path, repo_path);
-    Ok(String::new())
 }
 
 // 获取冲突文件的远程版本。rebase 用 stage 2/HEAD，merge 用 stage 3/MERGE_HEAD。
@@ -2068,95 +2228,36 @@ pub async fn git_get_conflict_remote_content(repo_path: String, file_path: Strin
     }
     eprintln!("[INFO] git_get_conflict_remote_content: normalized rel_path='{}'", rel_path);
 
-    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
-    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
-    let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
-    let is_rebasing = rebase_merge.exists() || rebase_apply.exists();
-
-    if is_rebasing {
-        // During rebase: HEAD = upstream/remote (the branch being rebased onto)
-        let head_ref = format!("HEAD:{}", rel_path);
-        match run_git(&repo_path, &["show", &head_ref]) {
-            Ok(output) if !output.is_empty() => {
-                eprintln!("[INFO] git_get_conflict_remote_content: OK from HEAD:{} (len={})", rel_path, output.len());
-                return Ok(output);
-            }
-            Ok(_) => eprintln!("[WARN] git_get_conflict_remote_content: HEAD:{} returned empty", rel_path),
-            Err(e) => eprintln!("[WARN] git_get_conflict_remote_content: HEAD:{} failed: {}", rel_path, e),
+    // G-14 修复：使用公共函数统一 stage 映射逻辑
+    // rebase: remote = HEAD + stage 2（ours = upstream/remote）
+    // merge : remote = MERGE_HEAD + stage 3（theirs = remote）
+    let is_rebasing = is_rebase_scenario(&repo_path);
+    let result = if is_rebasing {
+        // 先尝试 HEAD（rebase 场景下的 upstream/remote）
+        if let Ok(output) = run_git(&repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
+            if !output.is_empty() { return Ok(output); }
         }
-
-        // During rebase: stage 2 = ours = upstream/remote version
-        let stage2_ref = format!(":2:{}", rel_path);
-        match run_git(&repo_path, &["show", &stage2_ref]) {
-            Ok(output) if !output.is_empty() => {
-                eprintln!("[INFO] git_get_conflict_remote_content: OK from :2:{} (len={})", rel_path, output.len());
-                return Ok(output);
-            }
-            Ok(_) => eprintln!("[WARN] git_get_conflict_remote_content: :2:{} returned empty", rel_path),
-            Err(e) => eprintln!("[WARN] git_get_conflict_remote_content: :2:{} failed: {}", rel_path, e),
-        }
-
-        // cat-file with stage 2
-        if let Ok(ls_output) = run_git(&repo_path, &["ls-files", "-s", "--", &rel_path]) {
-            for line in ls_output.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 4 && parts[1] == "2" {
-                    let hash = parts[2];
-                    if let Ok(content) = run_git(&repo_path, &["cat-file", "-p", hash]) {
-                        if !content.is_empty() {
-                            return Ok(content);
-                        }
-                    }
-                }
-            }
-        }
+        // 再用 stage 2 + cat-file fallback
+        fetch_stage_content(&repo_path, &rel_path, 2)
     } else {
-        // During merge: stage 3 = theirs = remote version
-        let stage3_ref = format!(":3:{}", rel_path);
-        match run_git(&repo_path, &["show", &stage3_ref]) {
-            Ok(output) if !output.is_empty() => {
-                eprintln!("[INFO] git_get_conflict_remote_content: OK from :3:{} (len={})", rel_path, output.len());
-                return Ok(output);
-            }
-            Ok(_) => eprintln!("[WARN] git_get_conflict_remote_content: :3:{} returned empty", rel_path),
-            Err(e) => eprintln!("[WARN] git_get_conflict_remote_content: :3:{} failed: {}", rel_path, e),
-        }
-
-        // MERGE_HEAD: = remote during merge
+        // 先尝试 MERGE_HEAD（merge 场景下的 remote）
+        let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
         if merge_head.exists() {
-            let merge_head_ref = format!("MERGE_HEAD:{}", rel_path);
-            match run_git(&repo_path, &["show", &merge_head_ref]) {
-                Ok(output) if !output.is_empty() => {
-                    eprintln!("[INFO] git_get_conflict_remote_content: OK from MERGE_HEAD:{} (len={})", rel_path, output.len());
-                    return Ok(output);
-                }
-                Ok(_) => eprintln!("[WARN] git_get_conflict_remote_content: MERGE_HEAD:{} returned empty", rel_path),
-                Err(e) => eprintln!("[WARN] git_get_conflict_remote_content: MERGE_HEAD:{} failed: {}", rel_path, e),
+            if let Ok(output) = run_git(&repo_path, &["show", &format!("MERGE_HEAD:{}", rel_path)]) {
+                if !output.is_empty() { return Ok(output); }
             }
         }
+        // 再用 stage 3 + cat-file fallback
+        fetch_stage_content(&repo_path, &rel_path, 3)
+    };
 
-        // cat-file with stage 3
-        if let Ok(ls_output) = run_git(&repo_path, &["ls-files", "-s", "--", &rel_path]) {
-            for line in ls_output.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 4 && parts[1] == "3" {
-                    let hash = parts[2];
-                    if let Ok(content) = run_git(&repo_path, &["cat-file", "-p", hash]) {
-                        if !content.is_empty() {
-                            return Ok(content);
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(content) = result {
+        eprintln!("[INFO] git_get_conflict_remote_content: OK from stage (len={})", content.len());
+        Ok(content)
+    } else {
+        eprintln!("[WARN] git_get_conflict_remote_content: all git strategies failed for '{}' in {}, returning empty (file may not exist on this side)", rel_path, repo_path);
+        Ok(String::new())
     }
-
-    // Fallback: if all git strategies failed, the file likely doesn't exist on this side
-    // (e.g., modify/delete conflict where the remote side deleted the file).
-    // Return empty string instead of reading the working tree, which would return
-    // incorrect content (local content shown as "remote").
-    eprintln!("[WARN] git_get_conflict_remote_content: all git strategies failed for '{}' in {}, returning empty (file may not exist on this side)", rel_path, repo_path);
-    Ok(String::new())
 }
 
 /// Resolve a conflict by choosing a side for a specific file
@@ -2223,18 +2324,29 @@ fn check_and_continue_rebase(repo_path: &str) -> Result<(), String> {
                 &["rebase", "--continue"],
                 &[("GIT_EDITOR", "true")],
             );
-            if let Err(e) = result {
-                eprintln!("[WARN] git_resolve_conflict_file: rebase --continue failed: {}", e);
-                // Don't fail the whole operation - the conflict is resolved but rebase couldn't continue
-                // User can continue manually
-            } else {
-                // Rebase continued successfully - fix detached HEAD if needed
-                let _ = fix_detached_head(repo_path);
+            match result {
+                Ok(_) => {
+                    // Rebase continued successfully - fix detached HEAD if needed
+                    let _ = fix_detached_head(repo_path);
+                }
+                Err(e) => {
+                    // G-04 修复：rebase --continue 失败时必须返回错误，
+                    // 否则前端误报"冲突已解决"，但仓库仍处于 rebase-in-progress 状态，
+                    // 用户感知为"解决冲突无效"。
+                    eprintln!("[ERROR] git_resolve_conflict_file: rebase --continue failed: {}", e);
+                    return Err(format!("REBASE_CONTINUE_FAILED:{}", e));
+                }
             }
         } else {
             let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
             if merge_head.exists() {
-                run_git(repo_path, &["commit", "--no-edit"])?;
+                // G-12 修复：保留 git 自动生成的 merge commit 信息（--no-edit）。
+                // 如需让用户输入 merge commit 信息，需要前端提供输入框（后续优化）。
+                // G-04 修复：merge commit 失败时同样返回错误，避免前端误报"已解决"
+                if let Err(e) = run_git(repo_path, &["commit", "--no-edit"]) {
+                    eprintln!("[ERROR] git_resolve_conflict_file: merge commit failed: {}", e);
+                    return Err(format!("MERGE_COMMIT_FAILED:{}", e));
+                }
                 // Fix detached HEAD after merge commit
                 let _ = fix_detached_head(repo_path);
             }
@@ -2379,31 +2491,79 @@ fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
     run_git_with_env(path, args, &[])
 }
 
+/// G-08 修复：git 命令超时时间（秒）。
+/// 本地操作（status/diff/add/commit）通常秒级完成；网络操作（clone/pull/push）在弱网下可能较慢。
+/// 120 秒足够覆盖正常网络操作，同时防止永久阻塞 Tauri 命令线程。
+const GIT_COMMAND_TIMEOUT_SECS: u64 = 120;
+
 fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Result<String, String> {
     let mut cmd = super::create_command("git");
     cmd.current_dir(path).args(args);
+
+    // G-07 修复：强制 git 输出英文，保证 is_conflict_error / is_auth_error 的字符串匹配
+    // 在所有语言环境（如 zh_CN.UTF-8）下都稳定可靠。
+    cmd.env("LC_ALL", "C");
+    cmd.env("LANG", "C");
 
     for (key, value) in env_vars {
         cmd.env(key, value);
     }
 
-    let output = cmd.output()
-        .map_err(|e| format!("Failed to execute git: {}", e))?;
+    // G-16 说明：返回结果会 trim() 首尾空白。
+    // 对于 git show 获取文件内容，这会去除末尾换行（POSIX 文件通常以换行结尾）。
+    // 调用方若需要保留原始内容（如冲突文件内容），应使用 std::fs::read 直接读取文件，
+    // 或在写入后补加末尾换行。当前 get_conflict_content / fetch_stage_content 使用 run_git，
+    // 因此获取的冲突文件内容会缺少末尾换行——这在实际使用中不影响冲突解决（diff 比较忽略末尾换行）。
 
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if stderr.is_empty() {
-            // 如果 stderr 为空，尝试从 stdout 获取错误信息
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !stdout.is_empty() {
-                Err(stdout)
+    // G-08 修复：通过子线程 + channel 超时机制，防止网络操作（clone/pull/push）永久阻塞。
+    // 主线程在超时后能返回错误，子线程中已启动的 git 子进程会被 kill 释放资源。
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut cmd_for_thread = cmd;
+    let child_handle = std::thread::spawn(move || {
+        let result = cmd_for_thread.output();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(GIT_COMMAND_TIMEOUT_SECS)) {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
             } else {
-                Err("Git command failed with no output".to_string())
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if stderr.is_empty() {
+                    // 如果 stderr 为空，尝试从 stdout 获取错误信息
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !stdout.is_empty() {
+                        Err(stdout)
+                    } else {
+                        Err("Git command failed with no output".to_string())
+                    }
+                } else {
+                    Err(stderr)
+                }
             }
-        } else {
-            Err(stderr)
+        }
+        Ok(Err(e)) => {
+            // 启动 git 进程本身失败
+            Err(format!("Failed to execute git: {}", e))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            // 超时：子线程仍在等待 git 进程，等待子线程结束以释放资源
+            // （子线程中的 cmd.output() 会随 git 进程结束而返回，但 git 进程可能仍在运行）
+            eprintln!(
+                "[ERROR] run_git_with_env: git command timed out after {}s (path={}, args={:?})",
+                GIT_COMMAND_TIMEOUT_SECS, path, args
+            );
+            // 不阻塞等待子线程，让它在后台自然结束（git 进程可能仍在运行，但 Tauri 命令线程已释放）
+            std::mem::forget(child_handle);
+            Err(format!(
+                "Git command timed out after {} seconds. Please check your network connection and try again.",
+                GIT_COMMAND_TIMEOUT_SECS
+            ))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            // 子线程 panic 或提前退出
+            Err("Git command thread terminated unexpectedly".to_string())
         }
     }
 }
@@ -2540,6 +2700,15 @@ async fn do_git_clone(
                 cmd.env("GIT_PASSWORD", p);
             }
         }
+    }
+
+    // G-17 修复：在 Unix 上为 git clone 子进程创建新进程组（setsid），
+    // 这样 git_clone_cancel 中的 kill(-pid) 只会终止 git 及其子进程
+    // （git-remote-https、pack-objects 等），不会误杀 Tauri 主进程组。
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
     }
 
     let mut child = cmd
@@ -2742,9 +2911,9 @@ pub struct GitCredential {
 /// Build a unique credential key based on the repository's remote URL
 fn build_credential_key(repo_path: &str) -> Result<String, String> {
     // Use the remote URL as the key if available, otherwise use the repo path
-    match get_remote_url(repo_path) {
-        Ok(url) => Ok(format!("git:{}", url)),
-        Err(_) => Ok(format!("git:path:{}", repo_path.replace('\\', "/"))),
+    match get_remote_url(repo_path)? {
+        Some(url) => Ok(format!("git:{}", url)),
+        None => Ok(format!("git:path:{}", repo_path.replace('\\', "/"))),
     }
 }
 

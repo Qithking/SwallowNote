@@ -413,7 +413,9 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     if (!selectedFile) return
     setIsResolving(true)
     try {
-      // If there are unsaved changes, save them first — 优先使用编辑器实时内容，避免 state 过期
+      // G-09 保证：如果有未保存的改动，必须先 save 成功后才调用 resolve。
+      // await 确保 save 失败时抛错进入 catch 块，不会执行后续的 resolve（stage）操作，
+      // 避免后端 side="current" 不验证文件内容导致 stage 旧文件/空文件。
       if (hasUnsavedChanges) {
         const contentToSave = splitDiffRef.current?.getLocalContent() ?? editedLocalContent
         await gitSaveConflictFileContent(
@@ -442,7 +444,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     if (!selectedFile) return
     setIsResolving(true)
     try {
-      // Save remote content to the file
+      // G-09 保证：必须先 save 成功后才调用 resolve，避免 stage 旧文件
       await gitSaveConflictFileContent(
         selectedFile.repoPath,
         selectedFile.file.abs_path,
@@ -468,7 +470,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     if (!selectedFile) return
     setIsResolving(true)
     try {
-      // Save edited local content (or original if unmodified) to the file
+      // G-09 保证：必须先 save 成功后才调用 resolve，避免 stage 旧文件
       const contentToSave = hasUnsavedChanges ? editedLocalContent : localContent
       await gitSaveConflictFileContent(
         selectedFile.repoPath,
