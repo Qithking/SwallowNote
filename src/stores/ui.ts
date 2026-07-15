@@ -4,7 +4,7 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import i18n from '@/i18n'
-import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels } from '@/lib/tauri'
+import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, isAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
 import { AiModelConfig, generateModelId } from '@/lib/ai'
 import { useFileTreeStore } from './filetree'
@@ -1034,10 +1034,19 @@ export const useUIStore = create<UIState>((set, get) => ({
         }
       }
 
+      // 启动时检查 OS 实际自启状态，与设置同步
+      // 用户可能在 Task Manager 或系统设置中手动关闭了自启
+      let actualAutoStart = s.autoStart === 'true'
+      try {
+        actualAutoStart = await isAutoStartEnabled()
+      } catch {
+        // OS 查询失败时退回读取设置值
+      }
+
       set({
         theme: s.theme as Theme,
         themeColor: s.themeColor,
-        autoStart: s.autoStart === 'true',
+        autoStart: actualAutoStart,
         autoCheckUpdate: s.autoCheckUpdate !== 'false', // default true
         closeWithoutExit: s.closeWithoutExit === 'true',
         noteWidth: s.noteWidth as NoteWidth,

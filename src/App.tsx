@@ -92,7 +92,7 @@ function App() {
   const initRef = useRef(false)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
-  const { saveSessionStateNow, restoreSessionState } = useSessionPersistence()
+  const { saveSessionStateNow, restoreSessionState, restoreWindowGeometry } = useSessionPersistence()
 
   useEffect(() => {
     if (initRef.current) return
@@ -111,7 +111,11 @@ function App() {
         loadUISettings(),
       ])
 
-      // Step 3: 设置加载完成后立即显示窗口，避免用户等待文件树加载
+      // Step 3: 在显示窗口前恢复窗口几何（尺寸/位置/最大化/全屏），
+      // 避免用户先看到默认尺寸再被 resize 产生的"闪一下"
+      await restoreWindowGeometry()
+
+      // 设置加载完成后立即显示窗口，避免用户等待文件树加载
       try {
         await getCurrentWindow().show()
       } catch (e) {

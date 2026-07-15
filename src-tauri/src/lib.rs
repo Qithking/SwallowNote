@@ -75,6 +75,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![]),
@@ -219,6 +220,9 @@ commands::upgrade::download_latest_release,
             commands::frontmatter::rename_category,
             commands::frontmatter::delete_category,
             commands::frontmatter::create_category,
+            commands::autostart::enable_autostart,
+            commands::autostart::disable_autostart,
+            commands::autostart::is_autostart_enabled,
         ])
         .setup(|app| {
             // 获取 app_data_dir，失败时优雅降级跳过 DB 初始化
