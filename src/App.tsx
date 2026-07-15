@@ -128,10 +128,9 @@ function App() {
         } else if (platform === 'macos') {
           await enableModernWindowStyle({ cornerRadius: 12 })
         } else if (platform === 'windows') {
-          await enableModernWindowStyle({ cornerRadius: 12 })
-          // Windows 11 圆角需匹配 border-radius 避免黑角
-          document.documentElement.style.borderRadius = '8px'
-          document.body.style.borderRadius = '8px'
+          // Windows: html/body 圆角匹配 DWM 窗口圆角裁剪，应用边框由外层容器 inset-[2px] + background 间隙绘制
+          document.documentElement.style.borderRadius = '12px'
+          document.body.style.borderRadius = '12px'
         }
       } catch (e) {
         console.warn('[App] Failed to set window style:', e)
@@ -739,19 +738,21 @@ function App() {
 
   return (
     <TooltipProvider>
+      {/* 外层: 铺满窗口, 2px padding 显示主题色作为边框 */}
       <div
-        className="fixed inset-0 flex flex-col p-px rounded-[12px] box-border"
+        className="fixed inset-[2px] flex flex-col p-px rounded-[10px] box-border"
         style={{
           background: 'var(--theme-color)',
           color: 'var(--text-primary)',
           fontSize: 'var(--font-size)',
-          // Windows 11 DWM 圆角会裁剪窗口最外层 1px，用内阴影做保险边框，
-          // 避免右边/下边出现“缺边”现象
-          boxShadow: 'inset 0 0 0 1px var(--border-color)'
         }}
         onContextMenu={handleContextMenu}
       >
-        <div className="flex-1 flex flex-col overflow-hidden rounded-[11px]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))'}}>
+        {/* 内容层: 实际背景 */}
+        <div
+          className="flex-1 flex flex-col overflow-hidden rounded-[8px]"
+          style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))' }}
+        >
         {/* Title Bar */}
         <TitleBar />
 
