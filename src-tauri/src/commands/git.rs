@@ -348,12 +348,9 @@ pub async fn git_pull(path: String) -> Result<(), String> {
             if is_auth_error(&e) {
                 Err(format!("AUTH_REQUIRED:{}", e))
             } else if is_conflict_error(&e) {
-                // Do NOT abort the rebase - preserve the conflict state for the UI to resolve
-                // Restore conflicted files to local versions (remove conflict markers from working tree)
-                restore_conflicted_files_to_local(&path);
-                // G-11 提示：工作树文件已去除冲突标记，但 git index 仍为 unmerged，
-                // 用户必须通过 ConflictResolver 解决冲突才能继续
-                Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers removed from working tree. Use ConflictResolver to resolve.]", e))
+                // Do NOT abort the rebase - preserve the conflict state for the UI to resolve.
+                // Keep conflict markers in the working tree so the user must resolve them in ConflictResolver.
+                Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers preserved in working tree. Use ConflictResolver to resolve.]", e))
             } else {
                 // Non-conflict error (network, zlib, etc.): clean up stale rebase state
                 // that pull --rebase may have left behind
@@ -521,10 +518,9 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
         Ok(_) => Ok(()),
         Err(e) => {
             if is_conflict_error(&e) {
-                // Do NOT abort the rebase - preserve the conflict state for the UI to resolve
-                // Restore conflicted files to local versions (remove conflict markers from working tree)
-                restore_conflicted_files_to_local(&path);
-                Err(format!("REBASE_CONFLICT:{}", e))
+                // Do NOT abort the rebase - preserve the conflict state for the UI to resolve.
+                // Keep conflict markers in the working tree so the user must resolve them in ConflictResolver.
+                Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers preserved in working tree. Use ConflictResolver to resolve.]", e))
             } else if is_auth_error(&e) {
                 // Auth failure — let the frontend prompt for credentials
                 cleanup_stale_rebase_state(&path);
@@ -955,11 +951,10 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<Commit
         };
         let pull_result = run_git(&path, &pull_args);
         if let Err(e) = pull_result {
-            // If it's a conflict, do NOT abort - preserve conflict state for UI
+            // If it's a conflict, do NOT abort - preserve conflict state for UI.
+            // Keep conflict markers in the working tree so the user must resolve them in ConflictResolver.
             if is_conflict_error(&e) {
-                // Restore conflicted files to local versions (remove conflict markers from working tree)
-                restore_conflicted_files_to_local(&path);
-                return Err(format!("REBASE_CONFLICT:{}", e));
+                return Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers preserved in working tree. Use ConflictResolver to resolve.]", e));
             }
             // Auth errors during pull
             if is_auth_error(&e) {
@@ -1352,36 +1347,8 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
         &["show", "--no-color", &remote_ref],
     )?;
 
-    // 检测本地是否有未提交改动：git diff --quiet 退出码 0=无改动，1=有改动，其他（如 128 路径不存在）=错误。
-    // 有改动时拒绝 checkout，避免静默覆盖用户本地修改。
-    let diff_status = {
-        let mut cmd = super::create_command("git");
-        cmd.current_dir(repo_path)
-            .args(["diff", "--quiet", "--", relative_path_str])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-    };
-    match diff_status {
-        Ok(status) if status.success() => { /* 无本地改动，可安全 checkout */ }
-        // 仅退出码 1 视为"有改动"，拒绝覆盖（保留 LOCAL_CHANGES: 前缀供前端识别）
-        Ok(status) if status.code() == Some(1) => {
-            return Err(format!("LOCAL_CHANGES: {}", relative_path_str));
-        }
-        // 其他非零退出码（如 128 路径不存在）视为错误，避免误判为"有改动"
-        Ok(status) => {
-            let code = status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| i18n::t("backend.git.terminatedBySignal"));
-            return Err(format!("{}: git diff exit code {}", i18n::t("backend.git.checkLocalChangesFailed"), code));
-        }
-        Err(e) => {
-            return Err(format!("{}: {}", i18n::t("backend.git.checkLocalChangesFailed"), e));
-        }
-    }
-
-    // Also checkout the file from remote to update the working tree
+    // UI 文案已明确告知用户"强制覆盖本地文件，本地未提交的修改将丢失"，
+    // 因此这里直接执行 checkout，不再因为本地有改动而拒绝。
     run_git(repo_path, &["checkout", &format!("origin/{}", branch), "--", relative_path_str])
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.checkoutFileFailed"), e))?;
 
@@ -1405,10 +1372,10 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
     }
 
     let repo_path = current.to_str().ok_or("Invalid repo path")?;
-    let file_name = Path::new(&file_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
+    let relative_path = Path::new(&file_path)
+        .strip_prefix(current)
+        .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
+    let relative_path_str = relative_path.to_str().ok_or(i18n::t("backend.git.invalidPathEncoding"))?;
 
     // Check if remote exists
     // G-05 修复：区分"无远程配置"和"远程读取失败"
@@ -1417,12 +1384,12 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
         return Err("NO_REMOTE".to_string());
     }
 
-    // Stage the file
-    run_git(repo_path, &["add", &file_path])
+    // Stage the file using the relative path to avoid issues with absolute Windows paths
+    run_git(repo_path, &["add", relative_path_str])
         .map_err(|e| format!("Failed to stage file: {}", e))?;
 
     // Commit
-    let commit_message = format!("Force upload: {}", file_name);
+    let commit_message = format!("Force upload: {}", relative_path_str);
     match run_git(repo_path, &["commit", "-m", &commit_message]) {
         Ok(_) => {}
         Err(e) => {
@@ -1730,63 +1697,6 @@ fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<S
         Err(format!("Failed to get remote content for {}", rel_path))
     } else {
         Err(format!("Invalid side: {}", side))
-    }
-}
-
-// 冲突后恢复工作树文件到本地版本（去除冲突标记）。
-// G-03 修复：必须区分 rebase 和 merge 场景，因为 --theirs/--ours 语义相反：
-//   - rebase 中：--theirs = 本地（正在被 rebase 的提交），--ours = 远程/upstream
-//   - merge  中：--ours   = 本地（当前分支），           --theirs = 远程
-// G-11 说明：此函数会去除工作树文件的冲突标记，用户直接打开文件看到的是干净的本地版本，
-// 可能误以为冲突已自动解决。但 git index 中文件仍为 unmerged 状态，直接提交会失败。
-// 用户必须通过 ConflictResolver 解决冲突（stage 文件）才能继续。
-fn restore_conflicted_files_to_local(repo_path: &str) {
-    eprintln!("[INFO] Restoring conflicted files to local versions in {}", repo_path);
-
-    // 检测当前是 rebase 还是 merge 场景
-    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
-    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
-    let is_rebasing = rebase_merge.exists() || rebase_apply.exists();
-    // rebase 场景用 --theirs 表示本地；merge 场景用 --ours 表示本地
-    let local_side = if is_rebasing { "--theirs" } else { "--ours" };
-    eprintln!(
-        "[INFO] restore_conflicted_files_to_local: scenario={} local_side={}",
-        if is_rebasing { "rebase" } else { "merge" },
-        local_side
-    );
-
-    // Get all unmerged (conflicted) files
-    if let Ok(output) = run_git(repo_path, &["diff", "--name-only", "--diff-filter=U"]) {
-        for rel_path in output.lines() {
-            let rel_path = rel_path.trim();
-            if rel_path.is_empty() {
-                continue;
-            }
-            // 根据场景选择正确的 side 来恢复本地版本，去除冲突标记但保留 rebase/merge 状态
-            let checkout_result = run_git(repo_path, &["checkout", local_side, "--", rel_path]);
-            if checkout_result.is_ok() {
-                eprintln!("[INFO] Restored conflicted file to local version: {}", rel_path);
-            } else {
-                // checkout 失败时用 git show 获取本地内容写入；仍失败则保持原样。
-                eprintln!("[WARN] checkout {} failed for '{}', trying git show fallback", local_side, rel_path);
-                let local_content = get_conflict_content(repo_path, rel_path, "local");
-                match local_content {
-                    Ok(content) => {
-                        let abs_path = Path::new(repo_path).join(rel_path);
-                        if let Err(e) = std::fs::write(&abs_path, &content) {
-                            eprintln!("[ERROR] Failed to write local content to '{}': {}", abs_path.display(), e);
-                        } else {
-                            eprintln!("[INFO] Restored conflicted file via git show fallback: {}", rel_path);
-                        }
-                    }
-                    Err(e) => {
-                        // If even git show fails, the file truly doesn't have a local version
-                        // (e.g., local deleted the file). Leave the working tree as-is.
-                        eprintln!("[WARN] Could not get local content for '{}': {}. Leaving working tree as-is.", rel_path, e);
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -3259,5 +3169,113 @@ mod tests {
     fn test_unescape_git_path_incomplete_octal() {
         // \NN 不够 3 位时不做八进制转义，原样保留
         assert_eq!(unescape_git_path("\\34"), "\\34");
+    }
+
+    // ===== git 冲突内容读取集成测试 =====
+    // 验证 git_get_conflict_local_content / git_get_conflict_remote_content
+    // 在 merge 和 rebase 冲突场景下都返回干净的原始版本，不含冲突标记。
+
+    fn git_cmd(repo: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .status()
+            .expect("failed to run git");
+        assert!(status.success(), "git {:?} failed in {:?}", args, repo);
+    }
+
+    fn setup_conflict_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        git_cmd(repo, &["init", "-q", "-b", "main"]);
+        git_cmd(repo, &["config", "user.email", "test@example.com"]);
+        git_cmd(repo, &["config", "user.name", "Test"]);
+        std::fs::write(repo.join("file.txt"), "line1\nbase\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "base"]);
+        tmp
+    }
+
+    fn normalize(s: &str) -> String {
+        s.replace("\r\n", "\n")
+    }
+
+    #[tokio::test]
+    async fn test_get_conflict_local_content_merge_has_no_markers() {
+        let tmp = setup_conflict_repo();
+        let repo = tmp.path();
+
+        git_cmd(repo, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.join("file.txt"), "line1\nremote\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "feature"]);
+
+        git_cmd(repo, &["checkout", "-q", "main"]);
+        std::fs::write(repo.join("file.txt"), "line1\nlocal\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "main"]);
+
+        // Trigger merge conflict without committing
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["merge", "feature", "--no-commit", "--no-ff"])
+            .status()
+            .unwrap();
+        assert!(!status.success(), "merge should produce conflicts");
+
+        let working = std::fs::read_to_string(repo.join("file.txt")).unwrap();
+        assert!(working.contains("<<<<<<<"), "working tree should have conflict markers");
+
+        let local = git_get_conflict_local_content(repo.to_str().unwrap().to_string(), "file.txt".to_string()).await.unwrap();
+        let remote = git_get_conflict_remote_content(repo.to_str().unwrap().to_string(), "file.txt".to_string()).await.unwrap();
+
+        assert!(!local.contains("<<<<<<<"), "local content must not contain conflict markers:\n{}", local);
+        assert!(!local.contains("======="), "local content must not contain conflict markers:\n{}", local);
+        assert!(!local.contains(">>>>>>>"), "local content must not contain conflict markers:\n{}", local);
+        assert!(!remote.contains("<<<<<<<"), "remote content must not contain conflict markers:\n{}", remote);
+
+        assert_eq!(normalize(&local), "line1\nlocal\n", "local content should be HEAD version");
+        assert_eq!(normalize(&remote), "line1\nremote\n", "remote content should be MERGE_HEAD version");
+    }
+
+    #[tokio::test]
+    async fn test_get_conflict_local_content_rebase_has_no_markers() {
+        let tmp = setup_conflict_repo();
+        let repo = tmp.path();
+
+        git_cmd(repo, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.join("file.txt"), "line1\nlocal\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "feature"]);
+
+        git_cmd(repo, &["checkout", "-q", "main"]);
+        std::fs::write(repo.join("file.txt"), "line1\nremote\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "main"]);
+
+        // Rebase feature onto main: feature is the branch being rebased (local).
+        git_cmd(repo, &["checkout", "-q", "feature"]);
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["rebase", "main"])
+            .status()
+            .unwrap();
+        assert!(!status.success(), "rebase should produce conflicts");
+        assert!(repo.join(".git/rebase-merge").exists() || repo.join(".git/rebase-apply").exists(),
+            "rebase state should exist");
+
+        let working = std::fs::read_to_string(repo.join("file.txt")).unwrap();
+        assert!(working.contains("<<<<<<<"), "working tree should have conflict markers");
+
+        let local = git_get_conflict_local_content(repo.to_str().unwrap().to_string(), "file.txt".to_string()).await.unwrap();
+        let remote = git_get_conflict_remote_content(repo.to_str().unwrap().to_string(), "file.txt".to_string()).await.unwrap();
+
+        assert!(!local.contains("<<<<<<<"), "local content must not contain conflict markers:\n{}", local);
+        assert!(!local.contains("======="), "local content must not contain conflict markers:\n{}", local);
+        assert!(!local.contains(">>>>>>>"), "local content must not contain conflict markers:\n{}", local);
+        assert!(!remote.contains("<<<<<<<"), "remote content must not contain conflict markers:\n{}", remote);
+
+        assert_eq!(normalize(&local), "line1\nlocal\n", "local content should be REBASE_HEAD/stage 3 version (branch being rebased)");
+        assert_eq!(normalize(&remote), "line1\nremote\n", "remote content should be HEAD/stage 2 version (upstream)");
     }
 }
