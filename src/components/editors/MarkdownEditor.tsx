@@ -24,6 +24,7 @@ import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore }
 import { registerFlushFn } from '@/lib/editor-flush'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
+import { resolveMarkdownImagePath } from '@/utils/resolveImagePath'
 import { stripFrontmatter } from '@/lib/utils/frontmatter'
 import { buildTableOfContents } from '@/utils/tableOfContents'
 import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, readFile, pathExists, getFileMetadata } from '@/lib/tauri'
@@ -243,43 +244,12 @@ function BlockNoteInner({
   
   const resolveFileUrl = async (url: string): Promise<string> => {
     try {
-      // Skip URLs that are already fully qualified
-      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('asset://')) {
+      const absolutePath = resolveMarkdownImagePath(url, activeTabPath || '', rootPath || '')
+      // If the URL was a complete URL or absolute path, resolveMarkdownImagePath returns it as-is;
+      // only call convertFileSrc when the url changed (i.e., it was resolved to a local absolute path).
+      if (absolutePath === url) {
         return url
       }
-
-      let absolutePath: string
-
-      // If the URL is already an absolute path (starts with / on Unix or drive letter on Windows)
-      if (url.startsWith('/') || /^[a-zA-Z]:/.test(url)) {
-        absolutePath = url
-      } else {
-        // Resolve relative path based on the current file's directory
-        const filePath = activeTabPath || ''
-        const fileDir = filePath.split(/[\\/]/).slice(0, -1).join('/') || rootPath || ''
-
-        if (!fileDir) {
-          return url
-        }
-
-        // Normalize: remove leading ./ from relative path
-        const normalizedUrl = url.replace(/^\.\//, '')
-
-        // Handle ../ by resolving path segments
-        const urlParts = normalizedUrl.split('/')
-        const dirParts = fileDir.split('/')
-
-        for (const part of urlParts) {
-          if (part === '..') {
-            dirParts.pop()
-          } else if (part && part !== '.') {
-            dirParts.push(part)
-          }
-        }
-
-        absolutePath = dirParts.join('/')
-      }
-
       return convertFileSrc(absolutePath)
     } catch {
       return url

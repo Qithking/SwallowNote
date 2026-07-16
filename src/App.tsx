@@ -46,6 +46,15 @@ import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-co
 import { setAppLocale } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
+
+function logTime(stage: string, t0: number) {
+  const elapsed = Math.round(performance.now() - t0)
+  console.log(`[STARTUP-TIME] ${stage} t=${elapsed}`)
+  try {
+    invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch(() => {})
+  } catch { /* ignore */ }
+}
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -92,28 +101,38 @@ function App() {
   const initRef = useRef(false)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
-  const { saveSessionStateNow, restoreSessionState } = useSessionPersistence()
+  const { saveSessionStateNow, restoreSessionState, restoreWindowGeometry } = useSessionPersistence()
 
   useEffect(() => {
     if (initRef.current) return
     initRef.current = true
     const init = async () => {
+      const appInitT0 = performance.now()
+      logTime('app_init_begin', appInitT0)
       const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
       const { loadSettings: loadEditorSettings } = useEditorSettingsStore.getState()
       const { loadSettings: loadUISettings } = useUIStore.getState()
 
       // Step 1: Initialize workspace mode first (determines folder vs workspace)
       await initMode()
+      logTime('app_init_mode', appInitT0)
 
       // Step 2: Load settings in parallel (these are independent)
       await Promise.all([
         loadEditorSettings(),
         loadUISettings(),
       ])
+      logTime('app_init_settings', appInitT0)
 
-      // Step 3: 设置加载完成后立即显示窗口，避免用户等待文件树加载
+      // Step 3: 在显示窗口前恢复窗口几何（尺寸/位置/最大化/全屏），
+      // 避免用户先看到默认尺寸再被 resize 产生的"闪一下"
+      await restoreWindowGeometry()
+      logTime('app_init_geometry', appInitT0)
+
+      // 设置加载完成后立即显示窗口，避免用户等待文件树加载
       try {
         await getCurrentWindow().show()
+        logTime('app_window_shown', appInitT0)
       } catch (e) {
         console.warn('[App] Failed to show window:', e)
       }
@@ -128,11 +147,11 @@ function App() {
         } else if (platform === 'macos') {
           await enableModernWindowStyle({ cornerRadius: 12 })
         } else if (platform === 'windows') {
-          await enableModernWindowStyle({ cornerRadius: 12 })
-          // Windows 11 圆角需匹配 border-radius 避免黑角
-          document.documentElement.style.borderRadius = '8px'
-          document.body.style.borderRadius = '8px'
+          // Windows: html/body 圆角匹配 DWM 窗口圆角裁剪，应用边框由外层容器 inset-[2px] + background 间隙绘制
+          document.documentElement.style.borderRadius = '12px'
+          document.body.style.borderRadius = '12px'
         }
+        logTime('app_init_window_style', appInitT0)
       } catch (e) {
         console.warn('[App] Failed to set window style:', e)
       }
@@ -140,7 +159,9 @@ function App() {
       // Step 4: 窗口可见后加载文件树与恢复会话
       // loadLatestByMode 需先完成以建立文件树，再恢复会话状态
       await loadLatestByMode()
+      logTime('app_init_filetree', appInitT0)
       await restoreSessionState()
+      logTime('app_init_session_restored', appInitT0)
       
       // Step 5: 延迟加载插件和后台服务，确保编辑器先就绪可交互
 
@@ -237,6 +258,11 @@ function App() {
       } catch { /* ignore */ }
     }
     init()
+  }, [])
+
+  // 记录 App 组件首次渲染完成时间
+  useEffect(() => {
+    logTime('app_first_render', 0)
   }, [])
 
   useEffect(() => {
@@ -420,11 +446,19 @@ function App() {
   cachedReposRef.current = cachedRepositories
   const pullAllReposRef = useRef(pullAllRepos)
   pullAllReposRef.current = pullAllRepos
+  // 防止 setInterval 触发的 doSync 与上一次重叠（弱网下 pull 120s 超时 + push 可能超过 syncInterval）
+  const isSyncingRef = useRef(false)
 
   useEffect(() => {
     const doSync = async () => {
+      // 重入保护：上一次同步未完成时跳过，避免并发 git 操作导致 index 锁冲突
+      if (isSyncingRef.current) return
+      isSyncingRef.current = true
       const repos = cachedReposRef.current
-      if (repos.length === 0) return
+      if (repos.length === 0) {
+        isSyncingRef.current = false
+        return
+      }
       const gitStore = useGitStore.getState()
       gitStore.setSyncStatus({ isSyncing: true })
       try {
@@ -474,6 +508,11 @@ function App() {
                     const savedCred = await gitCredentialGet(repo.path)
                     if (savedCred) {
                       try {
+                        // gitCommitAndPush 内部 pull 阶段也可能因认证失败返回 AUTH_REQUIRED，
+                        // 仅调 gitPushWithCredentials 会跳过 pull，导致远端新提交未集成。
+                        // 先 pull 再 push，pull 已成功时为 no-op。
+                        const { gitPullWithCredentials } = await import('@/lib/tauri')
+                        await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
                         await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
                         pushSucceeded++
                         continue
@@ -560,6 +599,8 @@ function App() {
       } catch (e) {
         console.error('Auto sync failed:', e)
         gitStore.setSyncStatus({ isSyncing: false })
+      } finally {
+        isSyncingRef.current = false
       }
     }
 
@@ -739,19 +780,21 @@ function App() {
 
   return (
     <TooltipProvider>
+      {/* 外层: 铺满窗口, 2px padding 显示主题色作为边框 */}
       <div
-        className="fixed inset-0 flex flex-col p-px rounded-[12px] box-border"
+        className="fixed inset-[2px] flex flex-col p-px rounded-[10px] box-border"
         style={{
           background: 'var(--theme-color)',
           color: 'var(--text-primary)',
           fontSize: 'var(--font-size)',
-          // Windows 11 DWM 圆角会裁剪窗口最外层 1px，用内阴影做保险边框，
-          // 避免右边/下边出现“缺边”现象
-          boxShadow: 'inset 0 0 0 1px var(--border-color)'
         }}
         onContextMenu={handleContextMenu}
       >
-        <div className="flex-1 flex flex-col overflow-hidden rounded-[11px]" style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))'}}>
+        {/* 内容层: 实际背景 */}
+        <div
+          className="flex-1 flex flex-col overflow-hidden rounded-[8px]"
+          style={{ background: 'var(--bg-primary-gradient, var(--bg-primary))' }}
+        >
         {/* Title Bar */}
         <TitleBar />
 

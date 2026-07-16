@@ -1290,7 +1290,8 @@ pub async fn git_show_file_content(file_path: String, commit_hash: String) -> Re
     let relative_path_str = relative_path.to_str().ok_or("Invalid path encoding")?;
 
     // Get the full file content at the given commit
-    let output = run_git(
+    // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
+    let output = run_git_no_trim(
         repo_path,
         &[
             "show",
@@ -1344,8 +1345,9 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
     let branch = get_branch(repo_path)?;
 
     // Get the file content from the remote branch (origin/<branch>)
+    // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
     let remote_ref = format!("origin/{}:{}", branch, relative_path_str);
-    let output = run_git(
+    let output = run_git_no_trim(
         repo_path,
         &["show", "--no-color", &remote_ref],
     )?;
@@ -1654,7 +1656,8 @@ fn is_rebase_scenario(repo_path: &str) -> bool {
 /// Ok(None) 表示该 stage 无内容（文件可能不存在于此 side），Err 表示 git 命令失败。
 fn fetch_stage_content(repo_path: &str, rel_path: &str, stage: u8) -> Option<String> {
     let stage_ref = format!(":{}:{}", stage, rel_path);
-    if let Ok(output) = run_git(repo_path, &["show", &stage_ref]) {
+    // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
+    if let Ok(output) = run_git_no_trim(repo_path, &["show", &stage_ref]) {
         if !output.is_empty() {
             return Some(output);
         }
@@ -1666,7 +1669,7 @@ fn fetch_stage_content(repo_path: &str, rel_path: &str, stage: u8) -> Option<Str
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 4 && parts[1] == stage_str {
                 let hash = parts[2];
-                if let Ok(content) = run_git(repo_path, &["cat-file", "-p", hash]) {
+                if let Ok(content) = run_git_no_trim(repo_path, &["cat-file", "-p", hash]) {
                     if !content.is_empty() {
                         return Some(content);
                     }
@@ -1686,18 +1689,19 @@ fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<S
     if side == "local" {
         if is_rebasing {
             // During rebase: REBASE_HEAD = our local commit, :3: = theirs = our local
-            if let Ok(output) = run_git(repo_path, &["show", &format!("REBASE_HEAD:{}", rel_path)]) {
+            // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
+            if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!("REBASE_HEAD:{}", rel_path)]) {
                 if !output.is_empty() { return Ok(output); }
             }
-            if let Ok(output) = run_git(repo_path, &["show", &format!(":3:{}", rel_path)]) {
+            if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!(":3:{}", rel_path)]) {
                 if !output.is_empty() { return Ok(output); }
             }
         } else {
             // During merge: HEAD = our local branch, :2: = ours = our local
-            if let Ok(output) = run_git(repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
+            if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
                 if !output.is_empty() { return Ok(output); }
             }
-            if let Ok(output) = run_git(repo_path, &["show", &format!(":2:{}", rel_path)]) {
+            if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!(":2:{}", rel_path)]) {
                 if !output.is_empty() { return Ok(output); }
             }
         }
@@ -1705,20 +1709,20 @@ fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<S
     } else if side == "remote" {
         if is_rebasing {
             // During rebase: HEAD = upstream/remote, :2: = ours = upstream/remote
-            if let Ok(output) = run_git(repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
+            if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
                 if !output.is_empty() { return Ok(output); }
             }
-            if let Ok(output) = run_git(repo_path, &["show", &format!(":2:{}", rel_path)]) {
+            if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!(":2:{}", rel_path)]) {
                 if !output.is_empty() { return Ok(output); }
             }
         } else {
             // During merge: :3: = theirs = remote, MERGE_HEAD = remote
-            if let Ok(output) = run_git(repo_path, &["show", &format!(":3:{}", rel_path)]) {
+            if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!(":3:{}", rel_path)]) {
                 if !output.is_empty() { return Ok(output); }
             }
             let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
             if merge_head.exists() {
-                if let Ok(output) = run_git(repo_path, &["show", &format!("MERGE_HEAD:{}", rel_path)]) {
+                if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!("MERGE_HEAD:{}", rel_path)]) {
                     if !output.is_empty() { return Ok(output); }
                 }
             }
@@ -2193,14 +2197,15 @@ pub async fn git_get_conflict_local_content(repo_path: String, file_path: String
     let is_rebasing = is_rebase_scenario(&repo_path);
     let result = if is_rebasing {
         // 先尝试 REBASE_HEAD（rebase 场景下的本地提交）
-        if let Ok(output) = run_git(&repo_path, &["show", &format!("REBASE_HEAD:{}", rel_path)]) {
+        // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
+        if let Ok(output) = run_git_no_trim(&repo_path, &["show", &format!("REBASE_HEAD:{}", rel_path)]) {
             if !output.is_empty() { return Ok(output); }
         }
         // 再用 stage 3 + cat-file fallback
         fetch_stage_content(&repo_path, &rel_path, 3)
     } else {
         // 先尝试 HEAD（merge 场景下的本地分支）
-        if let Ok(output) = run_git(&repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
+        if let Ok(output) = run_git_no_trim(&repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
             if !output.is_empty() { return Ok(output); }
         }
         // 再用 stage 2 + cat-file fallback
@@ -2234,7 +2239,8 @@ pub async fn git_get_conflict_remote_content(repo_path: String, file_path: Strin
     let is_rebasing = is_rebase_scenario(&repo_path);
     let result = if is_rebasing {
         // 先尝试 HEAD（rebase 场景下的 upstream/remote）
-        if let Ok(output) = run_git(&repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
+        // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
+        if let Ok(output) = run_git_no_trim(&repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
             if !output.is_empty() { return Ok(output); }
         }
         // 再用 stage 2 + cat-file fallback
@@ -2243,7 +2249,7 @@ pub async fn git_get_conflict_remote_content(repo_path: String, file_path: Strin
         // 先尝试 MERGE_HEAD（merge 场景下的 remote）
         let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
         if merge_head.exists() {
-            if let Ok(output) = run_git(&repo_path, &["show", &format!("MERGE_HEAD:{}", rel_path)]) {
+            if let Ok(output) = run_git_no_trim(&repo_path, &["show", &format!("MERGE_HEAD:{}", rel_path)]) {
                 if !output.is_empty() { return Ok(output); }
             }
         }
@@ -2491,12 +2497,23 @@ fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
     run_git_with_env(path, args, &[])
 }
 
+/// 不 trim 输出的 git 命令包装。
+/// 用于获取文件内容的命令（git show / git cat-file），保留原始末尾换行。
+/// G-16 修复：run_git 会对输出 trim()，导致 git show 获取的文件内容丢失末尾换行。
+/// 文件内容返回场景应使用此函数。
+fn run_git_no_trim(path: &str, args: &[&str]) -> Result<String, String> {
+    run_git_with_env_no_trim(path, args, &[])
+}
+
 /// G-08 修复：git 命令超时时间（秒）。
 /// 本地操作（status/diff/add/commit）通常秒级完成；网络操作（clone/pull/push）在弱网下可能较慢。
 /// 120 秒足够覆盖正常网络操作，同时防止永久阻塞 Tauri 命令线程。
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 120;
 
-fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Result<String, String> {
+/// 核心执行逻辑：运行 git 命令并返回原始 stdout 字节。
+/// 不对 stdout 做 trim 处理，由调用方（run_git_with_env / run_git_with_env_no_trim）决定是否 trim。
+/// 错误信息（stderr / stdout fallback）仍会 trim 以保证错误消息干净。
+fn run_git_raw(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Result<Vec<u8>, String> {
     let mut cmd = super::create_command("git");
     cmd.current_dir(path).args(args);
 
@@ -2508,12 +2525,6 @@ fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Res
     for (key, value) in env_vars {
         cmd.env(key, value);
     }
-
-    // G-16 说明：返回结果会 trim() 首尾空白。
-    // 对于 git show 获取文件内容，这会去除末尾换行（POSIX 文件通常以换行结尾）。
-    // 调用方若需要保留原始内容（如冲突文件内容），应使用 std::fs::read 直接读取文件，
-    // 或在写入后补加末尾换行。当前 get_conflict_content / fetch_stage_content 使用 run_git，
-    // 因此获取的冲突文件内容会缺少末尾换行——这在实际使用中不影响冲突解决（diff 比较忽略末尾换行）。
 
     // G-08 修复：通过子线程 + channel 超时机制，防止网络操作（clone/pull/push）永久阻塞。
     // 主线程在超时后能返回错误，子线程中已启动的 git 子进程会被 kill 释放资源。
@@ -2527,7 +2538,7 @@ fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Res
     match rx.recv_timeout(std::time::Duration::from_secs(GIT_COMMAND_TIMEOUT_SECS)) {
         Ok(Ok(output)) => {
             if output.status.success() {
-                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+                Ok(output.stdout)
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 if stderr.is_empty() {
@@ -2551,7 +2562,7 @@ fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Res
             // 超时：子线程仍在等待 git 进程，等待子线程结束以释放资源
             // （子线程中的 cmd.output() 会随 git 进程结束而返回，但 git 进程可能仍在运行）
             eprintln!(
-                "[ERROR] run_git_with_env: git command timed out after {}s (path={}, args={:?})",
+                "[ERROR] run_git_raw: git command timed out after {}s (path={}, args={:?})",
                 GIT_COMMAND_TIMEOUT_SECS, path, args
             );
             // 不阻塞等待子线程，让它在后台自然结束（git 进程可能仍在运行，但 Tauri 命令线程已释放）
@@ -2566,6 +2577,18 @@ fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Res
             Err("Git command thread terminated unexpectedly".to_string())
         }
     }
+}
+
+fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Result<String, String> {
+    let stdout = run_git_raw(path, args, env_vars)?;
+    Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+}
+
+/// 不 trim 输出的 git 命令执行（带环境变量）。
+/// 用于获取文件内容的场景，保留原始末尾换行。
+fn run_git_with_env_no_trim(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Result<String, String> {
+    let stdout = run_git_raw(path, args, env_vars)?;
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
 /// Clone a git repository to a local path

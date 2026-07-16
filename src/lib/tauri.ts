@@ -771,12 +771,28 @@ export async function saveAppSettings(settings: Partial<AppSettings>): Promise<v
 }
 
 export async function setAutoStartEnabled(enabled: boolean): Promise<void> {
-  const { enable, disable } = await import('@tauri-apps/plugin-autostart')
-  if (enabled) {
-    await enable()
+  // Windows 用自定义命令直接操作注册表，正确引用 exe 路径
+  // macOS/Linux 继续用 tauri-plugin-autostart
+  const isWindows = await platform() === 'windows'
+  if (isWindows) {
+    await invoke(enabled ? 'enable_autostart' : 'disable_autostart')
   } else {
-    await disable()
+    const { enable, disable } = await import('@tauri-apps/plugin-autostart')
+    if (enabled) {
+      await enable()
+    } else {
+      await disable()
+    }
   }
+}
+
+export async function isAutoStartEnabled(): Promise<boolean> {
+  const isWindows = await platform() === 'windows'
+  if (isWindows) {
+    return await invoke<boolean>('is_autostart_enabled')
+  }
+  const { isEnabled } = await import('@tauri-apps/plugin-autostart')
+  return await isEnabled()
 }
 
 export async function openWorkspaceDialog(): Promise<string | null> {

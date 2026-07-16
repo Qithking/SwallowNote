@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, mapRepoInfosToRepositories, PullResult } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitForcePush, gitForcePull } from '@/lib/tauri'
+import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitPullWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitForcePush, gitForcePull } from '@/lib/tauri'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -266,6 +266,10 @@ function CommitSection({
             const savedCred = await gitCredentialGet(repo.path)
             if (savedCred) {
               try {
+                // gitCommitAndPush 内部 pull 阶段也可能因认证失败返回 AUTH_REQUIRED，
+                // 仅调 gitPushWithCredentials 会跳过 pull，导致远端新提交未集成。
+                // 先 pull 再 push，pull 已成功时为 no-op。
+                await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
                 await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
                 pushedWithSavedCred = true
                 successCount++

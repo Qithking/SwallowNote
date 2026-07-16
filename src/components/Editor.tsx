@@ -6,8 +6,8 @@ import { useEffect, useRef, useState, useCallback, useMemo, lazy, Suspense } fro
 import { useEditorStore, useUIStore, useWorkspaceStore } from '@/stores'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { usePluginEditors, pluginEditorRegistry, getEditorForExtension } from '@/stores/pluginEditor'
-import { MarkdownEditor } from './editors/MarkdownEditor'
-import { CodeEditor } from './editors/CodeEditor'
+const MarkdownEditor = lazy(() => import('./editors/MarkdownEditor').then(m => ({ default: m.MarkdownEditor })))
+const CodeEditor = lazy(() => import('./editors/CodeEditor').then(m => ({ default: m.CodeEditor })))
 import { serializeFrontmatter, parseFrontmatter } from '@/lib/utils/frontmatter'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 const MindMapEditor = lazy(() => import('./editors/MindMapEditor').then(m => ({ default: m.MindMapEditor })))
@@ -429,38 +429,44 @@ export function EditorView() {
       {fileType === 'markdown' && (
         <div className="flex-1 overflow-hidden">
           {viewMode === 'source' ? (
-            <ErrorBoundary key={activeTab.id}>
-              <CodeEditor
-                key={activeTab.id}
-                content={sourceContent ?? ''}
-                filename={activeTab.name}
-                onChange={handleSourceContentChange}
-                className="flex-1"
-              />
-            </ErrorBoundary>
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
+              <ErrorBoundary key={activeTab.id}>
+                <CodeEditor
+                  key={activeTab.id}
+                  content={sourceContent ?? ''}
+                  filename={activeTab.name}
+                  onChange={handleSourceContentChange}
+                  className="flex-1"
+                />
+              </ErrorBoundary>
+            </Suspense>
           ) : (
-            <ErrorBoundary key={activeTab.id}>
-              <MarkdownEditor
-                key={activeTab.id}
-                content={activeTab.content}
-                onChange={handleContentChange}
-              />
-            </ErrorBoundary>
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
+              <ErrorBoundary key={activeTab.id}>
+                <MarkdownEditor
+                  key={activeTab.id}
+                  content={activeTab.content}
+                  onChange={handleContentChange}
+                />
+              </ErrorBoundary>
+            </Suspense>
           )}
         </div>
       )}
 
       {fileType === 'code' && (
         <div className="flex-1 flex overflow-hidden">
-          <ErrorBoundary key={activeTab.id}>
-            <CodeEditor
-              key={activeTab.id}
-              content={activeTab.content}
-              filename={activeTab.name}
-              onChange={handleContentChange}
-              className="flex-1"
-            />
-          </ErrorBoundary>
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
+            <ErrorBoundary key={activeTab.id}>
+              <CodeEditor
+                key={activeTab.id}
+                content={activeTab.content}
+                filename={activeTab.name}
+                onChange={handleContentChange}
+                className="flex-1"
+              />
+            </ErrorBoundary>
+          </Suspense>
         </div>
       )}
 

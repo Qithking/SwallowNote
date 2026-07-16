@@ -10,6 +10,10 @@ import { saveSessionState, getSessionState } from '@/lib/tauri'
 import { getCurrentWindow, availableMonitors } from '@tauri-apps/api/window'
 import { LogicalSize, LogicalPosition } from '@tauri-apps/api/dpi'
 
+// 窗口最小尺寸约束，须与 tauri.conf.json 中 minWidth/minHeight 保持一致
+const MIN_WINDOW_WIDTH = 1000
+const MIN_WINDOW_HEIGHT = 700
+
 export function useSessionPersistence() {
   // 独立 selector 订阅，避免全量订阅 useUIStore 导致不必要的重渲染
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
@@ -112,6 +116,71 @@ export function useSessionPersistence() {
     }
   }, [])
 
+  // 独立恢复窗口几何（尺寸/位置/最大化/全屏），须在 win.show() 之前调用，
+  // 避免用户先看到默认尺寸再被 resize 产生的"闪一下"。
+  // 对保存的尺寸钳制到 minWidth/minHeight，防止陈旧记录违反新约束。
+  const restoreWindowGeometry = useCallback(async () => {
+    try {
+      const states = await getSessionState()
+      if (Object.keys(states).length === 0) return
+
+      const win = getCurrentWindow()
+      if (states.isMaximized === 'true') {
+        await win.maximize()
+      } else if (states.isFullscreen === 'true') {
+        await win.setFullscreen(true)
+      } else {
+        // 并行恢复窗口尺寸与位置，减少串行等待
+        const ops: Promise<unknown>[] = []
+        if (states.windowWidth && states.windowHeight) {
+          const width = Number(states.windowWidth)
+          const height = Number(states.windowHeight)
+          // 钳制到最小尺寸，防止升级前的陈旧记录违反新约束
+          const clampedWidth = Math.max(width, MIN_WINDOW_WIDTH)
+          const clampedHeight = Math.max(height, MIN_WINDOW_HEIGHT)
+          if (clampedWidth > 0 && clampedHeight > 0) {
+            ops.push(win.setSize(new LogicalSize(clampedWidth, clampedHeight)))
+          }
+        }
+        if (states.windowX && states.windowY) {
+          const x = Number(states.windowX)
+          const y = Number(states.windowY)
+          if (!isNaN(x) && !isNaN(y)) {
+            // 使用 Tauri 显示器 API 校验位置，支持多显示器场景
+            let positionValid = false
+            try {
+              // availableMonitors 是 Tauri v2 独立导出函数，而非 Window 方法
+              const monitors = await availableMonitors()
+              const sf = await win.scaleFactor()
+              positionValid = monitors.some(m => {
+                const mx = m.position.x / sf
+                const my = m.position.y / sf
+                const mw = m.size.width / sf
+                const mh = m.size.height / sf
+                return x >= mx - 200 && x < mx + mw &&
+                       y >= my - 200 && y < my + mh
+              })
+            } catch {
+              // 显示器 API 不可用时退化为基本范围检查
+              // 上限使用宽松倍数以兼容多显示器横向/纵向排列
+              positionValid = x >= -200 && y >= -200 &&
+                x < window.screen.width * 4 &&
+                y < window.screen.height * 4
+            }
+            if (positionValid) {
+              ops.push(win.setPosition(new LogicalPosition(x, y)))
+            }
+          }
+        }
+        if (ops.length > 0) {
+          await Promise.all(ops)
+        }
+      }
+    } catch (e) {
+      console.error('Failed to restore window geometry:', e)
+    }
+  }, [])
+
   const restoreSessionState = useCallback(async () => {
     try {
       const states = await getSessionState()
@@ -209,65 +278,10 @@ export function useSessionPersistence() {
           useUIStore.getState().setEditorViewMode(mode)
         }
       }
-
-      // 恢复窗口尺寸和位置
-      const win = getCurrentWindow()
-      try {
-        if (states.isMaximized === 'true') {
-          await win.maximize()
-        } else if (states.isFullscreen === 'true') {
-          await win.setFullscreen(true)
-        } else {
-          // 并行恢复窗口尺寸与位置，减少串行等待
-          const ops: Promise<unknown>[] = []
-          if (states.windowWidth && states.windowHeight) {
-            const width = Number(states.windowWidth)
-            const height = Number(states.windowHeight)
-            if (width > 0 && height > 0) {
-              ops.push(win.setSize(new LogicalSize(width, height)))
-            }
-          }
-          if (states.windowX && states.windowY) {
-            const x = Number(states.windowX)
-            const y = Number(states.windowY)
-            if (!isNaN(x) && !isNaN(y)) {
-              // 使用 Tauri 显示器 API 校验位置，支持多显示器场景
-              let positionValid = false
-              try {
-                // availableMonitors 是 Tauri v2 独立导出函数，而非 Window 方法
-                const monitors = await availableMonitors()
-                const sf = await win.scaleFactor()
-                positionValid = monitors.some(m => {
-                  const mx = m.position.x / sf
-                  const my = m.position.y / sf
-                  const mw = m.size.width / sf
-                  const mh = m.size.height / sf
-                  return x >= mx - 200 && x < mx + mw &&
-                         y >= my - 200 && y < my + mh
-                })
-              } catch {
-                // 显示器 API 不可用时退化为基本范围检查
-                // 上限使用宽松倍数以兼容多显示器横向/纵向排列
-                positionValid = x >= -200 && y >= -200 &&
-                  x < window.screen.width * 4 &&
-                  y < window.screen.height * 4
-              }
-              if (positionValid) {
-                ops.push(win.setPosition(new LogicalPosition(x, y)))
-              }
-            }
-          }
-          if (ops.length > 0) {
-            await Promise.all(ops)
-          }
-        }
-      } catch (e) {
-        console.error('Failed to restore window size:', e)
-      }
     } catch (e) {
       console.error('Failed to restore session state:', e)
     }
   }, [setSidebarWidth, setRightPanelWidth])
 
-  return { saveSessionStateNow, restoreSessionState }
+  return { saveSessionStateNow, restoreSessionState, restoreWindowGeometry }
 }

@@ -1,11 +1,23 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
 const host = process.env.TAURI_DEV_HOST
 
+// 禁止把重依赖的 vendor CSS 在启动 HTML 中预加载；这些 CSS 只在对应 chunk 真正加载时注入。
+function removeHeavyVendorCssFromHtml(): Plugin {
+  const heavyCssPrefixes = ['vendor-blocknote', 'vendor-markmap', 'vendor-codemirror', 'vendor-katex', 'vendor-ai']
+  return {
+    name: 'remove-heavy-vendor-css',
+    enforce: 'post',
+    transformIndexHtml(html) {
+      return html.replace(/<link[^>]+rel=["']stylesheet["'][^>]+href=["'][^"']*(?:vendor-blocknote|vendor-markmap|vendor-codemirror|vendor-katex|vendor-ai)[^"']*["'][^>]*>/g, '')
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), removeHeavyVendorCssFromHtml()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -35,10 +47,21 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari13',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // 生成 rollup metafile 用于 bundle 依赖分析
+    metafile: true,
     // 降低 CI 构建内存压力
     chunkSizeWarningLimit: 1000,
     // 让 GC 更积极，避免 OOM
     reportCompressedSize: false,
+    // 禁止把大依赖的 vendor chunk 在启动时通过 modulepreload 拉取；
+    // 它们只在使用对应编辑器/功能时按需加载。
+    modulePreload: {
+      resolveDependencies(filename, deps, context) {
+        if (context.hostType !== 'html') return deps
+        const heavyVendors = ['vendor-blocknote', 'vendor-markmap', 'vendor-codemirror', 'vendor-katex', 'vendor-ai']
+        return deps.filter((dep) => !heavyVendors.some((prefix) => dep.includes(prefix)))
+      },
+    },
     rollupOptions: {
       output: {
         // 拆分大依赖为独立 chunk，降低内存并改善缓存

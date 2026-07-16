@@ -52,3 +52,4 @@ coverage/
 *.tsbuildinfo
 vite.config.ts.timestamp-*
 vite.config.js.timestamp-*
+scripts/
