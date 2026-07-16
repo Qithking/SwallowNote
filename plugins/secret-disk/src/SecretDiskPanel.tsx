@@ -1126,7 +1126,7 @@ interface TreeItemProps {
 
 function TreeItem(props: TreeItemProps) {
   const {
-    item, depth, expanded, treeCache, treeVersion,
+    item, depth, expanded, treeCache,
     onSelectNote, onToggle, selectedId, setSelectedId,
     renaming, setRenaming, onRename, onContextMenu,
     onCreate, creating, newName, setNewName, handleCreate, inputRef,
@@ -1291,7 +1291,7 @@ interface ContextMenuViewProps {
 }
 
 const ContextMenuView = forwardRef<HTMLDivElement, ContextMenuViewProps>(function ContextMenuView(
-  { x, y, item, parentId, onNewFile, onNewFolder, onRename, onDelete, onCopyTitle, onClose },
+  { x, y, item, parentId: _parentId, onNewFile, onNewFolder, onRename, onDelete, onCopyTitle, onClose },
   ref,
 ) {
   /** 菜单项点击：执行操作后关闭菜单 */

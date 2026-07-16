@@ -7,11 +7,15 @@ const host = process.env.TAURI_DEV_HOST
 // 禁止把重依赖的 vendor CSS 在启动 HTML 中预加载；这些 CSS 只在对应 chunk 真正加载时注入。
 function removeHeavyVendorCssFromHtml(): Plugin {
   const heavyCssPrefixes = ['vendor-blocknote', 'vendor-markmap', 'vendor-codemirror', 'vendor-katex', 'vendor-ai']
+  const regex = new RegExp(
+    `<link[^>]+rel=["']stylesheet["'][^>]+href=["'][^"']*(?:${heavyCssPrefixes.join('|')})[^"']*["'][^>]*>`,
+    'g'
+  )
   return {
     name: 'remove-heavy-vendor-css',
     enforce: 'post',
     transformIndexHtml(html) {
-      return html.replace(/<link[^>]+rel=["']stylesheet["'][^>]+href=["'][^"']*(?:vendor-blocknote|vendor-markmap|vendor-codemirror|vendor-katex|vendor-ai)[^"']*["'][^>]*>/g, '')
+      return html.replace(regex, '')
     },
   }
 }
