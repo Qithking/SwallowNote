@@ -16,9 +16,18 @@ use tauri::{
 };
 use tauri_plugin_autostart::MacosLauncher;
 
+// 安全地记录窗口首次聚焦时刻；替代 run() 回调里不安全的 static mut。
+static STARTUP_T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+static WINDOW_SHOWN_LOGGED: std::sync::Once = std::sync::Once::new();
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+#[tauri::command]
+fn log_startup_time(stage: &str, elapsed_ms: u64) {
+    println!("[STARTUP-TIME] {} t={}", stage, elapsed_ms);
 }
 
 /// macOS Dock 图标可见性切换（Regular/Accessory 策略）。
@@ -90,6 +99,7 @@ pub fn run() {
         }))
         .invoke_handler(tauri::generate_handler![
             greet,
+            log_startup_time,
             commands::file::path_exists,
             commands::file::get_file_metadata,
             commands::file::list_directory,
@@ -225,30 +235,43 @@ commands::upgrade::download_latest_release,
             commands::autostart::is_autostart_enabled,
         ])
         .setup(|app| {
-            // 获取 app_data_dir，失败时优雅降级跳过 DB 初始化
-            let app_data_dir = match app.path().app_data_dir() {
-                Ok(d) => d,
-                Err(e) => {
-                    eprintln!("Failed to get app data dir, skipping DB init: {}", e);
-                    std::path::PathBuf::new()
+            let startup_t0 = std::time::Instant::now();
+            println!("[STARTUP-TIME] setup_begin t=0");
+            // 获取 app_data_dir；测量模式下可通过 SWALLOWNOTE_DATA_DIR 覆盖，避免污染/锁定生产数据
+            let app_data_dir = if let Ok(dir) = std::env::var("SWALLOWNOTE_DATA_DIR") {
+                let p = std::path::PathBuf::from(dir);
+                println!("[STARTUP-TIME] app_data_dir_override path={}", p.display());
+                p
+            } else {
+                match app.path().app_data_dir() {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!("Failed to get app data dir, skipping DB init: {}", e);
+                        std::path::PathBuf::new()
+                    }
                 }
             };
             std::fs::create_dir_all(&app_data_dir).ok();
+            println!("[STARTUP-TIME] app_data_dir_ready t={}", startup_t0.elapsed().as_millis());
 
             // 应用启动时清理上次崩溃可能残留的 askpass 脚本，防止明文凭证泄露
             commands::git::cleanup_stale_askpass_scripts();
+            println!("[STARTUP-TIME] askpass_cleanup_done t={}", startup_t0.elapsed().as_millis());
 
             // 初始化后端 i18n 翻译
             crate::i18n::init_translations();
+            println!("[STARTUP-TIME] i18n_init_done t={}", startup_t0.elapsed().as_millis());
 
             // 仅在成功获取 app_data_dir 时初始化 DB
             if !app_data_dir.as_os_str().is_empty() {
                 match db::init_db(app_data_dir.clone()) {
                     Ok(db) => {
                         app.handle().manage(db);
+                        println!("[STARTUP-TIME] db_init_done t={}", startup_t0.elapsed().as_millis());
                         // 启动 frontmatter 索引子线程（使用独立数据库连接）
                         let index_db_path = app_data_dir.join("swallownote.db");
                         services::frontmatter_index::start_index_thread(index_db_path, app.handle().clone());
+                        println!("[STARTUP-TIME] frontmatter_thread_started t={}", startup_t0.elapsed().as_millis());
                     }
                     Err(e) => {
                         eprintln!("Failed to initialize database: {}", e);
@@ -261,6 +284,7 @@ commands::upgrade::download_latest_release,
             services::file_watcher::init_watcher(app_handle.clone());
             // 监听 plugins 树，外部 storage.json 变更时通知前端。幂等。
             services::file_watcher::watch_plugin_storage(app_handle.clone());
+            println!("[STARTUP-TIME] file_watcher_ready t={}", startup_t0.elapsed().as_millis());
 
             app.handle().manage(commands::git::new_clone_pid_state());
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
@@ -269,6 +293,7 @@ commands::upgrade::download_latest_release,
             // 启动空闲回收定时器：每 5 分钟扫描，kill 超过 10 分钟未用的插件后端进程
             commands::plugin_invoke::start_idle_reaper(plugin_process_state.clone());
             app.handle().manage(plugin_process_state);
+            println!("[STARTUP-TIME] plugin_state_ready t={}", startup_t0.elapsed().as_millis());
 
             // AI 代理按需启动以节省内存
 
@@ -328,12 +353,24 @@ commands::upgrade::download_latest_release,
                     }
                 })
                 .build(app)?;
+            println!("[STARTUP-TIME] tray_ready t={}", startup_t0.elapsed().as_millis());
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            // 使用 OnceLock / Once 替代 static mut，避免 unsafe 与潜在竞态。
+            // 第一次进入 run 循环时记录 t0，窗口首次聚焦时用它输出耗时。
+            let t0 = STARTUP_T0.get_or_init(std::time::Instant::now);
+
+            // 记录窗口首次可见/可交互，作为 Rust 侧能观测到的最近似“窗口已显示”时刻
+            if let tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Focused(true), .. } = &event {
+                WINDOW_SHOWN_LOGGED.call_once(|| {
+                    println!("[STARTUP-TIME] rust_window_focused t={}", t0.elapsed().as_millis());
+                });
+            }
+
             // 应用退出请求时：停止 frontmatter 索引线程，释放独立数据库连接
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 services::frontmatter_index::stop_index_thread();

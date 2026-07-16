@@ -8,6 +8,19 @@ import { App } from './App'
 import './index.css'
 import { initHealthMonitor } from '@/lib/plugin-health'
 
+function logTime(stage: string, t0: number) {
+  const elapsed = Math.round(performance.now() - t0)
+  console.log(`[STARTUP-TIME] ${stage} t=${elapsed}`)
+  const tauri = (window as any).__TAURI__
+  if (tauri?.invoke) {
+    tauri.invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch((e: any) => {
+      console.error('[STARTUP-TIME] invoke failed:', e)
+    })
+  } else {
+    console.error('[STARTUP-TIME] __TAURI__.invoke not available')
+  }
+}
+
 // 暴露 React 全局变量供插件共享宿主实例
 ;(window as unknown as Window).React = React
 ;(window as unknown as Window).ReactDOM = ReactDOM
@@ -16,8 +29,12 @@ import { initHealthMonitor } from '@/lib/plugin-health'
 ;(window as unknown as Window).SonnerToast = toast
 ;(window as unknown as Window).ReactI18Next = { useTranslation }
 
+const mainT0 = performance.now()
+logTime('main_script_begin', mainT0)
+
 // Initialize plugin health monitor before rendering
 initHealthMonitor()
+logTime('health_monitor_init', mainT0)
 
 // Theme is applied synchronously by the inline script in index.html
 // before any paint occurs, preventing the white→black flash.
@@ -28,3 +45,4 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>,
 )
+logTime('react_render_called', mainT0)

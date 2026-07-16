@@ -296,12 +296,11 @@ body, #root {
   background-color: hsl(var(--primary) / 0.1);
 }
 /* ---- BlockNote Editor ---- */
-.dark>.bn-editor{
-  background-color: transparent;
-  color: var(--text-primary);
-}
+.dark>.bn-editor,
 .bn-editor{
-  background-color: transparent;
+  /* 覆盖 BlockNote 默认背景；CSS 现在随编辑器 chunk 动态注入，
+     加载顺序不可控，所以用 !important 保证应用主题背景透出来。 */
+  background-color: transparent !important;
   color: var(--text-primary);
 }
 .blocknote-editor-container [data-radix-scroll-area-viewport]{  
