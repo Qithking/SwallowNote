@@ -12,7 +12,7 @@ use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -99,6 +99,7 @@ pub fn run() {
         }))
         .invoke_handler(tauri::generate_handler![
             greet,
+            commands::app::restart_app,
             log_startup_time,
             commands::file::path_exists,
             commands::file::get_file_metadata,
@@ -263,22 +264,55 @@ commands::upgrade::download_latest_release,
             println!("[STARTUP-TIME] i18n_init_done t={}", startup_t0.elapsed().as_millis());
 
             // 仅在成功获取 app_data_dir 时初始化 DB
-            if !app_data_dir.as_os_str().is_empty() {
+            let developer_mode = if !app_data_dir.as_os_str().is_empty() {
                 match db::init_db(app_data_dir.clone()) {
                     Ok(db) => {
+                        // 读取开发者模式设置，用于控制是否启用 DevTools（F12）
+                        let developer_mode = match crate::db::session_state::get_session_state(&db) {
+                            Ok(states) => states
+                                .get("settings.developerMode")
+                                .map(|v| v.trim().eq_ignore_ascii_case("true"))
+                                .unwrap_or(false),
+                            Err(e) => {
+                                eprintln!("[WARN] Failed to read developerMode setting: {}", e);
+                                false
+                            }
+                        };
+
                         app.handle().manage(db);
                         println!("[STARTUP-TIME] db_init_done t={}", startup_t0.elapsed().as_millis());
                         // 启动 frontmatter 索引子线程（使用独立数据库连接）
                         let index_db_path = app_data_dir.join("swallownote.db");
                         services::frontmatter_index::start_index_thread(index_db_path, app.handle().clone());
                         println!("[STARTUP-TIME] frontmatter_thread_started t={}", startup_t0.elapsed().as_millis());
+
+                        developer_mode
                     }
                     Err(e) => {
                         eprintln!("Failed to initialize database: {}", e);
+                        false
                     }
                 }
-            }
+            } else {
+                false
+            };
 
+            // 根据开发者模式设置动态创建主窗口，控制 DevTools（F12）是否可用。
+            // 配置文件中的 app.windows 已移除，防止 Tauri 自动创建默认窗口。
+            let _main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("SwallowNote")
+                .inner_size(1200.0, 800.0)
+                .min_inner_size(1000.0, 700.0)
+                .resizable(true)
+                .fullscreen(false)
+                .decorations(false)
+                .transparent(true)
+                .shadow(false)
+                .visible(false)
+                .devtools(developer_mode)
+                .build()
+                .map_err(|e| format!("Failed to create main window: {}", e))?;
+            println!("[STARTUP-TIME] main_window_created devtools={} t={}", developer_mode, startup_t0.elapsed().as_millis());
 
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle.clone());

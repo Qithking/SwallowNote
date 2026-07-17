@@ -689,6 +689,11 @@ export async function setAppLocale(locale: string): Promise<void> {
   await invoke('set_app_locale', { locale })
 }
 
+// 重启应用（用于需要重新初始化窗口的设置项，如 DevTools 开关）
+export async function restartApp(): Promise<void> {
+  await invoke('restart_app')
+}
+
 // 会话状态 API
 export async function saveSessionState(states: Record<string, string>): Promise<void> {
   await invoke('save_session_state', { states })

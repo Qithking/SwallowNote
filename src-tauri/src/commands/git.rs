@@ -132,6 +132,22 @@ pub struct CommitPushResult {
     pub pushed: bool,
 }
 
+/// Convert a filesystem path to the forward-slash form required by Git commands.
+/// Git expects '/' separators on Windows; passing native backslashes will
+/// fail for paths like "HEAD:foo\\bar.md" or "git add foo\\bar.md".
+/// On Unix-like systems backslashes are valid filename characters, so we only
+/// normalize on Windows to avoid corrupting legitimate filenames.
+fn to_git_path(path: &Path) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        path.to_string_lossy().replace('\\', "/")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        path.to_string_lossy().to_string()
+    }
+}
+
 /// Check if a directory is a git repository by checking for .git folder
 #[tauri::command]
 pub fn git_is_repo(path: String) -> bool {
@@ -212,7 +228,11 @@ pub async fn git_status(path: String) -> Result<GitStatus, String> {
 /// Get git diff for a specific file
 #[tauri::command]
 pub async fn git_diff(path: String, file_path: String) -> Result<String, String> {
-    run_git(&path, &["diff", "--", &file_path])
+    let relative_path = Path::new(&file_path)
+        .strip_prefix(Path::new(&path))
+        .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
+    let git_path = to_git_path(&relative_path);
+    run_git(&path, &["diff", "--", &git_path])
 }
 
 /// Stage all changes and commit
@@ -1064,6 +1084,8 @@ fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
 /// Auto commit a single file (local only, no push)
 #[tauri::command]
 pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
+    eprintln!("[INFO] git_auto_commit called for: {}", file_path);
+
     // Find the git root by walking up directories
     let mut current = Path::new(&file_path);
     loop {
@@ -1072,41 +1094,67 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
         }
         match current.parent() {
             Some(parent) => current = parent,
-            None => return Ok(()), // Not in a git repo
+            None => {
+                eprintln!("[INFO] git_auto_commit: not in a git repo, skipping");
+                return Ok(()); // Not in a git repo
+            }
         }
     }
 
     let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    eprintln!("[INFO] git_auto_commit: repo_path={}", repo_path);
 
     // Skip auto-commit if repo is in a rebase/merge conflict state
     let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
     let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
     let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
     if rebase_merge.exists() || rebase_apply.exists() || merge_head.exists() {
+        eprintln!("[INFO] git_auto_commit: repo is in conflict state, skipping");
         return Ok(()); // Skip silently during conflict resolution
     }
 
     // Auto-fix detached HEAD by switching back to the correct branch
-    fix_detached_head(repo_path)?;
+    if let Err(e) = fix_detached_head(repo_path) {
+        eprintln!("[ERROR] git_auto_commit: fix_detached_head failed: {}", e);
+        return Err(e);
+    }
+
+    let relative_path = Path::new(&file_path)
+        .strip_prefix(current)
+        .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
+    let relative_path_str = relative_path.to_str().ok_or(i18n::t("backend.git.invalidPathEncoding"))?;
+    let git_path = to_git_path(&relative_path);
+    eprintln!("[INFO] git_auto_commit: relative_path={} git_path={}", relative_path_str, git_path);
 
     let file_name = Path::new(&file_path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
-
     let commit_message = format!("Auto-save: {}", file_name);
 
-    // Stage only this file
-    run_git(repo_path, &["add", &file_path])?;
+    // Stage only this file using the relative path to avoid issues with absolute Windows paths
+    match run_git(repo_path, &["add", &git_path]) {
+        Ok(_) => eprintln!("[INFO] git_auto_commit: git add succeeded"),
+        Err(e) => {
+            eprintln!("[ERROR] git_auto_commit: git add failed: {}", e);
+            return Err(e);
+        }
+    }
 
     // Commit
     match run_git(repo_path, &["commit", "-m", &commit_message]) {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            eprintln!("[INFO] git_auto_commit: git commit succeeded");
+            Ok(())
+        }
         Err(e) => {
-            // Silently ignore "nothing to commit" errors
+            // "nothing to commit" usually means the working tree/index content is identical to HEAD.
+            // Keep this silent but log it so we can diagnose why auto-commit appears to do nothing.
             if e.contains("nothing to commit") || e.contains("working tree clean") || e.contains("no changes added to commit") {
+                eprintln!("[INFO] git_auto_commit: git commit reports no changes ({})", e);
                 Ok(())
             } else {
+                eprintln!("[ERROR] git_auto_commit: git commit failed: {}", e);
                 Err(e)
             }
         }
@@ -1147,7 +1195,7 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
     let relative_path = Path::new(&file_path)
         .strip_prefix(current)
         .map_err(|e| format!("Invalid relative path: {}", e))?;
-    let relative_path_str = relative_path.to_str().ok_or("Invalid path encoding")?;
+    let git_path = to_git_path(&relative_path);
 
     let max_count_str = max_count.to_string();
     let skip_str = skip.to_string();
@@ -1162,7 +1210,7 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
             "-n", &max_count_str,
             "--skip", &skip_str,
             "--",
-            relative_path_str,
+            &git_path,
         ],
     )?;
 
@@ -1244,7 +1292,7 @@ pub async fn git_show_diff(file_path: String, commit_hash: String) -> Result<Str
     let relative_path = Path::new(&file_path)
         .strip_prefix(current)
         .map_err(|e| format!("Invalid relative path: {}", e))?;
-    let relative_path_str = relative_path.to_str().ok_or("Invalid path encoding")?;
+    let git_path = to_git_path(&relative_path);
 
     // Get diff for the specific file in this commit
     let output = run_git(
@@ -1256,7 +1304,7 @@ pub async fn git_show_diff(file_path: String, commit_hash: String) -> Result<Str
             &commit_hash,
             "--no-color",
             "--",
-            relative_path_str,
+            &git_path,
         ],
     )?;
 
@@ -1282,7 +1330,7 @@ pub async fn git_show_file_content(file_path: String, commit_hash: String) -> Re
     let relative_path = Path::new(&file_path)
         .strip_prefix(current)
         .map_err(|e| format!("Invalid relative path: {}", e))?;
-    let relative_path_str = relative_path.to_str().ok_or("Invalid path encoding")?;
+    let git_path = to_git_path(&relative_path);
 
     // Get the full file content at the given commit
     // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
@@ -1290,7 +1338,7 @@ pub async fn git_show_file_content(file_path: String, commit_hash: String) -> Re
         repo_path,
         &[
             "show",
-            &format!("{}:{}", commit_hash, relative_path_str),
+            &format!("{}:{}", commit_hash, &git_path),
             "--no-color",
         ],
     )?;
@@ -1318,7 +1366,7 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
     let relative_path = Path::new(&file_path)
         .strip_prefix(current)
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
-    let relative_path_str = relative_path.to_str().ok_or(i18n::t("backend.git.invalidPathEncoding"))?;
+    let git_path = to_git_path(&relative_path);
 
     // Check if remote exists
     // G-05 修复：区分"无远程配置"和"远程读取失败"
@@ -1341,7 +1389,7 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
 
     // Get the file content from the remote branch (origin/<branch>)
     // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
-    let remote_ref = format!("origin/{}:{}", branch, relative_path_str);
+    let remote_ref = format!("origin/{}:{}", branch, git_path);
     let output = run_git_no_trim(
         repo_path,
         &["show", "--no-color", &remote_ref],
@@ -1349,7 +1397,7 @@ pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
 
     // UI 文案已明确告知用户"强制覆盖本地文件，本地未提交的修改将丢失"，
     // 因此这里直接执行 checkout，不再因为本地有改动而拒绝。
-    run_git(repo_path, &["checkout", &format!("origin/{}", branch), "--", relative_path_str])
+    run_git(repo_path, &["checkout", &format!("origin/{}", branch), "--", &git_path])
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.checkoutFileFailed"), e))?;
 
     Ok(output)
@@ -1375,7 +1423,7 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
     let relative_path = Path::new(&file_path)
         .strip_prefix(current)
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
-    let relative_path_str = relative_path.to_str().ok_or(i18n::t("backend.git.invalidPathEncoding"))?;
+    let git_path = to_git_path(&relative_path);
 
     // Check if remote exists
     // G-05 修复：区分"无远程配置"和"远程读取失败"
@@ -1385,11 +1433,11 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
     }
 
     // Stage the file using the relative path to avoid issues with absolute Windows paths
-    run_git(repo_path, &["add", relative_path_str])
+    run_git(repo_path, &["add", &git_path])
         .map_err(|e| format!("Failed to stage file: {}", e))?;
 
     // Commit
-    let commit_message = format!("Force upload: {}", relative_path_str);
+    let commit_message = format!("Force upload: {}", git_path);
     match run_git(repo_path, &["commit", "-m", &commit_message]) {
         Ok(_) => {}
         Err(e) => {
@@ -2198,11 +2246,11 @@ pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, sid
                 })?
         }
     };
-    let rel_path_str = rel_path.to_str().ok_or("Invalid path encoding")?;
+    let git_path = to_git_path(&rel_path);
 
     // Validate: reject path traversal attempts
-    if rel_path_str.contains("..") {
-        return Err(format!("Invalid file path: path traversal detected in '{}'", rel_path_str));
+    if git_path.contains("..") {
+        return Err(format!("Invalid file path: path traversal detected in '{}'", git_path));
     }
 
     eprintln!("[INFO] git_resolve_conflict_file: repo_path={}, file_path={}, side={}", repo_path, file_path, side);
@@ -2211,16 +2259,16 @@ pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, sid
     // git_save_conflict_file_content, so we just need to stage it.
     // If side is "local" or "remote", we overwrite with the chosen side's content.
     if side != "current" {
-        let content = get_conflict_content(&repo_path, rel_path_str, &side)?;
+        let content = get_conflict_content(&repo_path, &git_path, &side)?;
         // 写入目标必须基于 repo_path + 相对路径，避免前端传入的 file_path
         // 指向仓库外（路径穿越）。
-        let target_path = Path::new(&repo_path).join(rel_path_str);
+        let target_path = Path::new(&repo_path).join(&rel_path);
         std::fs::write(&target_path, &content)
             .map_err(|e| format!("Failed to write file: {}", e))?;
     }
 
     // Stage the resolved file
-    run_git(&repo_path, &["add", rel_path_str])?;
+    run_git(&repo_path, &["add", &git_path])?;
 
     check_and_continue_rebase(&repo_path)
 }
@@ -2280,11 +2328,11 @@ pub async fn git_save_conflict_file_content(repo_path: String, file_path: String
     let rel_path = Path::new(&file_path)
         .strip_prefix(Path::new(&repo_path))
         .map_err(|e| format!("Invalid relative path: {}", e))?;
-    let rel_path_str = rel_path.to_str().ok_or("Invalid path encoding")?;
+    let git_path = to_git_path(&rel_path);
 
     // Validate: reject path traversal attempts
-    if rel_path_str.contains("..") {
-        return Err(format!("Invalid file path: path traversal detected in '{}'", rel_path_str));
+    if git_path.contains("..") {
+        return Err(format!("Invalid file path: path traversal detected in '{}'", git_path));
     }
 
     eprintln!("[INFO] git_save_conflict_file_content: repo_path={}, file_path={}", repo_path, file_path);
@@ -2293,7 +2341,7 @@ pub async fn git_save_conflict_file_content(repo_path: String, file_path: String
     // Do NOT run `git add` here — that would prematurely resolve the conflict.
     // Staging is done in `git_resolve_conflict_file` when the user explicitly resolves.
     // 写入目标基于 repo_path + 相对路径，避免前端传入的 file_path 指向仓库外（路径穿越）。
-    let target_path = Path::new(&repo_path).join(rel_path_str);
+    let target_path = Path::new(&repo_path).join(&rel_path);
     std::fs::write(&target_path, &content)
         .map_err(|e| format!("Failed to write file: {}", e))?;
 
@@ -3174,6 +3222,25 @@ mod tests {
     // ===== git 冲突内容读取集成测试 =====
     // 验证 git_get_conflict_local_content / git_get_conflict_remote_content
     // 在 merge 和 rebase 冲突场景下都返回干净的原始版本，不含冲突标记。
+
+    #[test]
+    fn test_to_git_path_normalizes_for_target_platform() {
+        // On Windows backslashes are path separators and must be converted to '/' for Git.
+        // On Unix-like systems backslashes are valid filename characters and must be preserved.
+        #[cfg(target_os = "windows")]
+        {
+            assert_eq!(to_git_path(std::path::Path::new("foo\\bar\\baz.md")), "foo/bar/baz.md");
+            assert_eq!(to_git_path(std::path::Path::new("D:\\repo\\我的工作\\202607.md")), "D:/repo/我的工作/202607.md");
+            assert_eq!(to_git_path(std::path::Path::new("simple.md")), "simple.md");
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert_eq!(to_git_path(std::path::Path::new("foo/bar/baz.md")), "foo/bar/baz.md");
+            assert_eq!(to_git_path(std::path::Path::new("repo/我的工作/202607.md")), "repo/我的工作/202607.md");
+            // A backslash inside a filename must not be altered on Unix.
+            assert_eq!(to_git_path(std::path::Path::new("my\\file.md")), "my\\file.md");
+        }
+    }
 
     fn git_cmd(repo: &std::path::Path, args: &[&str]) {
         let status = std::process::Command::new("git")

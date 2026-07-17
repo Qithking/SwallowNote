@@ -4,7 +4,7 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import i18n from '@/i18n'
-import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, isAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels } from '@/lib/tauri'
+import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, isAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels, restartApp } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
 import { AiModelConfig, generateModelId } from '@/lib/ai'
 import { useFileTreeStore } from './filetree'
@@ -923,6 +923,18 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ developerMode: value })
     saveAppSettings({ developerMode: String(value) })
     queueMicrotask(() => emitSettingChanged('developerMode', value))
+    // DevTools 只能在窗口创建时设置，切换后需要重启应用生效。
+    // 开发模式下 Vite 由 cargo tauri dev 管理，自动重启 Tauri 进程会断开与 :1420 的连接，
+    // 因此开发模式仅提示手动重启；生产包则自动重启。
+    const isDevServer = window.location.origin.includes('localhost:1420')
+    if (isDevServer) {
+      toast.info(i18n.t('settings.development.restartDevServerHint') ?? '开发者模式已更改，请重启开发服务器后生效')
+    } else {
+      restartApp().catch((err) => {
+        console.error('Failed to restart app:', err)
+        toast.error(i18n.t('settings.development.restartFailedHint') ?? '重启失败，请手动重启应用')
+      })
+    }
   },
   loadSettings: async () => {
     try {
