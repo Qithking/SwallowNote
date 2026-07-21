@@ -299,6 +299,8 @@ commands::upgrade::download_latest_release,
 
             // 根据开发者模式设置动态创建主窗口，控制 DevTools（F12）是否可用。
             // 配置文件中的 app.windows 已移除，防止 Tauri 自动创建默认窗口。
+            // 显式设置 256x256 窗口图标，避免 Tauri 默认从 bundle.icon 数组取第一个 PNG（32x32.png）
+            // 导致任务栏图标在高 DPI 屏幕上显示过小。
             let _main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("SwallowNote")
                 .inner_size(1200.0, 800.0)
@@ -310,6 +312,10 @@ commands::upgrade::download_latest_release,
                 .shadow(false)
                 .visible(false)
                 .devtools(developer_mode)
+                .icon(
+                    tauri::image::Image::from_bytes(include_bytes!("../icons/128x128@2x.png"))
+                        .expect("Failed to load window icon"),
+                )?
                 .build()
                 .map_err(|e| format!("Failed to create main window: {}", e))?;
             println!("[STARTUP-TIME] main_window_created devtools={} t={}", developer_mode, startup_t0.elapsed().as_millis());
