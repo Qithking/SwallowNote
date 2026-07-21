@@ -790,7 +790,7 @@ const { t } = useTranslation()
             <RefreshCw size={16} className="animate-spin" />
           </div>
         ) : nodes.length > 0 ? (
-          <div ref={parentRef} data-file-tree-scroll style={{ height: '100%', overflow: 'auto' }}>
+          <div ref={parentRef} data-file-tree-scroll style={{ height: '100%' }}>
             <div
               style={{
                 height: `${virtualizer.getTotalSize()}px`,
