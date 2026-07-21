@@ -38,7 +38,12 @@ import { countWords } from '@/lib/utils/wordCount'
 
 function getRelativePath(rootPath: string, fullPath: string): string {
   if (!rootPath) return fullPath
-  return fullPath.substring(rootPath.length + 1)
+  // 归一化路径分隔符，处理 Windows 下 \ 和 / 混用问题
+  const normalizedRoot = rootPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  const normalizedFull = fullPath.replace(/\\/g, '/')
+  // 验证前缀，防止 substring 计算错误
+  if (!normalizedFull.startsWith(normalizedRoot + '/')) return normalizedFull
+  return normalizedFull.substring(normalizedRoot.length + 1)
 }
 
 function getFileName(path: string): string {
@@ -164,7 +169,15 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   }
 
   const handleCopyPath = async (relative: boolean) => {
-    const pathToCopy = relative && rootPath ? getRelativePath(rootPath, node.path) : node.path
+    // 在 workspace 模式下，找到文件所属的 workspace 文件夹作为相对路径基准
+    const basePath = rootPath || (workspaceMode === 'workspace'
+      ? workspaceFolders.find(f => node.path.startsWith(f.replace(/\\/g, '/') + '/'))
+      : null)
+    // 相对路径从根节点的父目录开始，包含根节点名称
+    const relativeBase = basePath && basePath.lastIndexOf('/') > 0
+      ? basePath.substring(0, basePath.lastIndexOf('/'))
+      : null
+    const pathToCopy = relative && relativeBase ? getRelativePath(relativeBase, node.path) : node.path
     try {
       await navigator.clipboard.writeText(pathToCopy)
       showToast(t('tabBar.pathCopied'))
@@ -281,8 +294,10 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
         const updatedNodes = updateNodesWithChildren(nodes, parent.path, children)
         setNodes(updatedNodes)
       }
+    showToast(t('fileTree.deleteSuccess', { count: 1 }), 'success')
     } catch (e) {
       console.error('Failed to delete:', e)
+      showToast(t('fileTree.deletePartial', { success: 0, fail: 1 }), 'error')
     }
   }
 
@@ -414,7 +429,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           </ContextMenuItem>
         )}
 
-        {(!node.isDirectory || canPaste) && (
+        {canPaste && (
           <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
         )}
 
