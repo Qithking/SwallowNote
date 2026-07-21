@@ -641,6 +641,7 @@
     "forceUploadConfirmDesc": "This will commit the current local file and force push it to the remote repository, overwriting the remote version. Are you sure?",
     "forceUploadSuccess": "File forcefully uploaded to remote repository",
     "forceUploadFailed": "Force upload failed: {{error}}",
+    "forceUploadAlreadyUpToDate": "File already committed, local and remote are in sync, no action needed",
     "noRemote": "No remote repository configured",
     "refresh": "Refresh"
   },

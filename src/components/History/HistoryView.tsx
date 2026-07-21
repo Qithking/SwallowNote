@@ -227,12 +227,16 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       setHasMore(true)
       skipRef.current = 0
       loadHistory(activeTabPath, 0)
+      toast.success(t('history.forceUploadSuccess'))
     } catch (e) {
       console.error('Failed to force upload:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)
       if (errorMsg === 'NO_REMOTE') {
         // 使用 toast 替代原生 alert，与 pullLatest 分支保持一致
         toast.error(t('history.noRemote'))
+      } else if (errorMsg === 'ALREADY_UP_TO_DATE') {
+        // 本地无改动且与远端同步,提示用户无须重复操作
+        toast.info(t('history.forceUploadAlreadyUpToDate'))
       } else {
         toast.error(t('history.forceUploadFailed', { error: errorMsg }))
       }
