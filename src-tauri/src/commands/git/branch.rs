@@ -164,6 +164,7 @@ pub fn has_real_conflicts(repo_path: &str) -> bool {
 /// This happens when an operation (pull --rebase, etc.) was interrupted (network error, crash)
 /// but left behind .git/rebase-merge or .git/MERGE_HEAD files without actual unmerged files.
 pub fn cleanup_stale_rebase_state(repo_path: &str) {
+    #[cfg(debug_assertions)]
     eprintln!("[INFO] Cleaning up stale rebase/merge state in {}", repo_path);
 
     // 检查是否为交互式 rebase：rebase-merge/done 文件存在且非空说明用户正在进行交互式 rebase，
@@ -172,6 +173,7 @@ pub fn cleanup_stale_rebase_state(repo_path: &str) {
     if rebase_merge_done.exists() {
         if let Ok(content) = std::fs::read_to_string(&rebase_merge_done) {
             if !content.trim().is_empty() {
+                #[cfg(debug_assertions)]
                 eprintln!("[INFO] cleanup_stale_rebase_state: interactive rebase in progress (done file non-empty), skipping abort in {}", repo_path);
                 return;
             }
@@ -180,12 +182,13 @@ pub fn cleanup_stale_rebase_state(repo_path: &str) {
 
     // 存在真实冲突文件时不 abort，避免丢失未解决的冲突状态
     if has_real_conflicts(repo_path) {
+        #[cfg(debug_assertions)]
         eprintln!("[INFO] cleanup_stale_rebase_state: real conflicts exist, skipping abort in {}", repo_path);
         return;
     }
 
-    let _ = run_git(repo_path, &["rebase", "--abort"]);
-    let _ = run_git(repo_path, &["merge", "--abort"]);
+    let _ = run_git(repo_path, &["rebase", "--abort"]); // cleanup failure is non-fatal; continue best-effort
+    let _ = run_git(repo_path, &["merge", "--abort"]); // cleanup failure is non-fatal; continue best-effort
 }
 
 /// G-14 修复：检测当前是否处于 rebase 场景（统一三处重复的检测逻辑）。
@@ -228,13 +231,16 @@ pub fn fix_detached_head(repo_path: &str) -> Result<(), String> {
         return Ok(()); // Not detached
     }
 
+    #[cfg(debug_assertions)]
     eprintln!("[INFO] fix_detached_head: detected detached HEAD in {}", repo_path);
 
     // 3. Try to find the correct branch from rebase state
     if let Some(target_branch) = get_rebase_branch(repo_path) {
+        #[cfg(debug_assertions)]
         eprintln!("[INFO] fix_detached_head: switching to branch {}", target_branch);
         run_git(repo_path, &["checkout", &target_branch])
             .map_err(|e| format!("Failed to fix detached HEAD: {}", e))?;
+        #[cfg(debug_assertions)]
         eprintln!("[INFO] fix_detached_head: successfully switched to {}", target_branch);
         return Ok(());
     }
@@ -246,10 +252,12 @@ pub fn fix_detached_head(repo_path: &str) -> Result<(), String> {
             let local_ref = format!("refs/heads/{}", local_branch);
             let has_local = run_git(repo_path, &["show-ref", "--verify", &local_ref]).is_ok();
             if has_local {
+                #[cfg(debug_assertions)]
                 eprintln!("[INFO] fix_detached_head: switching to local branch {}", local_branch);
                 run_git(repo_path, &["checkout", local_branch])
                     .map_err(|e| format!("Failed to fix detached HEAD: {}", e))?;
             } else {
+                #[cfg(debug_assertions)]
                 eprintln!(
                     "[INFO] fix_detached_head: creating local branch {} tracking {}",
                     local_branch, remote_default
@@ -257,6 +265,7 @@ pub fn fix_detached_head(repo_path: &str) -> Result<(), String> {
                 run_git(repo_path, &["checkout", "-b", local_branch, remote_default])
                     .map_err(|e| format!("Failed to fix detached HEAD: {}", e))?;
             }
+            #[cfg(debug_assertions)]
             eprintln!("[INFO] fix_detached_head: successfully attached HEAD to {}", local_branch);
             return Ok(());
         }
@@ -269,13 +278,16 @@ pub fn fix_detached_head(repo_path: &str) -> Result<(), String> {
                 let parts: Vec<&str> = line.splitn(2, '=').collect();
                 if parts.len() == 2 && parts[1].trim() == head_hash.trim() {
                     let target = parts[0].trim();
+                    #[cfg(debug_assertions)]
                     eprintln!("[INFO] fix_detached_head: found matching branch {}, switching", target);
                     match run_git(repo_path, &["checkout", target]) {
                         Ok(_) => {
+                            #[cfg(debug_assertions)]
                             eprintln!("[INFO] fix_detached_head: successfully switched to {}", target);
                             return Ok(());
                         }
                         Err(e) => {
+                            #[cfg(debug_assertions)]
                             eprintln!("[WARN] fix_detached_head: failed to switch to {}: {}", target, e);
                             continue;
                         }

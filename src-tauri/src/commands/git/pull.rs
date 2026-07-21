@@ -42,7 +42,7 @@ pub async fn git_pull(path: String) -> Result<(), String> {
     match result {
         Ok(_) => {
             // Fix detached HEAD if it occurred during pull
-            let _ = fix_detached_head(&path);
+            let _ = fix_detached_head(&path); // cleanup failure is non-fatal; continue best-effort
             Ok(())
         },
         Err(e) => {

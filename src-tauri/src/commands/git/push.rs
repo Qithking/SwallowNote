@@ -24,9 +24,11 @@ pub async fn git_push(path: String) -> Result<(), String> {
             let err_str = e.to_lowercase();
             // If detached HEAD, try pushing with HEAD:<branch> format
             if err_str.contains("not currently on a branch") || err_str.contains("detached head") {
+                #[cfg(debug_assertions)]
                 eprintln!("[INFO] git_push: detached HEAD detected, trying HEAD:<branch> push");
                 // Get the branch name from rebase state or HEAD
                 if let Some(branch) = get_rebase_branch(&path) {
+                    #[cfg(debug_assertions)]
                     eprintln!("[INFO] git_push: pushing HEAD:refs/heads/{}", branch);
                     let push_result = run_git(&path, &["push", "origin", &format!("HEAD:refs/heads/{}", branch)]);
                     match push_result {
@@ -78,6 +80,7 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
             // `push origin HEAD:refs/heads/<branch>` 显式指定目标分支。
             if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
                 if let Some(branch) = resolve_push_target_branch(&path) {
+                    #[cfg(debug_assertions)]
                     eprintln!("[INFO] git_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
                     // Recreate askpass script for the retry
                     let (retry_path, _retry_guard) = create_askpass_script("askpass", &username, &password)?;
@@ -133,6 +136,7 @@ pub async fn git_force_push(path: String) -> Result<(), String> {
             // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
             if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
                 if let Some(branch) = resolve_push_target_branch(&path) {
+                    #[cfg(debug_assertions)]
                     eprintln!("[INFO] git_force_push: detached HEAD, pushing HEAD:refs/heads/{}", branch);
                     let retry = run_git(
                         &path,
@@ -203,6 +207,7 @@ pub async fn git_force_push_with_credentials(path: String, username: String, pas
             // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
             if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
                 if let Some(branch) = resolve_push_target_branch(&path) {
+                    #[cfg(debug_assertions)]
                     eprintln!("[INFO] git_force_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
                     // Recreate askpass script for the retry
                     let (retry_path, _retry_guard) = create_askpass_script("force_push", &username, &password)?;

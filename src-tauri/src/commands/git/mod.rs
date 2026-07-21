@@ -64,6 +64,7 @@ pub async fn git_status(path: String) -> Result<GitStatus, String> {
     // G-15 修复：分支获取失败时记录日志，返回空字符串让前端能据此判断获取失败
     // （区别于 "unknown" 等真实分支名）。若 git 命令本身失败，后续 run_git 会向上传播错误。
     let branch = get_branch(&path).unwrap_or_else(|e| {
+        #[cfg(debug_assertions)]
         eprintln!("[WARN] git_status: failed to get branch for {}: {}", path, e);
         "".to_string()
     });

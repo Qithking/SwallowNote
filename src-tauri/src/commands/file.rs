@@ -25,13 +25,7 @@ pub async fn get_file_metadata(path: String) -> Result<FileMetadata, String> {
     })
 }
 
-#[cfg(target_os = "macos")]
-use std::process::Command as StdCommand;
-
-#[cfg(target_os = "windows")]
-use std::process::Command as StdCommand;
-
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command as StdCommand;
 
 #[derive(Serialize, Clone)]

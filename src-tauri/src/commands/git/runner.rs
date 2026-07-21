@@ -68,6 +68,7 @@ pub fn run_git_raw(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Resu
             // 子线程中的 cmd.output() 会随 git 进程自然结束而返回,我们通过 forget 让它在后台自然退出,
             // 避免 drop child_handle 导致 JoinHandle 析构时 panic(子线程仍持有 cmd_for_thread)。
             // 注意:不主动 kill git 进程,按 AC-15 保持与原 git.rs 完全等价的行为。
+            #[cfg(debug_assertions)]
             eprintln!(
                 "[ERROR] run_git_raw: git command timed out after {}s (path={}, args={:?})",
                 GIT_COMMAND_TIMEOUT_SECS, path, args

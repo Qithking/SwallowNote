@@ -180,6 +180,7 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<Commit
                 // detached HEAD fallback
                 if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
                     if let Some(branch) = resolve_push_target_branch(&path) {
+                        #[cfg(debug_assertions)]
                         eprintln!("[INFO] git_commit_and_push: detached HEAD, pushing HEAD:refs/heads/{}", branch);
                         let retry = run_git(&path, &["push", "origin", &format!("HEAD:refs/heads/{}", branch)]);
                         if let Err(retry_err) = retry {
@@ -255,6 +256,7 @@ pub fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
 /// Auto commit a single file (local only, no push)
 #[tauri::command]
 pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
+    #[cfg(debug_assertions)]
     eprintln!("[INFO] git_auto_commit called for: {}", file_path);
 
     // Find the git root by walking up directories
@@ -266,6 +268,7 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
         match current.parent() {
             Some(parent) => current = parent,
             None => {
+                #[cfg(debug_assertions)]
                 eprintln!("[INFO] git_auto_commit: not in a git repo, skipping");
                 return Ok(()); // Not in a git repo
             }
@@ -273,6 +276,7 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
     }
 
     let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    #[cfg(debug_assertions)]
     eprintln!("[INFO] git_auto_commit: repo_path={}", repo_path);
 
     // Skip auto-commit if repo is in a rebase/merge conflict state
@@ -280,12 +284,14 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
     let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
     let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
     if rebase_merge.exists() || rebase_apply.exists() || merge_head.exists() {
+        #[cfg(debug_assertions)]
         eprintln!("[INFO] git_auto_commit: repo is in conflict state, skipping");
         return Ok(()); // Skip silently during conflict resolution
     }
 
     // Auto-fix detached HEAD by switching back to the correct branch
     if let Err(e) = fix_detached_head(repo_path) {
+        #[cfg(debug_assertions)]
         eprintln!("[ERROR] git_auto_commit: fix_detached_head failed: {}", e);
         return Err(e);
     }
@@ -295,6 +301,7 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
     let relative_path_str = relative_path.to_str().ok_or(i18n::t("backend.git.invalidPathEncoding"))?;
     let git_path = to_git_path(relative_path);
+    #[cfg(debug_assertions)]
     eprintln!("[INFO] git_auto_commit: relative_path={} git_path={}", relative_path_str, git_path);
 
     let file_name = Path::new(&file_path)
@@ -305,8 +312,12 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
 
     // Stage only this file using the relative path to avoid issues with absolute Windows paths
     match run_git(repo_path, &["add", &git_path]) {
-        Ok(_) => eprintln!("[INFO] git_auto_commit: git add succeeded"),
+        Ok(_) => {
+            #[cfg(debug_assertions)]
+            eprintln!("[INFO] git_auto_commit: git add succeeded")
+        }
         Err(e) => {
+            #[cfg(debug_assertions)]
             eprintln!("[ERROR] git_auto_commit: git add failed: {}", e);
             return Err(e);
         }
@@ -315,6 +326,7 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
     // Commit
     match run_git(repo_path, &["commit", "-m", &commit_message]) {
         Ok(_) => {
+            #[cfg(debug_assertions)]
             eprintln!("[INFO] git_auto_commit: git commit succeeded");
             Ok(())
         }
@@ -322,9 +334,11 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
             // "nothing to commit" usually means the working tree/index content is identical to HEAD.
             // Keep this silent but log it so we can diagnose why auto-commit appears to do nothing.
             if e.contains("nothing to commit") || e.contains("working tree clean") || e.contains("no changes added to commit") {
+                #[cfg(debug_assertions)]
                 eprintln!("[INFO] git_auto_commit: git commit reports no changes ({})", e);
                 Ok(())
             } else {
+                #[cfg(debug_assertions)]
                 eprintln!("[ERROR] git_auto_commit: git commit failed: {}", e);
                 Err(e)
             }
@@ -662,6 +676,7 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
             let err_lower = e.to_lowercase();
             if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
                 if let Some(branch) = resolve_push_target_branch(repo_path) {
+                    #[cfg(debug_assertions)]
                     eprintln!("[INFO] git_force_upload_file: detached HEAD, pushing HEAD:refs/heads/{}", branch);
                     let retry = run_git(
                         repo_path,

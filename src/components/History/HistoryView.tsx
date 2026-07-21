@@ -193,6 +193,7 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       setHasMore(true)
       skipRef.current = 0
       loadHistory(activeTabPath, 0)
+      toast.success(t('history.pullLatestSuccess'))
     } catch (e) {
       console.error('Failed to pull latest:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)

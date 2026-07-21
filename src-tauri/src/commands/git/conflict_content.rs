@@ -102,12 +102,13 @@ pub fn check_and_continue_rebase(repo_path: &str) -> Result<(), String> {
             match result {
                 Ok(_) => {
                     // Rebase continued successfully - fix detached HEAD if needed
-                    let _ = fix_detached_head(repo_path);
+                    let _ = fix_detached_head(repo_path); // cleanup failure is non-fatal; continue best-effort
                 }
                 Err(e) => {
                     // G-04 修复：rebase --continue 失败时必须返回错误，
                     // 否则前端误报"冲突已解决"，但仓库仍处于 rebase-in-progress 状态，
                     // 用户感知为"解决冲突无效"。
+                    #[cfg(debug_assertions)]
                     eprintln!("[ERROR] git_resolve_conflict_file: rebase --continue failed: {}", e);
                     return Err(format!("REBASE_CONTINUE_FAILED:{}", e));
                 }
@@ -119,11 +120,12 @@ pub fn check_and_continue_rebase(repo_path: &str) -> Result<(), String> {
                 // 如需让用户输入 merge commit 信息，需要前端提供输入框（后续优化）。
                 // G-04 修复：merge commit 失败时同样返回错误，避免前端误报"已解决"
                 if let Err(e) = run_git(repo_path, &["commit", "--no-edit"]) {
+                    #[cfg(debug_assertions)]
                     eprintln!("[ERROR] git_resolve_conflict_file: merge commit failed: {}", e);
                     return Err(format!("MERGE_COMMIT_FAILED:{}", e));
                 }
                 // Fix detached HEAD after merge commit
-                let _ = fix_detached_head(repo_path);
+                let _ = fix_detached_head(repo_path); // cleanup failure is non-fatal; continue best-effort
             }
         }
     }

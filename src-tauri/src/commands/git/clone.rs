@@ -35,6 +35,7 @@ pub fn git_clone_cancel(pid_state: State<'_, ClonePidState>) -> Result<bool, Str
                 Ok(true)
             } else {
                 // 进程已不存在（ESRCH），跳过 kill，避免 pid 复用误杀
+                #[cfg(debug_assertions)]
                 eprintln!("[INFO] git_clone_cancel: pid {} no longer exists, skipping kill", pid);
                 Ok(false)
             }

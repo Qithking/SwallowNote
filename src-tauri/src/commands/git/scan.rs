@@ -54,7 +54,10 @@ pub fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent
         // G-05 修复：get_remote_url 返回 Result<Option<String>, String>，flatten 后得到 Option<String>
         let remote_url_result = get_remote_url(&path_str);
         if cfg!(debug_assertions) {
-            eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url={:?}", path_str, remote_url_result.as_ref().ok().map(|o| o.as_ref()));
+            match &remote_url_result {
+                Ok(url) => eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url={:?}", path_str, url.as_ref()),
+                Err(e) => eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url error={}", path_str, e),
+            }
         }
         let remote_url = remote_url_result.ok().flatten();
 
@@ -89,7 +92,14 @@ pub fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent
                             .to_string();
 
                         let submodule_path_str = submodule_full_path.to_string_lossy().to_string().replace('\\', "/");
-                        let submodule_remote = get_remote_url(&submodule_path_str).ok().flatten();
+                        let submodule_remote_result = get_remote_url(&submodule_path_str);
+                        if cfg!(debug_assertions) {
+                            match &submodule_remote_result {
+                                Ok(url) => eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url={:?}", submodule_path_str, url.as_ref()),
+                                Err(e) => eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url error={}", submodule_path_str, e),
+                            }
+                        }
+                        let submodule_remote = submodule_remote_result.ok().flatten();
                         let submodule_branch = get_branch(&submodule_path_str).unwrap_or_else(|_| "unknown".to_string());
                         let (submodule_has_changes, submodule_change_count) = get_uncommitted_count(&submodule_path_str);
 
