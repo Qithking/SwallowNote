@@ -30,6 +30,7 @@ import { buildTableOfContents } from '@/utils/tableOfContents'
 import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, readFile, pathExists, getFileMetadata } from '@/lib/tauri'
 import { downloadCoordinator } from '@/lib/download-coordinator'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { open as openExternal } from '@tauri-apps/plugin-shell'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Network, Sigma, ExternalLink } from 'lucide-react'
@@ -448,7 +449,7 @@ function BlockNoteInner({
     event.preventDefault()
 
     if (isExternalUrl(href)) {
-      window.open(href, '_blank')
+      openExternal(href).catch(() => {})
       return true
     }
 
@@ -494,9 +495,9 @@ function BlockNoteInner({
   // Capture-phase click listener: 在捕获阶段拦截链接点击，调用 preventDefault()
   // 并执行跳转。此 listener 对预览模式必需——BlockNote 的 links.onClick 在只读模式
   // 下不会被调用（clickHandler.ts 中 !view.editable 时直接 return false）。
-  // 外部链接跳转统一交给 handleLinkClick 处理（编辑模式下），capture listener 仅
-  // 负责 preventDefault 以避免双重 window.open；内部文件链接与锚点跳转仍由 capture
-  // listener 处理（预览模式下 handleLinkClick 不会被调用）。
+  // 外部链接由 handleLinkClick 统一打开（编辑模式下），capture listener 仅负责
+  // preventDefault；内部文件链接与锚点跳转由 capture listener 处理（预览模式下
+  // handleLinkClick 不会被调用）。
   useEffect(() => {
     const container = editorContainerRef.current
     if (!container) return
@@ -518,8 +519,8 @@ function BlockNoteInner({
       event.preventDefault()
 
       if (isExternalUrl(href)) {
-        // 外部链接跳转交给 handleLinkClick 统一处理，避免双重 window.open。
-        // 这里仅 preventDefault 后 return，不执行 window.open。
+        // 编辑模式下 handleLinkClick 会处理外部链接打开，这里仅 preventDefault 避免双重打开。
+        // 若未来引入只读模式（editor.setEditable(false)），需改为直接 openExternal(href)。
         return
       }
 
@@ -1427,7 +1428,7 @@ function BlockNoteInner({
       const handleOpen = () => {
         const url = props.url
         if (isExternalUrl(url)) {
-          window.open(url, '_blank')
+          openExternal(url).catch(() => {})
           return
         }
         if (url.startsWith('#')) {
