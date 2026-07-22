@@ -99,6 +99,8 @@ function App() {
   const rafRef = useRef<number | null>(null)
   // StrictMode 双调用导致副作用重复执行
   const initRef = useRef(false)
+  // 标记启动关键路径已完成，自动同步可以开始
+  const startupReadyRef = useRef(false)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
   const { saveSessionStateNow, restoreSessionState, restoreWindowGeometry } = useSessionPersistence()
@@ -162,6 +164,10 @@ function App() {
       logTime('app_init_filetree', appInitT0)
       await restoreSessionState()
       logTime('app_init_session_restored', appInitT0)
+
+      // 启动关键路径已完成，自动同步可以开始
+      // checkReady 会通过 cachedRepositories.length > 0 等待首次仓库扫描完成
+      startupReadyRef.current = true
       
       // Step 5: 延迟加载插件和后台服务，确保编辑器先就绪可交互
 
@@ -448,6 +454,10 @@ function App() {
   pullAllReposRef.current = pullAllRepos
   // 防止 setInterval 触发的 doSync 与上一次重叠（弱网下 pull 120s 超时 + push 可能超过 syncInterval）
   const isSyncingRef = useRef(false)
+  // 标记当前是否为启动首次同步，用于跳过同步后的冗余重扫
+  const isInitialStartupSyncRef = useRef(true)
+  // 标记启动首次同步是否已尝试完成，用于收紧 30s 去重兜底
+  const hasCompletedInitialStartupSyncRef = useRef(false)
 
   useEffect(() => {
     const doSync = async () => {
@@ -460,6 +470,14 @@ function App() {
         return
       }
       const gitStore = useGitStore.getState()
+
+      // 启动阶段兜底：启动首次同步完成前，30 秒内已成功同步过则跳过，避免重复触发
+      const last = gitStore.syncStatus.lastSyncTime
+      if (!hasCompletedInitialStartupSyncRef.current && last && Date.now() - last < 30_000) {
+        isSyncingRef.current = false
+        return
+      }
+
       gitStore.setSyncStatus({ isSyncing: true })
       try {
         // Step 1: Always pull first
@@ -544,35 +562,37 @@ function App() {
         ]
         gitStore.updateRepositoryStatuses(allResults)
 
-        // Refresh repository list to update hasUncommittedChanges etc.
-        try {
-          const { scanGitRepos } = await import('@/lib/tauri')
-          const { mapRepoInfosToRepositories } = await import('@/stores/git')
-          const uiState = useUIStore.getState()
-          const wsState = useWorkspaceStore.getState()
-          const scanPaths = uiState.workspaceMode === 'workspace'
-            ? (wsState.workspaceFolders || [])
-            : (wsState.rootPath ? [wsState.rootPath] : [])
-          const scanPromises = scanPaths.map(async (path) => {
-            try { return await scanGitRepos(path) } catch { return [] }
-          })
-          const scanResults = await Promise.all(scanPromises)
-          const freshRepos = mapRepoInfosToRepositories(scanResults.flat())
-          // Preserve non-normal statuses from the sync results
-          const statusMap = new Map<string, 'conflict' | 'error'>()
-          for (const r of allResults) {
-            if (r.isConflict) statusMap.set(r.path, 'conflict')
-            else if (!r.success) statusMap.set(r.path, 'error')
+        // 启动首次同步刚完成过扫描，无需立即重扫；后续周期同步仍需刷新 hasUncommittedChanges
+        if (!isInitialStartupSyncRef.current) {
+          try {
+            const { scanGitRepos } = await import('@/lib/tauri')
+            const { mapRepoInfosToRepositories } = await import('@/stores/git')
+            const uiState = useUIStore.getState()
+            const wsState = useWorkspaceStore.getState()
+            const scanPaths = uiState.workspaceMode === 'workspace'
+              ? (wsState.workspaceFolders || [])
+              : (wsState.rootPath ? [wsState.rootPath] : [])
+            const scanPromises = scanPaths.map(async (path) => {
+              try { return await scanGitRepos(path) } catch { return [] }
+            })
+            const scanResults = await Promise.all(scanPromises)
+            const freshRepos = mapRepoInfosToRepositories(scanResults.flat())
+            // Preserve non-normal statuses from the sync results
+            const statusMap = new Map<string, 'conflict' | 'error'>()
+            for (const r of allResults) {
+              if (r.isConflict) statusMap.set(r.path, 'conflict')
+              else if (!r.success) statusMap.set(r.path, 'error')
+            }
+            const mergedRepos = freshRepos.map((repo: GitRepository) => {
+              const status = statusMap.get(repo.path)
+              if (status) return { ...repo, status }
+              return repo
+            })
+            gitStore.setRepositories(mergedRepos)
+            gitStore.setCachedRepositories(mergedRepos)
+          } catch {
+            // Ignore scan errors after sync
           }
-          const mergedRepos = freshRepos.map((repo: GitRepository) => {
-            const status = statusMap.get(repo.path)
-            if (status) return { ...repo, status }
-            return repo
-          })
-          gitStore.setRepositories(mergedRepos)
-          gitStore.setCachedRepositories(mergedRepos)
-        } catch {
-          // Ignore scan errors after sync
         }
 
         gitStore.setSyncStatus({
@@ -604,22 +624,68 @@ function App() {
       }
     }
 
-    // Initial sync after a short delay
-    const initialTimer = setTimeout(() => {
-      doSync()
-    }, 5000)
+    let intervalId: ReturnType<typeof setInterval> | null = null
+    let checkId: ReturnType<typeof setTimeout> | null = null
+    let postReadyDelayId: ReturnType<typeof setTimeout> | null = null
+    let maxWaitId: ReturnType<typeof setTimeout> | null = null
+    let isCancelled = false
 
-    // Set up periodic sync
-    const intervalMs = syncInterval * 60 * 1000
-    const intervalId = setInterval(() => {
-      doSync()
-    }, intervalMs)
+    const scheduleInterval = () => {
+      if (intervalId) clearInterval(intervalId)
+      const intervalMs = syncIntervalRef.current * 60 * 1000
+      if (intervalMs > 0) {
+        intervalId = setInterval(() => {
+          doSync()
+        }, intervalMs)
+      }
+    }
+
+    const startInitialSync = () => {
+      // 启动就绪后再延迟 2 秒，确保 UI 完全稳定
+      postReadyDelayId = setTimeout(() => {
+        isInitialStartupSyncRef.current = true
+        doSync().finally(() => {
+          hasCompletedInitialStartupSyncRef.current = true
+          isInitialStartupSyncRef.current = false
+          scheduleInterval()
+        })
+      }, 2000)
+    }
+
+    const checkReady = () => {
+      if (isCancelled) return
+      if (startupReadyRef.current && cachedReposRef.current.length > 0) {
+        startInitialSync()
+        return
+      }
+      checkId = setTimeout(checkReady, 500)
+    }
+
+    // 最多等待 30 秒启动就绪，超时则只建立周期同步
+    maxWaitId = setTimeout(() => {
+      if (checkId) clearTimeout(checkId)
+      if (!intervalId) scheduleInterval()
+    }, 30_000)
+
+    checkReady()
+
+    // 运行时修改 syncInterval 需要重建周期定时器
+    const unsubscribe = useUIStore.subscribe((state: UIState, prevState: UIState | undefined) => {
+      if (prevState && state.syncInterval !== prevState.syncInterval) {
+        syncIntervalRef.current = state.syncInterval
+        scheduleInterval()
+      }
+    })
 
     return () => {
-      clearTimeout(initialTimer)
-      clearInterval(intervalId)
+      isCancelled = true
+      if (checkId) clearTimeout(checkId)
+      if (postReadyDelayId) clearTimeout(postReadyDelayId)
+      if (maxWaitId) clearTimeout(maxWaitId)
+      if (intervalId) clearInterval(intervalId)
+      unsubscribe()
     }
-  }, [syncInterval])
+  }, [])
 
   const handleSaveAndClose = async () => {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose

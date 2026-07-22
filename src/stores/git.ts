@@ -2,7 +2,8 @@
  * Git Store - Manages Git state
  */
 import { create } from 'zustand'
-import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, removeConflictRepoRecord, syncConflictRepoRecords, gitGetConflictFiles, type ConflictRepoRecord } from '@/lib/tauri'
+import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, removeConflictRepoRecord, syncConflictRepoRecords, gitGetConflictFiles, scanGitRepos, type ConflictRepoRecord } from '@/lib/tauri'
+import i18n from '@/i18n'
 
 export type RepoStatus = 'normal' | 'conflict' | 'error'
 
@@ -83,13 +84,14 @@ export interface GitState {
   updateRepositoryStatuses: (pullResults: PullResult[]) => void
   resetRepositoryStatuses: () => void
   pullAllRepos: (repos: GitRepository[]) => Promise<PullResult[]>
+  scanAndCacheRepos: (paths: string[]) => Promise<GitRepository[]>
   loadConflictRepos: () => Promise<void>
   syncConflictReposFromPullResults: (pullResults: PullResult[]) => Promise<void>
   /** Check if a file path is a conflict file by comparing against cached conflict file lists */
   isConflictFile: (filePath: string) => { isConflict: boolean; repoPath: string; repoName: string } | null
 }
 
-export const useGitStore = create<GitState>((set) => ({
+export const useGitStore = create<GitState>((set, get) => ({
   repositories: [],
   cachedRepositories: [],
   activeRepository: null,
@@ -138,13 +140,55 @@ export const useGitStore = create<GitState>((set) => ({
     repositories: state.repositories.map((repo) => ({ ...repo, status: 'normal' as RepoStatus })),
     cachedRepositories: state.cachedRepositories.map((repo) => ({ ...repo, status: 'normal' as RepoStatus })),
   })),
+  scanAndCacheRepos: async (paths: string[]) => {
+    if (paths.length === 0) {
+      set({ repositories: [], cachedRepositories: [] })
+      return []
+    }
+
+    set({ isGitLoading: true, scanProgress: { current: 0, total: paths.length, message: i18n.t('git.scanning') } })
+    try {
+      const scanPromises = paths.map(async (path, index) => {
+        try {
+          set({ scanProgress: { current: index, total: paths.length, message: i18n.t('git.scanningPath', { path }) } })
+          const repos = await scanGitRepos(path)
+          return repos
+        } catch (e) {
+          console.error(`Failed to scan git repos in ${path}:`, e)
+          return []
+        }
+      })
+
+      const results = await Promise.all(scanPromises)
+      const allRepos = mapRepoInfosToRepositories(results.flat())
+
+      // Preserve non-normal statuses from the cache (canonical source of status)
+      const prevRepos = get().cachedRepositories
+      const statusMap = new Map<string, RepoStatus>()
+      for (const r of prevRepos) {
+        if (r.status !== 'normal') statusMap.set(r.path, r.status)
+      }
+      const mergedRepos = allRepos.map((repo) => {
+        const status = statusMap.get(repo.path)
+        return status ? { ...repo, status } : repo
+      })
+
+      set({ repositories: mergedRepos, cachedRepositories: mergedRepos })
+      return mergedRepos
+    } catch (e) {
+      console.error('Failed to scan and cache git repos:', e)
+      return get().cachedRepositories
+    } finally {
+      set({ isGitLoading: false, scanProgress: null })
+    }
+  },
   pullAllRepos: async (repos: GitRepository[]) => {
     // Filter repos that have a remote URL
     const reposWithRemote = repos.filter(r => r.remoteUrl)
     if (reposWithRemote.length === 0) return []
 
     // 防重入：如果正在拉取中，直接返回空数组
-    if (useGitStore.getState().isPulling) return []
+    if (get().isPulling) return []
 
     set({ isPulling: true })
     try {
@@ -269,7 +313,7 @@ export const useGitStore = create<GitState>((set) => ({
 
       // 包含本次 pull 未涉及的既有冲突仓库
       const existingConflictPaths = new Set(conflictEntries.map(([p]) => p))
-      const { conflictRepos } = useGitStore.getState()
+      const { conflictRepos } = get()
       for (const record of conflictRepos) {
         if (!existingConflictPaths.has(record.repo_path)) {
           conflictEntries.push([record.repo_path, record.repo_name, record.conflict_file_count])
@@ -295,7 +339,7 @@ export const useGitStore = create<GitState>((set) => ({
     }
   },
   isConflictFile: (filePath: string): { isConflict: boolean; repoPath: string; repoName: string } | null => {
-    const { conflictRepos, conflictFilesMap } = useGitStore.getState()
+    const { conflictRepos, conflictFilesMap } = get()
     for (const repo of conflictRepos) {
       const conflictFiles = conflictFilesMap[repo.repo_path]
       if (conflictFiles && conflictFiles.includes(filePath)) {

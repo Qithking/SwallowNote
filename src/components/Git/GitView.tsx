@@ -1,7 +1,7 @@
 /**
  * GitView Component - Git integration panel with multi-repository support
  */
-import { useState, useEffect, memo } from 'react'
+import { useState, useEffect, memo, useRef } from 'react'
 import {
   GitBranch,
   RefreshCw,
@@ -17,8 +17,8 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { useGitStore, GitRepository, mapRepoInfosToRepositories, PullResult } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitPullWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitForcePush, gitForcePull } from '@/lib/tauri'
+import { useGitStore, GitRepository, PullResult } from '@/stores/git'
+import { gitCommitAndPush, gitPushWithCredentials, gitPullWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitForcePush, gitForcePull } from '@/lib/tauri'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -718,7 +718,6 @@ function RepositoryItem({
 const GitView = memo(function GitView() {
   const repositories = useGitStore((s: GitState) => s.repositories)
   const setRepositories = useGitStore((s: GitState) => s.setRepositories)
-  const setCachedRepositories = useGitStore((s: GitState) => s.setCachedRepositories)
   const scanProgress = useGitStore((s: GitState) => s.scanProgress)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const updateRepositoryStatuses = useGitStore((s: GitState) => s.updateRepositoryStatuses)
@@ -729,65 +728,64 @@ const GitView = memo(function GitView() {
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [isPullingRepos, setIsPullingRepos] = useState(false)
   const { t } = useTranslation()
+  const hasInitialSyncRef = useRef(false)
+  // 跟踪已扫描过的路径指纹，避免启动阶段依赖变化触发重复扫描
+  const lastScannedPathsRef = useRef<string>('')
 
   // Load conflict repos from database on mount
   useEffect(() => {
     loadConflictRepos()
   }, [loadConflictRepos])
 
+  // Keep displayed repositories in sync with the canonical cache
+  useEffect(() => {
+    return useGitStore.subscribe((state, prevState) => {
+      if (prevState && state.cachedRepositories !== prevState.cachedRepositories) {
+        setRepositories(state.cachedRepositories)
+      }
+    })
+  }, [setRepositories])
+
   useEffect(() => {
     setSelectedRepos([])
+
+    const scanPaths = workspaceMode === 'workspace'
+      ? (workspaceFolders || [])
+      : (rootPath ? [rootPath] : [])
 
     const currentCached = useGitStore.getState().cachedRepositories
     if (currentCached.length > 0) {
       setRepositories(currentCached)
     }
 
-    const loadRepos = async () => {
-      const scanPaths = workspaceMode === 'workspace'
-        ? (workspaceFolders || [])
-        : (rootPath ? [rootPath] : [])
-
-      if (scanPaths.length === 0) {
-        setRepositories([])
-        return
-      }
-
-      try {
-        const scanPromises = scanPaths.map(async (path) => {
-          try {
-            return await scanGitRepos(path)
-          } catch (e) {
-            console.error(`Failed to scan git repos in ${path}:`, e)
-            return []
-          }
-        })
-
-        const results = await Promise.all(scanPromises)
-        const allRepos = results.flat()
-
-        const storeRepos = mapRepoInfosToRepositories(allRepos)
-        const prevRepos = useGitStore.getState().repositories
-        const mergedRepos = storeRepos.map((repo: GitRepository) => {
-          const prev = prevRepos.find((r: GitRepository) => r.path === repo.path)
-          if (prev && prev.status !== 'normal') {
-            return { ...repo, status: prev.status }
-          }
-          return repo
-        })
-        setRepositories(mergedRepos)
-        setCachedRepositories(mergedRepos)
-      } catch (e) {
-        console.error('Failed to scan git repos:', e)
-        const latestCached = useGitStore.getState().cachedRepositories
-        if (latestCached.length === 0) {
-          setRepositories([])
-        }
-      }
+    if (!hasInitialSyncRef.current) {
+      hasInitialSyncRef.current = true
+      lastScannedPathsRef.current = scanPaths.join(',')
+      // 首次挂载：workspace.ts 的 scanAndCacheGitRepos 会在启动时扫描，避免重复
+      return
     }
 
-    loadRepos()
-  }, [rootPath, workspaceFolders, workspaceMode, setRepositories, setCachedRepositories])
+    const pathsKey = scanPaths.join(',')
+
+    // 缓存为空时由 workspace.ts 负责首次扫描，GitView 不触发
+    if (currentCached.length === 0 && scanPaths.length > 0) {
+      lastScannedPathsRef.current = pathsKey
+      return
+    }
+
+    // 路径未变则跳过
+    if (pathsKey === lastScannedPathsRef.current) return
+    lastScannedPathsRef.current = pathsKey
+
+    // 路径/模式变化时重新扫描
+    if (scanPaths.length === 0) {
+      setRepositories([])
+      return
+    }
+
+    const gitStore = useGitStore.getState()
+    gitStore.scanAndCacheRepos(scanPaths)
+  }, [rootPath, workspaceFolders, workspaceMode, setRepositories])
 
   const toggleRepo = (path: string) => {
     setSelectedRepos(prev => 
@@ -872,38 +870,14 @@ const GitView = memo(function GitView() {
       ? (workspaceFolders || [])
       : (rootPath ? [rootPath] : [])
 
-    // Save previous repos BEFORE clearing to preserve conflict/error status
-    const prevRepos = useGitStore.getState().repositories
-
     setRepositories([])
     setSelectedRepos([])
 
     if (scanPaths.length === 0) return
 
     try {
-      const scanPromises = scanPaths.map(async (path) => {
-        try {
-          return await scanGitRepos(path)
-        } catch (e) {
-          console.error(`Failed to scan git repos in ${path}:`, e)
-          return []
-        }
-      })
-
-      const results = await Promise.all(scanPromises)
-      const allRepos = results.flat()
-
-      const storeRepos = mapRepoInfosToRepositories(allRepos)
-      const mergedRepos = storeRepos.map((repo: GitRepository) => {
-        const prev = prevRepos.find((r: GitRepository) => r.path === repo.path)
-        if (prev && prev.status !== 'normal') {
-          return { ...repo, status: prev.status }
-        }
-        return repo
-      })
-      setRepositories(mergedRepos)
-      setCachedRepositories(mergedRepos)
-
+      const gitStore = useGitStore.getState()
+      await gitStore.scanAndCacheRepos(scanPaths)
       // Reload conflict repos from database to ensure conflict status is accurate
       await loadConflictRepos()
     } catch (e) {

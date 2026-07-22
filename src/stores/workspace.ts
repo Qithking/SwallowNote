@@ -2,13 +2,12 @@
  * Workspace Store - Manages workspace state
  */
 import { create } from 'zustand'
-import { getLatestFolder, saveFolderHistory, getFolderHistory, scanGitRepos, watchDirectory, unwatchDirectory } from '@/lib/tauri'
+import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory } from '@/lib/tauri'
 import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
 import { useEditorStore, EditorTab } from './editor'
-import { useGitStore, mapRepoInfosToRepositories } from './git'
-import i18n from '@/i18n'
+import { useGitStore } from './git'
 
 export interface WorkspaceState {
   rootPath: string | null
@@ -99,6 +98,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
       
       // 异步扫描并缓存 Git 仓库 (延迟执行，避免与文件树加载竞争)
+      // fire-and-forget：App.tsx 的 checkReady 会通过 cachedRepositories.length > 0 等待扫描完成
       setTimeout(() => {
         scanAndCacheGitRepos()
       }, 500)
@@ -286,42 +286,13 @@ async function promptWorkspacePath(): Promise<string | null> {
 }
 
 async function scanAndCacheGitRepos() {
-  try {
-    const { workspaceMode } = useUIStore.getState()
-    const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
-    const gitStore = useGitStore.getState()
+  const { workspaceMode } = useUIStore.getState()
+  const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
+  const gitStore = useGitStore.getState()
 
-    const scanPaths = workspaceMode === 'workspace'
-      ? (workspaceFolders || [])
-      : (rootPath ? [rootPath] : [])
+  const scanPaths = workspaceMode === 'workspace'
+    ? (workspaceFolders || [])
+    : (rootPath ? [rootPath] : [])
 
-    if (scanPaths.length === 0) {
-      gitStore.setCachedRepositories([])
-      return
-    }
-
-    gitStore.setScanProgress({ current: 0, total: scanPaths.length, message: i18n.t('git.scanning') })
-
-    const scanPromises = scanPaths.map(async (path, index) => {
-      try {
-        gitStore.setScanProgress({ current: index, total: scanPaths.length, message: i18n.t('git.scanningPath', { path }) })
-        const repos = await scanGitRepos(path)
-        return repos
-      } catch (e) {
-        console.error(`Failed to scan git repos in ${path}:`, e)
-        return []
-      }
-    })
-
-    const results = await Promise.all(scanPromises)
-    const allRepos = results.flat()
-
-    const cachedRepos = mapRepoInfosToRepositories(allRepos)
-
-    gitStore.setCachedRepositories(cachedRepos)
-    gitStore.clearScanProgress()
-  } catch (e) {
-    console.error('Failed to scan and cache git repos:', e)
-    useGitStore.getState().clearScanProgress()
-  }
+  await gitStore.scanAndCacheRepos(scanPaths)
 }
