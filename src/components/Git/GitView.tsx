@@ -202,7 +202,7 @@ function CommitSection({
     repoName: string
   }>({ open: false, repoPath: '', repoName: '' })
   const [isPushingWithCredentials, setIsPushingWithCredentials] = useState(false)
-  const { showToast } = useUIStore()
+  const showToast = useUIStore((s) => s.showToast)
   const { t } = useTranslation()
 
   const handlePushWithCredentials = async (username: string, password: string) => {
@@ -722,7 +722,8 @@ const GitView = memo(function GitView() {
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const updateRepositoryStatuses = useGitStore((s: GitState) => s.updateRepositoryStatuses)
   const loadConflictRepos = useGitStore((s: GitState) => s.loadConflictRepos)
-  const { rootPath, workspaceFolders } = useWorkspaceStore()
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
   const workspaceMode = useUIStore((s) => s.workspaceMode)
   const showToast = useUIStore((s) => s.showToast)
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])

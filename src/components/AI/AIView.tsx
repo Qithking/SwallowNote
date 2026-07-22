@@ -47,6 +47,7 @@ function AIView() {
   // Maximum number of messages kept in memory to prevent unbounded growth
   const MAX_IN_MEMORY_MESSAGES = 100
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const copiedIdTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [inputValue, setInputValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isOverflow, setIsOverflow] = useState(false)
@@ -59,6 +60,10 @@ function AIView() {
       setIsOverflow(el.scrollHeight > 200)
     }
   }, [inputValue])
+  // Cleanup copy-feedback timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(copiedIdTimer.current)
+  }, [])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollViewportRef = useRef<HTMLDivElement | null>(null)
   const savedMessageIds = useRef<Set<string>>(new Set())
@@ -120,6 +125,15 @@ function AIView() {
 
   const { messages, status, stop, error, sendMessage, setMessages } = chat
   const isLoading = status === 'submitted' || status === 'streaming'
+
+  // Stop any in-flight AI stream on unmount so callbacks don't update state (R-M4)
+  const stopRef = useRef(stop)
+  stopRef.current = stop
+  useEffect(() => {
+    return () => {
+      stopRef.current()
+    }
+  }, [])
 
   // 当 messages 变化时，按 FIFO 顺序把待映射展示文本匹配到新出现的 user 消息（Task 21）
   useEffect(() => {
@@ -382,7 +396,8 @@ function AIView() {
   const handleCopy = async (content: string, id: string) => {
     await navigator.clipboard.writeText(content)
     setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 2000)
+    clearTimeout(copiedIdTimer.current)
+    copiedIdTimer.current = setTimeout(() => setCopiedId(null), 2000)
   }
 
   /**

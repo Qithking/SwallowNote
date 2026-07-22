@@ -21,6 +21,7 @@ import type { LinkToolbarProps } from '@blocknote/react'
 import { codeBlockOptions } from '@blocknote/code-block'
 import { TextSelection } from 'prosemirror-state'
 import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
+import { useShallow } from 'zustand/react/shallow'
 import { registerFlushFn } from '@/lib/editor-flush'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
@@ -134,7 +135,14 @@ function BlockNoteInner({
     normalPaddingHorizontal,
     widePaddingVertical,
     widePaddingHorizontal,
-  } = useEditorSettingsStore()
+  } = useEditorSettingsStore(
+    useShallow((s) => ({
+      normalPaddingVertical: s.normalPaddingVertical,
+      normalPaddingHorizontal: s.normalPaddingHorizontal,
+      widePaddingVertical: s.widePaddingVertical,
+      widePaddingHorizontal: s.widePaddingHorizontal,
+    })),
+  )
   const noteWidth = useUIStore((state) => state.noteWidth)
 
   const editorContainerRef = useRef<HTMLDivElement>(null)

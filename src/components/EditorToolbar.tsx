@@ -3,7 +3,7 @@
  * Shows file path, size, modified time, word count, and view toggles
  */
 import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2, DownloadCloud, Loader2 } from 'lucide-react'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useGitStore, usePluginStore } from '@/stores'
 import type { EditorToolbarConfig } from '@/stores/editor'
 import { useShallow } from 'zustand/react/shallow'
@@ -54,6 +54,11 @@ function EditorToolbar() {
     })
   )
   const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimer.current)
+  }, [])
   // isWide 直接派生自 store，保持与 noteWidth 单一数据源同步
   const isWide = noteWidth === 'wide'
   const [downloading, setDownloading] = useState(false)
@@ -133,7 +138,8 @@ function EditorToolbar() {
     try {
       await navigator.clipboard.writeText(path)
       setCopied(true)
-      setTimeout(() => setCopied(false), 3000)
+      clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 3000)
     } catch (err) {
       console.error('Failed to copy path:', err)
     }

@@ -210,6 +210,27 @@ function buildConflictMap(
   return map
 }
 
+// ── Getter result caches (P-H3) ──
+// Return stable array references across renders when the underlying state
+// hasn't changed, so these getters can be used as Zustand selectors without
+// triggering infinite re-renders. Invalidation is automatic by reference
+// equality: plugins/registry/pluginConflicts get new references on every
+// set that modifies them (via buildRegistry/buildConflictMap), so the cache
+// misses precisely when the data changes.
+const _getterCache = {
+  registryRef: null as PluginRegistry | null,
+  sidebarPlugins: [] as PluginDefinition[],
+  editorToolbarPlugins: [] as PluginDefinition[],
+  titleBarPlugins: [] as PluginDefinition[],
+
+  pluginsRef: null as PluginDefinition[] | null,
+  byIconPosition: new Map<IconPosition, PluginDefinition[]>(),
+  byContentPosition: new Map<ContentPosition, PluginDefinition[]>(),
+
+  conflictsRef: null as Record<string, PluginConflict[]> | null,
+  conflictsById: new Map<string, PluginConflict[]>(),
+}
+
 export const usePluginStore = create<PluginState>((set, get) => ({
   registry: { ...emptyRegistry },
   plugins: [],
@@ -707,9 +728,17 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   },
 
   getPluginConflicts: (id) => {
-    // 返回切片副本，缺失键返回空数组。
-    const cached = get().pluginConflicts[id]
-    return cached ? cached.slice() : []
+    const conflicts = get().pluginConflicts
+    if (_getterCache.conflictsRef !== conflicts) {
+      _getterCache.conflictsRef = conflicts
+      _getterCache.conflictsById.clear()
+    }
+    const hit = _getterCache.conflictsById.get(id)
+    if (hit) return hit
+    const stored = conflicts[id]
+    const result = stored ? stored.slice() : []
+    _getterCache.conflictsById.set(id, result)
+    return result
   },
 
   getPluginAutoUpdate: (id) => {
@@ -718,14 +747,61 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   },
 
   getPluginsByIconPosition: (position) => {
-    return sortByOrder(get().plugins.filter((p) => p.iconPosition === position && p.enabled))
+    const plugins = get().plugins
+    if (_getterCache.pluginsRef !== plugins) {
+      _getterCache.pluginsRef = plugins
+      _getterCache.byIconPosition.clear()
+      _getterCache.byContentPosition.clear()
+    }
+    const hit = _getterCache.byIconPosition.get(position)
+    if (hit) return hit
+    const result = sortByOrder(plugins.filter((p) => p.iconPosition === position && p.enabled))
+    _getterCache.byIconPosition.set(position, result)
+    return result
   },
 
   getPluginsByContentPosition: (position) => {
-    return sortByOrder(get().plugins.filter((p) => p.contentPosition === position && p.enabled))
+    const plugins = get().plugins
+    if (_getterCache.pluginsRef !== plugins) {
+      _getterCache.pluginsRef = plugins
+      _getterCache.byIconPosition.clear()
+      _getterCache.byContentPosition.clear()
+    }
+    const hit = _getterCache.byContentPosition.get(position)
+    if (hit) return hit
+    const result = sortByOrder(plugins.filter((p) => p.contentPosition === position && p.enabled))
+    _getterCache.byContentPosition.set(position, result)
+    return result
   },
 
-  getSidebarPlugins: () => sortByOrder(get().registry.sidebar),
-  getEditorToolbarPlugins: () => sortByOrder(get().registry.editorToolbar),
-  getTitleBarPlugins: () => sortByOrder(get().registry.titleBar),
+  getSidebarPlugins: () => {
+    const registry = get().registry
+    if (_getterCache.registryRef !== registry) {
+      _getterCache.registryRef = registry
+      _getterCache.sidebarPlugins = sortByOrder(registry.sidebar)
+      _getterCache.editorToolbarPlugins = sortByOrder(registry.editorToolbar)
+      _getterCache.titleBarPlugins = sortByOrder(registry.titleBar)
+    }
+    return _getterCache.sidebarPlugins
+  },
+  getEditorToolbarPlugins: () => {
+    const registry = get().registry
+    if (_getterCache.registryRef !== registry) {
+      _getterCache.registryRef = registry
+      _getterCache.sidebarPlugins = sortByOrder(registry.sidebar)
+      _getterCache.editorToolbarPlugins = sortByOrder(registry.editorToolbar)
+      _getterCache.titleBarPlugins = sortByOrder(registry.titleBar)
+    }
+    return _getterCache.editorToolbarPlugins
+  },
+  getTitleBarPlugins: () => {
+    const registry = get().registry
+    if (_getterCache.registryRef !== registry) {
+      _getterCache.registryRef = registry
+      _getterCache.sidebarPlugins = sortByOrder(registry.sidebar)
+      _getterCache.editorToolbarPlugins = sortByOrder(registry.editorToolbar)
+      _getterCache.titleBarPlugins = sortByOrder(registry.titleBar)
+    }
+    return _getterCache.titleBarPlugins
+  },
 }))

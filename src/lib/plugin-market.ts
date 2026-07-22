@@ -127,11 +127,11 @@ async function writeZipToCache(
 // 公共 API
 
 /** 拉取并解析 PluginIndex，snake_case 转 camelCase。 */
-export async function fetchPluginIndex(url: string): Promise<PluginIndex> {
+export async function fetchPluginIndex(url: string, signal?: AbortSignal): Promise<PluginIndex> {
   if (!url) {
     throw new Error('repo url is empty')
   }
-  const res = await fetch(url, { cache: 'no-store' })
+  const res = await fetch(url, { cache: 'no-store', signal })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching plugin index`)
   }
@@ -142,13 +142,14 @@ export async function fetchPluginIndex(url: string): Promise<PluginIndex> {
 /** 带进度的 fetch，回调百分比 */
 export async function fetchWithProgress(
   url: string,
-  onProgress: (percent: number) => void
+  onProgress: (percent: number) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   if (!url) {
     throw new Error('repo url is empty')
   }
 
-  const res = await fetch(url, { cache: 'no-store' })
+  const res = await fetch(url, { cache: 'no-store', signal })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching plugin index`)
   }
@@ -442,13 +443,13 @@ const inMemoryIndexCache = new Map<string, { index: PluginIndex; at: number }>()
 const IN_MEMORY_TTL_MS = 60_000
 
 /** 带 60s 内存缓存的 fetchPluginIndex。 */
-export async function fetchPluginIndexCached(url: string): Promise<PluginIndex> {
+export async function fetchPluginIndexCached(url: string, signal?: AbortSignal): Promise<PluginIndex> {
   const now = Date.now()
   const hit = inMemoryIndexCache.get(url)
   if (hit && now - hit.at < IN_MEMORY_TTL_MS) {
     return hit.index
   }
-  const index = await fetchPluginIndex(url)
+  const index = await fetchPluginIndex(url, signal)
   inMemoryIndexCache.set(url, { index, at: now })
   return index
 }

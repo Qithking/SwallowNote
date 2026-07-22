@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Settings as SettingsIcon,
   Palette,
@@ -91,7 +92,27 @@ function SettingsView() {
     customThemes, activeLightCustomThemeId, activeDarkCustomThemeId,
     setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
     developerMode, setDeveloperMode,
-  } = useUIStore()
+  } = useUIStore(
+    useShallow((s) => ({
+      theme: s.theme, setTheme: s.setTheme,
+      autoStart: s.autoStart, setAutoStart: s.setAutoStart,
+      autoCheckUpdate: s.autoCheckUpdate, setAutoCheckUpdate: s.setAutoCheckUpdate,
+      closeWithoutExit: s.closeWithoutExit, setCloseWithoutExit: s.setCloseWithoutExit,
+      noteWidth: s.noteWidth, setNoteWidth: s.setNoteWidth,
+      showAllFiles: s.showAllFiles, setShowAllFiles: s.setShowAllFiles,
+      markdownOnly: s.markdownOnly, setMarkdownOnly: s.setMarkdownOnly,
+      syncInterval: s.syncInterval, setSyncInterval: s.setSyncInterval,
+      autoSyncPush: s.autoSyncPush, setAutoSyncPush: s.setAutoSyncPush,
+      uploadPath: s.uploadPath, setUploadPath: s.setUploadPath,
+      showConflictBadge: s.showConflictBadge, setShowConflictBadge: s.setShowConflictBadge,
+      aiPort: s.aiPort, setAiPort: s.setAiPort,
+      aiModels: s.aiModels, activeAiModelId: s.activeAiModelId, defaultAiModelId: s.defaultAiModelId,
+      addAiModel: s.addAiModel, removeAiModel: s.removeAiModel, setActiveAiModel: s.setActiveAiModel, setDefaultAiModel: s.setDefaultAiModel, updateAiModelApiKey: s.updateAiModelApiKey,
+      customThemes: s.customThemes, activeLightCustomThemeId: s.activeLightCustomThemeId, activeDarkCustomThemeId: s.activeDarkCustomThemeId,
+      setActiveCustomThemeId: s.setActiveCustomThemeId, addCustomTheme: s.addCustomTheme, deleteCustomTheme: s.deleteCustomTheme, renameCustomTheme: s.renameCustomTheme, updateCustomThemeColor: s.updateCustomThemeColor,
+      developerMode: s.developerMode, setDeveloperMode: s.setDeveloperMode,
+    })),
+  )
 
   const [customThemeTab, setCustomThemeTab] = useState<'light' | 'dark'>('light')
   const [renamingId, setRenamingId] = useState<string | null>(null)

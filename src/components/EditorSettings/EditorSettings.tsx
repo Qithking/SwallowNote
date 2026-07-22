@@ -3,6 +3,7 @@
  * Includes font sizes (h1-h5, body), line height, and letter spacing controls
  */
 import { RotateCcw } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useEditorSettingsStore } from '@/stores'
 import { NumberInput } from '@/components/ui/number-input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -41,7 +42,39 @@ function EditorSettings() {
     setWidePaddingVertical,
     setWidePaddingHorizontal,
     resetToDefault,
-  } = useEditorSettingsStore()
+  } = useEditorSettingsStore(
+    useShallow((s) => ({
+      h1Size: s.h1Size,
+      h2Size: s.h2Size,
+      h3Size: s.h3Size,
+      h4Size: s.h4Size,
+      h5Size: s.h5Size,
+      bodySize: s.bodySize,
+      lineHeight: s.lineHeight,
+      letterSpacing: s.letterSpacing,
+      paragraphSpacing: s.paragraphSpacing,
+      firstLineIndent: s.firstLineIndent,
+      normalPaddingVertical: s.normalPaddingVertical,
+      normalPaddingHorizontal: s.normalPaddingHorizontal,
+      widePaddingVertical: s.widePaddingVertical,
+      widePaddingHorizontal: s.widePaddingHorizontal,
+      setH1Size: s.setH1Size,
+      setH2Size: s.setH2Size,
+      setH3Size: s.setH3Size,
+      setH4Size: s.setH4Size,
+      setH5Size: s.setH5Size,
+      setBodySize: s.setBodySize,
+      setLineHeight: s.setLineHeight,
+      setLetterSpacing: s.setLetterSpacing,
+      setParagraphSpacing: s.setParagraphSpacing,
+      setFirstLineIndent: s.setFirstLineIndent,
+      setNormalPaddingVertical: s.setNormalPaddingVertical,
+      setNormalPaddingHorizontal: s.setNormalPaddingHorizontal,
+      setWidePaddingVertical: s.setWidePaddingVertical,
+      setWidePaddingHorizontal: s.setWidePaddingHorizontal,
+      resetToDefault: s.resetToDefault,
+    })),
+  )
 
   const SettingRow = ({
     label,

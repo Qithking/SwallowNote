@@ -161,6 +161,14 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
   const remoteCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const localCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
+  // Cleanup copy-feedback timers on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(remoteCopiedTimer.current)
+      clearTimeout(localCopiedTimer.current)
+    }
+  }, [])
+
   // Expose getLocalContent via ref for parent components (e.g., ConflictResolver save logic)
   useImperativeHandle(ref, () => ({
     getLocalContent: () => {

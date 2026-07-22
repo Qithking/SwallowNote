@@ -61,7 +61,7 @@ export function EditorContextMenu({
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
   const activeTabId = useEditorStore((s) => s.activeTabId)
   const activeTabPath = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '')
-  const { rootPath } = useWorkspaceStore()
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
 
   const activeTab = activeTabPath ? { id: activeTabId, path: activeTabPath } : undefined
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/stores'
@@ -44,7 +45,14 @@ export function PluginCommandRecorder({ bindingKey, command }: PluginCommandReco
     pluginCommandShortcuts,
     setPluginCommandShortcut,
     resetPluginCommandShortcut,
-  } = useUIStore()
+  } = useUIStore(
+    useShallow((s) => ({
+      customShortcuts: s.customShortcuts,
+      pluginCommandShortcuts: s.pluginCommandShortcuts,
+      setPluginCommandShortcut: s.setPluginCommandShortcut,
+      resetPluginCommandShortcut: s.resetPluginCommandShortcut,
+    })),
+  )
   const [recording, setRecording] = useState(false)
   const [conflict, setConflict] = useState<ShortcutConflict | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
