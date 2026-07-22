@@ -99,8 +99,8 @@ function AIView() {
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
   const insertAtCursor = useEditorStore((s) => s.insertAtCursor)
   const replaceContent = useEditorStore((s) => s.replaceContent)
-  const editorTabs = useEditorStore((s) => s.tabs)
-  const editorActiveTabId = useEditorStore((s) => s.activeTabId)
+  // 只订阅 active tab 引用，避免订阅整个 tabs 数组导致任意 tab 内容变更都重渲染
+  const activeEditorTab = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId))
   const rootPath = useWorkspaceStore((s) => s.rootPath)
 
   // 使用 ref 让 mount-only useEffect 能读取到最新的 aiPort / activeAiModelId，
@@ -399,7 +399,7 @@ function AIView() {
   }, [setSettingsSection, setSettingsPanelVisible, setSidebarView])
 
   const handleSaveAsNewFile = async (content: string) => {
-    const activeTab = editorTabs.find((t) => t.id === editorActiveTabId)
+    const activeTab = activeEditorTab
     if (!activeTab?.path) return
     // Get directory of the active tab file
     const dirPath = activeTab.path.includes('/') ? activeTab.path.substring(0, activeTab.path.lastIndexOf('/')) : ''
@@ -605,7 +605,7 @@ function AIView() {
       // For non-chat roles (e.g. polish, format, summary), automatically attach
       // the active tab's file content so the AI can operate on it.
       // The user's input (e.g. "整理格式") is treated as an instruction for that file.
-      const activeTab = editorTabs.find((t) => t.id === editorActiveTabId)
+      const activeTab = activeEditorTab
       if (activeTab?.content) {
         // Compute relative file path for display
         let filePath = activeTab.path || ''

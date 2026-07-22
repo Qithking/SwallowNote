@@ -42,31 +42,31 @@ function StatusBar() {
   const [localClonePercent, setLocalClonePercent] = useState<number | null>(null)
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined
-    const setup = async () => {
-      unlisten = await listen<{ status: string; message: string; percent?: number; url?: string; local_path?: string }>(
-        'git-clone-progress',
-        (event) => {
-          const payload = event.payload
-          if (payload.status === 'started') {
-            setLocalCloneRunning(true)
-            setLocalCloneUrl(payload.url ?? '')
-            setLocalClonePercent(null)
-          } else if (payload.status === 'progress') {
-            setLocalCloneRunning(true)
-            setLocalClonePercent(payload.percent ?? null)
-          } else if (payload.status === 'completed') {
-            setLocalCloneRunning(false)
-            setLocalClonePercent(null)
-          } else if (payload.status === 'error') {
-            setLocalCloneRunning(false)
-            setLocalClonePercent(null)
-          }
-        },
-      )
+    // 捕获 listen() 返回的 Promise，即使组件在 listen resolve 前卸载，
+    // cleanup 也会在 resolve 后调用 unlisten，避免监听器泄漏
+    const unlistenPromise = listen<{ status: string; message: string; percent?: number; url?: string; local_path?: string }>(
+      'git-clone-progress',
+      (event) => {
+        const payload = event.payload
+        if (payload.status === 'started') {
+          setLocalCloneRunning(true)
+          setLocalCloneUrl(payload.url ?? '')
+          setLocalClonePercent(null)
+        } else if (payload.status === 'progress') {
+          setLocalCloneRunning(true)
+          setLocalClonePercent(payload.percent ?? null)
+        } else if (payload.status === 'completed') {
+          setLocalCloneRunning(false)
+          setLocalClonePercent(null)
+        } else if (payload.status === 'error') {
+          setLocalCloneRunning(false)
+          setLocalClonePercent(null)
+        }
+      },
+    )
+    return () => {
+      unlistenPromise.then((fn) => fn())
     }
-    setup()
-    return () => { unlisten?.() }
   }, [])
 
   const showCloneProgress = cloneIsRunning || localCloneRunning

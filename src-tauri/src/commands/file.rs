@@ -500,12 +500,12 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Use PowerShell to copy file path to clipboard in a format Explorer understands
-        let escaped_path = path.display().to_string()
-            .replace('"', "\"\"");
+        // Use PowerShell to copy file path to clipboard in a format Explorer understands.
+        // 使用单引号字符串避免 $(...) 子表达式扩展（命令注入风险）。
+        let escaped_path = path.display().to_string().replace('\'', "''");
         let ps_command = format!(
             r#"Add-Type -AssemblyName System.Windows.Forms;
-[System.Windows.Forms.Clipboard]::SetFileDropList(@("{}"));"#,
+[System.Windows.Forms.Clipboard]::SetFileDropList(@('{}'));"#,
             escaped_path
         );
         super::create_command("powershell")
