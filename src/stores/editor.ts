@@ -733,7 +733,9 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         // 若在 git 仓库则自动提交（异步非阻塞）
         try {
           await gitAutoCommit(tab.path)
-        } catch { /* ignore */ }
+        } catch (e) {
+          console.warn('[editor] gitAutoCommit failed for', tab.path, e)
+        }
       } catch (e) {
         console.error('Failed to save tab:', tab.path, e)
         window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))

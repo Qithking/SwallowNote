@@ -699,8 +699,9 @@ export const useUIStore = create<UIState>((set, get) => ({
           toast.error(i18n.t('settings.ai.restartFailed'), { description: String(err) })
         })
       }
-    } catch {
-      set({ aiApiKeyDecrypted: key })
+    } catch (e) {
+      console.error('[ui] setAiApiKey encryption failed', e)
+      toast.error(i18n.t('settings.ai.encryptFailed'))
     }
   },
   setAiBaseUrl: (url: string) => {
@@ -776,7 +777,10 @@ export const useUIStore = create<UIState>((set, get) => ({
         saveAppSettings({ aiModels: JSON.stringify(aiModels) })
         return { aiModels }
       })
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error('[ui] updateAiModelApiKey encryption failed', e)
+      toast.error(i18n.t('settings.ai.encryptFailed'))
+    }
   },
   setShortcut: (key, value) => {
     set((state) => ({

@@ -269,9 +269,9 @@ export const useGitStore = create<GitState>((set, get) => ({
             staleRepoPaths.push(record.repo_path)
             newConflictFilesMap[record.repo_path] = []
           }
-        } catch {
-          // 获取冲突文件失败则跳过该仓库
-          newConflictFilesMap[record.repo_path] = []
+        } catch (e) {
+          // 获取冲突文件失败时保留原记录，不清空，避免掩盖真实冲突
+          console.warn('[git] Failed to fetch conflict files for', record.repo_path, e)
         }
       }))
 

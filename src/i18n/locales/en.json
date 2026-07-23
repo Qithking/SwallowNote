@@ -136,6 +136,7 @@
     "ai.testSuccess": "Connection successful",
     "ai.testFailed": "Connection failed",
     "ai.restartFailed": "Failed to restart the local AI proxy",
+    "ai.encryptFailed": "API key encryption failed; not persisted",
     "ai.modelName": "Model Name",
     "ai.modelName.desc": "Set a display name for this model configuration",
     "ai.modelName.placeholder": "Enter display name, leave empty to use model ID",
