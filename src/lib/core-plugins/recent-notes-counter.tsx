@@ -39,6 +39,7 @@ import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
 import { pluginEventBus, getPluginStorage, buildPluginContext } from '@/lib/plugin-host'
 import { usePluginStorage, usePluginEvent } from '@/lib/plugin-hooks'
 import { registerContextMenu, unregisterContextMenu } from '@/lib/plugin-menu'
+import { logger } from '../logger'
 
 // ─── Panel component ──────────────────────────────────────────────────────────
 
@@ -254,7 +255,7 @@ function onUnload(context: { pluginId: string }): void {
 function onEnable(context: { pluginId: string }): void {
   // For this example we just log; the host's health monitor
   // surfaces any plugin that logs >N errors/min after enable.
-  console.debug(`[recent-notes] enabled (pluginId=${context.pluginId})`)
+  logger.debug('plugin:recent-notes', `enabled (pluginId=${context.pluginId})`)
 }
 
 /**
@@ -262,7 +263,7 @@ function onEnable(context: { pluginId: string }): void {
  * anything `onEnable` set up so a disabled plugin stays quiet.
  */
 function onDisable(context: { pluginId: string }): void {
-  console.debug(`[recent-notes] disabled (pluginId=${context.pluginId})`)
+  logger.debug('plugin:recent-notes', `disabled (pluginId=${context.pluginId})`)
 }
 
 /**
@@ -286,7 +287,7 @@ function onUnmount(): void {
 
 /** onActivate — panel becomes visible; use for focus side effects. */
 function onActivate(context: { pluginId: string }): void {
-  console.debug(`[recent-notes] activated (pluginId=${context.pluginId})`)
+  logger.debug('plugin:recent-notes', `activated (pluginId=${context.pluginId})`)
 }
 
 /**
@@ -295,7 +296,7 @@ function onActivate(context: { pluginId: string }): void {
  * in-flight fetches, etc.
  */
 function onDeactivate(context: { pluginId: string }): void {
-  console.debug(`[recent-notes] deactivated (pluginId=${context.pluginId})`)
+  logger.debug('plugin:recent-notes', `deactivated (pluginId=${context.pluginId})`)
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────

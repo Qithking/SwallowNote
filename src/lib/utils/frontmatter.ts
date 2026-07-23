@@ -1,5 +1,6 @@
 import * as yaml from 'js-yaml'
 import type { NoteFrontmatter, FrontmatterParseResult } from '@/lib/types/frontmatter'
+import { logger } from '../logger'
 
 const FRONTMATTER_DELIMITER = '---'
 
@@ -61,7 +62,7 @@ export function parseFrontmatter(content: string): FrontmatterParseResult {
         data = parsed as NoteFrontmatter
       }
     } catch (error) {
-      console.warn('Failed to parse frontmatter YAML:', error)
+      logger.warn('frontmatter', 'Failed to parse frontmatter YAML:', error)
     }
   }
 

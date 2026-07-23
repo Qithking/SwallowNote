@@ -16,6 +16,7 @@ import { EditorState, Extension, Compartment } from '@codemirror/state'
 import { StreamLanguage } from '@codemirror/language'
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
+import { logger } from '@/lib/logger'
 
 // ──────────────────────────────────────────────
 // Types
@@ -406,11 +407,11 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
               effects: langCompartment.reconfigure(exts as Extension),
             })
           } catch (e) {
-            console.warn('[SplitDiffViewer] Failed to apply language extension:', e)
+            logger.warn('diff-viewer', 'Failed to apply language extension:', e)
           }
         }
       }).catch((e: unknown) => {
-        console.warn('[SplitDiffViewer] Failed to load language extension:', e)
+        logger.warn('diff-viewer', 'Failed to load language extension:', e)
       })
 
       // Restore initial cursor position if specified
@@ -426,7 +427,7 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
         }
       }
     } catch (e) {
-      console.error('[SplitDiffViewer] Failed to create MergeView:', e)
+      logger.error('diff-viewer', 'Failed to create MergeView:', e)
     }
 
     return () => {

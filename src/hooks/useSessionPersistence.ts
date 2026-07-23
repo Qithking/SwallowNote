@@ -4,6 +4,7 @@
  * 从 App.tsx 提取，保持 App.tsx 职责清晰
  */
 import { useCallback } from 'react'
+import { logger } from '@/lib/logger'
 import { useUIStore, useEditorStore, useFileTreeStore, useEditorSettingsStore, type EditorTab, type EditorViewMode } from '@/stores'
 import { useWorkspaceStore } from '@/stores'
 import { saveSessionState, getSessionState } from '@/lib/tauri'
@@ -74,7 +75,7 @@ export function useSessionPersistence() {
           windowY = String(Math.round(position.y / scaleFactor))
         }
       } catch (e) {
-        console.error('Failed to save window size:', e)
+        logger.error('session', 'Failed to save window size:', e)
       }
 
       const updates: Record<string, string> = {
@@ -112,7 +113,7 @@ export function useSessionPersistence() {
 
       await saveSessionState(updates)
     } catch (e) {
-      console.error('Failed to save session state:', e)
+      logger.error('session', 'Failed to save session state:', e)
     }
   }, [])
 
@@ -177,7 +178,7 @@ export function useSessionPersistence() {
         }
       }
     } catch (e) {
-      console.error('Failed to restore window geometry:', e)
+      logger.error('session', 'Failed to restore window geometry:', e)
     }
   }, [])
 
@@ -191,7 +192,7 @@ export function useSessionPersistence() {
       
       // 文件树为空时跳过会话恢复
       if (useFileTreeStore.getState().nodes.length === 0) {
-        console.warn('File tree not loaded, skipping session restore')
+        logger.warn('session', 'File tree not loaded, skipping session restore')
         return
       }
 
@@ -232,7 +233,7 @@ export function useSessionPersistence() {
             const { useGitStore } = await import('@/stores')
             await useGitStore.getState().loadConflictRepos()
           } catch (e) {
-            console.error('Failed to load conflict repos before restore:', e)
+            logger.error('session', 'Failed to load conflict repos before restore:', e)
           }
 
           useEditorStore.getState().restoreTabs(restoredTabs, activeTabId)
@@ -261,7 +262,7 @@ export function useSessionPersistence() {
               }
             }
           } catch (e) {
-            console.error('Failed to validate conflict tabs during restore:', e)
+            logger.error('session', 'Failed to validate conflict tabs during restore:', e)
           }
         }
       }
@@ -279,7 +280,7 @@ export function useSessionPersistence() {
         }
       }
     } catch (e) {
-      console.error('Failed to restore session state:', e)
+      logger.error('session', 'Failed to restore session state:', e)
     }
   }, [setSidebarWidth, setRightPanelWidth])
 

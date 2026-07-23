@@ -2,7 +2,7 @@
  * StatusBar Component - Bottom status bar
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Database, GitBranch } from 'lucide-react'
+import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Database, GitBranch, ScrollText } from 'lucide-react'
 import { useUIStore, useGitStore, useCloneStore } from '@/stores'
 import { checkLatestVersion, downloadLatestRelease, openInstaller, installAndRestart, DownloadProgress } from '@/lib/tauri'
 import { open } from '@tauri-apps/plugin-shell'
@@ -30,6 +30,8 @@ const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000 // 1 hour in ms
 function StatusBar() {
   const showToast = useUIStore((s) => s.showToast)
   const autoCheckUpdate = useUIStore((s) => s.autoCheckUpdate)
+  const developerMode = useUIStore((s) => s.developerMode)
+  const toggleLogViewer = useUIStore((s) => s.toggleLogViewer)
   const syncStatus = useGitStore((s) => s.syncStatus)
   const cloneIsRunning = useCloneStore((s) => s.isCloning)
   const statusCloneUrl = useCloneStore((s) => s.cloneUrl)
@@ -440,6 +442,22 @@ function StatusBar() {
       >
         {/* Left Section */}
         <div className="flex items-center gap-2">
+          {/* 查看日志（仅开发者模式可见） */}
+          {developerMode && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  data-testid="statusbar-log-button"
+                  className="opacity-60 hover:opacity-100 cursor-pointer flex items-center gap-1"
+                  onClick={toggleLogViewer}
+                >
+                  <ScrollText size={12} />
+                  <span className="text-[11px]">{t('statusBar.viewLogs')}</span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{t('statusBar.viewLogsTooltip')}</TooltipContent>
+            </Tooltip>
+          )}
           {/* Git 克隆进度 */}
           {showCloneProgress && (
             <Tooltip>

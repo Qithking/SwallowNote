@@ -11,6 +11,7 @@
  * pid/url/local_path in Tauri managed state which survives a webview reload.
  */
 import { create } from 'zustand'
+import { logger } from '@/lib/logger'
 import { gitClone, gitCloneWithCredentials, gitCloneCancel, gitCloneStatus } from '@/lib/tauri'
 import { listen } from '@tauri-apps/api/event'
 import i18n from '@/i18n'
@@ -99,7 +100,7 @@ function initCloneProgressListener() {
     }
     _cloneListenerUnlisten = unlisten
   }).catch((err) => {
-    console.error('[clone] failed to register progress listener:', err)
+    logger.error('clone-store', 'failed to register progress listener:', err)
   })
 }
 
@@ -113,7 +114,7 @@ export function disposeCloneListener(): void {
     try {
       _cloneListenerUnlisten()
     } catch (err) {
-      console.error('[clone] unlisten failed:', err)
+      logger.error('clone-store', 'unlisten failed:', err)
     }
     _cloneListenerUnlisten = null
   }

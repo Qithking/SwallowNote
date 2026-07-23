@@ -9,6 +9,7 @@ import type {
 import type { PluginMetadataRust } from '@/lib/tauri'
 import { createElement, type ReactNode } from 'react'
 import { PlugZap } from 'lucide-react'
+import { logger } from './logger'
 
 /** Rust 元数据转前端元数据 */
 export function rustMetaToPluginMeta(meta: PluginMetadataRust): PluginMetadata {
@@ -87,10 +88,10 @@ async function loadPluginModuleWithRefInner(
         const module = (await import(/* @vite-ignore */ cached.blobUrl)) as Record<string, unknown>
         const manifest = (module.default || module.manifest || null) as PluginManifest | null
         if (import.meta.env.DEV) {
-          console.log(`[PluginLoader] Reused cached blob URL for ${pluginPath} (mtime unchanged)`)
+          logger.info('plugin-loader', `Reused cached blob URL for ${pluginPath} (mtime unchanged)`)
         }
         if (!manifest) {
-          console.warn(`[PluginLoader] No manifest found in module from ${pluginPath}`)
+          logger.warn('plugin-loader', `No manifest found in module from ${pluginPath}`)
         }
         return { manifest, module }
       } catch {
@@ -103,7 +104,7 @@ async function loadPluginModuleWithRefInner(
     code = await readFile(indexJsPath)
 
     if (import.meta.env.DEV) {
-      console.log(`[PluginLoader] Read ${indexJsPath}: ${code.length} chars, hasReactImport: ${code.includes('from "react"')}, hasBundledReact: ${code.includes('__SECRET_INTERNALS')}`)
+      logger.info('plugin-loader', `Read ${indexJsPath}: ${code.length} chars, hasReactImport: ${code.includes('from "react"')}, hasBundledReact: ${code.includes('__SECRET_INTERNALS')}`)
     }
 
     // 检测插件是否打包独立 React 实例，避免运行时冲突
@@ -117,7 +118,7 @@ async function loadPluginModuleWithRefInner(
        !hasReactExternalImport)
     if (hasBundledReact) {
       const errMsg = `Plugin bundles its own copy of React (react/react-dom must be externalized). Please rebuild the plugin with react/react-dom as external dependencies.`
-      console.error(`[PluginLoader] Plugin at ${pluginPath} bundles its own React, which causes hook crashes. The plugin must be rebuilt with react/react-dom as external dependencies.`)
+      logger.error('plugin-loader', `Plugin at ${pluginPath} bundles its own React, which causes hook crashes. The plugin must be rebuilt with react/react-dom as external dependencies.`)
       return { manifest: null, module: null, error: errMsg }
     }
 
@@ -276,7 +277,7 @@ async function loadPluginModuleWithRefInner(
       )
 
     if (import.meta.env.DEV) {
-      console.log(`[PluginLoader] After transform: ${code.length} chars, still hasReactImport: ${code.includes('from "react"')}, first 300 chars:`, code.substring(0, 300))
+      logger.info('plugin-loader', `After transform: ${code.length} chars, still hasReactImport: ${code.includes('from "react"')}, first 300 chars:`, code.substring(0, 300))
     }
 
     const blob = new Blob([code], { type: 'application/javascript' })
@@ -304,7 +305,7 @@ async function loadPluginModuleWithRefInner(
     }
 
     if (import.meta.env.DEV) {
-      console.log(`[PluginLoader] Loaded module from ${pluginPath}`, {
+      logger.info('plugin-loader', `Loaded module from ${pluginPath}`, {
         keys: Object.keys(module),
         hasDefault: 'default' in module,
         defaultType: typeof module.default,
@@ -313,7 +314,7 @@ async function loadPluginModuleWithRefInner(
     const manifest = (module.default || module.manifest || null) as PluginManifest | null
     if (manifest) {
       if (import.meta.env.DEV) {
-        console.log(`[PluginLoader] Manifest for ${manifest.id}:`, {
+        logger.info('plugin-loader', `Manifest for ${manifest.id}:`, {
           iconPosition: manifest.iconPosition,
           contentPosition: manifest.contentPosition,
           hasToolbarButton: !!manifest.toolbarButton,
@@ -322,7 +323,7 @@ async function loadPluginModuleWithRefInner(
         })
       }
     } else {
-      console.warn(`[PluginLoader] No manifest found in module from ${pluginPath}`)
+      logger.warn('plugin-loader', `No manifest found in module from ${pluginPath}`)
     }
     return { manifest, module }
   } catch (err) {
@@ -331,8 +332,9 @@ async function loadPluginModuleWithRefInner(
     const errMsg = err instanceof Error ? err.message : String(err)
     let detailMsg = errMsg
     if (remainingImports && remainingImports.length > 0) {
-      console.error(
-        `[PluginLoader] Failed to load plugin from ${pluginPath}.`,
+      logger.error(
+        'plugin-loader',
+        `Failed to load plugin from ${pluginPath}.`,
         `Residual import statement(s) after rewrite (loader transform is incomplete):`,
         remainingImports,
         'Underlying error:',
@@ -340,7 +342,7 @@ async function loadPluginModuleWithRefInner(
       )
       detailMsg = `Residual import statement(s) after rewrite: ${remainingImports.join(', ')}\nUnderlying error: ${errMsg}`
     } else {
-      console.error(`[PluginLoader] Failed to load plugin from ${pluginPath}:`, err)
+      logger.error('plugin-loader', `Failed to load plugin from ${pluginPath}:`, err)
     }
     return { manifest: null, module: null, error: detailMsg }
   }
@@ -395,7 +397,7 @@ async function loadWithConcurrency(
         // 同步 throw 视为单插件失败
         const meta = items[idx]
         const reason = err instanceof Error ? `${err.message}` : String(err)
-        console.error(`[PluginLoader] Unexpected throw loading plugin ${meta.id}:`, err)
+        logger.error('plugin-loader', `Unexpected throw loading plugin ${meta.id}:`, err)
         failureSlots[idx] = {
           id: meta.id,
           name: meta.name,
@@ -438,7 +440,7 @@ export async function loadAllPlugins(
   rustMetas: PluginMetadataRust[]
 ): Promise<PluginLoadResult> {
   if (import.meta.env.DEV) {
-    console.log(`[PluginLoader] loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
+    logger.info('plugin-loader', `loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
   }
   return loadWithConcurrency(rustMetas, async (meta) => {
       // manifest 为 null 时按加载失败处理

@@ -35,6 +35,7 @@ import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuIte
 import { updateNodesWithChildren, findParentNode } from '@/lib/utils/treeUtils'
 import { usePluginEditors } from '@/stores/pluginEditor'
 import { countWords } from '@/lib/utils/wordCount'
+import { logger } from '@/lib/logger'
 
 function getRelativePath(rootPath: string, fullPath: string): string {
   if (!rootPath) return fullPath
@@ -140,7 +141,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           wordCount: countWords(content),
         })
       } catch (e) {
-        console.error('Failed to open file:', e)
+        logger.error('file-tree-menu', 'Failed to open file:', e)
       }
     }
   }
@@ -149,7 +150,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
     try {
       await invoke('open_in_finder', { path: node.path })
     } catch (e) {
-      console.error('Failed to open in finder:', e)
+      logger.error('file-tree-menu', 'Failed to open in finder:', e)
     }
   }
 
@@ -163,7 +164,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       const updatedNodes = updateNodesWithChildren(nodes, node.path, children)
       setNodes(updatedNodes)
     } catch (e) {
-      console.error('Failed to init git:', e)
+      logger.error('file-tree-menu', 'Failed to init git:', e)
       showToast(t('contextMenu.gitInitFailed', { error: String(e) }))
     }
   }
@@ -182,7 +183,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       await navigator.clipboard.writeText(pathToCopy)
       showToast(t('tabBar.pathCopied'))
     } catch (e) {
-      console.error('Failed to copy path:', e)
+      logger.error('file-tree-menu', 'Failed to copy path:', e)
       showToast(t('contextMenu.copied', { name: 'path' }))
     }
   }
@@ -235,7 +236,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           editorStore.updateTabPath(sourcePath, destPath, destName)
         }
       } catch (e) {
-        console.error('Failed to paste:', e)
+        logger.error('file-tree-menu', 'Failed to paste:', e)
         failCount++
       }
     }
@@ -296,7 +297,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       }
     showToast(t('fileTree.deleteSuccess', { count: 1 }), 'success')
     } catch (e) {
-      console.error('Failed to delete:', e)
+      logger.error('file-tree-menu', 'Failed to delete:', e)
       showToast(t('fileTree.deletePartial', { success: 0, fail: 1 }), 'error')
     }
   }
@@ -312,7 +313,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       
       showToast(t('contextMenu.removed', { name: node.name }))
     } catch (e) {
-      console.error('Failed to remove record:', e)
+      logger.error('file-tree-menu', 'Failed to remove record:', e)
     }
   }
 

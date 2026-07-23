@@ -1,4 +1,5 @@
 import React from 'react'
+import { logger } from '@/lib/logger'
 import * as ReactDOM from 'react-dom'
 import * as ReactJSXRuntime from 'react/jsx-runtime'
 import { createRoot } from 'react-dom/client'
@@ -10,14 +11,14 @@ import { initHealthMonitor } from '@/lib/plugin-health'
 
 function logTime(stage: string, t0: number) {
   const elapsed = Math.round(performance.now() - t0)
-  console.log(`[STARTUP-TIME] ${stage} t=${elapsed}`)
+  logger.info('main', `[STARTUP-TIME] ${stage} t=${elapsed}`)
   const tauri = (window as any).__TAURI__
   if (tauri?.invoke) {
     tauri.invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch((e: any) => {
-      console.error('[STARTUP-TIME] invoke failed:', e)
+      logger.error('main', '[STARTUP-TIME] invoke failed:', e)
     })
   } else {
-    console.error('[STARTUP-TIME] __TAURI__.invoke not available')
+    logger.error('main', '[STARTUP-TIME] __TAURI__.invoke not available')
   }
 }
 

@@ -34,6 +34,7 @@ mod test_utils;
 
 use std::path::Path;
 use crate::i18n;
+use log::warn;
 
 /// Check if a directory is a git repository by checking for .git folder
 #[tauri::command]
@@ -64,8 +65,7 @@ pub async fn git_status(path: String) -> Result<GitStatus, String> {
     // G-15 修复：分支获取失败时记录日志，返回空字符串让前端能据此判断获取失败
     // （区别于 "unknown" 等真实分支名）。若 git 命令本身失败，后续 run_git 会向上传播错误。
     let branch = get_branch(&path).unwrap_or_else(|e| {
-        #[cfg(debug_assertions)]
-        eprintln!("[WARN] git_status: failed to get branch for {}: {}", path, e);
+        warn!("[WARN] git_status: failed to get branch for {}: {}", path, e);
         "".to_string()
     });
     // 不再吞掉 run_git 错误：git 失败时向上传播，避免前端误以为"无改动"。

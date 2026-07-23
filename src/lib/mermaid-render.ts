@@ -1,4 +1,6 @@
 /** mermaid 实例与渲染结果 LRU 缓存的共享模块 */
+import { logger } from './logger'
+
 type MermaidApi = typeof import('mermaid')['default']
 
 // 按 securityLevel 缓存独立的 mermaid 实例，避免不同安全策略互相污染
@@ -128,7 +130,7 @@ export function renderMermaidDiagram(
       if (oldest !== undefined) svgCache.delete(oldest)
     }
   }).catch((e) => {
-    console.warn('[mermaid-render] Render failed:', e)
+    logger.warn('mermaid', 'Render failed:', e)
   })
 
   return nextRender

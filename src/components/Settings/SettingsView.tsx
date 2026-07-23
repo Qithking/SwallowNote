@@ -53,6 +53,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/components/ui/alert-dialog'
+import { logger } from '@/lib/logger'
 
 type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | 'development'
 
@@ -158,7 +159,7 @@ function SettingsView() {
           setSelectedRoleKey(prompts[0].role_key)
         }
       })
-      .catch(console.error)
+      .catch((e) => logger.error('settings', 'Failed to load AI role prompts:', e))
   }, [])
 
   // Notify AI panel to reload role prompts after any change
@@ -311,7 +312,7 @@ function SettingsView() {
         } catch (err) {
           // Non-fatal — the file-watcher subscription
           // (Plan B) will catch up within ~500 ms.
-          console.warn('[Settings] failed to re-seed storage sizes after import:', err)
+          logger.warn('settings', 'failed to re-seed storage sizes after import:', err)
         }
       }
     } catch (e) {

@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { CategoryTreeSelect } from '@/components/Category/CategoryTreeSelect'
+import { logger } from '@/lib/logger'
 
 interface NotePropertiesPanelProps {
   tabId: string
@@ -188,7 +189,7 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
             try {
               await invoke('create_category', { path: cat })
             } catch (e) {
-              console.error('Failed to create category from properties:', cat, e)
+              logger.error('note-properties', 'Failed to create category from properties:', cat, e)
               toast.error(`创建分类失败: ${cat}`)
             }
           }

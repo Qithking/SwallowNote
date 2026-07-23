@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useCategoryStore, type CategoryNode } from '@/stores'
+import { logger } from '@/lib/logger'
 
 interface CategoryTreeSelectProps {
   value: string[]
@@ -61,7 +62,7 @@ export function CategoryTreeSelect({ value, onChange }: CategoryTreeSelectProps)
         try {
           await invoke('create_category', { path: trimmed })
         } catch (e) {
-          console.error('Failed to create category:', trimmed, e)
+          logger.error('category', 'Failed to create category:', trimmed, e)
           toast.error(`创建分类失败: ${trimmed}`)
         }
       }

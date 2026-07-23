@@ -2,6 +2,7 @@
  * UI Store - Manages UI state
  */
 import { create } from 'zustand'
+import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import i18n from '@/i18n'
 import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, isAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels, restartApp } from '@/lib/tauri'
@@ -399,6 +400,7 @@ export interface UIState {
   editorViewMode: EditorViewMode
   commandPaletteVisible: boolean
   settingsPanelVisible: boolean
+  logViewerVisible: boolean
   /**
    * Section to focus when the Settings panel opens.
    * Set by callers (e.g. AIView's settings button) so the panel
@@ -453,6 +455,7 @@ export interface UIState {
   toggleStatusBar: () => void
   setEditorViewMode: (mode: EditorViewMode) => void
   toggleCommandPalette: () => void
+  toggleLogViewer: () => void
   setSettingsPanelVisible: (visible: boolean) => void
   setSettingsSection: (section: SettingsSection) => void
   toggleSettingsPanel: () => void
@@ -522,6 +525,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   editorViewMode: 'split',
   commandPaletteVisible: false,
   settingsPanelVisible: false,
+  logViewerVisible: false,
   settingsSection: null,
   aiPanelVisible: false,
   rightPanelType: null,
@@ -579,6 +583,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
   toggleCommandPalette: () =>
     set((state) => ({ commandPaletteVisible: !state.commandPaletteVisible })),
+  toggleLogViewer: () =>
+    set((state) => ({ logViewerVisible: !state.logViewerVisible })),
   setSettingsPanelVisible: (visible) => set({ settingsPanelVisible: visible }),
   setSettingsSection: (section: SettingsSection) => set({ settingsSection: section }),
   toggleSettingsPanel: () =>
@@ -619,7 +625,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     saveAppSettings({ autoStart: String(value) })
     setAutoStartEnabled(value).catch((err) => {
       // OS 注册失败，回滚乐观状态并提示错误
-      console.error('[ui] setAutoStartEnabled failed', err)
+      logger.error('ui-store', 'setAutoStartEnabled failed', err)
       toast.error(i18n.t('settings.general.autoStart.failed'), { description: String(err) })
       get().setAutoStart(!value)
     })
@@ -695,12 +701,12 @@ export const useUIStore = create<UIState>((set, get) => ({
       if (aiProvider) {
         // 重启失败：新 key 已持久化但代理仍用旧配置，需提示
         restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch((err) => {
-          console.error('[ui] restartAiProxy failed', err)
+          logger.error('ui-store', 'restartAiProxy failed', err)
           toast.error(i18n.t('settings.ai.restartFailed'), { description: String(err) })
         })
       }
     } catch (e) {
-      console.error('[ui] setAiApiKey encryption failed', e)
+      logger.error('ui-store', 'setAiApiKey encryption failed', e)
       toast.error(i18n.t('settings.ai.encryptFailed'))
     }
   },
@@ -778,7 +784,7 @@ export const useUIStore = create<UIState>((set, get) => ({
         return { aiModels }
       })
     } catch (e) {
-      console.error('[ui] updateAiModelApiKey encryption failed', e)
+      logger.error('ui-store', 'updateAiModelApiKey encryption failed', e)
       toast.error(i18n.t('settings.ai.encryptFailed'))
     }
   },
@@ -935,7 +941,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       toast.info(i18n.t('settings.development.restartDevServerHint') ?? '开发者模式已更改，请重启开发服务器后生效')
     } else {
       restartApp().catch((err) => {
-        console.error('Failed to restart app:', err)
+        logger.error('ui-store', 'Failed to restart app:', err)
         toast.error(i18n.t('settings.development.restartFailedHint') ?? '重启失败，请手动重启应用')
       })
     }

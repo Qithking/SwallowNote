@@ -13,6 +13,7 @@ import {
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { scanPlugins } from '@/lib/tauri'
 import i18next from 'i18next'
+import { logger } from './logger'
 
 /** 兼容 i18next.TFunction 和普通函数的翻译类型。 */
 export type AutoUpdateTranslator = (
@@ -81,7 +82,7 @@ export async function runAutoUpdateOnStartup(
     // await 后重新读取 index
     index = usePluginMarketStore.getState().index
   } catch (err) {
-    console.warn('[auto-update] failed to fetch marketplace index:', err)
+    logger.warn('plugin-update', 'failed to fetch marketplace index:', err)
     return report
   }
   if (!index) {
@@ -112,8 +113,9 @@ export async function runAutoUpdateOnStartup(
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
-      console.warn(
-        `[auto-update] install failed for ${plugin.id}:`,
+      logger.warn(
+        'plugin-update',
+        `install failed for ${plugin.id}:`,
         reason,
       )
       report.failed.push({
@@ -240,7 +242,7 @@ async function refreshInstalledPlugins(): Promise<void> {
     store.setPlugins(result.plugins)
     store.setLoadFailures(result.failures)
   } catch (err) {
-    console.warn('[auto-update] post-install rescan failed:', err)
+    logger.warn('plugin-update', 'post-install rescan failed:', err)
   }
 }
 

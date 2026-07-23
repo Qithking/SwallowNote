@@ -1,10 +1,11 @@
 use crate::db::Database;
 use rusqlite::Result;
+use log::error;
 
 pub fn save_folder(db: &Database, path: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     // 用 unchecked_transaction 包裹 INSERT + DELETE，保证“写入当前 + 裁剪历史”原子提交，
@@ -30,7 +31,7 @@ pub fn save_folder(db: &Database, path: &str) -> Result<()> {
 pub fn get_latest_folder(db: &Database) -> Result<Option<String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     
@@ -50,7 +51,7 @@ pub fn get_latest_folder(db: &Database) -> Result<Option<String>> {
 pub fn get_folder_history(db: &Database) -> Result<Vec<String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     
@@ -71,7 +72,7 @@ pub fn get_folder_history(db: &Database) -> Result<Vec<String>> {
 pub fn remove_folder(db: &Database, path: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     
@@ -86,7 +87,7 @@ pub fn remove_folder(db: &Database, path: &str) -> Result<()> {
 pub fn clear_other_history(db: &Database, current_path: Option<&str>) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     

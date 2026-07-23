@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next'
 import { openFolderDialog, openFileDialog, getFolderHistory } from '@/lib/tauri'
 import { formatShortcutForDisplay, getShortcutKey } from '@/lib/shortcuts'
 import appIconUrl from '@/assets/app-icon.png'
+import { logger } from '@/lib/logger'
 
 interface UnsupportedEditorProps {
   filename: string
@@ -142,7 +143,7 @@ function WelcomeScreen() {
         }
       }
     } catch (e) {
-      console.error('Failed to open:', e)
+      logger.error('editor', 'Failed to open:', e)
     }
   }, [workspaceMode])
 
@@ -167,7 +168,7 @@ function WelcomeScreen() {
       })
       useEditorStore.getState().loadTabContent(id)
     } catch (e) {
-      console.error('Failed to open file:', e)
+      logger.error('editor', 'Failed to open file:', e)
     }
   }, [])
 
@@ -189,7 +190,7 @@ function WelcomeScreen() {
         await useWorkspaceStore.getState().openFolder(path)
       }
     } catch (e) {
-      console.error('Failed to open recent:', e)
+      logger.error('editor', 'Failed to open recent:', e)
     }
   }, [workspaceMode])
 

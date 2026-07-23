@@ -4,6 +4,7 @@ use super::runner::{run_git, run_git_no_trim};
 use super::paths::{to_git_path, unescape_git_path};
 use super::branch::is_rebase_scenario;
 use super::conflict_content::{fetch_stage_content, get_conflict_content, check_and_continue_rebase};
+use log::{debug, warn};
 
 /// Get list of conflicting files in a repository during a rebase or merge
 #[tauri::command]
@@ -92,8 +93,7 @@ pub async fn git_get_conflict_files(repo_path: String) -> Result<Vec<ConflictFil
 
     // Early return if no state file and no conflicts found
     if !has_state_file && files.is_empty() {
-        #[cfg(debug_assertions)]
-        eprintln!("[INFO] git_get_conflict_files: no rebase/merge state found and no conflicts detected in {}", repo_path);
+        debug!("[INFO] git_get_conflict_files: no rebase/merge state found and no conflicts detected in {}", repo_path);
         return Ok(vec![]);
     }
 
@@ -101,28 +101,24 @@ pub async fn git_get_conflict_files(repo_path: String) -> Result<Vec<ConflictFil
     // the rebase/merge may be in a special state (e.g. interactive rebase with empty todo).
     // Return empty list - the frontend should keep showing the conflict tab until user resolves it.
     if files.is_empty() {
-        #[cfg(debug_assertions)]
-        eprintln!("[INFO] git_get_conflict_files: rebase/merge state exists but no unmerged files found in {}", repo_path);
+        debug!("[INFO] git_get_conflict_files: rebase/merge state exists but no unmerged files found in {}", repo_path);
     }
 
-    #[cfg(debug_assertions)]
-    eprintln!("[INFO] git_get_conflict_files: found {} conflict files in {}", files.len(), repo_path);
+    debug!("[INFO] git_get_conflict_files: found {} conflict files in {}", files.len(), repo_path);
     Ok(files)
 }
 
 // 获取冲突文件的本地版本。rebase 用 stage 3/REBASE_HEAD，merge 用 stage 2/HEAD。
 #[tauri::command]
 pub async fn git_get_conflict_local_content(repo_path: String, file_path: String) -> Result<String, String> {
-    #[cfg(debug_assertions)]
-    eprintln!("[INFO] git_get_conflict_local_content: repo_path={}, file_path={}", repo_path, file_path);
+    debug!("[INFO] git_get_conflict_local_content: repo_path={}, file_path={}", repo_path, file_path);
 
     let rel_path = file_path.trim().trim_start_matches('/').trim_matches('"').to_string();
     // Validate: reject path traversal attempts
     if rel_path.contains("..") {
         return Err(format!("Invalid file path: path traversal detected in '{}'", rel_path));
     }
-    #[cfg(debug_assertions)]
-    eprintln!("[INFO] git_get_conflict_local_content: normalized rel_path='{}'", rel_path);
+    debug!("[INFO] git_get_conflict_local_content: normalized rel_path='{}'", rel_path);
 
     // G-14 修复：使用公共函数统一 stage 映射逻辑
     // rebase: local = REBASE_HEAD + stage 3（theirs = 本地）
@@ -146,12 +142,10 @@ pub async fn git_get_conflict_local_content(repo_path: String, file_path: String
     };
 
     if let Some(content) = result {
-        #[cfg(debug_assertions)]
-        eprintln!("[INFO] git_get_conflict_local_content: OK from stage (len={})", content.len());
+        debug!("[INFO] git_get_conflict_local_content: OK from stage (len={})", content.len());
         Ok(content)
     } else {
-        #[cfg(debug_assertions)]
-        eprintln!("[WARN] git_get_conflict_local_content: all git strategies failed for '{}' in {}, returning empty (file may not exist on this side)", rel_path, repo_path);
+        warn!("[WARN] git_get_conflict_local_content: all git strategies failed for '{}' in {}, returning empty (file may not exist on this side)", rel_path, repo_path);
         Ok(String::new())
     }
 }
@@ -159,16 +153,14 @@ pub async fn git_get_conflict_local_content(repo_path: String, file_path: String
 // 获取冲突文件的远程版本。rebase 用 stage 2/HEAD，merge 用 stage 3/MERGE_HEAD。
 #[tauri::command]
 pub async fn git_get_conflict_remote_content(repo_path: String, file_path: String) -> Result<String, String> {
-    #[cfg(debug_assertions)]
-    eprintln!("[INFO] git_get_conflict_remote_content: repo_path={}, file_path={}", repo_path, file_path);
+    debug!("[INFO] git_get_conflict_remote_content: repo_path={}, file_path={}", repo_path, file_path);
 
     let rel_path = file_path.trim().trim_start_matches('/').trim_matches('"').to_string();
     // Validate: reject path traversal attempts
     if rel_path.contains("..") {
         return Err(format!("Invalid file path: path traversal detected in '{}'", rel_path));
     }
-    #[cfg(debug_assertions)]
-    eprintln!("[INFO] git_get_conflict_remote_content: normalized rel_path='{}'", rel_path);
+    debug!("[INFO] git_get_conflict_remote_content: normalized rel_path='{}'", rel_path);
 
     // G-14 修复：使用公共函数统一 stage 映射逻辑
     // rebase: remote = HEAD + stage 2（ours = upstream/remote）
@@ -195,12 +187,10 @@ pub async fn git_get_conflict_remote_content(repo_path: String, file_path: Strin
     };
 
     if let Some(content) = result {
-        #[cfg(debug_assertions)]
-        eprintln!("[INFO] git_get_conflict_remote_content: OK from stage (len={})", content.len());
+        debug!("[INFO] git_get_conflict_remote_content: OK from stage (len={})", content.len());
         Ok(content)
     } else {
-        #[cfg(debug_assertions)]
-        eprintln!("[WARN] git_get_conflict_remote_content: all git strategies failed for '{}' in {}, returning empty (file may not exist on this side)", rel_path, repo_path);
+        warn!("[WARN] git_get_conflict_remote_content: all git strategies failed for '{}' in {}, returning empty (file may not exist on this side)", rel_path, repo_path);
         Ok(String::new())
     }
 }
@@ -234,8 +224,7 @@ pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, sid
         return Err(format!("Invalid file path: path traversal detected in '{}'", git_path));
     }
 
-    #[cfg(debug_assertions)]
-    eprintln!("[INFO] git_resolve_conflict_file: repo_path={}, file_path={}, side={}", repo_path, file_path, side);
+    debug!("[INFO] git_resolve_conflict_file: repo_path={}, file_path={}, side={}", repo_path, file_path, side);
 
     // If side is "current", the user has already edited and saved the file via
     // git_save_conflict_file_content, so we just need to stage it.
@@ -271,8 +260,7 @@ pub async fn git_save_conflict_file_content(repo_path: String, file_path: String
         return Err(format!("Invalid file path: path traversal detected in '{}'", git_path));
     }
 
-    #[cfg(debug_assertions)]
-    eprintln!("[INFO] git_save_conflict_file_content: repo_path={}, file_path={}", repo_path, file_path);
+    debug!("[INFO] git_save_conflict_file_content: repo_path={}, file_path={}", repo_path, file_path);
 
     // Write the edited content back to the file
     // Do NOT run `git add` here — that would prematurely resolve the conflict.

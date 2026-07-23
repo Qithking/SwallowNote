@@ -72,6 +72,7 @@ import type {
   PluginPermission,
 } from '@/types/plugin'
 import type { PluginMetadataRust } from '@/lib/tauri'
+import { logger } from '@/lib/logger'
 
 /**
  * The five tabs of the detail dialog. The order here is the order
@@ -98,7 +99,7 @@ async function reloadAfterInstall(): Promise<void> {
     // banner stays consistent with what's on disk.
     usePluginStore.getState().setLoadFailures(failures)
   } catch (e) {
-    console.warn('post-install reload failed', e)
+    logger.warn('plugin-market', 'post-install reload failed', e)
   }
 }
 

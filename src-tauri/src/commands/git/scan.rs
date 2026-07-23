@@ -3,6 +3,7 @@ use super::models::GitRepositoryInfo;
 use super::runner::run_git;
 use super::branch::get_branch;
 use super::conflict::get_uncommitted_count;
+use log::debug;
 
 /// Scan directory for all git repositories
 #[tauri::command]
@@ -53,11 +54,9 @@ pub fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent
         // Get remote URL
         // G-05 修复：get_remote_url 返回 Result<Option<String>, String>，flatten 后得到 Option<String>
         let remote_url_result = get_remote_url(&path_str);
-        if cfg!(debug_assertions) {
-            match &remote_url_result {
-                Ok(url) => eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url={:?}", path_str, url.as_ref()),
-                Err(e) => eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url error={}", path_str, e),
-            }
+        match &remote_url_result {
+            Ok(url) => debug!("[DIAG] scan_dir_recursive repo={} get_remote_url={:?}", path_str, url.as_ref()),
+            Err(e) => debug!("[DIAG] scan_dir_recursive repo={} get_remote_url error={}", path_str, e),
         }
         let remote_url = remote_url_result.ok().flatten();
 
@@ -93,11 +92,9 @@ pub fn scan_dir_recursive(dir: &Path, repos: &mut Vec<GitRepositoryInfo>, parent
 
                         let submodule_path_str = submodule_full_path.to_string_lossy().to_string().replace('\\', "/");
                         let submodule_remote_result = get_remote_url(&submodule_path_str);
-                        if cfg!(debug_assertions) {
-                            match &submodule_remote_result {
-                                Ok(url) => eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url={:?}", submodule_path_str, url.as_ref()),
-                                Err(e) => eprintln!("[DIAG] scan_dir_recursive repo={} get_remote_url error={}", submodule_path_str, e),
-                            }
+                        match &submodule_remote_result {
+                            Ok(url) => debug!("[DIAG] scan_dir_recursive repo={} get_remote_url={:?}", submodule_path_str, url.as_ref()),
+                            Err(e) => debug!("[DIAG] scan_dir_recursive repo={} get_remote_url error={}", submodule_path_str, e),
                         }
                         let submodule_remote = submodule_remote_result.ok().flatten();
                         let submodule_branch = get_branch(&submodule_path_str).unwrap_or_else(|_| "unknown".to_string());
@@ -180,27 +177,19 @@ pub fn parse_gitmodules(gitmodules_path: &Path) -> Result<Vec<String>, String> {
 /// - `Err(e)`：git 命令执行失败（如仓库损坏、git 配置异常），调用方应报错而非静默成功
 pub fn get_remote_url(path: &str) -> Result<Option<String>, String> {
     // 诊断日志：用于定位"未配置远程仓库"bug（release 构建静默）
-    if cfg!(debug_assertions) {
-        eprintln!("[DIAG] get_remote_url path={}", path);
-    }
+    debug!("[DIAG] get_remote_url path={}", path);
     // 先检查是否有 origin 远程配置
     let remotes = run_git(path, &["remote"])?;
-    if cfg!(debug_assertions) {
-        eprintln!("[DIAG] get_remote_url path={} remotes={:?}", path, remotes);
-    }
+    debug!("[DIAG] get_remote_url path={} remotes={:?}", path, remotes);
     if !remotes.lines().any(|r| r.trim() == "origin") {
         // 没有配置 origin 远程，返回 None 表示"无远程配置"
-        if cfg!(debug_assertions) {
-            eprintln!("[DIAG] get_remote_url path={} no origin remote", path);
-        }
+        debug!("[DIAG] get_remote_url path={} no origin remote", path);
         return Ok(None);
     }
     // 有 origin 但 get-url 失败，说明 git 配置异常（如 .git/config 损坏）
     let output = run_git(path, &["remote", "get-url", "origin"])?;
     let url = output.trim().to_string();
-    if cfg!(debug_assertions) {
-        eprintln!("[DIAG] get_remote_url path={} url={}", path, url);
-    }
+    debug!("[DIAG] get_remote_url path={} url={}", path, url);
     if url.is_empty() {
         return Ok(None);
     }

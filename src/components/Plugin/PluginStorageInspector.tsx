@@ -42,6 +42,7 @@ import {
   deletePluginStorageEntry,
   clearPluginStorage,
 } from '@/lib/plugin-host'
+import { logger } from '@/lib/logger'
 
 export interface PluginStorageInspectorProps {
   open: boolean
@@ -97,7 +98,7 @@ export function PluginStorageInspector({
       // instead of an inline error so the dialog can still be
       // closed cleanly. The next refresh after a permission fix
       // will repopulate the table.
-      console.error('[PluginStorageInspector] failed to read storage:', err)
+      logger.error('plugin-storage', 'failed to read storage:', err)
       toast.error(t('plugin.pa.dialog.storageInspector.loadFailed'), {
         description: String(err),
       })
@@ -134,7 +135,7 @@ export function PluginStorageInspector({
         setEntries(list)
       } catch (err) {
         if (cancelled) return
-        console.error('[PluginStorageInspector] failed to read storage:', err)
+        logger.error('plugin-storage', 'failed to read storage:', err)
         toast.error(t('plugin.pa.dialog.storageInspector.loadFailed'), {
           description: String(err),
         })
@@ -163,7 +164,7 @@ export function PluginStorageInspector({
         // catches any side effects from a buggy `set()`.
         await refresh()
       } catch (err) {
-        console.error('[PluginStorageInspector] delete failed:', err)
+        logger.error('plugin-storage', 'delete failed:', err)
         toast.error(t('plugin.pa.dialog.storageInspector.deleteFailed'), {
           description: String(err),
         })
@@ -185,7 +186,7 @@ export function PluginStorageInspector({
       }))
       await refresh()
     } catch (err) {
-      console.error('[PluginStorageInspector] clear failed:', err)
+      logger.error('plugin-storage', 'clear failed:', err)
       toast.error(t('plugin.pa.dialog.storageInspector.clearFailed'), {
         description: String(err),
       })

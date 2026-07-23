@@ -19,6 +19,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
 import { usePluginStorage, usePluginEvent } from '@/lib/plugin-hooks'
+import { logger } from '../logger'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -174,8 +175,9 @@ function WordCounterToolbarButton(panel: PluginPanelProps): ReactNode {
         // In a real plugin we'd read the active editor's content
         // through the host API; for the sample we just log so the
         // user can confirm the toolbar mount point works.
-        console.debug(
-          `[word-counter] toolbar refresh (pluginId=${panel.pluginId})`,
+        logger.debug(
+          'plugin:word-counter',
+          `toolbar refresh (pluginId=${panel.pluginId})`,
         )
       }}
     >

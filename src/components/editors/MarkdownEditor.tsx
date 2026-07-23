@@ -49,6 +49,7 @@ import {
   MARKMAP_BLOCK_TYPE,
 } from './markmapBlockSpec'
 import '@blocknote/mantine/style.css'
+import { logger } from '@/lib/logger'
 
 /** Check if a URL is an external protocol (http, https, mailto, etc.) */
 function isExternalUrl(url: string): boolean {
@@ -389,7 +390,7 @@ function BlockNoteInner({
                 } as PartialBlock)
               }
             } catch (e) {
-              console.error('Failed to paste file from clipboard:', sourcePath, e)
+              logger.error('markdown-editor', 'Failed to paste file from clipboard:', sourcePath, e)
             }
           }
         }
@@ -435,7 +436,7 @@ function BlockNoteInner({
         wordCount: countWords(content),
       })
     } catch (e) {
-      console.error('Failed to open file from link:', e)
+      logger.error('markdown-editor', 'Failed to open file from link:', e)
       toast.error(`无法打开文件: ${filePath}`)
     }
   }, [])
@@ -568,7 +569,7 @@ function BlockNoteInner({
         doScrollToBlockId(block.id)
       }
     } catch (e) {
-      console.error('Failed to scroll to line:', e)
+      logger.error('markdown-editor', 'Failed to scroll to line:', e)
     }
   }
 
@@ -635,10 +636,10 @@ function BlockNoteInner({
           targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
         }
       } else {
-        console.warn('Block element not found:', blockId, 'fallback:', fallbackText)
+        logger.warn('markdown-editor', 'Block element not found:', blockId, 'fallback:', fallbackText)
       }
     } catch (e) {
-      console.error('Failed to scroll to block:', e)
+      logger.error('markdown-editor', 'Failed to scroll to block:', e)
     }
   }
 
@@ -730,7 +731,7 @@ function BlockNoteInner({
           rootPath: rootPath || '',
         })
       } catch (err) {
-        console.error('Failed to enqueue download remote images:', err)
+        logger.error('markdown-editor', 'Failed to enqueue download remote images:', err)
         toast.error(`下载远程图片失败：${String(err)}`)
       }
     }
@@ -762,7 +763,7 @@ function BlockNoteInner({
           // Transform markmap code blocks to markmap blocks
           blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
-          console.warn('[MarkdownEditor] Failed to parse markdown for insert, treating as plain text:', parseError)
+          logger.warn('markdown-editor', 'Failed to parse markdown for insert, treating as plain text:', parseError)
           // Fallback: treat as plain text
           const lines = text.split('\n')
           blocks = lines.map((line: string) => ({
@@ -770,7 +771,7 @@ function BlockNoteInner({
             content: line || undefined
           }))
         }
-        
+
         if (blocks.length > 0) {
           const currentBlock = editor.getTextCursorPosition().block
           if (Array.isArray(currentBlock.content) && currentBlock.content.length === 0) {
@@ -786,7 +787,7 @@ function BlockNoteInner({
           }
         }
       } catch (err) {
-        console.error('Failed to insert at cursor in BlockNote:', err)
+        logger.error('markdown-editor', 'Failed to insert at cursor in BlockNote:', err)
       }
     }
     window.addEventListener('insert-at-cursor', handler)
@@ -844,7 +845,7 @@ function BlockNoteInner({
           const tr = state.tr.setSelection(selection)
           dispatch(tr)
         } catch (err) {
-          console.error('Failed to select all:', err)
+          logger.error('markdown-editor', 'Failed to select all:', err)
         }
         return false
       }
@@ -880,7 +881,7 @@ function BlockNoteInner({
           // Transform markmap code blocks to markmap blocks
           blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
-          console.warn('[MarkdownEditor] Failed to parse markdown for replace, treating as plain text:', parseError)
+          logger.warn('markdown-editor', 'Failed to parse markdown for replace, treating as plain text:', parseError)
           // Fallback: treat as plain text
           const lines = text.split('\n')
           blocks = lines.map((line: string) => ({
@@ -927,7 +928,7 @@ function BlockNoteInner({
           }
         }
       } catch (err) {
-        console.error('Failed to replace content in BlockNote:', err)
+        logger.error('markdown-editor', 'Failed to replace content in BlockNote:', err)
       }
     }
     window.addEventListener('replace-content', handler)
@@ -1016,10 +1017,10 @@ function BlockNoteInner({
           detail: { toc, isBlockNote: true }
         }))
       } catch (error) {
-        console.error('Error building table of contents:', error)
+        logger.error('markdown-editor', 'Error building table of contents:', error)
       }
     } catch (e) {
-      console.error('[MarkdownEditor] Failed to convert blocks to markdown:', e)
+      logger.error('markdown-editor', 'Failed to convert blocks to markdown:', e)
       // Don't propagate error to avoid breaking the editor
     }
   }, [onChange, editor, activeTabName, t])
@@ -1078,7 +1079,7 @@ function BlockNoteInner({
         detail: { toc, isBlockNote: true }
       }))
     } catch (error) {
-      console.error('Error building table of contents:', error)
+      logger.error('markdown-editor', 'Error building table of contents:', error)
     }
   }, [editor, activeTabName, t])
 
@@ -1138,7 +1139,7 @@ function BlockNoteInner({
         return tiptapEditor.state.doc.textContent || ''
       }
     } catch (e) {
-      console.warn('[MarkdownEditor] Failed to get editor text content:', e)
+      logger.warn('markdown-editor', 'Failed to get editor text content:', e)
     }
     return ''
   }, [editor])
@@ -1587,7 +1588,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
           // Transform markmap code blocks to markmap blocks
           blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
-          console.warn('[MarkdownEditor] Markdown parsing failed, treating as plain text:', parseError)
+          logger.warn('markdown-editor', 'Markdown parsing failed, treating as plain text:', parseError)
           // If markdown parsing fails, treat content as plain text
           // Split by newlines and create paragraph blocks
           const lines = body.split('\n')
@@ -1610,7 +1611,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
         }
       } catch (e) {
         if (cancelled) return
-        console.error('[MarkdownEditor] Failed to parse markdown:', e)
+        logger.error('markdown-editor', 'Failed to parse markdown:', e)
         // Don't show error UI, instead show content as plain text
         const lines = stripFrontmatter(content).split('\n')
         setInitialBlocks(lines.map(line => ({

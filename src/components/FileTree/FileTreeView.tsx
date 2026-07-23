@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { getFileFrontmatter, getFileFrontmattersByPrefix } from '@/lib/utils/searchQuery'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
+import { logger } from '@/lib/logger'
 
 export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
 
@@ -567,7 +568,7 @@ const { t } = useTranslation()
     try {
       await useFileTreeStore.getState().refreshExpanded()
     } catch (e) {
-      console.error('Failed to refresh:', e)
+      logger.error('file-tree', 'Failed to refresh:', e)
     } finally {
       setIsRefreshing(false)
     }
@@ -618,7 +619,7 @@ const { t } = useTranslation()
           wordCount: countWords(content),
         })
       })
-      .catch(console.error)
+      .catch((e) => logger.error('file-tree', 'Failed to open file from tree:', e))
   }, [editingPath, lastClickedPath, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab, setMultiSelectedPaths])
 
   const handleOpenFolder = async () => {

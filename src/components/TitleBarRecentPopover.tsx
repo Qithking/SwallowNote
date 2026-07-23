@@ -13,6 +13,7 @@ import { useState, useEffect, useRef } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { logger } from '@/lib/logger'
 
 interface RecentItem {
   path: string
@@ -94,7 +95,7 @@ export function TitleBarRecentPopover() {
       }))
       setRecentItems(items)
     } catch (e) {
-      console.error('Failed to load history:', e)
+      logger.error('title-bar', 'Failed to load history:', e)
     }
   }
 
@@ -156,7 +157,7 @@ export function TitleBarRecentPopover() {
       await loadHistory()
       setShowClearConfirm(false)
     } catch (e) {
-      console.error('Failed to clear history:', e)
+      logger.error('title-bar', 'Failed to clear history:', e)
     }
   }
 
@@ -232,7 +233,7 @@ export function TitleBarRecentPopover() {
       await removeFolderHistory(path)
       await loadHistory()
     } catch (e) {
-      console.error('Failed to delete item:', e)
+      logger.error('title-bar', 'Failed to delete item:', e)
     }
   }
 

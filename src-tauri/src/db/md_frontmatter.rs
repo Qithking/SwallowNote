@@ -2,6 +2,7 @@ use crate::db::Database;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use log::error;
 
 /// 标准前端 frontmatter 字段
 const STANDARD_KEYS: &[&str] = &[
@@ -108,7 +109,7 @@ pub fn upsert_frontmatter(
 ) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
 
@@ -207,7 +208,7 @@ pub fn upsert_frontmatter(
 pub fn delete_frontmatter(db: &Database, file_path: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute(
@@ -221,7 +222,7 @@ pub fn delete_frontmatter(db: &Database, file_path: &str) -> Result<()> {
 pub fn create_category(db: &Database, path: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute(
@@ -237,7 +238,7 @@ pub fn sync_categories_from_frontmatter(conn: &Connection, categories: &str) -> 
     let cat_list: Vec<String> = match serde_json::from_str(categories) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[sync_categories] Failed to parse categories JSON: {}", e);
+            error!("[sync_categories] Failed to parse categories JSON: {}", e);
             return Ok(());
         }
     };
@@ -261,7 +262,7 @@ pub fn sync_categories_from_frontmatter(conn: &Connection, categories: &str) -> 
 pub fn sync_all_categories_from_frontmatter(db: &Database) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare(
@@ -278,7 +279,7 @@ pub fn sync_all_categories_from_frontmatter(db: &Database) -> Result<()> {
 pub fn get_frontmatter(db: &Database, file_path: &str) -> Result<Option<FrontmatterRecord>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare(
@@ -313,7 +314,7 @@ pub fn get_frontmatter(db: &Database, file_path: &str) -> Result<Option<Frontmat
 pub fn query_by_tag(db: &Database, tag: &str) -> Result<Vec<FrontmatterRecord>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare(
@@ -351,7 +352,7 @@ pub fn query_by_tag(db: &Database, tag: &str) -> Result<Vec<FrontmatterRecord>> 
 pub fn query_by_prefix(db: &Database, path_prefix: &str) -> Result<Vec<FrontmatterRecord>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare(
@@ -396,7 +397,7 @@ pub fn query_by_prefix(db: &Database, path_prefix: &str) -> Result<Vec<Frontmatt
 pub fn get_modified_at(db: &Database, file_path: &str) -> Result<Option<String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare(
@@ -417,7 +418,7 @@ pub fn get_modified_at(db: &Database, file_path: &str) -> Result<Option<String>>
 pub fn get_all_modified_at(db: &Database) -> Result<HashMap<String, String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare("SELECT file_path, modified_at FROM md_frontmatter")?;
@@ -439,7 +440,7 @@ pub fn get_all_modified_at(db: &Database) -> Result<HashMap<String, String>> {
 pub fn get_modified_at_for_paths(db: &Database, paths: &[String]) -> Result<HashMap<String, String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut map = HashMap::new();
@@ -600,7 +601,7 @@ pub fn search_frontmatter(
     let raw_rows = {
         // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
         let conn = db.conn.lock().unwrap_or_else(|e| {
-            eprintln!("[DB] mutex poisoned: {}", e);
+            error!("[DB] mutex poisoned: {}", e);
             e.into_inner()
         });
         let mut stmt = conn.prepare(&sql)?;
@@ -655,7 +656,7 @@ pub fn get_category_tree(db: &Database) -> Result<Vec<CategoryNode>> {
     let (all_paths_set, file_associations) = {
         // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
         let conn = db.conn.lock().unwrap_or_else(|e| {
-            eprintln!("[DB] mutex poisoned: {}", e);
+            error!("[DB] mutex poisoned: {}", e);
             e.into_inner()
         });
 
@@ -775,7 +776,7 @@ pub fn rename_category(db: &Database, old_path: &str, new_path: &str) -> Result<
     // 会被 Phase 3 基于旧数据的 UPDATE 覆盖，造成丢更新。现合并为单次锁持有。
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
 
@@ -843,7 +844,7 @@ pub fn delete_category(db: &Database, path: &str) -> Result<usize> {
     // 会被 Phase 3 基于旧数据的 UPDATE 覆盖，造成丢更新。现合并为单次锁持有。
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     // 修复 OLD-5：多条 UPDATE + DELETE 用 unchecked_transaction 包裹，
@@ -978,7 +979,7 @@ tags:
         // 验证 categories 被正确存储
         // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
         let conn = db.conn.lock().unwrap_or_else(|e| {
-            eprintln!("[DB] mutex poisoned: {}", e);
+            error!("[DB] mutex poisoned: {}", e);
             e.into_inner()
         });
         let categories: String = conn.query_row(
@@ -1032,7 +1033,7 @@ categories:
         // 验证 categories 被正确存储
         // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
         let conn = db.conn.lock().unwrap_or_else(|e| {
-            eprintln!("[DB] mutex poisoned: {}", e);
+            error!("[DB] mutex poisoned: {}", e);
             e.into_inner()
         });
         let categories: String = conn.query_row(
@@ -1052,7 +1053,7 @@ categories:
         let db = create_test_db();
         // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
         let conn = db.conn.lock().unwrap_or_else(|e| {
-            eprintln!("[DB] mutex poisoned: {}", e);
+            error!("[DB] mutex poisoned: {}", e);
             e.into_inner()
         });
         conn.execute(
@@ -1090,7 +1091,7 @@ categories:
         let db = create_test_db();
         // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
         let conn = db.conn.lock().unwrap_or_else(|e| {
-            eprintln!("[DB] mutex poisoned: {}", e);
+            error!("[DB] mutex poisoned: {}", e);
             e.into_inner()
         });
         conn.execute(

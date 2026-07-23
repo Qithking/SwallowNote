@@ -9,7 +9,9 @@ import { EditorView } from '@/components/Editor'
 import { RightPanelContent, FullPanelPluginContent } from '@/components/PanelContent'
 import { SettingsView } from '@/components/Settings/SettingsView'
 import { flushAllEditors } from '@/lib/editor-flush'
+import { attachLogger, logger } from '@/lib/logger'
 const PluginManagerView = lazy(() => import('@/components/Plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })))
+const LogViewer = lazy(() => import('@/components/LogViewer').then(m => ({ default: m.LogViewer })))
 
 // Simple loading placeholder for PluginManager
 function PluginManagerLoading() {
@@ -50,7 +52,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 function logTime(stage: string, t0: number) {
   const elapsed = Math.round(performance.now() - t0)
-  console.log(`[STARTUP-TIME] ${stage} t=${elapsed}`)
+  logger.info('app', `[STARTUP-TIME] ${stage} t=${elapsed}`)
   try {
     invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch(() => {})
   } catch { /* ignore */ }
@@ -71,6 +73,8 @@ function App() {
     tRef.current = t
   }, [t])
   const settingsPanelVisible = useUIStore((s: UIState) => s.settingsPanelVisible)
+  const logViewerVisible = useUIStore((s: UIState) => s.logViewerVisible)
+  const toggleLogViewer = useUIStore((s: UIState) => s.toggleLogViewer)
   const rightPanelType = useUIStore((s: UIState) => s.rightPanelType)
   const sidebarWidth = useUIStore((s: UIState) => s.sidebarWidth)
   const rightPanelWidth = useUIStore((s: UIState) => s.rightPanelWidth)
@@ -111,6 +115,8 @@ function App() {
     const init = async () => {
       const appInitT0 = performance.now()
       logTime('app_init_begin', appInitT0)
+      // 初始化统一日志模块（注入 @tauri-apps/plugin-log 为 fileWriter）
+      await attachLogger()
       const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
       const { loadSettings: loadEditorSettings } = useEditorSettingsStore.getState()
       const { loadSettings: loadUISettings } = useUIStore.getState()
@@ -136,7 +142,7 @@ function App() {
         await getCurrentWindow().show()
         logTime('app_window_shown', appInitT0)
       } catch (e) {
-        console.warn('[App] Failed to show window:', e)
+        logger.warn('app', 'Failed to show window:', e)
       }
 
       // 显示窗口后立即应用 macOS 圆角窗口样式
@@ -155,7 +161,7 @@ function App() {
         }
         logTime('app_init_window_style', appInitT0)
       } catch (e) {
-        console.warn('[App] Failed to set window style:', e)
+        logger.warn('app', 'Failed to set window style:', e)
       }
 
       // Step 4: 窗口可见后加载文件树与恢复会话
@@ -205,26 +211,26 @@ function App() {
               void getAllPluginStorageSizes()
                 .then((sizes) => seedPluginStorageSizes(sizes))
                 .catch((err) => {
-                  console.warn('[App] failed to seed plugin storage sizes:', err)
+                  logger.warn('app', 'failed to seed plugin storage sizes:', err)
                 })
             } catch (err) {
-              console.warn('[App] failed to init plugin storage sizes:', err)
+              logger.warn('app', 'failed to init plugin storage sizes:', err)
             }
 
             try {
               const { subscribeToPluginStorageChanges } = await import('@/lib/plugin-telemetry')
               void subscribeToPluginStorageChanges().catch((err) => {
-                console.warn('[App] failed to subscribe to plugin storage changes:', err)
+                logger.warn('app', 'failed to subscribe to plugin storage changes:', err)
               })
             } catch (err) {
-              console.warn('[App] failed to subscribe plugin storage changes:', err)
+              logger.warn('app', 'failed to subscribe plugin storage changes:', err)
             }
 
             try {
               const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
               void hydratePermissionGuard(defs.map((d) => d.id))
             } catch (err) {
-              console.warn('[App] failed to hydrate permission guard:', err)
+              logger.warn('app', 'failed to hydrate permission guard:', err)
             }
 
             try {
@@ -233,7 +239,7 @@ function App() {
               hydrateAutoUpdateFromLocalStorage()
               void runAutoUpdateOnStartup()
             } catch (err) {
-              console.warn('[App] failed to init plugin auto update:', err)
+              logger.warn('app', 'failed to init plugin auto update:', err)
             }
 
             // 后台检查插件更新以显示角标
@@ -244,10 +250,10 @@ function App() {
               void marketStore.refreshIndex({ background: true })
               void marketStore.refreshUpdates({ background: true })
             } catch (err) {
-              console.warn('[App] failed to check plugin updates on startup:', err)
+              logger.warn('app', 'failed to check plugin updates on startup:', err)
             }
           } catch (err) {
-            console.error('[App] Failed to load plugins on startup:', err)
+            logger.error('app', 'Failed to load plugins on startup:', err)
             usePluginStore.getState().setLoaded(true)
           }
         })()
@@ -285,7 +291,7 @@ function App() {
         const { flushAllPluginStorage } = await import('@/lib/plugin-host')
         await flushAllPluginStorage()
       } catch (e) {
-        console.warn('[App] flushAllPluginStorage on close failed', e)
+        logger.warn('app', 'flushAllPluginStorage on close failed', e)
       }
 
       // 先 flush 编辑器防抖内容避免丢失
@@ -293,7 +299,7 @@ function App() {
         const { flushAllEditors } = await import('@/lib/editor-flush')
         await flushAllEditors()
       } catch (e) {
-        console.warn('[App] flushAllEditors on close failed', e)
+        logger.warn('app', 'flushAllEditors on close failed', e)
       }
 
       const { closeWithoutExit } = useUIStore.getState()
@@ -310,7 +316,7 @@ function App() {
         await win.hide()
         const { setDockIconVisibility } = await import('@/lib/tauri')
         // 次要副作用，失败不阻塞退出
-        setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
+        setDockIconVisibility(false).catch((err) => logger.warn('app', 'setDockIconVisibility failed', err))
       } else {
         await saveSessionStateNow()
         await win.destroy()
@@ -413,7 +419,7 @@ function App() {
     const scheduleSave = () => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => {
-        saveSessionStateNow().catch(console.error)
+        saveSessionStateNow().catch((err) => logger.error('app', 'Session save failed:', err))
         saveTimer = null
       }, 500)
     }
@@ -431,7 +437,7 @@ function App() {
 
     // Listen for save-session-now events (e.g., before install & restart)
     const handleSaveSessionNow = () => {
-      saveSessionStateNow().catch(console.error)
+      saveSessionStateNow().catch((err) => logger.error('app', 'Session save failed:', err))
     }
     window.addEventListener('save-session-now', handleSaveSessionNow)
 
@@ -547,7 +553,7 @@ function App() {
                 if (!errorMessage.startsWith('AUTH_REQUIRED:')) {
                   pushFailed++
                   pushErrorPaths.push(repo.path)
-                  console.error('Auto sync push failed:', repo.path, errorMessage)
+                  logger.error('app', 'Auto sync push failed:', repo.path, errorMessage)
                 }
               }
             }
@@ -617,7 +623,7 @@ function App() {
           await gitStore.syncConflictReposFromPullResults(allResults)
         }
       } catch (e) {
-        console.error('Auto sync failed:', e)
+        logger.error('app', 'Auto sync failed:', e)
         gitStore.setSyncStatus({ isSyncing: false })
       } finally {
         isSyncingRef.current = false
@@ -703,7 +709,7 @@ function App() {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
       // 次要副作用，失败不阻塞退出
-      setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
+      setDockIconVisibility(false).catch((err) => logger.warn('app', 'setDockIconVisibility failed', err))
     } else {
       await win.destroy()
     }
@@ -725,7 +731,7 @@ function App() {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
       // 次要副作用，失败不阻塞退出
-      setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
+      setDockIconVisibility(false).catch((err) => logger.warn('app', 'setDockIconVisibility failed', err))
     } else {
       await win.destroy()
     }
@@ -783,7 +789,7 @@ function App() {
     setIsDraggingLeft(false)
     setIsDraggingRight(false)
     // 拖拽结束后保存会话状态（面板宽度等），避免崩溃或强制关闭后丢失
-    saveSessionStateNow().catch(console.error)
+    saveSessionStateNow().catch((err) => logger.error('app', 'Session save failed:', err))
   }, [saveSessionStateNow])
 
   // Disable text selection while dragging to prevent content being selected
@@ -1017,6 +1023,11 @@ function App() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* LogViewer Dialog (Ctrl+Shift+Y) */}
+        <Suspense fallback={null}>
+          <LogViewer open={logViewerVisible} onOpenChange={(o) => { if (!o) toggleLogViewer() }} />
+        </Suspense>
         </div>
       </div>
     </TooltipProvider>

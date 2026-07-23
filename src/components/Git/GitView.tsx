@@ -32,6 +32,7 @@ import type { GitState } from '@/stores/git'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
+import { logger } from '@/lib/logger'
 import {
   Dialog,
   DialogContent,
@@ -98,7 +99,7 @@ function CredentialDialog({
     if (username.trim() && password.trim()) {
       // Save credentials to keyring if checkbox is checked
       if (saveCredential) {
-        gitCredentialSave(repoPath, username.trim(), password.trim()).catch(console.error)
+        gitCredentialSave(repoPath, username.trim(), password.trim()).catch((e) => logger.error('git-view', 'Failed to save git credential:', e))
       }
       onSubmit(username.trim(), password.trim())
     }
@@ -253,7 +254,7 @@ function CommitSection({
         successCount++
       } catch (e) {
         const errorMessage = String(e).trim()
-        console.error('Failed to commit and push:', repo.path, errorMessage)
+        logger.error('git-view', 'Failed to commit and push:', repo.path, errorMessage)
         // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
         if (errorMessage.startsWith('DETACHED_HEAD:')) {
           failCount++
@@ -859,7 +860,7 @@ const GitView = memo(function GitView() {
         showToast(t('git.pullSuccess', { count: succeeded }), 'success')
       }
     } catch (e) {
-      console.error('Pull failed:', e)
+      logger.error('git-view', 'Pull failed:', e)
       gitStore.setSyncStatus({ isSyncing: false })
     } finally {
       setIsPullingRepos(false)
@@ -882,7 +883,7 @@ const GitView = memo(function GitView() {
       // Reload conflict repos from database to ensure conflict status is accurate
       await loadConflictRepos()
     } catch (e) {
-      console.error('Failed to refresh repos:', e)
+      logger.error('git-view', 'Failed to refresh repos:', e)
     }
   }
 

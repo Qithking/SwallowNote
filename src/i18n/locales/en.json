@@ -294,6 +294,16 @@
       "explain": "Explain"
     }
   },
+  "logViewer": {
+    "title": "Log Viewer",
+    "filterSource": "Filter source...",
+    "search": "Search...",
+    "copy": "Copy",
+    "export": "Export JSONL",
+    "clear": "Clear",
+    "entries": "entries",
+    "empty": "No logs"
+  },
   "common": {
     "ok": "OK",
     "cancel": "Cancel",
@@ -695,7 +705,9 @@
     "cloneProgressTooltip": "Cloning {{url}}",
     "clonePrefix": "Clone({{url}})",
     "syncRepos": "Sync Repos",
-    "syncResultTooltip": "{{succeeded}} succeeded, {{failed}} failed, {{conflicted}} conflicted"
+    "syncResultTooltip": "{{succeeded}} succeeded, {{failed}} failed, {{conflicted}} conflicted",
+    "viewLogs": "Logs",
+    "viewLogsTooltip": "View application logs (Ctrl+Shift+Y)"
   },
   "error": {
     "componentRenderError": "Component render error",

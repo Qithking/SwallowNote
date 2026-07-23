@@ -2,6 +2,7 @@
  * Workspace Store - Manages workspace state
  */
 import { create } from 'zustand'
+import { logger } from '@/lib/logger'
 import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory } from '@/lib/tauri'
 import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import { useFileTreeStore } from './filetree'
@@ -53,11 +54,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({ rootPath: path, isLoading: false })
 
       // 非阻塞：保存历史、启动文件监听和frontmatter扫描
-      saveFolderHistory(path).catch(err => console.warn('Failed to save folder history:', err))
-      watchDirectory(path).catch(err => console.warn(`Failed to watch directory ${path}:`, err))
-      triggerFrontmatterScan(path).catch(err => console.warn(`Failed to trigger frontmatter scan for ${path}:`, err))
+      saveFolderHistory(path).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
+      watchDirectory(path).catch(err => logger.warn('workspace-store', `Failed to watch directory ${path}:`, err))
+      triggerFrontmatterScan(path).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${path}:`, err))
     } catch (err) {
-      console.error('Failed to open folder:', err)
+      logger.error('workspace-store', 'Failed to open folder:', err)
       set({ error: `Failed to open folder: ${err}`, isLoading: false, rootPath: null })
       const fileTreeStore = useFileTreeStore.getState()
       fileTreeStore.clearAll()
@@ -70,7 +71,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         await get().openFolder(lastPath)
       }
     } catch (err) {
-      console.warn('Failed to load last folder:', err)
+      logger.warn('workspace-store', 'Failed to load last folder:', err)
     }
   },
   loadLatestByMode: async () => {
@@ -103,7 +104,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         scanAndCacheGitRepos()
       }, 500)
     } catch (err) {
-      console.warn('Failed to load latest by mode:', err)
+      logger.warn('workspace-store', 'Failed to load latest by mode:', err)
       // Clear state on error to ensure consistent state
       const fileTreeStore = useFileTreeStore.getState()
       fileTreeStore.clearAll()
@@ -191,14 +192,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         })
 
         // 非阻塞：保存历史、启动文件监听和frontmatter扫描
-        saveFolderHistory(workspacePath).catch(err => console.warn('Failed to save folder history:', err))
+        saveFolderHistory(workspacePath).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
         for (const folder of workspace.folders) {
-          watchDirectory(folder).catch(err => console.warn(`Failed to watch directory ${folder}:`, err))
-          triggerFrontmatterScan(folder).catch(err => console.warn(`Failed to trigger frontmatter scan for ${folder}:`, err))
+          watchDirectory(folder).catch(err => logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err))
+          triggerFrontmatterScan(folder).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
         }
       }
     } catch (err) {
-      console.error('Failed to load workspace:', err)
+      logger.error('workspace-store', 'Failed to load workspace:', err)
       set({ error: `Failed to load workspace: ${err}`, isLoading: false, workspaceFolders: [], currentWorkspacePath: null })
       // Clear file tree on error
       const fileTreeStore = useFileTreeStore.getState()
@@ -261,7 +262,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       : state.rootPath
     if (currentPath) {
       saveFolderHistory(currentPath).catch((err) => {
-        console.warn('Failed to save folder history:', err)
+        logger.warn('workspace-store', 'Failed to save folder history:', err)
       })
     }
 
@@ -270,10 +271,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     paths.forEach((folder, index) => {
       setTimeout(() => {
         watchDirectory(folder).catch((err) => {
-          console.warn(`Failed to watch directory ${folder}:`, err)
+          logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err)
         })
         triggerFrontmatterScan(folder).catch((err) => {
-          console.warn(`Failed to trigger frontmatter scan for ${folder}:`, err)
+          logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err)
         })
       }, index * 200)
     })

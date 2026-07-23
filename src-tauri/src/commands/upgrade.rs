@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
+use log::{info, warn};
 // macOS 下用 pre_exec 调用 setsid() 让重启脚本脱离父进程会话
 #[cfg(target_os = "macos")]
 use std::os::unix::process::CommandExt;
@@ -256,7 +257,7 @@ async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
             if !expected.eq_ignore_ascii_case(&computed_hash) {
                 // 哈希不匹配：文件可能损坏或被篡改，记录详情后清理已下载文件并中止，
                 // 避免向用户发出"下载完成"通知导致安装不可信的安装包。
-                eprintln!(
+                warn!(
                     "WARN: SHA-256 mismatch for {}: expected {}, got {}",
                     asset.name, expected, computed_hash
                 );
@@ -269,7 +270,7 @@ async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
         }
     } else {
         // release 未提供 digest，无法校验完整性，仅记录计算出的哈希便于排查
-        eprintln!(
+        info!(
             "INFO: Downloaded {} SHA-256: {}",
             asset.name, computed_hash
         );

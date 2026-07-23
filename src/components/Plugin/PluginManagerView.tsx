@@ -49,6 +49,7 @@ import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-
 import { getAllPluginMetrics, getTotalPluginStorageBytes } from '@/lib/plugin-telemetry'
 import { getStorageCap } from '@/lib/tauri'
 import type { PluginDefinition, PluginPanelProps, PluginPermission, PluginIndexEntry, PluginIndex } from '@/types/plugin'
+import { logger } from '@/lib/logger'
 
 
 // Lazy load dialog components - only loaded when user clicks the corresponding button
@@ -396,7 +397,7 @@ function PluginManagerView() {
       // scan/refresh is fresh.
       setLastSyncAt(new Date())
     } catch (err) {
-      console.error('Failed to reload plugins:', err)
+      logger.error('plugin-manager', 'Failed to reload plugins:', err)
     } finally {
       setIsScanning(false)
     }

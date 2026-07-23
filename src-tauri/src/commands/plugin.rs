@@ -10,6 +10,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use tauri::Manager;
+use log::{error, warn};
 
 /// The application version recorded into the export bundle's
 /// `manifest.json`. Bumping the export schema (e.g. changing the
@@ -286,7 +287,7 @@ fn set_current_version(plugin_dir: &Path, version: &str) -> Result<(), PluginErr
         use std::os::unix::fs::symlink;
         if let Err(e) = symlink(&target, &link) {
             // Non-fatal: text marker will carry the version.
-            eprintln!("[plugin] symlink fallback ({}): {}", link.display(), e);
+            warn!("[plugin] symlink fallback ({}): {}", link.display(), e);
         }
     }
     #[cfg(windows)]
@@ -295,7 +296,7 @@ fn set_current_version(plugin_dir: &Path, version: &str) -> Result<(), PluginErr
         if let Err(e) = symlink_dir(&target, &link) {
             // Windows requires Developer Mode or admin for symlinks.
             // Fall back to the text marker.
-            eprintln!("[plugin] symlink fallback ({}): {}", link.display(), e);
+            warn!("[plugin] symlink fallback ({}): {}", link.display(), e);
         }
     }
 
@@ -642,7 +643,7 @@ pub fn install_plugin(
     if let Some(ref src) = source {
         if !src.is_empty() {
             if let Err(e) = fs::write(final_version_dir.join(".source"), src.as_bytes()) {
-                eprintln!("[plugin] failed to write .source for '{}': {}", real_plugin_id, e);
+                error!("[plugin] failed to write .source for '{}': {}", real_plugin_id, e);
             }
         }
     }
@@ -656,7 +657,7 @@ pub fn install_plugin(
             if let Err(e) = crate::commands::plugin_settings::apply_settings_schema_on_disk(
                 &app_handle, &conn, &real_plugin_id,
             ) {
-                eprintln!(
+                error!(
                     "[plugin] apply_settings_schema for '{}' on install: {}",
                     real_plugin_id, e
                 );
@@ -710,7 +711,7 @@ pub async fn uninstall_plugin(
     )
     .await
     {
-        eprintln!(
+        error!(
             "[plugin] kill_plugin_backend for '{}' failed (continuing with uninstall): {}",
             plugin_id, e
         );
@@ -753,10 +754,10 @@ pub async fn uninstall_plugin(
             let plugin_data_root = canonical_app_data.join("plugin-data");
             if canonical_data_dir.starts_with(&plugin_data_root) {
                 if let Err(e) = fs::remove_dir_all(&data_dir) {
-                    eprintln!("[plugin] failed to remove plugin data dir for '{}': {}", plugin_id, e);
+                    error!("[plugin] failed to remove plugin data dir for '{}': {}", plugin_id, e);
                 }
             } else {
-                eprintln!("[plugin] security: plugin data dir for '{}' is outside plugin-data root, skipping deletion", plugin_id);
+                warn!("[plugin] security: plugin data dir for '{}' is outside plugin-data root, skipping deletion", plugin_id);
             }
         }
     }
@@ -767,7 +768,7 @@ pub async fn uninstall_plugin(
     if let Err(e) =
         crate::commands::plugin_settings::drop_settings_table_for(&app_handle, &plugin_id)
     {
-        eprintln!(
+        error!(
             "[plugin] drop_settings_table_for '{}' on uninstall: {}",
             plugin_id, e
         );
@@ -1371,7 +1372,7 @@ pub async fn install_plugin_from_bytes(
     if let Some(ref src) = source {
         if !src.is_empty() {
             if let Err(e) = fs::write(version_dir.join(".source"), src.as_bytes()) {
-                eprintln!("[plugin] failed to write .source for '{}': {}", plugin_id, e);
+                error!("[plugin] failed to write .source for '{}': {}", plugin_id, e);
             }
         }
     }
@@ -1382,7 +1383,7 @@ pub async fn install_plugin_from_bytes(
             if let Err(e) = crate::commands::plugin_settings::apply_settings_schema_on_disk(
                 &app_handle, &conn, &plugin_id,
             ) {
-                eprintln!(
+                error!(
                     "[plugin] apply_settings_schema for '{}' on install/update: {}",
                     plugin_id, e
                 );

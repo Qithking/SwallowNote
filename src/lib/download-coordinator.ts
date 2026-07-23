@@ -2,6 +2,7 @@
 import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { downloadRemoteImages, type RemoteImageResult } from './tauri'
+import { logger } from './logger'
 
 interface ApplyContext {
   editor: any
@@ -83,7 +84,7 @@ class DownloadCoordinator {
       try {
         cb()
       } catch (err) {
-        console.error('[DownloadCoordinator] busy listener failed:', err)
+        logger.error('download', 'busy listener failed:', err)
       }
     }
   }
@@ -129,7 +130,7 @@ class DownloadCoordinator {
                 props: { url: relative_path, name: file_name || '' },
               } as any)
             } catch (err) {
-              console.error('Failed to apply downloaded url:', err)
+              logger.error('download', 'Failed to apply downloaded url:', err)
             }
           }
         }
@@ -167,7 +168,7 @@ class DownloadCoordinator {
       try {
         fn()
       } catch (err) {
-        console.error('[DownloadCoordinator] unlisten failed:', err)
+        logger.error('download', 'unlisten failed:', err)
       }
     }
     this.unlistenFns = []
@@ -239,7 +240,7 @@ class DownloadCoordinator {
           })),
         })
       } catch (err) {
-        console.error('[DownloadCoordinator] invoke failed:', err)
+        logger.error('download', 'invoke failed:', err)
         // invoke 失败：本批图片算失败并提示
         const message = err instanceof Error ? err.message : String(err)
         toast.error(`远程图片下载失败：${message}`)

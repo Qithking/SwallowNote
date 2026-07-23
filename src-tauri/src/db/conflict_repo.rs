@@ -3,6 +3,7 @@
 use crate::db::Database;
 use rusqlite::Result;
 use serde::{Deserialize, Serialize};
+use log::error;
 
 /// A record of a repository with active merge/rebase conflicts
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,7 +40,7 @@ pub fn create_table(conn: &rusqlite::Connection) -> Result<()> {
 pub fn upsert_conflict_repo(db: &Database, repo_path: &str, repo_name: &str, file_count: i64) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute(
@@ -58,7 +59,7 @@ pub fn upsert_conflict_repo(db: &Database, repo_path: &str, repo_name: &str, fil
 pub fn remove_conflict_repo(db: &Database, repo_path: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute(
@@ -72,7 +73,7 @@ pub fn remove_conflict_repo(db: &Database, repo_path: &str) -> Result<()> {
 pub fn get_all_conflict_repos(db: &Database) -> Result<Vec<ConflictRepoRecord>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare(
@@ -102,7 +103,7 @@ pub fn get_all_conflict_repos(db: &Database) -> Result<Vec<ConflictRepoRecord>> 
 pub fn clear_all_conflict_repos(db: &Database) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute("DELETE FROM conflict_repos", [])?;
@@ -118,7 +119,7 @@ pub fn sync_conflict_repos(
 ) -> Result<Vec<ConflictRepoRecord>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
 

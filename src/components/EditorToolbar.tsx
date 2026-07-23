@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next'
 import { pluginRightPanelType, renderPluginIcon, pluginSidebarView, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
 import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 import { downloadCoordinator } from '@/lib/download-coordinator'
+import { logger } from '@/lib/logger'
 
 function EditorToolbar() {
   const toggleViewMode = useEditorStore((s) => s.toggleViewMode)
@@ -130,7 +131,7 @@ function EditorToolbar() {
     try {
       await invoke('open_in_finder', { path })
     } catch (err) {
-      console.error('Failed to open folder:', err)
+      logger.error('editor-toolbar', 'Failed to open folder:', err)
     }
   }
 
@@ -141,7 +142,7 @@ function EditorToolbar() {
       clearTimeout(copyTimer.current)
       copyTimer.current = setTimeout(() => setCopied(false), 3000)
     } catch (err) {
-      console.error('Failed to copy path:', err)
+      logger.error('editor-toolbar', 'Failed to copy path:', err)
     }
   }
 
@@ -396,14 +397,14 @@ function EditorToolbar() {
                   pluginName={plugin.name}
                   resetKey={`${plugin.id}-${activeTab.id}`}
                   variant="toolbar"
-                  onCrash={(_id, err) => console.error(`[EditorToolbar] Plugin ${plugin.name} crashed:`, err)}
+                  onCrash={(_id, err) => logger.error('editor-toolbar', `Plugin ${plugin.name} crashed:`, err)}
                 >
                   {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}
                 </PluginErrorBoundary>
               )
             } catch (e) {
               // toolbarButton 同步渲染抛错：记录日志并降级为下方默认图标渲染
-              console.error('[EditorToolbar] Plugin toolbarButton render failed:', e)
+              logger.error('editor-toolbar', 'Plugin toolbarButton render failed:', e)
             }
           }
 

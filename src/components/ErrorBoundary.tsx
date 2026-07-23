@@ -13,6 +13,7 @@
 import { Component, type ReactNode } from 'react'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 import i18n from '@/i18n'
+import { logger } from '@/lib/logger'
 
 interface Props {
   children: ReactNode
@@ -38,7 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: { componentStack: string }) {
-    console.error('[ErrorBoundary] Caught error:', error, info)
+    logger.error('error-boundary', 'Caught error:', error, info)
     this.props.onError?.(error, info)
   }
 

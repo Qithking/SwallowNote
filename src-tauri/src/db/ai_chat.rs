@@ -1,6 +1,7 @@
 use crate::db::Database;
 use rusqlite::Result;
 use serde::{Deserialize, Serialize};
+use log::error;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiMessage {
@@ -14,7 +15,7 @@ pub struct AiMessage {
 pub fn save_message(db: &Database, role: &str, content: &str, model_id: &str) -> Result<i64> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     // 事务包裹 INSERT+DELETE，drop 自动回滚
@@ -43,7 +44,7 @@ pub fn load_messages(
 ) -> Result<Vec<AiMessage>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
 
@@ -92,7 +93,7 @@ pub fn load_messages(
 pub fn clear_messages(db: &Database) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute("DELETE FROM ai_messages", [])?;

@@ -1,6 +1,7 @@
 use std::path::Path;
 use super::runner::{run_git, run_git_no_trim, run_git_with_env};
 use super::branch::{is_rebase_scenario, fix_detached_head};
+use log::error;
 
 /// G-14 修复：从 git index 的指定 stage 获取文件内容（统一三处重复的 stage 读取逻辑）。
 /// stage 2 = ours，stage 3 = theirs。返回 Ok(Some(content)) 表示成功获取非空内容，
@@ -108,8 +109,7 @@ pub fn check_and_continue_rebase(repo_path: &str) -> Result<(), String> {
                     // G-04 修复：rebase --continue 失败时必须返回错误，
                     // 否则前端误报"冲突已解决"，但仓库仍处于 rebase-in-progress 状态，
                     // 用户感知为"解决冲突无效"。
-                    #[cfg(debug_assertions)]
-                    eprintln!("[ERROR] git_resolve_conflict_file: rebase --continue failed: {}", e);
+                    error!("[ERROR] git_resolve_conflict_file: rebase --continue failed: {}", e);
                     return Err(format!("REBASE_CONTINUE_FAILED:{}", e));
                 }
             }
@@ -120,8 +120,7 @@ pub fn check_and_continue_rebase(repo_path: &str) -> Result<(), String> {
                 // 如需让用户输入 merge commit 信息，需要前端提供输入框（后续优化）。
                 // G-04 修复：merge commit 失败时同样返回错误，避免前端误报"已解决"
                 if let Err(e) = run_git(repo_path, &["commit", "--no-edit"]) {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[ERROR] git_resolve_conflict_file: merge commit failed: {}", e);
+                    error!("[ERROR] git_resolve_conflict_file: merge commit failed: {}", e);
                     return Err(format!("MERGE_COMMIT_FAILED:{}", e));
                 }
                 // Fix detached HEAD after merge commit

@@ -3,6 +3,7 @@
  */
 import { create } from 'zustand'
 import { loadDirectory, loadDirectoriesBatch } from '@/lib/api'
+import { logger } from '@/lib/logger'
 import { useUIStore } from './ui'
 import { pathExists } from '@/lib/tauri'
 import { updateNodesWithChildren, findNodeByPath } from '@/lib/utils/treeUtils'
@@ -131,7 +132,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         const currentNodes = get().nodes
         set({ nodes: updateNodesWithChildren(currentNodes, path, children) })
       } catch (e) {
-        console.error(e)
+        logger.error('filetree-store', 'toggleNode failed:', e)
         // Clear loading state on error
         const currentNodes = get().nodes
         set({ nodes: setNodeLoading(currentNodes, path, false) })
@@ -154,7 +155,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         return await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
       } catch (e) {
         if (currentRetry < maxRetries) {
-          console.warn(`Failed to load root directory, retrying (${currentRetry + 1}/${maxRetries}):`, rootPath)
+          logger.warn('filetree-store', `Failed to load root directory, retrying (${currentRetry + 1}/${maxRetries}):`, rootPath)
           await new Promise(resolve => setTimeout(resolve, retryDelay))
           return tryLoadDirectory(currentRetry + 1)
         }
@@ -174,7 +175,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       set({ nodes: [rootNode], expanded: new Set([rootPath]), isLoading: false })
       return true
     } catch (e) {
-      console.error('Failed to load root directory after retries:', e)
+      logger.error('filetree-store', 'Failed to load root directory after retries:', e)
       set({ isLoading: false })
       // Keep empty nodes to indicate loading failed
       set({ nodes: [], expanded: new Set() })
@@ -202,7 +203,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         expanded: new Set([...expanded, rootPath]) 
       })
     } catch (e) {
-      console.error(e)
+      logger.error('filetree-store', 'addRoot failed:', e)
     }
   },
 
@@ -232,7 +233,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
             path: rootPath,
           }
         } catch (e) {
-          console.error(e)
+          logger.error('filetree-store', 'addRoots batch load failed:', e)
           return null
         }
       })
@@ -285,12 +286,12 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       await tryLoad()
     } catch (e) {
       // 首次失败延迟 200ms 重试（应对网络盘/权限问题）
-      console.warn('refreshNode failed, retrying:', e)
+      logger.warn('filetree-store', 'refreshNode failed, retrying:', e)
       await new Promise(resolve => setTimeout(resolve, 200))
       try {
         await tryLoad()
       } catch (err) {
-        console.error('refreshNode retry failed:', err)
+        logger.error('filetree-store', 'refreshNode retry failed:', err)
       }
     }
   },
@@ -346,7 +347,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       }
       set({ nodes: currentNodes })
     } catch (e) {
-      console.error('Batch refresh failed, falling back to sequential:', e)
+      logger.error('filetree-store', 'Batch refresh failed, falling back to sequential:', e)
       // 兜底：并行逐个刷新目录
       let currentNodes = get().nodes
       const individualResults = await Promise.all(
@@ -355,7 +356,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
             const children = await loadDirectory(path, filterParams.showAllFiles, filterParams.markdownOnly)
             return { path, children }
           } catch (err) {
-            console.error(err)
+            logger.error('filetree-store', 'refreshExpanded individual load failed:', err)
             return null
           }
         })
@@ -425,7 +426,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
           set({ nodes: updateNodesWithChildren(latestNodes, result.path, result.children) })
         }
       } catch (e) {
-        console.error('Batch load in revealPath failed, falling back:', e)
+        logger.error('filetree-store', 'Batch load in revealPath failed, falling back:', e)
         // Fallback to sequential loading
         for (const dirPath of dirsToLoad) {
           const latestNodes = get().nodes
@@ -435,7 +436,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
               const children = await loadDirectoryDedup(dirPath, filterParams.showAllFiles, filterParams.markdownOnly)
               set({ nodes: updateNodesWithChildren(get().nodes, dirPath, children) })
             } catch (err) {
-              console.error(err)
+              logger.error('filetree-store', 'revealPath sequential load failed:', err)
             }
           }
         }
@@ -504,7 +505,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
           currentNodes = updateNodesWithChildren(currentNodes, result.path, result.children)
         }
       } catch (e) {
-        console.error('Batch load in restoreTreeState failed, falling back:', e)
+        logger.error('filetree-store', 'Batch load in restoreTreeState failed, falling back:', e)
         for (const dirPath of dirsToLoad) {
           const node = findNodeByPath(dirPath, currentNodes)
           if (node && node.isDirectory && (!node.children || node.children.length === 0)) {
@@ -516,7 +517,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
               )
               currentNodes = updateNodesWithChildren(currentNodes, dirPath, children)
             } catch (err) {
-              console.error(err)
+              logger.error('filetree-store', 'restoreTreeState sequential load failed:', err)
             }
           }
         }

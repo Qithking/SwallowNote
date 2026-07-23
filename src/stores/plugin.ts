@@ -2,6 +2,7 @@
  * Plugin Store - Manages plugin registration, loading, and state
  */
 import { create } from 'zustand'
+import { logger } from '@/lib/logger'
 import type {
   PluginDefinition,
   PluginLoadFailure,
@@ -182,7 +183,7 @@ function buildRegistry(plugins: PluginDefinition[]): PluginRegistry {
     if (key in registry) {
       registry[key].push(plugin)
     } else {
-      console.warn(`[PluginStore] Plugin ${plugin.id} has unknown iconPosition: "${key}"`)
+      logger.warn('plugin-store', `Plugin ${plugin.id} has unknown iconPosition: "${key}"`)
     }
   }
   return registry
@@ -404,7 +405,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const wasEnabled = target?.enabled ?? false
     if (!target) {
       // 插件不存在时警告。
-      console.warn(`[plugin-store] setPluginEnabled: plugin "${id}" not found in registry`)
+      logger.warn('plugin-store', `setPluginEnabled: plugin "${id}" not found in registry`)
       return
     }
     set((state) => {
@@ -455,8 +456,9 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const deduped: typeof plugins = []
     for (const p of plugins) {
       if (seen.has(p.id)) {
-        console.warn(
-          `[plugin-store] setPlugins received duplicate id "${p.id}", keeping the last occurrence`,
+        logger.warn(
+          'plugin-store',
+          `setPlugins received duplicate id "${p.id}", keeping the last occurrence`,
         )
         // 用后一条覆盖前一条，保证 last wins 语义
         const idx = deduped.findIndex((q) => q.id === p.id)
@@ -604,7 +606,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     // 插件已移除则跳过，避免写入 stale 健康记录
     const target = get().plugins.find((p) => p.id === id)
     if (!target) {
-      console.warn(`[plugin-store] setPluginHealth: plugin "${id}" not found in registry`)
+      logger.warn('plugin-store', `setPluginHealth: plugin "${id}" not found in registry`)
       return
     }
     set((state) => {

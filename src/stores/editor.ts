@@ -2,6 +2,7 @@
  * Editor Store - Manages editor state
  */
 import { create } from 'zustand'
+import { logger } from '@/lib/logger'
 import { subscribeWithSelector } from 'zustand/middleware'
 import type { ReactNode } from 'react'
 import { loadFileContent } from '@/lib/api'
@@ -416,7 +417,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         return await loadFileContent(tab.path)
       } catch (e) {
         if (currentRetry < maxRetries) {
-          console.warn(`Failed to load tab content, retrying (${currentRetry + 1}/${maxRetries}):`, tab.path)
+          logger.warn('editor-store', `Failed to load tab content, retrying (${currentRetry + 1}/${maxRetries}):`, tab.path)
           await new Promise(resolve => setTimeout(resolve, retryDelay))
           return tryLoadContent(currentRetry + 1)
         }
@@ -475,7 +476,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         queueMicrotask(() => emitNoteChanged(loadedTab.id, loadedTab.path, loadedTab.content ?? ''))
       }
     } catch (e) {
-      console.error('Failed to load tab content after retries:', e)
+      logger.error('editor-store', 'Failed to load tab content after retries:', e)
       // 不关闭 tab，标记外部变更；content 置 '' 避免无限重试
       set((state) => ({
         tabs: state.tabs.map((t) =>
@@ -680,7 +681,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         const isMarkdown = tab.path.toLowerCase().endsWith('.md')
         // 防御：content===undefined 时跳过写入避免丢失正文
         if (tab.content === undefined && isMarkdown) {
-          console.warn(`[saveAllDirtyTabs] Skipping save for tab with undefined content: ${tab.path}`)
+          logger.warn('editor-store', `Skipping save for tab with undefined content: ${tab.path}`)
           continue
         }
 
@@ -710,7 +711,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
             await invoke('index_saved_file', { path: tab.path })
           } catch (e) {
             // 索引线程会异步补偿，但记录日志便于排查
-            console.error('Failed to index saved file:', tab.path, e)
+            logger.error('editor-store', 'Failed to index saved file:', tab.path, e)
           }
         }
         // CAS 保护：仅期间无新编辑才清脏标记
@@ -734,10 +735,10 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         try {
           await gitAutoCommit(tab.path)
         } catch (e) {
-          console.warn('[editor] gitAutoCommit failed for', tab.path, e)
+          logger.warn('editor-store', 'gitAutoCommit failed for', tab.path, e)
         }
       } catch (e) {
-        console.error('Failed to save tab:', tab.path, e)
+        logger.error('editor-store', 'Failed to save tab:', tab.path, e)
         window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))
       } finally {
         // 延迟移除 savingPaths，等 file-watcher 平息
@@ -775,7 +776,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
           ),
         }))
       } catch (e) {
-        console.error('Failed to reset dirty tab:', tab.path, e)
+        logger.error('editor-store', 'Failed to reset dirty tab:', tab.path, e)
         set((state) => ({
           tabs: state.tabs.map((t) =>
             t.id === tab.id ? { ...t, isDirty: false, isEdited: false, frontmatterDirty: false } : t

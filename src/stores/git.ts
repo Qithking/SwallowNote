@@ -2,6 +2,7 @@
  * Git Store - Manages Git state
  */
 import { create } from 'zustand'
+import { logger } from '@/lib/logger'
 import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, removeConflictRepoRecord, syncConflictRepoRecords, gitGetConflictFiles, scanGitRepos, type ConflictRepoRecord } from '@/lib/tauri'
 import i18n from '@/i18n'
 
@@ -154,7 +155,7 @@ export const useGitStore = create<GitState>((set, get) => ({
           const repos = await scanGitRepos(path)
           return repos
         } catch (e) {
-          console.error(`Failed to scan git repos in ${path}:`, e)
+          logger.error('git-store', `Failed to scan git repos in ${path}:`, e)
           return []
         }
       })
@@ -176,7 +177,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ repositories: mergedRepos, cachedRepositories: mergedRepos })
       return mergedRepos
     } catch (e) {
-      console.error('Failed to scan and cache git repos:', e)
+      logger.error('git-store', 'Failed to scan and cache git repos:', e)
       return get().cachedRepositories
     } finally {
       set({ isGitLoading: false, scanProgress: null })
@@ -271,7 +272,7 @@ export const useGitStore = create<GitState>((set, get) => ({
           }
         } catch (e) {
           // 获取冲突文件失败时保留原记录，不清空，避免掩盖真实冲突
-          console.warn('[git] Failed to fetch conflict files for', record.repo_path, e)
+          logger.warn('git-store', 'Failed to fetch conflict files for', record.repo_path, e)
         }
       }))
 
@@ -301,7 +302,7 @@ export const useGitStore = create<GitState>((set, get) => ({
         }),
       }))
     } catch (e) {
-      console.error('Failed to load conflict repos:', e)
+      logger.error('git-store', 'Failed to load conflict repos:', e)
     }
   },
   syncConflictReposFromPullResults: async (pullResults: PullResult[]) => {
@@ -335,7 +336,7 @@ export const useGitStore = create<GitState>((set, get) => ({
 
       set({ conflictRepos: records, conflictFilesMap: newConflictFilesMap })
     } catch (e) {
-      console.error('Failed to sync conflict repos:', e)
+      logger.error('git-store', 'Failed to sync conflict repos:', e)
     }
   },
   isConflictFile: (filePath: string): { isConflict: boolean; repoPath: string; repoName: string } | null => {

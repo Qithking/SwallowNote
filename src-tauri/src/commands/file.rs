@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use log::error;
 
 #[derive(Serialize)]
 pub struct FileMetadata {
@@ -894,7 +895,7 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
                 if !line_matches.is_empty() {
                     // 锁中毒时恢复内部数据，避免 spawn_blocking 任务连锁 panic
                     let mut matches_map = file_matches_clone.lock().unwrap_or_else(|e| {
-                        eprintln!("锁中毒: {}", e);
+                        error!("锁中毒: {}", e);
                         e.into_inner()
                     });
                     let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();

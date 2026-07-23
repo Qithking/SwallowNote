@@ -1,6 +1,7 @@
 use crate::db::Database;
 use rusqlite::Result;
 use serde::{Deserialize, Serialize};
+use log::error;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiRolePrompt {
@@ -16,7 +17,7 @@ pub struct AiRolePrompt {
 pub fn load_role_prompts(db: &Database) -> Result<Vec<AiRolePrompt>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare(
@@ -44,7 +45,7 @@ pub fn load_role_prompts(db: &Database) -> Result<Vec<AiRolePrompt>> {
 pub fn get_role_prompt(db: &Database, role_key: &str) -> Result<Option<AiRolePrompt>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     let mut stmt = conn.prepare(
@@ -71,7 +72,7 @@ pub fn get_role_prompt(db: &Database, role_key: &str) -> Result<Option<AiRolePro
 pub fn update_role_prompt(db: &Database, role_key: &str, prompt: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute(
@@ -84,7 +85,7 @@ pub fn update_role_prompt(db: &Database, role_key: &str, prompt: &str) -> Result
 pub fn add_role_prompt(db: &Database, role_key: &str, name: &str, prompt: &str) -> Result<AiRolePrompt> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute(
@@ -106,7 +107,7 @@ pub fn add_role_prompt(db: &Database, role_key: &str, name: &str, prompt: &str) 
 pub fn delete_role_prompt(db: &Database, role_key: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     // 仅允许删除非内置提示词
@@ -120,7 +121,7 @@ pub fn delete_role_prompt(db: &Database, role_key: &str) -> Result<()> {
 pub fn update_role_prompt_name(db: &Database, role_key: &str, name: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
     let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
+        error!("[DB] mutex poisoned: {}", e);
         e.into_inner()
     });
     conn.execute(

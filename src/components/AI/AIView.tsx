@@ -26,6 +26,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { getAiProxyUrl } from '@/lib/ai'
 import { loadFileContent } from '@/lib/api'
 import { restartAiProxy, saveAiMessage, loadAiMessages, loadAiRolePrompts, writeFile, createFile, type AiRolePrompt } from '@/lib/tauri'
+import { logger } from '@/lib/logger'
 
 function getMessageText(message: { parts?: Array<{ type: string; text?: string }> }): string {
   if (!message.parts) return ''
@@ -223,7 +224,7 @@ function AIView() {
               // 标记为已入库，避免下次 effect 重试时重复写入
               savedMessageIds.current.add(msg.id)
             } catch (e) {
-              console.error('[AIView] Failed to flush user message before trim, skipping trim:', e)
+              logger.error('ai-view', 'Failed to flush user message before trim, skipping trim:', e)
               // flush 失败则不裁剪，保留在内存中，等待下次 effect 重新尝试
               return
             }
@@ -262,7 +263,7 @@ function AIView() {
       const model = aiModels.find((m) => m.id === currentActiveAiModelId)
       if (model) {
         const apiKey = model._decryptedApiKey || ''
-        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, currentAiPort).catch(console.error)
+        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, currentAiPort).catch((e) => logger.error('ai-view', 'Failed to restart AI proxy:', e))
       }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -271,7 +272,7 @@ function AIView() {
   const reloadRolePrompts = useCallback(() => {
     loadAiRolePrompts()
       .then((prompts) => setAiRolePrompts(prompts))
-      .catch((e) => console.error('Failed to load AI role prompts:', e))
+      .catch((e) => logger.error('ai-view', 'Failed to load AI role prompts:', e))
   }, [])
 
   useEffect(() => {
@@ -303,7 +304,7 @@ function AIView() {
           setHasMoreHistory(dbMessages.length >= 30)
         }
       } catch (e) {
-        console.error('Failed to load AI chat history:', e)
+        logger.error('ai-view', 'Failed to load AI chat history:', e)
       } finally {
         // Mark history as ready even if loading failed, so pending requests can proceed
         historyReadyRef.current = true
@@ -323,7 +324,7 @@ function AIView() {
         const now = new Date()
         const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
         setMessageTimestamps((prev) => ({ ...prev, [lastMsg.id]: timeStr }))
-        saveAiMessage('assistant', text, activeAiModelId || '').catch(console.error)
+        saveAiMessage('assistant', text, activeAiModelId || '').catch((e) => logger.error('ai-view', 'Failed to save AI assistant message:', e))
       }
     }
   }, [status])
@@ -362,7 +363,7 @@ function AIView() {
         setHasMoreHistory(false)
       }
     } catch (e) {
-      console.error('Failed to load more history:', e)
+      logger.error('ai-view', 'Failed to load more history:', e)
     } finally {
       setIsLoadingHistory(false)
     }
@@ -388,7 +389,7 @@ function AIView() {
       try {
         await restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, aiPort)
       } catch (e) {
-        console.error('Failed to restart AI proxy:', e)
+        logger.error('ai-view', 'Failed to restart AI proxy:', e)
       }
     }
   }
@@ -431,7 +432,7 @@ function AIView() {
       const { useFileTreeStore } = await import('@/stores/filetree')
       await useFileTreeStore.getState().refreshExpanded()
     } catch (e) {
-      console.error('Failed to save as new file:', e)
+      logger.error('ai-view', 'Failed to save as new file:', e)
     }
   }
 
@@ -535,7 +536,7 @@ function AIView() {
       }
 
       // Save display message to DB (not the full content)
-      saveAiMessage('user', displayMessage, activeAiModelId || '').catch(console.error)
+      saveAiMessage('user', displayMessage, activeAiModelId || '').catch((e) => logger.error('ai-view', 'Failed to save AI user message:', e))
     }
 
     // If chat history hasn't finished loading yet, wait for it.
@@ -603,7 +604,7 @@ function AIView() {
           displayNames.push(relPath)
           fileParts.push(`--- ${relPath} ---\n${content}`)
         } catch (e) {
-          console.error('Failed to read attached file:', filePath, e)
+          logger.error('ai-view', 'Failed to read attached file:', filePath, e)
         }
       }
       if (fileParts.length > 0) {
@@ -645,7 +646,7 @@ function AIView() {
     }
 
     // Save the display text (not the full file content) to DB
-    saveAiMessage('user', displayText, activeAiModelId || '').catch(console.error)
+    saveAiMessage('user', displayText, activeAiModelId || '').catch((e) => logger.error('ai-view', 'Failed to save AI user message:', e))
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

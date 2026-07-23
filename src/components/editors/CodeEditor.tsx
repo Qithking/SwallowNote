@@ -39,6 +39,7 @@ import { java } from '@codemirror/lang-java'
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EditorContextMenu } from './EditorContextMenu'
+import { logger } from '@/lib/logger'
 
 interface CodeEditorProps {
   content: string
@@ -187,7 +188,7 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
         effects: EditorView.scrollIntoView(line.from, { y: 'center' })
       })
     } catch (e) {
-      console.error('Failed to scroll to line:', e)
+      logger.error('code-editor', 'Failed to scroll to line:', e)
     }
   }
 

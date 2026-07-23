@@ -16,6 +16,7 @@ export type ShortcutKey =
   | 'settings'
   | 'renameFile'
   | 'deleteFile'
+  | 'logViewer'
 
 export interface ShortcutDefinition {
   key: ShortcutKey
@@ -40,6 +41,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { key: 'settings', defaultKey: 'Ctrl+,' },
   { key: 'renameFile', defaultKey: 'F2' },
   { key: 'deleteFile', defaultKey: 'Ctrl+Delete' },
+  { key: 'logViewer', defaultKey: 'Ctrl+Shift+Y' },
 ]
 
 export const DEFAULT_SHORTCUTS_MAP: Record<ShortcutKey, string> = Object.fromEntries(

@@ -2,6 +2,7 @@ use super::runner::{run_git, run_git_with_env};
 use super::branch::{is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, fix_detached_head, get_rebase_branch, resolve_push_target_branch};
 use super::askpass::{create_askpass_script, build_askpass_env};
 use super::errors::is_auth_error;
+use log::debug;
 
 /// Push commits to remote
 /// Handles detached HEAD state by using HEAD:<branch> format
@@ -24,12 +25,10 @@ pub async fn git_push(path: String) -> Result<(), String> {
             let err_str = e.to_lowercase();
             // If detached HEAD, try pushing with HEAD:<branch> format
             if err_str.contains("not currently on a branch") || err_str.contains("detached head") {
-                #[cfg(debug_assertions)]
-                eprintln!("[INFO] git_push: detached HEAD detected, trying HEAD:<branch> push");
+                debug!("[INFO] git_push: detached HEAD detected, trying HEAD:<branch> push");
                 // Get the branch name from rebase state or HEAD
                 if let Some(branch) = get_rebase_branch(&path) {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[INFO] git_push: pushing HEAD:refs/heads/{}", branch);
+                    debug!("[INFO] git_push: pushing HEAD:refs/heads/{}", branch);
                     let push_result = run_git(&path, &["push", "origin", &format!("HEAD:refs/heads/{}", branch)]);
                     match push_result {
                         Ok(_) => return Ok(()),
@@ -80,8 +79,7 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
             // `push origin HEAD:refs/heads/<branch>` 显式指定目标分支。
             if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
                 if let Some(branch) = resolve_push_target_branch(&path) {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[INFO] git_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    debug!("[INFO] git_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
                     // Recreate askpass script for the retry
                     let (retry_path, _retry_guard) = create_askpass_script("askpass", &username, &password)?;
                     let retry_env = build_askpass_env(&retry_path, &username, &password);
@@ -136,8 +134,7 @@ pub async fn git_force_push(path: String) -> Result<(), String> {
             // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
             if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
                 if let Some(branch) = resolve_push_target_branch(&path) {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[INFO] git_force_push: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    debug!("[INFO] git_force_push: detached HEAD, pushing HEAD:refs/heads/{}", branch);
                     let retry = run_git(
                         &path,
                         &["push", "--force", "origin", &format!("HEAD:refs/heads/{}", branch)],
@@ -207,8 +204,7 @@ pub async fn git_force_push_with_credentials(path: String, username: String, pas
             // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
             if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
                 if let Some(branch) = resolve_push_target_branch(&path) {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[INFO] git_force_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
+                    debug!("[INFO] git_force_push_with_credentials: detached HEAD, pushing HEAD:refs/heads/{}", branch);
                     // Recreate askpass script for the retry
                     let (retry_path, _retry_guard) = create_askpass_script("force_push", &username, &password)?;
                     let retry_env = build_askpass_env(&retry_path, &username, &password);

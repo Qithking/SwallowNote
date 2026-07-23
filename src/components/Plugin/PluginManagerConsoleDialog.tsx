@@ -66,6 +66,7 @@ import {
 import { downloadDiagnosticBundle } from '@/lib/plugin-diagnostics'
 import { writeFile } from '@/lib/tauri'
 import { usePluginStore } from '@/stores'
+import { logger } from '@/lib/logger'
 
 export interface PluginManagerConsoleDialogProps {
   open: boolean
@@ -375,7 +376,7 @@ function DiagnosticsTab({ open }: { open: boolean }) {
     try {
       await downloadDiagnosticBundle()
     } catch (err) {
-      console.error('Failed to export diagnostic bundle:', err)
+      logger.error('plugin-console', 'Failed to export diagnostic bundle:', err)
     }
   }
 
@@ -551,7 +552,7 @@ function LogsTab({ open }: { open: boolean }) {
       await navigator.clipboard.writeText(text)
       toast.success(t('plugin.pa.dialog.logs.toast.copySuccess'))
     } catch (err) {
-      console.error('Failed to copy logs:', err)
+      logger.error('plugin-console', 'Failed to copy logs:', err)
       toast.error(t('plugin.pa.dialog.logs.toast.copyFailed'))
     }
   }
@@ -576,7 +577,7 @@ function LogsTab({ open }: { open: boolean }) {
         ],
       })
     } catch (err) {
-      console.error('Failed to open save dialog:', err)
+      logger.error('plugin-console', 'Failed to open save dialog:', err)
       toast.error(t('plugin.pa.dialog.logs.toast.exportOpenFailed'), { description: String(err) })
       return
     }
@@ -588,7 +589,7 @@ function LogsTab({ open }: { open: boolean }) {
         { description: target },
       )
     } catch (err) {
-      console.error('Failed to write log file:', err)
+      logger.error('plugin-console', 'Failed to write log file:', err)
       toast.error(t('plugin.pa.dialog.logs.toast.exportWriteFailed'), { description: String(err) })
     }
   }

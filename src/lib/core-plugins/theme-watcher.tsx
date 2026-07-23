@@ -26,6 +26,7 @@ import {
   usePluginStorage,
   usePluginEvents,
 } from '@/lib/plugin-hooks'
+import { logger } from '../logger'
 
 // ─── Panel component ──────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ function ThemeWatcherPanel(panel: PluginPanelProps): ReactNode {
       }))
     } catch (err) {
       if (verbose) {
-        console.debug('[theme-watcher] failed to hydrate from appSettings:', err)
+        logger.debug('plugin:theme-watcher', 'failed to hydrate from appSettings:', err)
       }
     }
   }, [verbose])
@@ -123,7 +124,7 @@ function ThemeWatcherPanel(panel: PluginPanelProps): ReactNode {
     })
 
     if (verbose) {
-      console.debug(`[theme-watcher] ${event}`, payload)
+      logger.debug('plugin:theme-watcher', `${event}`, payload)
     }
     // Demo: emit a follow-up `settings:change` carrying the latest
     // theme, so other plugins (or the diagnostics panel) can
@@ -274,11 +275,11 @@ function onUnload(): void {
 }
 
 function onEnable(context: { pluginId: string }): void {
-  console.debug(`[theme-watcher] enabled (pluginId=${context.pluginId})`)
+  logger.debug('plugin:theme-watcher', `enabled (pluginId=${context.pluginId})`)
 }
 
 function onDisable(context: { pluginId: string }): void {
-  console.debug(`[theme-watcher] disabled (pluginId=${context.pluginId})`)
+  logger.debug('plugin:theme-watcher', `disabled (pluginId=${context.pluginId})`)
 }
 
 function onMount(context: { pluginId: string }): void {
@@ -290,11 +291,11 @@ function onUnmount(): void {
 }
 
 function onActivate(context: { pluginId: string }): void {
-  console.debug(`[theme-watcher] activated (pluginId=${context.pluginId})`)
+  logger.debug('plugin:theme-watcher', `activated (pluginId=${context.pluginId})`)
 }
 
 function onDeactivate(context: { pluginId: string }): void {
-  console.debug(`[theme-watcher] deactivated (pluginId=${context.pluginId})`)
+  logger.debug('plugin:theme-watcher', `deactivated (pluginId=${context.pluginId})`)
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────

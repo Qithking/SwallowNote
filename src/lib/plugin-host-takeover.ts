@@ -36,6 +36,7 @@ import { assertPermission } from './plugin-permission-guard'
 import { writePluginSettings } from './tauri'
 import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
 import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
+import { logger } from './logger'
 
 /** 生命周期钩子默认超时 5s。 */
 export const DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS = 5000
@@ -246,7 +247,7 @@ export async function runPluginLifecycleHook(
         const { usePluginStore } = await import('@/stores')
         usePluginStore.getState().setPluginHealth(plugin.id, 'healthy')
       } catch (err) {
-        console.error(`[plugin-host-takeover] Failed to mark plugin "${plugin.id}" healthy in store:`, err)
+        logger.error('plugin-takeover', `Failed to mark plugin "${plugin.id}" healthy in store:`, err)
       }
       void import('./plugin-telemetry').then(({ markPluginHealthy }) => {
         markPluginHealthy(plugin.id)
@@ -264,7 +265,7 @@ async function handleHookTimeout(
   timeoutMs: number,
 ): Promise<void> {
   const message = `Lifecycle hook "${hookName}" exceeded ${timeoutMs}ms timeout`
-  console.error(`[plugin-host-takeover] Plugin "${plugin.id}": ${message}, auto-disabling.`)
+  logger.error('plugin-takeover', `Plugin "${plugin.id}": ${message}, auto-disabling.`)
   // 遥测先行（fire-and-forget）。
   void import('./plugin-telemetry').then(({ recordPluginError }) => {
     recordPluginError(plugin.id, hookName, message, true)
@@ -283,6 +284,6 @@ async function handleHookTimeout(
       })
     }
   } catch (err) {
-    console.error(`[plugin-host-takeover] Failed to handle timeout for plugin "${plugin.id}":`, err)
+    logger.error('plugin-takeover', `Failed to handle timeout for plugin "${plugin.id}":`, err)
   }
 }
