@@ -351,9 +351,6 @@ export interface PluginIndexEntryVersion {
   publishedAt: string
 }
 
-/** 市场详情 UI 的别名，规范名为 PluginIndexEntryVersion */
-export type PluginIndexVersion = PluginIndexEntryVersion
-
 export interface PluginIndex {
   schemaVersion: number
   updatedAt: string

@@ -458,7 +458,7 @@ function BlockNoteInner({
     event.preventDefault()
 
     if (isExternalUrl(href)) {
-      openExternal(href).catch(() => {})
+      openExternal(href).catch((e) => logger.warn('markdown-editor', 'openExternal failed', href, e))
       return true
     }
 
@@ -1437,7 +1437,7 @@ function BlockNoteInner({
       const handleOpen = () => {
         const url = props.url
         if (isExternalUrl(url)) {
-          openExternal(url).catch(() => {})
+          openExternal(url).catch((e) => logger.warn('markdown-editor', 'openExternal failed', url, e))
           return
         }
         if (url.startsWith('#')) {

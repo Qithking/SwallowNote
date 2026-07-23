@@ -54,7 +54,7 @@ function logTime(stage: string, t0: number) {
   const elapsed = Math.round(performance.now() - t0)
   logger.info('app', `[STARTUP-TIME] ${stage} t=${elapsed}`)
   try {
-    invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch(() => {})
+    invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch((e) => logger.warn('app', 'log_startup_time failed', e))
   } catch { /* ignore */ }
 }
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
@@ -179,7 +179,7 @@ function App() {
 
       // Sync current i18n language to the Rust backend (fire-and-forget)
       import('i18next').then(({ default: i18n }) => {
-        setAppLocale(i18n.language).catch(() => {})
+        setAppLocale(i18n.language).catch((e) => logger.warn('app', 'setAppLocale failed', e))
       }).catch(() => {})
 
       // 窗口可见后发射 app:ready（fire-and-forget，不阻塞）
@@ -540,8 +540,8 @@ function App() {
                         await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
                         pushSucceeded++
                         continue
-                      } catch {
-                        // Saved credentials failed
+                      } catch (e) {
+                        logger.error('app', 'auto-sync credentials failed', e)
                       }
                     }
                   } catch {

@@ -37,21 +37,6 @@ pub struct AiSettingsUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct ChatRequest {
-    pub messages: Vec<ChatMessage>,
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     pub name: String,
@@ -77,44 +62,45 @@ client,
 }
 
 pub fn get_provider_base_url(provider: &str, custom_url: &str) -> String {
+    let base = custom_url.trim_end_matches('/');
     match provider {
         "openai" => {
             if custom_url.is_empty() {
                 "https://api.openai.com/v1".to_string()
             } else {
-                custom_url.trim_end_matches('/').to_string()
+                base.to_string()
             }
         }
         "anthropic" => {
             if custom_url.is_empty() {
                 "https://api.anthropic.com/v1".to_string()
             } else {
-                custom_url.trim_end_matches('/').to_string()
+                base.to_string()
             }
         }
         "google" => {
             if custom_url.is_empty() {
                 "https://generativelanguage.googleapis.com/v1beta".to_string()
             } else {
-                custom_url.trim_end_matches('/').to_string()
+                base.to_string()
             }
         }
         "deepseek" => {
             if custom_url.is_empty() {
                 "https://api.deepseek.com/v1".to_string()
             } else {
-                custom_url.trim_end_matches('/').to_string()
+                base.to_string()
             }
         }
         "ollama" => {
             if custom_url.is_empty() {
                 "http://localhost:11434/v1".to_string()
             } else {
-                custom_url.trim_end_matches('/').to_string()
+                base.to_string()
             }
         }
-        "custom" => custom_url.trim_end_matches('/').to_string(),
-        _ => custom_url.trim_end_matches('/').to_string(),
+        "custom" => base.to_string(),
+        _ => base.to_string(),
     }
 }
 

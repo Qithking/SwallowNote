@@ -1183,115 +1183,6 @@ fn dir_size(path: &Path) -> u64 {
     total
 }
 
-/// Adapter that feeds bytes through a `sha2::Sha256` hasher. Used by
-/// [`hash_dir_sha256_hex`] to stream file contents into the digest
-/// without buffering the whole file in memory.
-#[allow(dead_code)]
-struct HasherWriter<'a>(&'a mut sha2::Sha256);
-
-impl std::io::Write for HasherWriter<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        sha2::Digest::update(self.0, buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-// 递归收集文件，按小写化相对路径排序以保证跨平台 hash 一致。跳过 symlink 和平台垃圾文件。
-#[allow(dead_code)]
-fn collect_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), PluginError> {
-    let entries = fs::read_dir(dir)
-        .map_err(|e| PluginError::Io(format!("hash_dir: read_dir({}): {}", dir.display(), e)))?;
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
-    // Use a deterministic sort key (lowercased relative path, '/' as
-    // the separator) so Windows (case-insensitive PathBuf::Ord) and
-    // macOS / Linux (case-sensitive byte Ord) produce the same order.
-    paths.sort_by(|a, b| {
-        let ra = a.strip_prefix(dir).unwrap_or(a.as_path()).to_string_lossy().replace('\\', "/").to_lowercase();
-        let rb = b.strip_prefix(dir).unwrap_or(b.as_path()).to_string_lossy().replace('\\', "/").to_lowercase();
-        ra.cmp(&rb)
-    });
-    for p in paths {
-        let meta = match fs::symlink_metadata(&p) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if meta.file_type().is_symlink() {
-            continue;
-        }
-        if meta.is_dir() {
-            // Skip VCS / SCM directories — their contents are
-            // host-specific (.git/objects packs differ between
-            // clones) and would silently invalidate the digest.
-            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                if name == ".git" {
-                    continue;
-                }
-            }
-            collect_files_sorted(&p, out)?;
-        } else {
-            // Skip OS-junk files that macOS Finder / Windows
-            // Explorer create on demand. They shift the digest
-            // between host machines even when the plugin payload
-            // is byte-identical.
-            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                if matches!(name, ".DS_Store" | "Thumbs.db" | "desktop.ini") {
-                    continue;
-                }
-            }
-            out.push(p);
-        }
-    }
-    Ok(())
-}
-
-// 计算目录的确定性内容 hash（每文件：relpath + \0 + 内容 + \0），流式处理。
-#[allow(dead_code)]
-fn hash_dir_sha256_hex(dir: &Path) -> Result<String, PluginError> {
-    use sha2::{Digest, Sha256};
-    use std::fmt::Write;
-
-    let mut hasher = Sha256::new();
-    let mut paths: Vec<PathBuf> = Vec::new();
-    collect_files_sorted(dir, &mut paths)?;
-
-    for abs in &paths {
-        let rel = abs.strip_prefix(dir).unwrap_or(abs.as_path());
-        // Use the canonical string form (forward slashes) so the
-        // hash doesn't shift on Windows where `\` and `/` are
-        // interchangeable in some APIs. ASCII-lowercase the rel
-        // path so a Windows publish (case-insensitive Ord) and a
-        // macOS / Linux publish (byte Ord) produce the same
-        // digest — otherwise `A.txt` and `a.txt` swap order across
-        // platforms and break marketplace signatures.
-        let rel_str = rel
-            .to_string_lossy()
-            .replace('\\', "/")
-            .to_lowercase();
-        hasher.update(rel_str.as_bytes());
-        hasher.update(b"\0");
-        let mut file = fs::File::open(abs).map_err(|e| {
-            PluginError::Io(format!("hash_dir: open({}): {}", abs.display(), e))
-        })?;
-        let mut writer = HasherWriter(&mut hasher);
-        std::io::copy(&mut file, &mut writer)
-            .map_err(|e| PluginError::Io(format!("hash_dir: read({}): {}", abs.display(), e)))?;
-        hasher.update(b"\0");
-    }
-
-    let digest = hasher.finalize();
-    let mut out = String::with_capacity(64);
-    for b in digest {
-        let _ = write!(&mut out, "{:02x}", b);
-    }
-    Ok(out)
-}
-
 // Marketplace 安装入口：接收 zip bytes，校验 SHA-256 后安装到 .versions/<version>/。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -2130,6 +2021,112 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("file.txt"), "hello").unwrap();
         dir
+    }
+
+    /// Adapter that feeds bytes through a `sha2::Sha256` hasher. Used by
+    /// [`hash_dir_sha256_hex`] to stream file contents into the digest
+    /// without buffering the whole file in memory.
+    struct HasherWriter<'a>(&'a mut sha2::Sha256);
+
+    impl std::io::Write for HasherWriter<'_> {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            sha2::Digest::update(self.0, buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    // 递归收集文件，按小写化相对路径排序以保证跨平台 hash 一致。跳过 symlink 和平台垃圾文件。
+    fn collect_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), PluginError> {
+        let entries = fs::read_dir(dir)
+            .map_err(|e| PluginError::Io(format!("hash_dir: read_dir({}): {}", dir.display(), e)))?;
+        let mut paths: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect();
+        // Use a deterministic sort key (lowercased relative path, '/' as
+        // the separator) so Windows (case-insensitive PathBuf::Ord) and
+        // macOS / Linux (case-sensitive byte Ord) produce the same order.
+        paths.sort_by(|a, b| {
+            let ra = a.strip_prefix(dir).unwrap_or(a.as_path()).to_string_lossy().replace('\\', "/").to_lowercase();
+            let rb = b.strip_prefix(dir).unwrap_or(b.as_path()).to_string_lossy().replace('\\', "/").to_lowercase();
+            ra.cmp(&rb)
+        });
+        for p in paths {
+            let meta = match fs::symlink_metadata(&p) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                // Skip VCS / SCM directories — their contents are
+                // host-specific (.git/objects packs differ between
+                // clones) and would silently invalidate the digest.
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if name == ".git" {
+                        continue;
+                    }
+                }
+                collect_files_sorted(&p, out)?;
+            } else {
+                // Skip OS-junk files that macOS Finder / Windows
+                // Explorer create on demand. They shift the digest
+                // between host machines even when the plugin payload
+                // is byte-identical.
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if matches!(name, ".DS_Store" | "Thumbs.db" | "desktop.ini") {
+                        continue;
+                    }
+                }
+                out.push(p);
+            }
+        }
+        Ok(())
+    }
+
+    // 计算目录的确定性内容 hash（每文件：relpath + \0 + 内容 + \0），流式处理。
+    fn hash_dir_sha256_hex(dir: &Path) -> Result<String, PluginError> {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write;
+
+        let mut hasher = Sha256::new();
+        let mut paths: Vec<PathBuf> = Vec::new();
+        collect_files_sorted(dir, &mut paths)?;
+
+        for abs in &paths {
+            let rel = abs.strip_prefix(dir).unwrap_or(abs.as_path());
+            // Use the canonical string form (forward slashes) so the
+            // hash doesn't shift on Windows where `\` and `/` are
+            // interchangeable in some APIs. ASCII-lowercase the rel
+            // path so a Windows publish (case-insensitive Ord) and a
+            // macOS / Linux publish (byte Ord) produce the same
+            // digest — otherwise `A.txt` and `a.txt` swap order across
+            // platforms and break marketplace signatures.
+            let rel_str = rel
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_lowercase();
+            hasher.update(rel_str.as_bytes());
+            hasher.update(b"\0");
+            let mut file = fs::File::open(abs).map_err(|e| {
+                PluginError::Io(format!("hash_dir: open({}): {}", abs.display(), e))
+            })?;
+            let mut writer = HasherWriter(&mut hasher);
+            std::io::copy(&mut file, &mut writer)
+                .map_err(|e| PluginError::Io(format!("hash_dir: read({}): {}", abs.display(), e)))?;
+            hasher.update(b"\0");
+        }
+
+        let digest = hasher.finalize();
+        let mut out = String::with_capacity(64);
+        for b in digest {
+            let _ = write!(&mut out, "{:02x}", b);
+        }
+        Ok(out)
     }
 
     #[test]

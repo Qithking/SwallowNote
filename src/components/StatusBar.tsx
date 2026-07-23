@@ -22,6 +22,7 @@ import packageJson from '../../package.json'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
+import { logger } from '@/lib/logger'
 
 type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-failed' | 'downloading' | 'download-ready' | 'download-failed'
 
@@ -180,8 +181,8 @@ function StatusBar() {
         })
       }
       // If no update, or check failed: do nothing (silent)
-    } catch {
-      // Silent: ignore errors
+    } catch (e) {
+      logger.warn('statusbar', 'update check failed', e)
     } finally {
       isCheckingRef.current = false
     }

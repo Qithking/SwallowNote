@@ -26,7 +26,9 @@ pub async fn start_ai_proxy(settings: AiSettings) -> Result<AiProxyServer, Strin
         .await
         .map_err(|e| format!("Failed to bind port {}: {}", port, e))?;
 
-    let actual_port = listener.local_addr().unwrap().port();
+    let actual_port = listener.local_addr()
+        .map_err(|e| format!("local_addr failed: {}", e))?
+        .port();
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 

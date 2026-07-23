@@ -428,15 +428,19 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
     try {
       const rawContent = await tryLoadContent()
       const cursorPosition = tab.cursorPosition || { line: 1, column: 1 }
-      // Get actual file modification time from backend
-      let modifiedTime = new Date().toLocaleString()
+      // Get actual file modification time from backend.
+      // 失败时保留 tab 已有的 modifiedTime（不回退到当前时间），
+      // 否则用户会看到错误的"修改时间"。
+      let modifiedTime = tab.modifiedTime
       try {
         const { getFileMetadata } = await import('@/lib/tauri')
         const metadata = await getFileMetadata(tab.path)
         if (metadata?.modified_time) {
           modifiedTime = metadata.modified_time
         }
-      } catch { /* ignore */ }
+      } catch (e) {
+        logger.warn('editor-store', 'getFileMetadata failed, keeping previous modifiedTime', e)
+      }
 
       // .md 文件解析 frontmatter，存储正文为 content
       const isMarkdown = tab.path.toLowerCase().endsWith('.md')

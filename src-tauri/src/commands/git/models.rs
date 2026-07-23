@@ -49,18 +49,6 @@ pub struct ConflictFile {
     pub abs_path: String,
 }
 
-/// Result of checking conflicts in a repository
-#[derive(Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct ConflictInfo {
-    /// Repository path
-    pub repo_path: String,
-    /// Repository name
-    pub repo_name: String,
-    /// List of conflicting files
-    pub files: Vec<ConflictFile>,
-}
-
 #[derive(Serialize)]
 pub struct GitStatus {
     pub branch: String,

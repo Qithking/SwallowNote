@@ -326,7 +326,9 @@ export function PluginMarketDetail({
     if (!canAutoResolve || isAutoResolving) return
     setIsAutoResolving(true)
     let succeeded = 0
-    let failed = 0
+    // 收集失败依赖的 id/name/错误信息，循环后由 toast.error
+    // 具体展示是哪个依赖失败，而不是只报一个笼统的数字。
+    const failures: Array<{ id: string; name: string; error: string }> = []
     try {
       for (const missing of dependencyResolution.missing) {
         if (!missing.available) continue
@@ -334,14 +336,22 @@ export function PluginMarketDetail({
         if (!depEntry) {
           // Marketplace no longer carries this id (race vs
           // index refresh). Skip rather than block.
-          failed++
+          failures.push({
+            id: missing.id,
+            name: missing.id,
+            error: 'not found in marketplace index',
+          })
           continue
         }
         try {
           await installEntry(depEntry)
           succeeded++
-        } catch {
-          failed++
+        } catch (e) {
+          failures.push({
+            id: depEntry.id,
+            name: depEntry.name || depEntry.id,
+            error: e instanceof Error ? e.message : String(e),
+          })
         }
       }
       await reloadAfterInstall()
@@ -354,11 +364,17 @@ export function PluginMarketDetail({
           }),
         )
       }
-      if (failed > 0) {
+      if (failures.length > 0) {
+        const first = failures[0]
+        const detail =
+          failures.length === 1
+            ? `${first.name} (${first.id}): ${first.error}`
+            : `${first.name} (${first.id}) 等 ${failures.length} 个`
         toast.error(
           t('plugin.market.depsAutoResolveFailed', {
-            defaultValue: '{{count}} 个依赖安装失败',
-            count: failed,
+            defaultValue: '{{count}} 个依赖安装失败: {{detail}}',
+            count: failures.length,
+            detail,
           }),
         )
       }

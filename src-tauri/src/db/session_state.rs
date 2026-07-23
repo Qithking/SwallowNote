@@ -1,14 +1,10 @@
 use crate::db::Database;
 use rusqlite::Result;
 use std::collections::HashMap;
-use log::error;
 
 pub fn save_session_state(db: &Database, states: &HashMap<String, String>) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
-    let conn = db.conn.lock().unwrap_or_else(|e| {
-        error!("[DB] mutex poisoned: {}", e);
-        e.into_inner()
-    });
+    let conn = db.conn_lock();
     // 事务包裹批量 INSERT 保证原子性
     let tx = conn.unchecked_transaction()?;
 
@@ -25,10 +21,7 @@ pub fn save_session_state(db: &Database, states: &HashMap<String, String>) -> Re
 
 pub fn get_session_state(db: &Database) -> Result<HashMap<String, String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
-    let conn = db.conn.lock().unwrap_or_else(|e| {
-        error!("[DB] mutex poisoned: {}", e);
-        e.into_inner()
-    });
+    let conn = db.conn_lock();
     
     let mut stmt = conn.prepare("SELECT key, value FROM session_state")?;
     let rows = stmt.query_map([], |row| {

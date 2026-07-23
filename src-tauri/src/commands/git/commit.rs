@@ -253,27 +253,35 @@ pub fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Walk up directories from `path` to find the first ancestor containing a `.git` directory.
+/// Returns the repo root path as a String, or None if not inside a git repository.
+fn find_git_root(path: &str) -> Option<String> {
+    let mut current = Path::new(path);
+    loop {
+        if current.join(".git").exists() {
+            return current.to_str().map(|s| s.to_string());
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => return None,
+        }
+    }
+}
+
 /// Auto commit a single file (local only, no push)
 #[tauri::command]
 pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
     debug!("[INFO] git_auto_commit called for: {}", file_path);
 
     // Find the git root by walking up directories
-    let mut current = Path::new(&file_path);
-    loop {
-        if current.join(".git").exists() {
-            break;
+    let repo_root = match find_git_root(&file_path) {
+        Some(root) => root,
+        None => {
+            debug!("[INFO] git_auto_commit: not in a git repo, skipping");
+            return Ok(()); // Not in a git repo
         }
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => {
-                debug!("[INFO] git_auto_commit: not in a git repo, skipping");
-                return Ok(()); // Not in a git repo
-            }
-        }
-    }
-
-    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    };
+    let repo_path = repo_root.as_str();
     debug!("[INFO] git_auto_commit: repo_path={}", repo_path);
 
     // Skip auto-commit if repo is in a rebase/merge conflict state
@@ -292,7 +300,7 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
     }
 
     let relative_path = Path::new(&file_path)
-        .strip_prefix(current)
+        .strip_prefix(repo_path)
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
     let relative_path_str = relative_path.to_str().ok_or(i18n::t("backend.git.invalidPathEncoding"))?;
     let git_path = to_git_path(relative_path);
@@ -354,20 +362,10 @@ pub async fn git_log(path: String, max_count: i32) -> Result<Vec<String>, String
 /// Get file commit history with pagination
 #[tauri::command]
 pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> Result<Vec<GitFileLogEntry>, String> {
-    let mut current = Path::new(&file_path);
-    loop {
-        if current.join(".git").exists() {
-            break;
-        }
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => return Err("NOT_IN_GIT_REPO".to_string()),
-        }
-    }
-
-    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+    let repo_path = repo_root.as_str();
     let relative_path = Path::new(&file_path)
-        .strip_prefix(current)
+        .strip_prefix(repo_path)
         .map_err(|e| format!("Invalid relative path: {}", e))?;
     let git_path = to_git_path(relative_path);
 
@@ -451,20 +449,10 @@ pub async fn git_file_log(file_path: String, max_count: usize, skip: usize) -> R
 #[tauri::command]
 pub async fn git_show_diff(file_path: String, commit_hash: String) -> Result<String, String> {
     // Find the git root by walking up directories
-    let mut current = Path::new(&file_path);
-    loop {
-        if current.join(".git").exists() {
-            break;
-        }
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => return Err("NOT_IN_GIT_REPO".to_string()),
-        }
-    }
-
-    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+    let repo_path = repo_root.as_str();
     let relative_path = Path::new(&file_path)
-        .strip_prefix(current)
+        .strip_prefix(repo_path)
         .map_err(|e| format!("Invalid relative path: {}", e))?;
     let git_path = to_git_path(relative_path);
 
@@ -489,20 +477,10 @@ pub async fn git_show_diff(file_path: String, commit_hash: String) -> Result<Str
 #[tauri::command]
 pub async fn git_show_file_content(file_path: String, commit_hash: String) -> Result<String, String> {
     // Find the git root by walking up directories
-    let mut current = Path::new(&file_path);
-    loop {
-        if current.join(".git").exists() {
-            break;
-        }
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => return Err("NOT_IN_GIT_REPO".to_string()),
-        }
-    }
-
-    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+    let repo_path = repo_root.as_str();
     let relative_path = Path::new(&file_path)
-        .strip_prefix(current)
+        .strip_prefix(repo_path)
         .map_err(|e| format!("Invalid relative path: {}", e))?;
     let git_path = to_git_path(relative_path);
 
@@ -525,20 +503,10 @@ pub async fn git_show_file_content(file_path: String, commit_hash: String) -> Re
 #[tauri::command]
 pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
     // Find the git root by walking up directories
-    let mut current = Path::new(&file_path);
-    loop {
-        if current.join(".git").exists() {
-            break;
-        }
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => return Err("NOT_IN_GIT_REPO".to_string()),
-        }
-    }
-
-    let repo_path = current.to_str().ok_or(i18n::t("backend.git.invalidRepoPath"))?;
+    let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+    let repo_path = repo_root.as_str();
     let relative_path = Path::new(&file_path)
-        .strip_prefix(current)
+        .strip_prefix(repo_path)
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
     let git_path = to_git_path(relative_path);
 
@@ -602,20 +570,10 @@ fn is_local_ahead_of_remote(repo_path: &str) -> Result<bool, String> {
 #[tauri::command]
 pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
     // Find the git root by walking up directories
-    let mut current = Path::new(&file_path);
-    loop {
-        if current.join(".git").exists() {
-            break;
-        }
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => return Err("NOT_IN_GIT_REPO".to_string()),
-        }
-    }
-
-    let repo_path = current.to_str().ok_or("Invalid repo path")?;
+    let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+    let repo_path = repo_root.as_str();
     let relative_path = Path::new(&file_path)
-        .strip_prefix(current)
+        .strip_prefix(repo_path)
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
     let git_path = to_git_path(relative_path);
 

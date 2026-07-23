@@ -125,7 +125,7 @@ function WelcomeScreen() {
 
   // Load recent folder history on mount
   useEffect(() => {
-    getFolderHistory().then((paths) => setRecentPaths(paths)).catch(() => {})
+    getFolderHistory().then((paths) => setRecentPaths(paths)).catch((e) => logger.warn('editor', 'getFolderHistory failed', e))
   }, [])
 
   const handleOpenFolder = useCallback(async () => {

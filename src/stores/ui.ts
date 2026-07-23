@@ -983,7 +983,7 @@ export const useUIStore = create<UIState>((set, get) => ({
               themeType: t.themeType || 'light' as const,
             }))
           customThemes = [...BUILT_IN_THEMES, ...userThemes]
-        } catch { /* ignore */ }
+        } catch (e) { logger.warn('ui-store', 'custom theme JSON.parse failed', e) }
       }
       let aiModels: AiModelConfig[] = []
       if (s.aiModels) {

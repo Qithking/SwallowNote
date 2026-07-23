@@ -67,15 +67,10 @@ export interface CloneState {
 let _cancelled = false
 
 let _listenerInitialized = false
-/** 保存 git-clone-progress 监听器的 unlisten 函数，供 dispose 时调用。 */
-let _cloneListenerUnlisten: (() => void) | null = null
-/** 标记是否已 dispose：防止 listen Promise 延迟 resolve 后赋值已释放的 unlisten */
-let _listenerDisposed = false
 
 function initCloneProgressListener() {
   if (_listenerInitialized) return
   _listenerInitialized = true
-  _listenerDisposed = false
 
   listen<{ status: string; message: string; percent?: number; url?: string; local_path?: string }>(
     'git-clone-progress',
@@ -92,33 +87,9 @@ function initCloneProgressListener() {
         store._setError(payload.message)
       }
     },
-  ).then((unlisten) => {
-    // dispose 在 Promise resolve 前已调用：立即释放监听器，避免泄漏
-    if (_listenerDisposed) {
-      try { unlisten() } catch { /* noop */ }
-      return
-    }
-    _cloneListenerUnlisten = unlisten
-  }).catch((err) => {
+  ).catch((err) => {
     logger.error('clone-store', 'failed to register progress listener:', err)
   })
-}
-
-/**
- * 释放 git-clone-progress 全局监听器。模块级单例通常无需手动调用，
- * 仅供测试或显式销毁场景使用，避免监听器泄漏。
- */
-export function disposeCloneListener(): void {
-  _listenerDisposed = true
-  if (_cloneListenerUnlisten) {
-    try {
-      _cloneListenerUnlisten()
-    } catch (err) {
-      logger.error('clone-store', 'unlisten failed:', err)
-    }
-    _cloneListenerUnlisten = null
-  }
-  _listenerInitialized = false
 }
 
 /**

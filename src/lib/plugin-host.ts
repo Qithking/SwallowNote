@@ -238,8 +238,8 @@ class PluginEventBusImpl {
       const payloadSize = (() => {
         try {
           return JSON.stringify(payload).length
-        } catch {
-          return 0
+        } catch (e) {
+          logger.error('plugin-host', 'serialize payload failed', e); return 0
         }
       })()
       for (const [pid, stats] of perPlugin) {

@@ -291,7 +291,9 @@ commands::upgrade::download_latest_release,
                     }
                 }
             };
-            std::fs::create_dir_all(&app_data_dir).ok();
+            if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
+                warn!("create_dir_all failed: {}", e);
+            }
             info!("[STARTUP-TIME] app_data_dir_ready t={}", startup_t0.elapsed().as_millis());
 
             // 应用启动时清理上次崩溃可能残留的 askpass 脚本，防止明文凭证泄露

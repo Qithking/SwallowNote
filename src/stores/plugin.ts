@@ -389,8 +389,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     // 清除持久化的自动更新 opt-in。
     try {
       window.localStorage.removeItem(`${PLUGIN_AUTO_UPDATE_KEY_PREFIX}${id}`)
-    } catch {
-      /* ignore */
+    } catch (e) {
+      logger.warn('plugin-store', 'localStorage write failed', e)
     }
     // 清理遥测缓冲、存储尺寸映射和 lastError。
     clearPluginMetrics(id)
@@ -577,8 +577,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         window.localStorage.removeItem(
           `${PLUGIN_AUTO_UPDATE_KEY_PREFIX}${target.id}`,
         )
-      } catch {
-        /* ignore */
+      } catch (e) {
+        logger.warn('plugin-store', 'localStorage write failed', e)
       }
       // 清理移除插件的遥测缓冲。
       clearPluginMetrics(target.id)
@@ -670,8 +670,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
           `${PLUGIN_AUTO_UPDATE_KEY_PREFIX}${id}`,
           enabled ? 'true' : 'false',
         )
-      } catch {
-        /* private mode / quota — in-memory copy still wins */
+      } catch (e) {
+        logger.warn('plugin-store', 'localStorage write failed', e)
       }
       // 仅当镜像标志变化时重建 plugins 数组。
       let plugins = state.plugins
@@ -708,8 +708,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       }
       try {
         window.localStorage.removeItem(`${PLUGIN_AUTO_UPDATE_KEY_PREFIX}${id}`)
-      } catch {
-        /* ignore */
+      } catch (e) {
+        logger.warn('plugin-store', 'localStorage write failed', e)
       }
       const plugins = state.plugins.map((p) =>
         p.id === id ? { ...p, autoUpdate: false } : p,

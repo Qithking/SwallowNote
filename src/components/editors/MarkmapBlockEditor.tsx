@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useBlockResize } from '@/hooks/useBlockResize'
 import { BlockResizeHandles } from './BlockResizeHandles'
+import { logger } from '@/lib/logger'
 
 interface MarkmapBlockEditorProps {
   diagram: string
@@ -151,7 +152,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       const inst = markmapRef.current
       markmapRef.current = null
       if (inst) {
-        try { inst.destroy() } catch { /* noop */ }
+        try { inst.destroy() } catch (e) { logger.warn('markmap', 'destroy failed', e) }
       }
     }
   }, [diagram, scale])
@@ -187,7 +188,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       const inst = dialogMarkmapRef.current
       dialogMarkmapRef.current = null
       if (inst) {
-        try { inst.destroy() } catch { /* noop */ }
+        try { inst.destroy() } catch (e) { logger.warn('markmap', 'destroy failed', e) }
       }
     }
   }, [dialogOpen, diagram])
@@ -203,7 +204,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       rafId = requestAnimationFrame(() => {
         const inst = markmapRef.current
         if (inst) {
-          inst.fit().catch(() => { /* noop */ })
+          inst.fit().catch((e) => logger.warn('markmap', 'fit failed', e))
         }
       })
     })
@@ -226,7 +227,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       rafId = requestAnimationFrame(() => {
         const inst = dialogMarkmapRef.current
         if (inst) {
-          inst.fit().catch(() => { /* noop */ })
+          inst.fit().catch((e) => logger.warn('markmap', 'fit failed', e))
         }
       })
     })

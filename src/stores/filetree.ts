@@ -377,8 +377,10 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     try {
       const exists = await pathExists(filePath)
       if (!exists) return
-    } catch {
-      // pathExists 失败时不阻塞，继续尝试 reveal
+    } catch (e) {
+      // pathExists 失败时不继续 reveal，避免下游报更困惑的错误
+      logger.warn('filetree-store', 'pathExists failed, aborting revealPath', e)
+      return
     }
 
     const { nodes, expanded } = get()

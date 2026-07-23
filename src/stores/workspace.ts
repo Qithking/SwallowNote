@@ -120,8 +120,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const fileTreeStore = useFileTreeStore.getState()
     await fileTreeStore.addRoot(path)
     
-    await watchDirectory(path)
-    
+    await watchDirectory(path).catch(err => logger.warn('workspace-store', `Failed to watch directory ${path}:`, err))
+
     // 触发 frontmatter 索引扫描
     triggerFrontmatterScan(path)
     

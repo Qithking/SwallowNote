@@ -7,6 +7,7 @@ import type {
   PluginVersionInfo,
 } from '@/types/plugin'
 import type { PluginMetadataRust } from './tauri'
+import { logger } from '@/lib/logger'
 
 const ZIP_STORE_NAME = 'plugin-zips'
 const INDEX_DB = 'swallow-plugin-market'
@@ -63,8 +64,9 @@ async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
             resolve(null)
             return
           }
-        } catch {
+        } catch (e) {
           // crypto.subtle 失败按 miss 处理
+          logger.warn('plugin-market', 'cache sha256 verify failed', e)
           resolve(null)
           return
         }
@@ -119,8 +121,8 @@ async function writeZipToCache(
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
-  } catch {
-    /* 忽略错误 */
+  } catch (e) {
+    logger.warn('plugin-market', 'cache write failed', e)
   }
 }
 
@@ -210,8 +212,9 @@ function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
   try {
     // 绝对 URL 原样返回，相对 URL 基于 repoUrl 解析
     parsed = new URL(downloadUrl, repoUrl)
-  } catch {
+  } catch (e) {
     // 解析失败时回退原字符串。
+    logger.warn('plugin-market', 'download url parse failed', e)
     return downloadUrl
   }
   // 仅允许 http/https。

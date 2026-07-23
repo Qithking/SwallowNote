@@ -66,12 +66,6 @@ pub struct DownloadComplete {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[allow(dead_code)]
-pub struct DownloadError {
-    pub message: String,
-}
-
 fn get_default_download_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {

@@ -281,8 +281,8 @@ export const useGitStore = create<GitState>((set, get) => ({
         await Promise.all(staleRepoPaths.map(async (path) => {
           try {
             await removeConflictRepoRecord(path)
-          } catch {
-            // Ignore removal errors
+          } catch (e) {
+            logger.warn('git-store', 'conflict repo cleanup failed', e)
           }
         }))
       }
