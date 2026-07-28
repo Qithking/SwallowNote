@@ -9,6 +9,7 @@ import { EditorView } from '@/components/Editor'
 import { RightPanelContent, FullPanelPluginContent } from '@/components/PanelContent'
 import { SettingsView } from '@/components/Settings/SettingsView'
 import { flushAllEditors } from '@/lib/editor-flush'
+import { readActiveEditorScrollTop } from '@/stores/editor'
 import { attachLogger, logger } from '@/lib/logger'
 const PluginManagerView = lazy(() => import('@/components/Plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })))
 const LogViewer = lazy(() => import('@/components/LogViewer').then(m => ({ default: m.LogViewer })))
@@ -99,6 +100,9 @@ function App() {
   const pendingCloseRef = useRef(false)
   // 防止 Radix AlertDialog 的 onOpenChange 在 Save/Discard 点击后干扰关闭流程
   const actionTakenRef = useRef(false)
+  // 托盘"退出"菜单请求标志：由 tray-quit-requested listener 设置，
+  // close-requested handler 读取后重置。为 true 时跳过 closeWithoutExit 的 hide 分支，走真正退出。
+  const forceQuitRef = useRef(false)
   // rAF 节流：拖拽面板宽度时每帧最多更新一次
   const rafRef = useRef<number | null>(null)
   // StrictMode 双调用导致副作用重复执行
@@ -279,7 +283,24 @@ function App() {
 
   useEffect(() => {
     const win = getCurrentWindow()
-    const unlisten = win.listen('tauri://close-requested', async () => {
+    // 使用 onCloseRequested 而非 win.listen('tauri://close-requested', ...)：
+    // onCloseRequested 会 await handler 完成，handler 完成后才自动 destroy；
+    // win.listen 是 fire-and-forget，Tauri 不等 async handler，会在第一个 await 后销毁窗口，
+    // 导致 saveSessionStateNow 等 async 保存逻辑被打断（Layer 5 根因）。
+    const unlistenPromise = win.onCloseRequested(async (event) => {
+      // 关闭前保存当前活动 tab 的滚动位置
+      try {
+        const activeId = useEditorStore.getState().activeTabId
+        if (activeId) {
+          const top = readActiveEditorScrollTop()
+          if (top != null && top > 0) {
+            useEditorStore.getState().updateScrollTop(activeId, top)
+          }
+        }
+      } catch (e) {
+        logger.warn('app', 'save scrollTop on close failed', e)
+      }
+
       // 通知插件 app 退出（不 await）
       try {
         const { emitAppExit } = await import('@/lib/plugin-host')
@@ -304,6 +325,11 @@ function App() {
 
       const { closeWithoutExit } = useUIStore.getState()
       const dirtyCount = useEditorStore.getState().getDirtyTabsCount()
+      // 托盘"退出"菜单触发时 forceQuitRef=true，跳过 closeWithoutExit 的 hide 分支，走真正退出。
+      // dirty>0 走 SaveDialog 分支时不 reset forceQuitRef——交给 handleSaveAndClose /
+      // handleDiscardAndClose / handleCancelClose 在流程结束时消费，否则这些 handler 读不到标志，
+      // 会按 closeWithoutExit 走 win.hide() 而非 win.destroy()，导致托盘"退出"被拦截为"隐藏"。
+      const isForceQuit = forceQuitRef.current
       if (dirtyCount > 0) {
         const dirtyTabs = useEditorStore.getState().tabs.filter((t) => t.isDirty || t.frontmatterDirty)
         const names = dirtyTabs.slice(0, 5).map((t) => t.name)
@@ -311,18 +337,37 @@ function App() {
         setDirtyFileNames(names)
         setShowSaveDialog(true)
         pendingCloseRef.current = true
-      } else if (closeWithoutExit) {
+        // 阻止默认关闭，等用户在 SaveDialog 选择后再处理
+        event.preventDefault()
+      } else if (closeWithoutExit && !isForceQuit) {
+        // closeWithoutExit 模式：保存后隐藏而非销毁，阻止默认 destroy
         await saveSessionStateNow()
         await win.hide()
         const { setDockIconVisibility } = await import('@/lib/tauri')
         // 次要副作用，失败不阻塞退出
         setDockIconVisibility(false).catch((err) => logger.warn('app', 'setDockIconVisibility failed', err))
+        event.preventDefault()
       } else {
+        // 真正退出：保存后允许默认 destroy（不调 preventDefault）
         await saveSessionStateNow()
-        await win.destroy()
       }
     })
-    return () => { unlisten.then(fn => fn()) }
+    return () => { unlistenPromise.then(fn => fn()) }
+  }, [])
+
+  // 托盘"退出"菜单：Rust 端 emit tray-quit-requested 设置 forceQuit 标志后立即 window.close()，
+  // 前端收到事件只设置 forceQuit 标志（不调 window.close()，避免与 Rust 端重复 close）。
+  // close 触发的 close-requested handler 检测 forceQuit 后跳过 closeWithoutExit 的 hide 分支。
+  useEffect(() => {
+    let unlistenFn: (() => void) | null = null
+    listen('tray-quit-requested', () => {
+      forceQuitRef.current = true
+    }).then((fn) => {
+      unlistenFn = fn
+    })
+    return () => {
+      if (unlistenFn) unlistenFn()
+    }
   }, [])
 
   useEffect(() => {
@@ -373,7 +418,7 @@ function App() {
           const editorStore = useEditorStore.getState()
           // 原子写 .tmp→rename 可能触发 remove 事件
           if (editorStore.isPathSaving(path)) return
-          // Check if the removed path matches any open tab (file) or is a parent of any tab (directory)
+          // Check if removed path matches any open tab or is a parent of a tab
           const tabsToClose = editorStore.tabs.filter(tab =>
             tab.path === path || tab.path.startsWith(path + '/')
           )
@@ -697,6 +742,9 @@ function App() {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose
     actionTakenRef.current = true
     const shouldClose = pendingCloseRef.current
+    // 消费 forceQuit 标志：托盘"退出"触发 close-requested 时设置，dirty>0 走 SaveDialog 分支保留至此
+    const isForceQuit = forceQuitRef.current
+    forceQuitRef.current = false
     setShowSaveDialog(false)
     pendingCloseRef.current = false
     if (!shouldClose) { actionTakenRef.current = false; return }
@@ -705,7 +753,7 @@ function App() {
     const win = getCurrentWindow()
     await saveSessionStateNow()
     const { closeWithoutExit } = useUIStore.getState()
-    if (closeWithoutExit) {
+    if (closeWithoutExit && !isForceQuit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
       // 次要副作用，失败不阻塞退出
@@ -720,6 +768,9 @@ function App() {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose
     actionTakenRef.current = true
     const shouldClose = pendingCloseRef.current
+    // 消费 forceQuit 标志：托盘"退出"触发 close-requested 时设置，dirty>0 走 SaveDialog 分支保留至此
+    const isForceQuit = forceQuitRef.current
+    forceQuitRef.current = false
     setShowSaveDialog(false)
     pendingCloseRef.current = false
     if (!shouldClose) { actionTakenRef.current = false; return }
@@ -727,7 +778,7 @@ function App() {
     const win = getCurrentWindow()
     await saveSessionStateNow()
     const { closeWithoutExit } = useUIStore.getState()
-    if (closeWithoutExit) {
+    if (closeWithoutExit && !isForceQuit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
       // 次要副作用，失败不阻塞退出
@@ -743,6 +794,8 @@ function App() {
     if (actionTakenRef.current) return
     setShowSaveDialog(false)
     pendingCloseRef.current = false
+    // 用户取消则放弃退出意图，托盘"退出"也被取消（应用保持打开）
+    forceQuitRef.current = false
   }
 
   const handleMouseDownLeft = useCallback(() => {
@@ -875,7 +928,7 @@ function App() {
           {/* Activity Bar */}
           <ActivityBar />
 
-          {/* Sidebar - hidden when settings/fullPanel/pluginManager is open, sidebar is collapsed, or sidebar view is 'settings' (settings shown in main area) */}
+          {/* Sidebar - hidden when settings/fullPanel/pluginManager open or collapsed */}
           {!settingsPanelVisible && sidebarVisible && sidebarView !== 'settings' && !activeFullPanelPlugin && !isPluginManagerActive && (
             <div 
               className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 

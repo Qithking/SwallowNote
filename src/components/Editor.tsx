@@ -4,11 +4,13 @@
  */
 import { useEffect, useRef, useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore } from '@/stores'
+import { setEditorContainerEl, setLastScrollTop } from '@/stores/editor'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
 import { usePluginEditors, pluginEditorRegistry, getEditorForExtension } from '@/stores/pluginEditor'
 const MarkdownEditor = lazy(() => import('./editors/MarkdownEditor').then(m => ({ default: m.MarkdownEditor })))
 const CodeEditor = lazy(() => import('./editors/CodeEditor').then(m => ({ default: m.CodeEditor })))
 import { serializeFrontmatter, parseFrontmatter } from '@/lib/utils/frontmatter'
+import { restoreScrollTop } from '@/lib/scroll-position'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 const MindMapEditor = lazy(() => import('./editors/MindMapEditor').then(m => ({ default: m.MindMapEditor })))
 const DiffViewer = lazy(() => import('./DiffViewer/DiffViewer'))
@@ -294,7 +296,40 @@ export function EditorView() {
   const loadTabContent = useEditorStore((s) => s.loadTabContent)
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const scrollToLineRef = useRef(scrollToLine)
+  const editorContainerRef = useRef<HTMLDivElement>(null)
+  const prevActiveTabIdRef = useRef<string | null>(null)
+  /** 标记已恢复 scrollTop 的 tab id，避免 content 变化时重复恢复覆盖用户手动滚动 */
+  const restoredTabIdRef = useRef<string | null>(null)
+
+  // 注册编辑器容器引用到 store，供 setActiveTab 读取 scrollTop
+  const setContainerRef = useCallback((el: HTMLDivElement | null) => {
+    editorContainerRef.current = el
+    setEditorContainerEl(el)
+  }, [])
   const { t } = useTranslation()
+
+  // 持续跟踪编辑器滚动位置到模块级缓存。
+  // 应用退出（tauri://close-requested）触发时 React 可能已开始卸载 Editor，
+  // editorContainerEl 变为 null，此时 readActiveEditorScrollTop 读不到 DOM。
+  // 用 scroll 捕获监听持续把 scrollTop 写入缓存，退出时 store 优先读 DOM、
+  // 失败时回退到缓存，保证用户滚动位置不丢失。
+  // 捕获阶段（capture: true）能监听到 .cm-scroller / Radix viewport 等内部
+  // 滚动容器的 scroll 事件，无需关心它们何时 mount。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const target = e.target
+      if (!(target instanceof HTMLElement)) return
+      const container = editorContainerRef.current
+      if (!container) return
+      // 只关心编辑器容器内的 scroll 事件
+      if (target !== container && !container.contains(target)) return
+      const activeId = useEditorStore.getState().activeTabId
+      if (!activeId) return
+      setLastScrollTop(activeId, target.scrollTop)
+    }
+    window.addEventListener('scroll', handler, true)
+    return () => window.removeEventListener('scroll', handler, true)
+  }, [])
 
   // Re-render when the plugin editor registry changes. The plugin
   // store fires its `onLoad` / `onUnload` / `onEnable` / `onDisable`
@@ -340,6 +375,39 @@ export function EditorView() {
       return () => clearTimeout(timer)
     }
   }, [activeTab?.id, activeTab?.content, activeTab?.isLoading, activeTab?.type, loadTabContent])
+
+  // 恢复滚动位置：新 tab 内容渲染完成后恢复 scrollTop
+  // 保存逻辑在 store 的 setActiveTab 中处理（切换前同步读取 DOM）
+  useEffect(() => {
+    const currentId = activeTab?.id ?? null
+
+    // tab 切换时重置已恢复标记
+    if (prevActiveTabIdRef.current !== currentId) {
+      restoredTabIdRef.current = null
+      prevActiveTabIdRef.current = currentId
+    }
+
+    // 新 tab 恢复：仅在该 tab 首次内容就绪时恢复一次，避免覆盖用户手动滚动
+    if (
+      currentId &&
+      currentId !== restoredTabIdRef.current &&
+      activeTab?.scrollTop != null &&
+      activeTab.scrollTop > 0 &&
+      activeTab.content !== undefined
+    ) {
+      const savedTop = activeTab.scrollTop
+      restoredTabIdRef.current = currentId
+      let cancelled = false
+      const raf = requestAnimationFrame(() => {
+        if (cancelled) return
+        restoreScrollTop(editorContainerRef.current, savedTop).catch(() => { /* noop */ })
+      })
+      return () => {
+        cancelled = true
+        cancelAnimationFrame(raf)
+      }
+    }
+  }, [activeTab?.id, activeTab?.scrollTop, activeTab?.content])
 
   // For source mode: compose full file content (frontmatter + body) for display.
   // Must be called before any conditional returns (Rules of Hooks).
@@ -420,7 +488,7 @@ export function EditorView() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden relative">
+    <div ref={setContainerRef} className="flex-1 flex flex-col overflow-hidden relative">
       {activeTab.isLoading && (
         <div className="absolute top-0 left-0 right-0 z-10">
           <Progress />

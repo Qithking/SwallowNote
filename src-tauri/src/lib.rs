@@ -12,7 +12,7 @@ use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_autostart::MacosLauncher;
 use log::{info, warn, error};
@@ -414,7 +414,18 @@ commands::upgrade::download_latest_release,
                         show_dock_icon();
                     }
                     "quit" => {
-                        app.exit(0);
+                        // 先 emit 事件让前端设置 forceQuit 标志（跳过 closeWithoutExit 的 hide 分支），
+                        // 再立即 window.close() 触发 close-requested。
+                        // emit 是同步派发到 webview，close 触发的 close-requested 时 forceQuit 已设置。
+                        // close-requested handler 使用 onCloseRequested（await async handler），
+                        // 确保 saveSessionStateNow 等 async 保存逻辑完成后再 destroy。
+                        let _ = app.emit("tray-quit-requested", ());
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.close();
+                        } else {
+                            // 窗口不存在时回退到直接退出
+                            app.exit(0);
+                        }
                     }
                     _ => {}
                 })

@@ -51,6 +51,7 @@ export function useSessionPersistence() {
           name: tab.name,
           viewMode: tab.viewMode,
           cursorPosition: tab.cursorPosition,
+          scrollTop: tab.scrollTop,
         }
       })
 
@@ -212,7 +213,7 @@ export function useSessionPersistence() {
             id: tab.id || '',
             path: tab.path || '',
             name: tab.name || '',
-            content: undefined as unknown as string, // Mark as not loaded yet (will trigger auto-load)
+            content: undefined as unknown as string, // Not loaded yet (triggers auto-load)
             isDirty: false,
             isEdited: false,
             type: tab.type || 'file',
@@ -222,6 +223,7 @@ export function useSessionPersistence() {
             conflictSelectedFile: tab.conflictSelectedFile,
             conflictCursorLine: tab.conflictCursorLine,
             viewMode: tab.viewMode || 'preview',
+            scrollTop: tab.scrollTop,
             fileSize: tab.fileSize,
             modifiedTime: tab.modifiedTime,
             wordCount: tab.wordCount,
