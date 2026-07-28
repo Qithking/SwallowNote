@@ -88,6 +88,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(
             tauri_plugin_log::Builder::new()
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .level({
                     // LOG_LEVEL 环境变量覆盖 > dev/release 默认
                     match std::env::var("LOG_LEVEL").ok().as_deref() {
