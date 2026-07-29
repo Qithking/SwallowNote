@@ -378,9 +378,15 @@ export function useKeyboardShortcuts() {
 
       if (dispatchBuiltin(e, 'commandPalette', toggleCommandPalette)) return
 
-      // CodeMirror 内不拦截 Ctrl+F，交给其内置搜索
-      const isInCodeMirror = !!(e.target as HTMLElement | null)?.closest?.('.cm-editor')
-      if (!isInCodeMirror && dispatchBuiltin(e, 'searchPanel', handleToggleSearch)) return
+      // Ctrl+F → 编辑器查找/替换;Ctrl+Shift+F → 全局搜索侧边栏
+      // CodeMirror editor 已获得焦点时由 CodeEditor 内部 keymap 处理,避免双重派发
+      const activeElement = document.activeElement
+      const isCodeMirrorFocused = activeElement && activeElement.closest('.cm-editor') != null
+      if (!isCodeMirrorFocused && dispatchBuiltin(e, 'findReplace', () => {
+        window.dispatchEvent(new CustomEvent('editor:toggle-find-replace'))
+      })) return
+
+      if (dispatchBuiltin(e, 'searchPanel', handleToggleSearch)) return
 
       if (dispatchBuiltin(e, 'toggleSidebar', toggleSidebar)) return
       if (dispatchBuiltin(e, 'settings', handleToggleSettings)) return

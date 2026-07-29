@@ -3180,6 +3180,23 @@ introducing a hard color split. */
 }
 
 /* ============================================================
+   Find/Replace Highlight Styles
+   ============================================================ */
+/* CodeMirror 与 BlockNote 共用高亮 class */
+.find-match {
+  background: rgba(255, 213, 79, 0.4);
+  border-radius: 2px;
+}
+.find-match-current {
+  background: rgba(255, 145, 0, 0.6) !important;
+  border-radius: 2px;
+}
+/* 隐藏 CodeMirror 官方 search panel(用自建 UI 替代) */
+.cm-panel.cm-search {
+  display: none !important;
+}
+
+/* ============================================================
    AI Chat Markdown Rendering Styles (ported from deleted app.css)
    ============================================================ */
 

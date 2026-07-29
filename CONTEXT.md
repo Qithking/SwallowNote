@@ -13,3 +13,7 @@
 | tauri-plugin-log | Tauri v2 官方日志插件 | 后端 Rust 日志后端，提供文件轮转 + 转发到前端 Webview console 能力 |
 | app.log | 日志主文件路径：`{app_data_dir}/logs/app.log` | 5MB 上限，轮转为 `app.log.1`~`app.log.5`，磁盘上限 25MB |
 | source | 日志来源标识字符串 | 如 `'ui'`、`'editor'`、`'git'`、`'plugin:com.foo'`；保留现有 `[module]` 前缀语义 |
+| FindReplacePanel | 编辑器工具栏查找图标触发的内嵌下拉层(非弹框、非 popover) | 共用组件,按编辑器类型分发到 CodeMirror search API 或 ProseMirror Decoration 实现 |
+| SearchQuery | 查找面板当前的查询参数:`{ text, caseSensitive, wholeWord, regexp }` | CodeMirror 与 BlockNote 各持一份,字段语义对齐 |
+| MatchDecoration | BlockNote 查找高亮的 ProseMirror Decoration 实现 | 通过 `_tiptapEditor.view` 派发 transaction;高亮用 DecorationSet,替换用 ProseMirror transaction 的 replaceWith |
+

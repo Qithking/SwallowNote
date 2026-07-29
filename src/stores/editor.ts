@@ -42,6 +42,8 @@ export interface EditorToolbarConfig {
   externalChangeWarning?: boolean
   /** 冲突指示器（默认 true） */
   conflictIndicator?: boolean
+  /** 查找替换按钮（默认 true） */
+  showFindReplace?: boolean
 }
 
 /**

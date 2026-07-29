@@ -229,8 +229,10 @@
     "shortcuts.openExplorer.desc": "Open selected node in system file explorer",
     "shortcuts.commandPalette": "Command Palette",
     "shortcuts.commandPalette.desc": "Open command palette for quick actions",
-    "shortcuts.searchPanel": "Search Panel",
-    "shortcuts.searchPanel.desc": "Toggle search panel",
+    "shortcuts.searchPanel": "Global Search",
+    "shortcuts.searchPanel.desc": "Toggle sidebar global search view",
+    "shortcuts.findReplace": "Find/Replace",
+    "shortcuts.findReplace.desc": "Find and replace in the current editor",
     "shortcuts.toggleSidebar": "Toggle Sidebar",
     "shortcuts.toggleSidebar.desc": "Show or hide the sidebar",
     "shortcuts.settings": "Settings",
@@ -424,7 +426,19 @@
     "externalChange": "File modified externally, click to reload",
     "conflictResolve": "File has conflicts, click to resolve",
     "noteProperties": "Note Properties",
-    "downloadRemoteImages": "Download remote images"
+    "downloadRemoteImages": "Download remote images",
+    "findReplace": {
+      "find": "Find",
+      "replace": "Replace",
+      "replaceAll": "Replace All",
+      "caseSensitive": "Case sensitive",
+      "wholeWord": "Whole word",
+      "regexp": "Regex",
+      "matchCount": "{{current}}/{{total}}",
+      "close": "Close",
+      "invalidRegex": "Invalid regex",
+      "toggle": "Find/Replace"
+    }
   },
   "editor": {
     "untitled": "Untitled",

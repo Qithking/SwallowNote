@@ -12,6 +12,7 @@ export type ShortcutKey =
   | 'openExplorer'
   | 'commandPalette'
   | 'searchPanel'
+  | 'findReplace'
   | 'toggleSidebar'
   | 'settings'
   | 'renameFile'
@@ -36,7 +37,8 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { key: 'toggleLanguage', defaultKey: 'Ctrl+Shift+L' },
   { key: 'openExplorer', defaultKey: 'Ctrl+Shift+R' },
   { key: 'commandPalette', defaultKey: 'Ctrl+P' },
-  { key: 'searchPanel', defaultKey: 'Ctrl+F' },
+  { key: 'searchPanel', defaultKey: 'Ctrl+Shift+F' },
+  { key: 'findReplace', defaultKey: 'Ctrl+F' },
   { key: 'toggleSidebar', defaultKey: 'Ctrl+B' },
   { key: 'settings', defaultKey: 'Ctrl+,' },
   { key: 'renameFile', defaultKey: 'F2' },
