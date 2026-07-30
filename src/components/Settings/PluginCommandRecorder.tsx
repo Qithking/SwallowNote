@@ -140,7 +140,7 @@ export function PluginCommandRecorder({ bindingKey, command }: PluginCommandReco
             variant="outline"
             className="font-mono text-xs px-2 py-1 border-primary text-primary animate-pulse"
           >
-            {t('settings.shortcuts.recording')}
+            {t('shortcuts.recording')}
           </Badge>
         ) : (
           <Badge
@@ -164,7 +164,7 @@ export function PluginCommandRecorder({ bindingKey, command }: PluginCommandReco
             resetPluginCommandShortcut(bindingKey)
             setConflict(null)
           }}
-          title={t('settings.shortcuts.reset')}
+          title={t('shortcuts.reset')}
         >
           <RotateCcw size={12} />
         </Button>

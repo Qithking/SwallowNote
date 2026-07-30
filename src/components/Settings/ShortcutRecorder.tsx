@@ -87,7 +87,7 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
         if (found.source.kind === 'plugin-command') {
           setConflict(found.message)
         } else {
-          setConflict(t('settings.shortcuts.conflict', { key: t(`settings.shortcuts.${found.source.key}`) }))
+          setConflict(t('shortcuts.conflict', { key: t(`shortcuts.${found.source.key}`) }))
         }
       } else {
         setConflict(null)
@@ -117,7 +117,7 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
       >
         {recording ? (
           <Badge variant="outline" className="font-mono text-xs px-2 py-1 border-primary text-primary animate-pulse">
-            {t('settings.shortcuts.recording')}
+            {t('shortcuts.recording')}
           </Badge>
         ) : (
           <Badge
@@ -141,7 +141,7 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
             resetShortcut(shortcutKey)
             setConflict(null)
           }}
-          title={t('settings.shortcuts.reset')}
+          title={t('shortcuts.reset')}
         >
           <RotateCcw size={12} />
         </Button>

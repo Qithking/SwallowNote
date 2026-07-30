@@ -1096,13 +1096,13 @@ function SettingsView() {
             {/* ===== 快捷键 ===== */}
             <section id="section-shortcuts" className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold">{t('settings.shortcuts.title')}</h2>
+                <h2 className="text-base font-semibold">{t('shortcuts.title')}</h2>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => useUIStore.getState().resetAllShortcuts()}
                 >
-                  {t('settings.shortcuts.resetAll')}
+                  {t('shortcuts.resetAll')}
                 </Button>
               </div>
               <Card>
@@ -1113,8 +1113,8 @@ function SettingsView() {
                       className="flex items-center justify-between px-4 py-3"
                     >
                       <div className="flex-1 mr-4">
-                        <Label className="text-sm font-medium">{t(`settings.shortcuts.${item.key}`)}</Label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t(`settings.shortcuts.${item.key}.desc`)}</p>
+                        <Label className="text-sm font-medium">{t(`shortcuts.${item.key}`)}</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t(`shortcuts.${item.key}.desc`)}</p>
                       </div>
                       <ShortcutRecorder shortcutKey={item.key} />
                     </div>
