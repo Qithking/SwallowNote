@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor, fireEvent } from '@testing-library/react'
 import { PluginMarketDetail } from '@/components/Plugin/PluginMarketDetail'
 import type { PluginIndex, PluginIndexEntry } from '@/types/plugin'
+import zhCN from '@/i18n/locales/zh-CN.json'
 
 // ─── Hoisted mocks (referenced inside vi.mock factories) ────────────────────
 const { toastMock, mockMarketState, mockPluginState } = vi.hoisted(() => ({
@@ -31,19 +32,48 @@ vi.mock('sonner', () => ({
   toast: toastMock,
 }))
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, opts?: Record<string, unknown>) => {
-      let s = (opts?.defaultValue as string) ?? key
-      if (opts) {
-        for (const [k, v] of Object.entries(opts)) {
-          s = s.replace(new RegExp(`{{${k}}}`, 'g'), String(v))
+// Mock react-i18next's useTranslation with a real locale-backed translator so
+// the test exercises the same translation keys the app ships with. Falls back
+// to defaultValue (if provided) and then to the raw key when the key is missing.
+// Tracks all t() calls so tests can assert which keys were used.
+const tCalls: string[] = []
+vi.mock('react-i18next', () => {
+  const resolve = (obj: Record<string, unknown>, path: string): unknown => {
+    const parts = path.split('.')
+    let cur: unknown = obj
+    for (let i = 0; i < parts.length; i++) {
+      if (cur && typeof cur === 'object' && Object.prototype.hasOwnProperty.call(cur, parts[i])) {
+        cur = (cur as Record<string, unknown>)[parts[i]]
+      } else if (cur && typeof cur === 'object') {
+        // Try flat-dotted key: join remaining parts as a literal key
+        const flatKey = parts.slice(i).join('.')
+        if (Object.prototype.hasOwnProperty.call(cur, flatKey)) {
+          return (cur as Record<string, unknown>)[flatKey]
         }
+        return undefined
+      } else {
+        return undefined
       }
-      return s
-    },
-  }),
-}))
+    }
+    return cur
+  }
+  return {
+    useTranslation: () => ({
+      t: (key: string, opts?: Record<string, unknown>) => {
+        tCalls.push(key)
+        let s = (resolve(zhCN as unknown as Record<string, unknown>, key) as string)
+          ?? (opts?.defaultValue as string)
+          ?? key
+        if (opts) {
+          for (const [k, v] of Object.entries(opts)) {
+            s = s.replace(new RegExp(`{{${k}}}`, 'g'), String(v))
+          }
+        }
+        return s
+      },
+    }),
+  }
+})
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children, open }: any) => (open ? children : null),
@@ -105,6 +135,7 @@ function makeEntry(overrides: Partial<PluginIndexEntry>): PluginIndexEntry {
 describe('E-H7: dependency install failure preserves error info in toast', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    tCalls.length = 0
   })
 
   it('toast.error includes failed dependency id when installEntry throws', async () => {
@@ -149,5 +180,52 @@ describe('E-H7: dependency install failure preserves error info in toast', () =>
     // toast.error 的消息必须包含失败的依赖 id（当前代码只报数字 → RED）
     const firstCallArg = toastMock.error.mock.calls[0][0]
     expect(firstCallArg).toContain('com.test.dep')
+  })
+
+  it('多个依赖失败时 detail 使用 i18n 键而非硬编码中文', async () => {
+    const dep1 = makeEntry({
+      id: 'com.test.dep1',
+      name: 'Dep1',
+      version: '1.0.0',
+      downloadUrl: 'https://example.com/dep1.zip',
+      sha256: 'sha1',
+    })
+    const dep2 = makeEntry({
+      id: 'com.test.dep2',
+      name: 'Dep2',
+      version: '1.0.0',
+      downloadUrl: 'https://example.com/dep2.zip',
+      sha256: 'sha2',
+    })
+    const rootEntry = makeEntry({
+      id: 'com.test.root',
+      name: 'Root Plugin',
+      version: '1.0.0',
+      dependencies: ['com.test.dep1@^1.0.0', 'com.test.dep2@^1.0.0'],
+    })
+    const index: PluginIndex = {
+      schemaVersion: 1,
+      updatedAt: '',
+      pubkeyB64: '',
+      plugins: [rootEntry, dep1, dep2],
+    }
+
+    const { getByTestId } = render(
+      <PluginMarketDetail
+        entry={rootEntry}
+        index={index}
+        localVersion={null}
+        onClose={() => {}}
+      />,
+    )
+
+    fireEvent.click(getByTestId('plugin-auto-resolve'))
+
+    await waitFor(() => {
+      expect(toastMock.error).toHaveBeenCalled()
+    })
+
+    // 验证 detail 文本通过 t() 获取，而非硬编码模板
+    expect(tCalls).toContain('plugin.market.depsAutoResolveFailedDetail')
   })
 })

@@ -105,29 +105,21 @@ async function reloadAfterInstall(): Promise<void> {
 
 function friendlyInstallError(
   e: unknown,
-  t: (key: string, opts?: { defaultValue: string }) => string,
+  t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
   const raw = e instanceof Error ? e.message : String(e)
   const lower = raw.toLowerCase()
   if (lower.includes('sha256 mismatch')) {
-    return t('plugin.market.errorSha256Mismatch', {
-      defaultValue: 'SHA-256 不匹配:zip 已被替换或损坏,请联系作者',
-    })
+    return t('plugin.market.errorSha256Mismatch')
   }
   if (lower.startsWith('http ') || lower.includes(' downloading ')) {
-    return t('plugin.market.errorDownload', {
-      defaultValue: '下载失败:网络异常或文件已被移除',
-    })
+    return t('plugin.market.errorDownload')
   }
   if (lower.includes('disallowed scheme')) {
-    return t('plugin.market.errorScheme', {
-      defaultValue: 'repo.json 中 download_url 协议被拒绝(仅允许 http/https)',
-    })
+    return t('plugin.market.errorScheme')
   }
   if (lower.includes('missing required')) {
-    return t('plugin.market.errorProtocol', {
-      defaultValue: 'repo.json 协议错误:插件元数据字段缺失',
-    })
+    return t('plugin.market.errorProtocol')
   }
   return raw
 }
@@ -256,12 +248,8 @@ export function PluginMarketDetail({
     if (hasBlockingDependencyIssue) {
       const reason =
         dependencyResolution.cycles.length > 0
-          ? t('plugin.market.depsCycleDetected', {
-              defaultValue: '检测到循环依赖，无法安装',
-            })
-          : t('plugin.market.depsUnsatisfied', {
-              defaultValue: '依赖版本不满足，无法安装',
-            })
+          ? t('plugin.market.depsCycleDetected')
+          : t('plugin.market.depsUnsatisfied')
       setError(reason)
       return
     }
@@ -280,7 +268,6 @@ export function PluginMarketDetail({
       await refreshUpdates()
       toast.success(
         t('plugin.market.installed', {
-          defaultValue: '已安装 {{name}} v{{version}}',
           name: entry.name,
           version: entry.version,
         })
@@ -359,7 +346,6 @@ export function PluginMarketDetail({
       if (succeeded > 0) {
         toast.success(
           t('plugin.market.depsAutoResolved', {
-            defaultValue: '已自动解决 {{count}} 个依赖',
             count: succeeded,
           }),
         )
@@ -369,10 +355,13 @@ export function PluginMarketDetail({
         const detail =
           failures.length === 1
             ? `${first.name} (${first.id}): ${first.error}`
-            : `${first.name} (${first.id}) 等 ${failures.length} 个`
+            : t('plugin.market.depsAutoResolveFailedDetail', {
+                name: first.name,
+                id: first.id,
+                count: failures.length,
+              })
         toast.error(
           t('plugin.market.depsAutoResolveFailed', {
-            defaultValue: '{{count}} 个依赖安装失败: {{detail}}',
             count: failures.length,
             detail,
           }),
@@ -407,18 +396,18 @@ export function PluginMarketDetail({
           </span>
           <span className="pmd-header-info">
             <span className="pmd-header-title">
-              {entry.name || t('plugin.market.unknownName', { defaultValue: '未命名插件' })}
+              {entry.name || t('plugin.market.unknownName')}
               <span className="pa-market-badge is-xs">
                 v{entry.version}
               </span>
               {isUpdateAvailable && (
                 <span className="pa-market-badge is-update is-xs">
-                  {t('plugin.market.badgeUpdate', { defaultValue: 'Update' })}
+                  {t('plugin.market.badgeUpdate')}
                 </span>
               )}
               {isInstalled && !isUpdateAvailable && (
                 <span className="pa-market-badge is-installed is-xs">
-                  {t('plugin.market.badgeInstalled', { defaultValue: 'Installed' })}
+                  {t('plugin.market.badgeInstalled')}
                 </span>
               )}
             </span>
@@ -442,14 +431,14 @@ export function PluginMarketDetail({
           className="pmd-tabstrip"
         >
           <DetailTabButton
-            label={t('plugin.market.tabOverview', { defaultValue: '基本信息' })}
+            label={t('plugin.market.tabOverview')}
             icon={<Info size={12} />}
             active={activeTab === 'overview'}
             onClick={() => setActiveTab('overview')}
             data-testid="pmd-tab-overview"
           />
           <DetailTabButton
-            label={t('plugin.market.tabPermissions', { defaultValue: '权限' })}
+            label={t('plugin.market.tabPermissions')}
             icon={<Shield size={12} />}
             active={activeTab === 'permissions'}
             onClick={() => setActiveTab('permissions')}
@@ -457,7 +446,7 @@ export function PluginMarketDetail({
             data-testid="pmd-tab-permissions"
           />
           <DetailTabButton
-            label={t('plugin.market.tabDependencies', { defaultValue: '依赖' })}
+            label={t('plugin.market.tabDependencies')}
             icon={<Network size={12} />}
             active={activeTab === 'dependencies'}
             onClick={() => setActiveTab('dependencies')}
@@ -526,7 +515,7 @@ export function PluginMarketDetail({
         <div className="pmd-footer">
           <Button variant="outline" onClick={onClose} disabled={isInstalling || isAutoResolving}>
             <X size={14} />
-            {t('common.close', { defaultValue: '关闭' })}
+            {t('common.close')}
           </Button>
           {/* "自动解决依赖" affordance. Only shown when there's
               at least one missing dep that's also present in
@@ -547,9 +536,7 @@ export function PluginMarketDetail({
               ) : (
                 <Wand2 size={14} />
               )}
-              {t('plugin.market.autoResolve', {
-                defaultValue: '自动解决依赖',
-              })}
+              {t('plugin.market.autoResolve')}
             </Button>
           )}
           {!isInstalled && (
@@ -559,7 +546,7 @@ export function PluginMarketDetail({
               data-testid="plugin-install"
             >
               {isInstalling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              {t('plugin.market.install', { defaultValue: '安装' })}
+              {t('plugin.market.install')}
             </Button>
           )}
           {isUpdateAvailable && (
@@ -569,7 +556,6 @@ export function PluginMarketDetail({
             >
               {isInstalling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
               {t('plugin.market.updateTo', {
-                defaultValue: '更新到 v{{version}}',
                 version: entry.version,
               })}
             </Button>
@@ -681,14 +667,14 @@ function OverviewPanel({
     <div className="pmd-overview">
       {/* 描述 */}
       <p className="pmd-desc">
-        {entry.description || t('plugin.market.noDescription', { defaultValue: '暂无描述' })}
+        {entry.description || t('plugin.market.noDescription')}
       </p>
 
       {/* 元信息行 */}
       <div className="pmd-meta-line">
         <span className="pmd-meta-dot">v{entry.version}</span>
         <span className="pmd-meta-sep">·</span>
-        <span className="pmd-meta-dot">{entry.author || t('plugin.market.unknownAuthor', { defaultValue: '未知作者' })}</span>
+        <span className="pmd-meta-dot">{entry.author || t('plugin.market.unknownAuthor')}</span>
         {dateText && (
           <>
             <span className="pmd-meta-sep">·</span>
@@ -700,22 +686,22 @@ function OverviewPanel({
           isUpdateAvailable ? (
             <>
               <span className="pa-market-badge is-update is-xs">
-                {t('plugin.market.badgeUpdate', { defaultValue: 'UPDATE' })}
+                {t('plugin.market.badgeUpdate')}
               </span>
               {localVersion && (
                 <span className="pmd-meta-dot is-warn">
-                  {t('plugin.market.local', { defaultValue: '本地' })} v{localVersion}
+                  {t('plugin.market.local')} v{localVersion}
                 </span>
               )}
             </>
           ) : (
             <span className="pa-market-badge is-installed is-xs">
-              {t('plugin.market.badgeInstalled', { defaultValue: 'INSTALLED' })}
+              {t('plugin.market.badgeInstalled')}
             </span>
           )
         ) : (
           <span className="pa-market-badge is-install is-xs">
-            {t('plugin.market.badgeInstall', { defaultValue: 'INSTALL' })}
+            {t('plugin.market.badgeInstall')}
           </span>
         )}
       </div>
@@ -754,12 +740,8 @@ function PermissionsPanel({
     return (
       <EmptyStatePanel
         icon={<Shield size={28} />}
-        title={t('plugin.market.permissionsEmpty', {
-          defaultValue: '市场清单未声明该插件的权限项。',
-        })}
-        hint={t('plugin.market.permissionsEmptyHint', {
-          defaultValue: '安装后将展示实际请求的权限。',
-        })}
+        title={t('plugin.market.permissionsEmpty')}
+        hint={t('plugin.market.permissionsEmptyHint')}
       />
     )
   }
@@ -768,12 +750,8 @@ function PermissionsPanel({
     return (
       <EmptyStatePanel
         icon={<ShieldOff size={28} />}
-        title={t('plugin.market.permissionsEmpty', {
-          defaultValue: '市场清单未声明该插件的权限项。',
-        })}
-        hint={t('plugin.market.permissionsEmptyHint', {
-          defaultValue: '安装后将展示实际请求的权限。',
-        })}
+        title={t('plugin.market.permissionsEmpty')}
+        hint={t('plugin.market.permissionsEmptyHint')}
       />
     )
   }
@@ -797,7 +775,7 @@ function PermissionsPanel({
               <div className="pmd-perm-name">
                 <span>{t(`plugin.permission.items.${perm}.name`)}</span>
                 <span className="pa-market-badge is-installed is-xs">
-                  {t('plugin.market.permissionsRequested', { defaultValue: '已请求' })}
+                  {t('plugin.market.permissionsRequested')}
                 </span>
               </div>
               <div className="pmd-perm-desc">
@@ -827,9 +805,7 @@ function DependenciesPanel({
     return (
       <EmptyStatePanel
         icon={<Network size={28} />}
-        title={t('plugin.market.dependenciesEmpty', {
-          defaultValue: '该插件没有声明任何依赖。',
-        })}
+        title={t('plugin.market.dependenciesEmpty')}
       />
     )
   }
@@ -841,12 +817,8 @@ function DependenciesPanel({
           <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>
             {dependencyResolution.cycles.length > 0
-              ? t('plugin.market.depsCycleDetected', {
-                  defaultValue: '检测到循环依赖，无法安装',
-                })
-              : t('plugin.market.depsUnsatisfied', {
-                  defaultValue: '依赖版本不满足，无法安装',
-                })}
+              ? t('plugin.market.depsCycleDetected')
+              : t('plugin.market.depsUnsatisfied')}
           </span>
         </div>
       )}
@@ -889,9 +861,7 @@ function DependencyResolutionList({
           ? {
               cls: 'is-cycle',
               icon: <AlertCircle size={12} />,
-              label: t('plugin.market.depsStatusCycle', {
-                defaultValue: '循环依赖',
-              }),
+              label: t('plugin.market.depsStatusCycle'),
             }
           : unsatisfied
           ? {
@@ -899,15 +869,12 @@ function DependencyResolutionList({
               icon: <AlertCircle size={12} />,
               label:
                 unsatisfied.kind === 'invalid-range'
-                  ? t('plugin.market.depsStatusInvalidRange', {
-                      defaultValue: '清单中的依赖范围无效',
-                    })
+                  ? t('plugin.market.depsStatusInvalidRange')
                   : unsatisfied.kind === 'unparseable-version'
-                  ? t('plugin.market.depsStatusUnparseable', {
-                      defaultValue: '已安装版本无法解析',
-                    })
+                  ? t('plugin.market.depsStatusUnparseable')
                   : t('plugin.market.depsStatusUnsatisfied', {
-                      defaultValue: `本地 v${unsatisfied.installed}，需要 ${unsatisfied.required}`,
+                      installed: unsatisfied.installed,
+                      required: unsatisfied.required,
                     }),
             }
           : missing
@@ -916,18 +883,14 @@ function DependencyResolutionList({
               icon: <AlertCircle size={12} />,
               label: missing.available
                 ? t('plugin.market.depsStatusMissingWithAvailable', {
-                    defaultValue: `仓库提供 v${missing.available}`,
+                    available: missing.available,
                   })
-                : t('plugin.market.depsStatusMissingNoSource', {
-                    defaultValue: '未找到来源',
-                  }),
+                : t('plugin.market.depsStatusMissingNoSource'),
             }
           : {
               cls: 'is-ok',
               icon: <CheckCircle2 size={12} />,
-              label: t('plugin.market.depsStatusSatisfied', {
-                defaultValue: '已满足',
-              }),
+              label: t('plugin.market.depsStatusSatisfied'),
             }
         return (
           <li

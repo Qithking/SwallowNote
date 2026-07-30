@@ -220,7 +220,7 @@ function TitleBar() {
               <Bot size={14} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>AI Assistant</TooltipContent>
+          <TooltipContent>{t('ai.title')}</TooltipContent>
         </Tooltip>
 
         <DropdownMenu>

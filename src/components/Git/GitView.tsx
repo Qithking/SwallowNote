@@ -258,7 +258,7 @@ function CommitSection({
         // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
         if (errorMessage.startsWith('DETACHED_HEAD:')) {
           failCount++
-          errorDetails.push(`${repo.name}: ${t('git.detachedHead', { defaultValue: '仓库处于 detached HEAD 状态，请先切换到分支再提交' })}`)
+          errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
           errorPaths.push(repo.path)
         } else if (errorMessage.startsWith('AUTH_REQUIRED:')) {
           // Try to use saved credentials from keyring first
@@ -306,7 +306,7 @@ function CommitSection({
         } else if (errorMessage.startsWith('REBASE_CONTINUE_FAILED:') || errorMessage.startsWith('MERGE_COMMIT_FAILED:')) {
           // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
           failCount++
-          errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { defaultValue: '冲突解决失败，请手动处理', error: errorMessage })}`)
+          errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { error: errorMessage })}`)
           conflictPaths.push(repo.path)
         } else {
           failCount++
@@ -359,7 +359,7 @@ function CommitSection({
           type="text"
           value={commitMessage}
           onChange={(e) => setCommitMessage(e.target.value)}
-          placeholder="Sync changes"
+          placeholder={t('git.commitMessagePlaceholder')}
           className="flex h-8 w-full rounded-md border px-2.5 py-1 text-xs bg-[var(--bg-primary)] border-[var(--border-color)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           disabled={isCommitting}
         />
@@ -852,7 +852,7 @@ const GitView = memo(function GitView() {
         // G-06 修复：批量 pull 遇到 detached HEAD 时给出更明确的提示
         const detachedNames = results.filter((r: PullResult) => r.isDetachedHead).map((r: PullResult) => r.name).join(', ')
         if (detachedNames) {
-          showToast(t('git.pullDetachedHead', { defaultValue: '{{repos}}: 仓库处于 detached HEAD 状态，请先切换到分支再拉取', repos: detachedNames }), 'error')
+          showToast(t('git.pullDetachedHead', { repos: detachedNames }), 'error')
         } else {
           showToast(t('git.pullResult', { success: succeeded, fail: failed }), 'error')
         }

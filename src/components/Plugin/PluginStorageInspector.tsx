@@ -240,7 +240,7 @@ export function PluginStorageInspector({
               </div>
             </div>
           ) : (
-            <div className="psi-table" role="table" aria-label="Storage entries">
+            <div className="psi-table" role="table" aria-label={t('plugin.pa.dialog.storageInspector.tableAriaLabel')}>
               <div className="psi-head" role="row">
                 <div className="psi-cell psi-cell-key" role="columnheader">
                   {t('plugin.pa.dialog.storageInspector.colKey')}
@@ -249,7 +249,7 @@ export function PluginStorageInspector({
                   {t('plugin.pa.dialog.storageInspector.colSize')}
                 </div>
                 <div className="psi-cell psi-cell-action" role="columnheader">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">{t('plugin.pa.dialog.storageInspector.colAction')}</span>
                 </div>
               </div>
               {entries.map((entry) => (

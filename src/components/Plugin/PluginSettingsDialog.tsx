@@ -25,6 +25,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Eye, EyeOff, FolderOpen, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useTranslation } from 'react-i18next'
 import {
   Dialog,
   DialogContent,
@@ -69,6 +70,7 @@ export function PluginSettingsDialog({
   onOpenChange,
   initial,
 }: Props) {
+  const { t } = useTranslation()
   const [view, setView] = useState<PluginSettingsView | null>(initial ?? null)
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(true)
@@ -93,7 +95,7 @@ export function PluginSettingsDialog({
       .then((v) => {
         if (cancelled) return
         if (!hasSettings(v)) {
-          toast.error('该插件未提供 settings.json')
+          toast.error(t('plugin.pa.settings.noSettings'))
           onOpenChange(false)
           return
         }
@@ -110,7 +112,7 @@ export function PluginSettingsDialog({
       })
       .catch((e) => {
         if (cancelled) return
-        toast.error(`加载设置失败：${String(e)}`)
+        toast.error(t('plugin.pa.settings.loadFailed', { error: String(e) }))
         onOpenChange(false)
       })
       .finally(() => {
@@ -140,11 +142,11 @@ export function PluginSettingsDialog({
       if (!f.required) continue
       const v = values[f.key]
       if (v === undefined || v === null || v === '') {
-        errors[f.key] = '此字段为必填'
+        errors[f.key] = t('plugin.pa.settings.requiredField')
       }
     }
     return errors
-  }, [visibleFields, values])
+  }, [visibleFields, values, t])
 
   const canSave = !saving && Object.keys(validation).length === 0
 
@@ -154,9 +156,9 @@ export function PluginSettingsDialog({
     try {
       await saveSettings(pluginId, values)
       setSavedOnce(true)
-      toast.success('设置已保存')
+      toast.success(t('plugin.pa.settings.saved'))
     } catch (e) {
-      toast.error(`设置保存失败：${String(e)}`)
+      toast.error(t('plugin.pa.settings.saveFailed', { error: String(e) }))
     } finally {
       setSaving(false)
     }
@@ -243,6 +245,7 @@ function FieldRow({
   onChange,
   onPickDirectory,
 }: FieldRowProps) {
+  const { t } = useTranslation()
   const isSecret = field.secret || field.type === 'password'
   return (
     <div className="space-y-1.5">
@@ -266,7 +269,7 @@ function FieldRow({
           onValueChange={(v) => onChange(v)}
         >
           <SelectTrigger>
-            <SelectValue placeholder="请选择" />
+            <SelectValue placeholder={t('plugin.pa.settings.selectPlaceholder')} />
           </SelectTrigger>
           <SelectContent>
             {(field.options ?? []).map((opt) => (

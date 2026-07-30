@@ -56,6 +56,8 @@ export interface CustomThemeColors {
 export interface CustomTheme {
   id: string
   name: string
+  /** i18n key for built-in theme names; user themes leave this undefined */
+  nameKey?: string
   isBuiltIn: boolean
   themeType: 'light' | 'dark'
   light: CustomThemeColors
@@ -65,7 +67,8 @@ export interface CustomTheme {
 export const BUILT_IN_THEMES: CustomTheme[] = [
   {
     id: 'builtin-light',
-    name: '浅色主题',
+    name: i18n.t('theme.light'),
+    nameKey: 'theme.light',
     isBuiltIn: true,
     themeType: 'light',
     light: {
@@ -87,7 +90,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-dark',
-    name: '深色主题',
+    name: i18n.t('theme.dark'),
+    nameKey: 'theme.dark',
     isBuiltIn: true,
     themeType: 'dark',
     light: {
@@ -109,7 +113,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-warm-sand',
-    name: '暖沙',
+    name: i18n.t('theme.warmSand'),
+    nameKey: 'theme.warmSand',
     isBuiltIn: true,
     themeType: 'light',
     light: {
@@ -131,7 +136,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-sage-meadow',
-    name: '鼠尾草',
+    name: i18n.t('theme.sage'),
+    nameKey: 'theme.sage',
     isBuiltIn: true,
     themeType: 'light',
     light: {
@@ -153,7 +159,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-midnight-ink',
-    name: '墨夜',
+    name: i18n.t('theme.inkNight'),
+    nameKey: 'theme.inkNight',
     isBuiltIn: true,
     themeType: 'dark',
     light: {
@@ -175,7 +182,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-ember-glow',
-    name: '余烬',
+    name: i18n.t('theme.ember'),
+    nameKey: 'theme.ember',
     isBuiltIn: true,
     themeType: 'dark',
     light: {
@@ -197,7 +205,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-dawn',
-    name: '晨曦',
+    name: i18n.t('theme.dawn'),
+    nameKey: 'theme.dawn',
     isBuiltIn: true,
     themeType: 'light',
     light: {
@@ -221,7 +230,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-mint-frost',
-    name: '薄荷霜',
+    name: i18n.t('theme.mintFrost'),
+    nameKey: 'theme.mintFrost',
     isBuiltIn: true,
     themeType: 'light',
     light: {
@@ -245,7 +255,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-galaxy',
-    name: '星河',
+    name: i18n.t('theme.galaxy'),
+    nameKey: 'theme.galaxy',
     isBuiltIn: true,
     themeType: 'dark',
     light: {
@@ -269,7 +280,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-lava',
-    name: '熔岩',
+    name: i18n.t('theme.lava'),
+    nameKey: 'theme.lava',
     isBuiltIn: true,
     themeType: 'dark',
     light: {
@@ -293,7 +305,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-sakura',
-    name: '樱花',
+    name: i18n.t('theme.sakura'),
+    nameKey: 'theme.sakura',
     isBuiltIn: true,
     themeType: 'light',
     light: {
@@ -317,7 +330,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-aurora',
-    name: '极光',
+    name: i18n.t('theme.aurora'),
+    nameKey: 'theme.aurora',
     isBuiltIn: true,
     themeType: 'light',
     light: {
@@ -341,7 +355,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-abyss',
-    name: '深海',
+    name: i18n.t('theme.deepSea'),
+    nameKey: 'theme.deepSea',
     isBuiltIn: true,
     themeType: 'dark',
     light: {
@@ -365,7 +380,8 @@ export const BUILT_IN_THEMES: CustomTheme[] = [
   },
   {
     id: 'builtin-twilight',
-    name: '暮霭',
+    name: i18n.t('theme.dusk'),
+    nameKey: 'theme.dusk',
     isBuiltIn: true,
     themeType: 'dark',
     light: {
@@ -938,11 +954,11 @@ export const useUIStore = create<UIState>((set, get) => ({
     // 因此开发模式仅提示手动重启；生产包则自动重启。
     const isDevServer = window.location.origin.includes('localhost:1420')
     if (isDevServer) {
-      toast.info(i18n.t('settings.development.restartDevServerHint') ?? '开发者模式已更改，请重启开发服务器后生效')
+      toast.info(i18n.t('theme.devModeChanged'))
     } else {
       restartApp().catch((err) => {
         logger.error('ui-store', 'Failed to restart app:', err)
-        toast.error(i18n.t('settings.development.restartFailedHint') ?? '重启失败，请手动重启应用')
+        toast.error(i18n.t('theme.restartFailed'))
       })
     }
   },
@@ -1099,3 +1115,21 @@ export const useUIStore = create<UIState>((set, get) => ({
     }
   },
 }))
+
+// 内置主题名随语言切换动态更新（用户自定义主题名保持不变）
+i18n.on('languageChanged', () => {
+  const { customThemes } = useUIStore.getState()
+  const freshNames = new Map(
+    BUILT_IN_THEMES.map((t) => [t.id, i18n.t(t.nameKey!)] as const),
+  )
+  let changed = false
+  const next = customThemes.map((t) => {
+    const fresh = freshNames.get(t.id)
+    if (fresh && fresh !== t.name) {
+      changed = true
+      return { ...t, name: fresh }
+    }
+    return t
+  })
+  if (changed) useUIStore.setState({ customThemes: next })
+})

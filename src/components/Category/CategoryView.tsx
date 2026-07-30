@@ -170,12 +170,12 @@ export function CategoryView() {
       await invoke('create_category', { path: fullPath })
     } catch (e) {
       logger.error('category', 'Failed to create category:', fullPath, e)
-      toast.error(`创建分类失败: ${fullPath}`)
+      toast.error(t('category.createFailed', { path: fullPath }))
     }
 
     await useCategoryStore.getState().loadTree()
     setNewItem(null)
-  }, [newItem])
+  }, [newItem, t])
 
   const handleCancelNew = useCallback(() => {
     setNewItem(null)

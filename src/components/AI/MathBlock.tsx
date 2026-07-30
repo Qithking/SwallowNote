@@ -5,6 +5,7 @@
  * language is rendered as a KaTeX formula.
  */
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 // Lazy-load katex to reduce initial bundle size
 let katexModule: typeof import('katex') | null = null
 async function getKatex() {
@@ -42,6 +43,7 @@ interface RenderState {
 }
 
 export function MathBlock({ formula, display }: MathBlockProps) {
+  const { t } = useTranslation()
   const [state, setState] = useState<RenderState>({ html: '', error: false })
   const [isLoading, setIsLoading] = useState(true)
 
@@ -64,7 +66,7 @@ export function MathBlock({ formula, display }: MathBlockProps) {
         <div className="flex items-center px-3 py-1 text-[10px] text-muted-foreground bg-black/5 dark:bg-white/5">
           <span className="font-mono">{display ? 'math' : 'math-inline'}</span>
           <span className="ml-2 text-destructive text-[9px]">
-            {state.error ? '渲染失败' : '空公式'}
+            {state.error ? t('editor.katex.renderFailed') : t('editor.katex.emptyFormula')}
           </span>
         </div>
         <pre className="p-3 m-0 overflow-x-auto text-xs font-mono leading-relaxed">

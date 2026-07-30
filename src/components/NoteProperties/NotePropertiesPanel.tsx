@@ -190,13 +190,13 @@ function NotePropertiesPanel({ tabId, frontmatter }: NotePropertiesPanelProps) {
               await invoke('create_category', { path: cat })
             } catch (e) {
               logger.error('note-properties', 'Failed to create category from properties:', cat, e)
-              toast.error(`创建分类失败: ${cat}`)
+              toast.error(t('category.createFailed', { path: cat }))
             }
           }
         }
       }
     },
-    [categories, update]
+    [categories, update, t]
   )
 
   // --- Custom properties ---

@@ -46,8 +46,7 @@ export function readScrollTop(container: HTMLElement | null): number | null {
 /**
  * 在给定容器内恢复滚动位置。
  * 每次轮询重新查询 viewport（处理编辑器 remount 导致 viewport DOM 元素变化），
- * 等 scrollHeight 稳定（连续 STABLE_THRESHOLD 次不变）后再设置 scrollTop，
- * 避免 BlockNote 异步分批渲染时 scrollHeight 持续增长导致 scrollTop 被 clamp 到错误值。
+ * 检测 scrollHeight > clientHeight（内容已渲染到可滚动状态）后设置 scrollTop。
  * 超时放弃（默认 3000ms，留足 BlockNote 异步解析时间）。
  *
  * @param container 编辑器容器 DOM 元素
@@ -63,10 +62,6 @@ export function restoreScrollTop(
   if (!savedScrollTop || savedScrollTop <= 0) return Promise.resolve()
 
   const start = Date.now()
-  // scrollHeight 连续不变的次数阈值（~3 帧 ≈ 48ms 稳定后才 restore）
-  const STABLE_THRESHOLD = 3
-  let lastScrollHeight = 0
-  let stableCount = 0
 
   return new Promise<void>((resolve) => {
     const tryRestore = () => {
@@ -82,41 +77,13 @@ export function restoreScrollTop(
         return
       }
       const { scrollHeight, clientHeight } = viewport
-      // 内容还没渲染到可滚动状态，继续等待
-      if (scrollHeight <= clientHeight) {
-        if (Date.now() - start >= timeoutMs) {
-          resolve()
-          return
-        }
-        requestAnimationFrame(tryRestore)
-        return
-      }
-      // scrollHeight 仍在变化（BlockNote 异步分批渲染中），等稳定后再 restore
-      if (scrollHeight !== lastScrollHeight) {
-        lastScrollHeight = scrollHeight
-        stableCount = 0
-        if (Date.now() - start >= timeoutMs) {
-          // 超时 fallback：用当前 scrollHeight restore（比不 restore 好）
-          const clampedTop = Math.min(savedScrollTop, scrollHeight - clientHeight)
-          viewport.scrollTop = clampedTop
-          resolve()
-          return
-        }
-        requestAnimationFrame(tryRestore)
-        return
-      }
-      // scrollHeight 未变化，累加稳定计数
-      stableCount++
-      if (stableCount >= STABLE_THRESHOLD) {
-        // 内容渲染稳定，restore scrollTop（此时不会被错误 clamp）
+      if (scrollHeight > clientHeight) {
         const clampedTop = Math.min(savedScrollTop, scrollHeight - clientHeight)
         viewport.scrollTop = clampedTop
         resolve()
         return
       }
       if (Date.now() - start >= timeoutMs) {
-        const clampedTop = Math.min(savedScrollTop, scrollHeight - clientHeight)
-        viewport.scrollTop = clampedTop
         resolve()
         return
       }

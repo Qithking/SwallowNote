@@ -409,7 +409,7 @@ function BlockNoteInner({
       // 先检查文件是否存在，给出更友好的提示
       const exists = await pathExists(filePath)
       if (!exists) {
-        toast.error(`文件不存在: ${filePath}`)
+        toast.error(t('download.fileNotFound', { path: filePath }))
         return
       }
       const [content, meta] = await Promise.all([
@@ -438,9 +438,9 @@ function BlockNoteInner({
       })
     } catch (e) {
       logger.error('markdown-editor', 'Failed to open file from link:', e)
-      toast.error(`无法打开文件: ${filePath}`)
+      toast.error(t('download.openFileFailed', { path: filePath }))
     }
-  }, [])
+  }, [t])
 
   // links.onClick 回调：处理链接点击跳转。
   // 注意：capture-phase listener 作为拦截 Tauri webview 导航的第一道防线，
@@ -702,7 +702,7 @@ function BlockNoteInner({
         })
 
         if (remoteBlocks.length === 0) {
-          toast.info('当前文档无远程图片')
+          toast.info(t('download.noRemoteImages'))
           return
         }
 
@@ -736,7 +736,7 @@ function BlockNoteInner({
         })
       } catch (err) {
         logger.error('markdown-editor', 'Failed to enqueue download remote images:', err)
-        toast.error(`下载远程图片失败：${String(err)}`)
+        toast.error(t('download.downloadFailed', { error: String(err) }))
       }
     }
     window.addEventListener('editor:download-remote-images', handler)
@@ -744,7 +744,7 @@ function BlockNoteInner({
       cancelled = true
       window.removeEventListener('editor:download-remote-images', handler)
     }
-  }, [editor, activeTabId, activeTabPath, rootPath, uploadPath])
+  }, [editor, activeTabId, activeTabPath, rootPath, uploadPath, t])
 
   // Insert text at cursor position in BlockNote
   // AI results are Markdown, so we need to parse them into BlockNote blocks

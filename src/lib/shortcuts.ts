@@ -1,3 +1,5 @@
+import i18n from '@/i18n'
+
 export type ShortcutKey =
   | 'newFile'
   | 'newFolder'
@@ -184,7 +186,7 @@ export function findShortcutConflictDetailed(
     if (currentKey === value) {
       return {
         source: { kind: 'builtin', key: def.key, label: def.key },
-        message: `与「${def.key}」冲突`,
+        message: i18n.t('shortcuts.conflict.builtin', { key: def.key }),
       }
     }
   }
@@ -197,7 +199,7 @@ export function findShortcutConflictDetailed(
     if (def && def.defaultKey === value) continue
     return {
       source: { kind: 'custom-builtin', key: key as ShortcutKey, label: key },
-      message: `与「${key}」冲突`,
+      message: i18n.t('shortcuts.conflict.builtin', { key }),
     }
   }
   // 3. 插件命令快捷键
@@ -206,7 +208,7 @@ export function findShortcutConflictDetailed(
     if (currentKey !== value) continue
     return {
       source: { kind: 'plugin-command', bindingKey, label: pluginCommandLabels[bindingKey] ?? bindingKey },
-      message: `与插件命令「${pluginCommandLabels[bindingKey] ?? bindingKey}」冲突`,
+      message: i18n.t('shortcuts.conflict.plugin', { name: pluginCommandLabels[bindingKey] ?? bindingKey }),
     }
   }
   return null

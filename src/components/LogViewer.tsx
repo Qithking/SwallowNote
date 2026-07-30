@@ -148,7 +148,7 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl h-[600px] flex flex-col">
         <DialogHeader>
-          <DialogTitle>{t('logViewer.title', '日志查看器')}</DialogTitle>
+          <DialogTitle>{t('logViewer.title')}</DialogTitle>
         </DialogHeader>
 
         {/* 过滤工具栏 */}
@@ -176,7 +176,7 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
 
           {/* 来源过滤 */}
           <Input
-            placeholder={t('logViewer.filterSource', '来源过滤...')}
+            placeholder={t('logViewer.filterSource')}
             value={source}
             onChange={(e) => setSource(e.target.value)}
             style={{ width: '140px', height: '28px', fontSize: '12px' }}
@@ -186,7 +186,7 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
           <div className="relative flex-1 min-w-[160px]">
             <Search size={12} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <Input
-              placeholder={t('logViewer.search', '搜索...')}
+              placeholder={t('logViewer.search')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{ width: '100%', height: '28px', fontSize: '12px', paddingLeft: '24px' }}
@@ -194,20 +194,20 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
           </div>
 
           {/* 操作按钮 */}
-          <Button variant="ghost" size="sm" onClick={handleCopy} title={t('logViewer.copy', '复制')}>
+          <Button variant="ghost" size="sm" onClick={handleCopy} title={t('logViewer.copy')}>
             <Copy size={14} />
           </Button>
-          <Button variant="ghost" size="sm" onClick={handleExport} title={t('logViewer.export', '导出 JSONL')}>
+          <Button variant="ghost" size="sm" onClick={handleExport} title={t('logViewer.export')}>
             <Download size={14} />
           </Button>
-          <Button variant="ghost" size="sm" onClick={handleClear} title={t('logViewer.clear', '清空')}>
+          <Button variant="ghost" size="sm" onClick={handleClear} title={t('logViewer.clear')}>
             <Trash2 size={14} />
           </Button>
         </div>
 
         {/* 日志条数 */}
         <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          {filtered.length} / {entries.length} {t('logViewer.entries', '条')}
+          {filtered.length} / {entries.length} {t('logViewer.entries')}
         </div>
 
         {/* 日志列表 */}
@@ -227,7 +227,7 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
         >
           {filtered.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>
-              {t('logViewer.empty', '暂无日志')}
+              {t('logViewer.empty')}
             </div>
           ) : (
             filtered.map((e, i) => (

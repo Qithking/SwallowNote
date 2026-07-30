@@ -63,13 +63,13 @@ export function CategoryTreeSelect({ value, onChange }: CategoryTreeSelectProps)
           await invoke('create_category', { path: trimmed })
         } catch (e) {
           logger.error('category', 'Failed to create category:', trimmed, e)
-          toast.error(`创建分类失败: ${trimmed}`)
+          toast.error(t('category.createFailed', { path: trimmed }))
         }
       }
       setNewCategory('')
       setShowNewInput(false)
     }
-  }, [newCategory, value, onChange, tree])
+  }, [newCategory, value, onChange, tree, t])
 
   // 搜索过滤
   const filterTree = useCallback((nodes: CategoryNode[], query: string): CategoryNode[] => {
@@ -166,7 +166,7 @@ export function CategoryTreeSelect({ value, onChange }: CategoryTreeSelectProps)
                     if (e.key === 'Enter') addNewCategory()
                     if (e.key === 'Escape') setShowNewInput(false)
                   }}
-                  placeholder="技术/前端/Vue"
+                  placeholder={t('category.newCategoryExample')}
                   className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground"
                   autoFocus
                 />

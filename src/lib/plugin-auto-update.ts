@@ -138,7 +138,6 @@ export async function runAutoUpdateOnStartup(
   if (report.failed.length > 0) {
     toast.warning(
       t('plugin.pa.autoUpdate.failedTitle', {
-        defaultValue: '自动更新失败 ({{count}} 个插件)',
         count: report.failed.length,
       }),
       {
@@ -188,12 +187,10 @@ export async function undoAutoUpdate(args: {
     await rollbackPlugin(args.pluginId, args.previousVersion)
     toast.success(
       t('plugin.pa.autoUpdate.undone', {
-        defaultValue: '已撤销 {{name}} 的更新',
         name: args.pluginName,
       }),
       {
         description: t('plugin.pa.autoUpdate.undoneDesc', {
-          defaultValue: '已恢复到 v{{version}}',
           version: args.previousVersion,
         }),
       },
@@ -204,7 +201,6 @@ export async function undoAutoUpdate(args: {
     const reason = err instanceof Error ? err.message : String(err)
     toast.error(
       t('plugin.pa.autoUpdate.undoFailed', {
-        defaultValue: '撤销 {{name}} 的更新失败',
         name: args.pluginName,
       }),
       {
@@ -283,19 +279,15 @@ async function installOnePlugin(
 function showAutoUpdateToast(t: AutoUpdateTranslator, installed: AutoUpdateInstall): void {
   toast.success(
     t('plugin.pa.autoUpdate.installedTitle', {
-      defaultValue: '{{name}} 已更新到 v{{version}}',
       name: installed.pluginName,
       version: installed.newVersion,
     }),
     {
       description: t('plugin.pa.autoUpdate.installedDesc', {
-        defaultValue: '从 v{{version}} 自动更新',
         version: installed.previousVersion,
       }),
       action: {
-        label: t('plugin.pa.autoUpdate.undo', {
-          defaultValue: '撤销',
-        }),
+        label: t('plugin.pa.autoUpdate.undo'),
         onClick: () => {
           void undoAutoUpdate({
             pluginId: installed.pluginId,

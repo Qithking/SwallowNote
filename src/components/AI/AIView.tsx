@@ -766,7 +766,7 @@ function AIView() {
                     )}
                   >
                     {message.role === 'user' ? (
-                      <span className="text-xs text-foreground">You</span>
+                      <span className="text-xs text-foreground">{t('ai.you')}</span>
                     ) : (
                       <Bot size={14} />
                     )}

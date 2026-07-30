@@ -1,72 +1,22 @@
 {
-  "app": {
-    "name": "燕子笔记"
-  },
-  "menu": {
-    "file": "文件",
-    "edit": "编辑",
-    "view": "视图",
-    "help": "帮助"
-  },
-  "sidebar": {
-    "explorer": "资源管理器",
-    "search": "搜索",
-    "git": "Git",
-    "ai": "AI",
-    "settings": "设置"
-  },
-  "editor": {
-    "untitled": "未命名",
-    "preview": "预览",
-    "split": "分屏视图",
-    "loadFailed": "编辑器加载失败，请关闭标签页重试"
-  },
-  "fileTree": {
-    "newFile": "新建文件",
-    "newFolder": "新建文件夹",
-    "rename": "重命名",
-    "delete": "删除",
-    "refresh": "刷新"
-  },
   "tabs": {
     "close": "关闭",
-    "closeOthers": "关闭其他",
-    "closeAll": "关闭所有"
-  },
-  "search": {
-    "placeholder": "搜索...",
-    "noResults": "未找到结果",
-    "files": "文件",
-    "content": "内容"
+    "closeOthers": "关闭其他"
   },
   "commandPalette": {
     "placeholder": "输入命令或搜索...",
     "noResults": "未找到命令"
   },
-  "statusBar": {
-    "Ln": "行",
-    "Col": "列",
-    "spaces": "空格",
-    "encoding": "编码",
-    "language": "语言",
-    "branch": "分支"
-  },
   "settings": {
-    "title": "设置",
     "general": "通用",
-    "editor": "编辑器",
     "appearance": "外观",
-    "git": "Git",
     "sync": "同步",
     "ai": "AI",
     "shortcuts": "快捷键",
-    "about": "关于",
     "plugins": "插件",
     "development": "开发",
     "development.developerMode": "开发者模式",
     "development.developerMode.desc": "开启后启用右键菜单并启用 F12 开发者工具，切换后需重启应用生效",
-    "development.restartDevServerHint": "开发者模式已更改，请重启开发服务器后生效",
-    "development.restartFailedHint": "重启失败，请手动重启应用",
     "plugins.configs": "插件配置",
     "plugins.configs.desc": "将所有已安装插件的 storage 打包成一个压缩包进行导出/导入。可用于在重装前备份配置，或在多台机器之间迁移设置。",
     "plugins.configs.export": "导出插件配置",
@@ -75,12 +25,11 @@
     "plugins.configs.exportFailed": "导出插件配置失败",
     "plugins.configs.importSuccess": "已导入 {{imported}}/{{total}} 个插件配置；跳过 {{skipped}} 个",
     "plugins.configs.importNone": "压缩包中没有可导入的条目",
-    "plugins.configs.versionMismatch": "压缩包来自 SwallowNote v{{bundleVersion}}（schema v{{bundleSchema}}），当前构建期望 schema v{{expected}}",
-"general.autoStart": "开启自动启动",
-"general.autoStart.desc": "应用启动时自动运行，无需手动打开",
-"general.autoStart.failed": "无法更新开机自启设置，请检查系统权限后重试",
-"general.autoCheckUpdate": "自动检查更新",
-"general.autoCheckUpdate.desc": "启动时和每1小时静默检查是否有新版本，发现新版本时在状态栏提示",
+    "general.autoStart": "开启自动启动",
+    "general.autoStart.desc": "应用启动时自动运行，无需手动打开",
+    "general.autoStart.failed": "无法更新开机自启设置，请检查系统权限后重试",
+    "general.autoCheckUpdate": "自动检查更新",
+    "general.autoCheckUpdate.desc": "启动时和每1小时静默检查是否有新版本，发现新版本时在状态栏提示",
     "general.closeWithoutExit": "关闭不退出",
     "general.closeWithoutExit.desc": "关闭窗口后应用继续在后台运行，可通过托盘图标退出",
     "general.language": "语言设置",
@@ -95,14 +44,13 @@
     "general.showAllFiles.desc": "文件树中显示所有文件，包括隐藏文件和目录",
     "general.markdownOnly": "仅显示Markdown文件",
     "general.markdownOnly.desc": "文件树中仅展示 .md 格式文件，过滤其他类型",
-"sync.interval": "同步拉取时间",
-"sync.interval.desc": "定时执行 git pull 拉取远程更新，间隔时间越短同步越及时",
-"sync.interval.minute": "分钟",
-"sync.pullInterval": "同步拉取时间",
-"sync.pullInterval.desc": "定时执行 git pull 拉取远程更新，间隔时间越短同步越及时",
-"sync.autoSyncPush": "拉取后自动提交并推送",
-"sync.autoSyncPush.desc": "开启后自动同步时会在拉取完成后自动提交本地变更并推送到远程，需要提前配置好推送凭证",
-"sync.uploadPath": "文件上传路径",
+    "sync.interval": "同步拉取时间",
+    "sync.interval.minute": "分钟",
+    "sync.pullInterval": "同步拉取时间",
+    "sync.pullInterval.desc": "定时执行 git pull 拉取远程更新，间隔时间越短同步越及时",
+    "sync.autoSyncPush": "拉取后自动提交并推送",
+    "sync.autoSyncPush.desc": "开启后自动同步时会在拉取完成后自动提交本地变更并推送到远程，需要提前配置好推送凭证",
+    "sync.uploadPath": "文件上传路径",
     "sync.uploadPath.desc": "BlockNote 编辑器上传文件的存储路径，支持变量：$folder（文件所在目录）、$rootPath（根目录）、$userRootPath（用户主目录）",
     "sync.uploadPath.placeholder": "默认文件所在目录，如：$folder/images",
     "sync.showConflictBadge": "显示冲突仓库徽标",
@@ -115,13 +63,12 @@
     "ai.apiKey.placeholder": "输入 API Key",
     "ai.baseUrl": "API Base URL",
     "ai.baseUrl.desc": "AI 服务的 API 地址，默认使用服务商官方地址，可自定义代理地址",
-    "ai.baseUrl.placeholder": "自定义 API 地址",
     "ai.model": "模型",
     "ai.model.desc": "选择或输入要使用的 AI 模型",
     "ai.model.placeholder": "输入模型名称",
     "ai.modelName": "模型名称",
-    "ai.modelName.desc": "自定义模型显示名称，留空则使用模型 ID",
-    "ai.modelName.placeholder": "输入显示名称",
+    "ai.modelName.desc": "为此模型配置设置一个显示名称",
+    "ai.modelName.placeholder": "输入显示名称，留空使用模型 ID",
     "ai.port": "代理端口",
     "ai.port.desc": "本地 AI 代理服务器端口，默认 4017",
     "ai.defaultModel": "默认模型",
@@ -137,9 +84,6 @@
     "ai.testFailed": "连接失败",
     "ai.restartFailed": "无法重启本地 AI 代理",
     "ai.encryptFailed": "API key 加密失败，未持久化",
-    "ai.modelName": "模型名称",
-    "ai.modelName.desc": "为此模型配置设置一个显示名称",
-    "ai.modelName.placeholder": "输入显示名称，留空使用模型 ID",
     "ai.modelId": "模型 ID",
     "ai.provider.placeholder": "选择服务商",
     "ai.deleteModel": "删除模型",
@@ -160,17 +104,15 @@
     "ai.rolePrompts.promptContent.placeholder": "请输入系统提示词...",
     "ai.rolePrompts.saveFailed": "保存失败",
     "ai.rolePrompts.selectRole": "请从左侧选择一个角色",
-"ai.rolePrompts.delete": "删除角色",
-"ai.rolePrompts.deleteConfirm": "确定删除角色「{{name}}」吗？此操作不可撤销。",
-"ai.rolePrompts.deleteFailed": "删除角色失败",
-"ai.rolePrompts.reset": "重置",
-"ai.rolePrompts.resetSuccess": "已重置为系统默认",
-"ai.rolePrompts.resetFailed": "重置失败",
-"ai.rolePrompts.resetAll": "重置所有",
-"ai.rolePrompts.resetAllSuccess": "所有提示词已重置为系统默认",
-"ai.rolePrompts.resetAllFailed": "重置所有提示词失败",
-    "appearance.themeColor": "主题颜色设置",
-    "appearance.themeColor.desc": "自定义主题强调色，影响按钮、链接等高亮元素",
+    "ai.rolePrompts.delete": "删除角色",
+    "ai.rolePrompts.deleteConfirm": "确定删除角色「{{name}}」吗？此操作不可撤销。",
+    "ai.rolePrompts.deleteFailed": "删除角色失败",
+    "ai.rolePrompts.reset": "重置",
+    "ai.rolePrompts.resetSuccess": "已重置为系统默认",
+    "ai.rolePrompts.resetFailed": "重置失败",
+    "ai.rolePrompts.resetAll": "重置所有",
+    "ai.rolePrompts.resetAllSuccess": "所有提示词已重置为系统默认",
+    "ai.rolePrompts.resetAllFailed": "重置所有提示词失败",
     "appearance.theme": "主题设置",
     "appearance.theme.desc": "切换浅色、暗黑或跟随系统外观模式",
     "appearance.theme.light": "亮主题",
@@ -182,10 +124,7 @@
     "appearance.customTheme.darkTab": "深色主题",
     "appearance.customTheme.add": "新增主题",
     "appearance.customTheme.delete": "删除主题",
-    "appearance.customTheme.rename": "重命名",
-    "appearance.customTheme.renamePlaceholder": "输入主题名称",
     "appearance.customTheme.deleteConfirm": "确定删除主题「{{name}}」吗？",
-    "appearance.customTheme.cannotDeleteBuiltIn": "内置主题不可删除",
     "appearance.customTheme.themeColor": "主题色",
     "appearance.customTheme.themeColor.desc": "按钮、链接等高亮元素颜色",
     "appearance.customTheme.appBg": "应用背景",
@@ -247,34 +186,12 @@
     "pluginCommands.unbound": "未绑定",
     "pluginCommands.empty": "当前没有已安装插件注册命令面板条目。",
     "pluginCommandShadowed": "插件「{{id}}」的快捷键被内置命令占用，该快捷键无法触发插件命令，请在设置中修改绑定",
-    "pluginCommandShadowedDesc": "已执行内置动作「{{action}}」，请在设置中解绑插件命令后由插件接管此快捷键。",
-    "about.projectName": "项目名称",
-    "about.projectVersion": "项目版本",
-    "about.projectRepo": "项目仓库",
-    "about.checkUpdate": "检查更新",
-    "about.checking": "检测中...",
-    "about.upToDate": "已是最新版本",
-    "about.hasUpdate": "发现新版本",
-    "about.checkFailed": "检测失败，点击重试"
-  },
-  "git": {
-    "commit": "提交",
-    "push": "推送",
-    "pull": "拉取",
-    "branch": "分支",
-    "merge": "合并",
-    "diff": "差异"
+    "pluginCommandShadowedDesc": "已执行内置动作「{{action}}」，请在设置中解绑插件命令后由插件接管此快捷键。"
   },
   "ai": {
-    "chat": "对话",
-    "complete": "补全",
-    "rewrite": "改写",
-    "explain": "解释",
     "title": "AI助手",
-    "askAnything": "输入任意问题...",
     "placeholder": "输入任意问题...",
     "placeholderResponse": "你好！我是小燕子，有什么可以帮你的？",
-    "fetchUrl": "获取 URL 内容",
     "thinking": "思考中...",
     "notConfigured": "AI 尚未配置，请先在设置中配置 AI 服务商",
     "goToSettings": "前往设置",
@@ -284,6 +201,7 @@
     "replaceContent": "替换",
     "copyContent": "复制",
     "saveAsNewFile": "保存为新文件",
+    "you": "你",
     "role": {
       "continue_writing": "续写",
       "polish": "润色",
@@ -314,10 +232,6 @@
     "close": "关闭",
     "confirm": "确认",
     "loading": "加载中...",
-    "error": "错误",
-    "success": "成功",
-    "no": "否",
-    "yes": "是",
     "settings": "设置",
     "retry": "重试"
   },
@@ -361,14 +275,13 @@
     "copyPath": "复制路径",
     "copyRelativePath": "复制相对路径",
     "showInExplorer": "在文件资源管理器中显示",
-"revealInTree": "在文件树中定位",
-"refresh": "刷新",
-"refreshConfirm": "该文件有未保存的修改，刷新将丢弃本地修改并重新从磁盘加载，确定继续吗？"
-},
+    "revealInTree": "在文件树中定位",
+    "refresh": "刷新",
+    "refreshConfirm": "该文件有未保存的修改，刷新将丢弃本地修改并重新从磁盘加载，确定继续吗？"
+  },
   "fileTree": {
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
-    "rename": "重命名",
     "delete": "删除",
     "refresh": "刷新",
     "noFolderOpened": "未打开文件夹",
@@ -383,7 +296,6 @@
     "defaultFileName": "新文件.md",
     "defaultFolderName": "新文件夹",
     "defaultMindMapName": "新思维导图.smm",
-    "newMindMap": "新建思维导图",
     "sort": "排序方式",
     "sortDefault": "默认排序",
     "sortUpdatedDesc": "按更新时间 (新到旧)",
@@ -396,7 +308,6 @@
     "paste": "粘贴",
     "open": "打开",
     "showInExplorer": "在文件资源管理器中显示",
-    "openHistory": "打开历史记录",
     "syncInit": "同步初始化",
     "copyPath": "复制路径",
     "copyRelativePath": "复制相对路径",
@@ -442,19 +353,42 @@
   },
   "editor": {
     "untitled": "未命名",
-    "preview": "预览",
-    "split": "分屏视图",
     "loadFailed": "加载文件失败: {{error}}",
     "loading": "加载中...",
-    "cannotOpenFile": "无法打开此文件",
     "binaryFile": "二进制文件无法在编辑器中显示",
-    "unsupportedType": "不支持的文件类型",
     "cannotOpen": "无法打开此文件类型",
     "mindmapPluginMissingTitle": "思维导图插件未安装",
     "mindmapPluginMissingBody": "请在插件管理中安装「思维导图」插件以打开 {{filename}}",
     "mindmapPluginInstall": "打开插件管理",
     "welcome": "欢迎使用 SwallowNote",
-    "welcomeHint": "打开文件或文件夹开始编辑"
+    "welcomeHint": "打开文件或文件夹开始编辑",
+    "katex": {
+      "renderFailed": "渲染失败: {{error}}",
+      "emptyFormula": "空公式",
+      "edit": "编辑",
+      "editLatex": "编辑 LaTeX",
+      "switchToInline": "转为行内",
+      "switchToBlock": "转为块级",
+      "switchToInlineTitle": "切换为行内公式",
+      "switchToBlockTitle": "切换为块级公式",
+      "expand": "放大查看",
+      "dialogTitle": "LaTeX 公式",
+      "cancel": "取消",
+      "save": "保存"
+    },
+    "markmap": {
+      "expand": "展开思维导图",
+      "dialogTitle": "Markmap 思维导图"
+    },
+    "mermaid": {
+      "expand": "展开图表",
+      "dialogTitle": "Mermaid 图表"
+    },
+    "blockResize": {
+      "resizeWidth": "拖拽调整宽度",
+      "resizeHeight": "拖拽调整高度",
+      "resizeBoth": "拖拽调整宽高"
+    }
   },
   "welcome": {
     "start": "快速开始",
@@ -503,7 +437,6 @@
     "inputPlaceholder": "输入搜索内容",
     "searching": "搜索中...",
     "notFound": "未找到匹配项",
-    "hint": "回车搜索，Esc 关闭",
     "yamlFilter": "YAML 筛选",
     "yamlSearch": "YAML 搜索",
     "filterKey": "属性名",
@@ -520,35 +453,23 @@
     "rename": "重命名",
     "delete": "删除",
     "deleteCategory": "删除分类",
-    "confirmDelete": "确定要删除分类「{{name}}」吗？该分类下的文件不会被删除，但会从该分类中移除。"
+    "confirmDelete": "确定要删除分类「{{name}}」吗？该分类下的文件不会被删除，但会从该分类中移除。",
+    "createFailed": "创建分类失败: {{path}}",
+    "newCategoryExample": "技术/前端/Vue"
   },
   "git": {
-    "title":"同步管理",
-    "sync":"同步",
-    "refresh":"刷新",
+    "title": "同步管理",
+    "sync": "同步",
+    "refresh": "刷新",
     "commit": "提交",
     "push": "推送",
     "pull": "拉取",
     "pullSelected": "拉取选中仓库",
-    "branch": "分支",
-    "merge": "合并",
-    "diff": "差异",
-    "noRepoToSync": "没有需要同步的仓库或没有变更",
-    "noChangeToSync": "没有需要同步的变更",
-    "submoduleUncommitted": "子模块内部有未提交的变更，请先在子模块内提交",
-    "submoduleRefNeedUpdate": "子模块引用需要更新，请先提交子模块变更",
     "unknownError": "未知错误",
-    "syncedCount": "已同步 {{count}} 个仓库",
-    "syncResult": "成功 {{success}} 个，失败 {{fail}} 个",
     "syncing": "同步中...",
     "submodule": "子模块",
     "noRemote": "无远程仓库",
-    "repoPath": "仓库目录",
     "parentRepo": "父仓库",
-    "uncommittedFiles": "待提交文件: {{count}} 个文件",
-    "syncManagement": "同步管理",
-    "refreshRepos": "刷新所有仓库列表",
-    "noGitRepoFound": "未发现 Git 仓库",
     "noReposToSync": "没有需要同步的仓库或没有变更",
     "noChangesToSync": "没有需要同步的变更",
     "submoduleHasChanges": "子模块内部有未提交的变更，请先在子模块内提交",
@@ -577,6 +498,7 @@
     "pullResult": "拉取完成：成功 {{success}} 个，失败 {{fail}} 个",
     "pullConflict": "仓库 {{repos}} 存在合并冲突，请手动解决冲突后再同步",
     "pullDetachedHead": "{{repos}}: 仓库处于 detached HEAD 状态，请先切换到分支再拉取",
+    "detachedHead": "仓库处于 detached HEAD 状态，请先切换到分支再提交",
     "forcePush": "强制推送",
     "forcePushDesc": "强制推送本地提交到远程仓库，覆盖远程历史",
     "forcePull": "强制拉取",
@@ -587,68 +509,31 @@
     "forcePullSuccess": "已强制刷新 {{repo}}",
     "forcePushFailed": "强制推送 {{repo}} 失败: {{error}}",
     "forcePullFailed": "强制刷新 {{repo}} 失败: {{error}}",
-    "repoActions": "仓库操作",
     "conflictTitle": "冲突解决",
     "conflictFiles": "冲突文件",
-    "conflictRepos": "冲突仓库",
     "local": "本地",
     "remote": "远端",
-    "resolveConflict": "解决冲突",
-    "markAsResolved": "标记为已解决",
-    "overwriteLocal": "覆盖本地",
-    "overwriteRemote": "覆盖云端",
-    "saveLocalContent": "保存本地修改",
-    "saveAndResolve": "保存并标记解决",
     "save": "保存",
     "saved": "修改已保存",
     "markResolved": "标记解决",
-    "localEditable": "本地（可编辑）",
-    "remoteReadOnly": "远端（只读）",
     "copyRemoteContent": "复制远端内容",
     "copyLocalContent": "复制本地内容",
-    "abortConflict": "放弃解决",
-    "abortConflictConfirm": "确定要放弃解决冲突吗？这将撤销所有未完成的冲突解决操作，恢复到冲突前的状态。",
     "conflictResolved": "冲突已解决",
     "conflictResolveFailed": "解决冲突失败：{{error}}",
-    "abortSuccess": "已放弃解决冲突",
-    "abortFailed": "放弃解决冲突失败：{{error}}",
-    "noConflicts": "没有冲突文件",
-    "allConflictsResolved": "所有冲突已解决",
     "noConflictFilesDetected": "未检测到具体冲突文件",
     "conflictStateHint": "仓库仍处于冲突状态，可通过「放弃」按钮退出",
-    "loadingContent": "加载中...",
     "loadContentFailed": "加载内容失败",
     "clickFileToCompare": "点击左侧冲突文件查看差异对比",
-    "overwriteLocalConfirm": "确定要使用远端版本覆盖本地版本吗？本地修改将丢失。",
-    "overwriteRemoteConfirm": "确定要使用本地版本覆盖远端版本吗？远端修改将丢失。",
-    "markAsResolvedConfirm": "确定该冲突文件已解决？标记后将使用当前本地内容作为最终版本。",
-    "saveSuccess": "保存成功",
-    "saveFailed": "保存失败：{{error}}",
     "resolving": "处理中...",
     "unsavedChanges": "有未保存的修改",
-    "incoming": "传入更改",
-    "current": "当前更改",
-    "result": "合并结果",
-    "resultEditable": "可编辑",
     "acceptRemote": "接受远端",
     "acceptLocal": "接受本地",
-    "acceptBoth": "接受两者",
-    "conflictCount": "第 {{current}} 处冲突（共 {{total}} 处）",
-    "unresolvedCount": "{{count}} 处未解决",
-    "resolvedCount": "{{count}} 处已解决",
-    "previousConflict": "上一处冲突",
-    "nextConflict": "下一处冲突",
-    "completeMerge": "完成合并",
-    "completeMergeConfirm": "确认完成合并？所有冲突均已解决后将使用当前结果作为最终版本。",
-    "conflictUnresolvedWarning": "仍有未解决的冲突，请先解决所有冲突再完成合并。",
     "hideConflictTree": "隐藏冲突文件列表",
-    "showConflictTree": "显示冲突文件列表"
+    "showConflictTree": "显示冲突文件列表",
+    "commitMessagePlaceholder": "同步说明"
   },
   "history": {
     "title": "历史",
-    "noFileOpened": "未打开文件",
-    "initHint": "请到文件根目录下右键同步初始化",
-    "noCommitHistory": "暂无提交历史",
     "allLoaded": "已加载全部历史记录",
     "noFileOpen": "未打开文件",
     "initGitFirst": "请到文件根目录下右键同步初始化",
@@ -672,32 +557,24 @@
   },
   "directory": {
     "title": "目录",
-    "noFileOpened": "未打开文件",
     "noFileOpen": "未打开文件",
-    "noDirectory": "无目录",
     "noToc": "无目录"
   },
   "diffViewer": {
-    "noDiffContent": "暂无差异内容",
     "noDiff": "暂无差异"
   },
   "statusBar": {
-    "author":"作者",
-    "openGitHub":"打开GitHub仓库",
+    "author": "作者",
+    "openGitHub": "打开GitHub仓库",
     "downloadFailed": "下载失败: {{error}}",
-    "openInstallerFailed": "打开安装包失败",
-"installFailed": "安装更新失败: {{error}}",
-"installing": "正在安装更新...",
+    "installFailed": "安装更新失败: {{error}}",
     "openLinkFailed": "打开链接失败",
     "upToDate": "已是最新版本",
     "checking": "检测中...",
-    "downloadUpdate": "下载升级",
     "downloading": "下载中: {{progress}}%",
-    "ready": "新版本已就绪",
-    "downloadFailedStatus": "下载失败",
-    "download":"下载",
-    "foundNewVersion":"发布新版本",
-    "downloadingTooltip":"正在下载中",
+    "download": "下载",
+    "foundNewVersion": "发布新版本",
+    "downloadingTooltip": "正在下载中",
     "clickToCheck": "点击检测新版本",
     "downloadReady": "新版本已就绪",
     "downloadReadyTooltip": "点击安装新版本",
@@ -709,13 +586,11 @@
     "installAndRestart": "安装并重启",
     "syncing": "同步中...",
     "syncResult": "同步：成功 {{succeeded}} 个，失败 {{failed}} 个",
-    "syncConflicted": "{{count}} 个冲突",
     "yamlIndexProgress": "YAML索引：{{current}}/{{total}}",
     "yamlIndexDone": "YAML索引：完成",
     "yamlIndexProgressTooltip": "正在索引YAML元数据 {{current}}/{{total}}",
     "yamlIndexDoneTooltip": "YAML元数据索引已完成",
     "cloneProgress": "克隆({{url}})进度{{percent}}%",
-    "cloneInProgress": "克隆({{url}})中...",
     "cloneProgressTooltip": "正在克隆 {{url}}",
     "clonePrefix": "克隆({{url}})",
     "syncRepos": "同步仓库",
@@ -728,28 +603,15 @@
     "renderFailed": "渲染失败"
   },
   "recent": {
-    "workspaceName": "工作区",
-    "folderName": "文件夹",
-    "recentLabel": "最近记录",
     "cloneComplete": "克隆完成",
-    "pathNotExist": "路径不存在: {{path}}",
-    "inputUrlRequired": "请输入仓库 URL",
-    "selectLocalPathRequired": "请选择本地地址",
     "cloneFailed": "克隆失败: {{error}}",
     "openFolder": "打开文件夹",
-    "cloneRepo": "克隆 Git 仓库",
     "clearHistory": "清空历史",
     "recent": "最近",
     "noHistory": "暂无历史记录",
-    "delete": "删除",
-    "cancel": "取消",
-    "confirm": "确认",
-    "cloneDialogTitle": "克隆 Git 仓库",
-    "cloneGitRepo":"克隆 Git 仓库",
+    "cloneGitRepo": "克隆 Git 仓库",
     "repoUrl": "仓库 URL",
-    "repoUrlLabel": "仓库 URL",
     "localPath": "本地地址",
-    "localPathLabel": "本地地址",
     "cloning": "克隆中...",
     "cloneAndOpen": "克隆&打开",
     "workspace": "工作区",
@@ -772,13 +634,10 @@
       "cloneFailed": "克隆失败",
       "targetPathExists": "目标路径已存在",
       "submoduleUncommitted": "子模块内部有未提交的变更，请先在子模块内提交",
-      "invalidRepoPath": "无效的仓库路径",
       "invalidPathEncoding": "无效的路径编码",
       "invalidRelativePath": "无效的相对路径",
       "fetchFailed": "拉取失败",
-      "checkLocalChangesFailed": "检查本地改动失败",
-      "checkoutFileFailed": "检出文件失败",
-      "terminatedBySignal": "被信号终止"
+      "checkoutFileFailed": "检出文件失败"
     }
   },
   "tray": {
@@ -811,33 +670,17 @@
     "group_details": "详情"
   },
   "plugin": {
-    "manager": "插件管理",
-    "installed": "已安装插件",
-    "noPlugins": "暂无已安装的插件",
-    "uploadHint": "点击上传插件包",
-    "uploadFormat": "支持 .zip 格式的插件包",
     "installSuccess": "插件 {{name}} 安装成功",
     "installFailed": "插件安装失败",
+    "noUpdateAvailable": "暂无可用更新",
     "uninstallSuccess": "插件 {{name}} 已卸载",
     "uninstallFailed": "插件卸载失败",
     "enabled": "插件 {{name}} 已启用",
     "disabled": "插件 {{name}} 已禁用",
     "toggleFailed": "切换插件状态失败",
-    "refresh": "刷新",
     "installing": "安装中...",
     "settings": "插件设置",
     "permissions": "插件权限",
-    "iconPosition": {
-      "sidebar": "侧边栏",
-      "editorToolbar": "编辑器工具栏",
-      "titleBar": "标题栏"
-    },
-    "contentPosition": {
-      "leftPanel": "左面板",
-      "rightPanel": "右面板",
-      "fullPanel": "全面板",
-      "editorArea": "编辑区"
-    },
     "diagnostics": {
       "title": "可观测性",
       "description": "实时查看已安装插件的运行指标",
@@ -868,13 +711,6 @@
       "colDuration": "耗时",
       "colStatus": "状态"
     },
-    "error": {
-      "title": "插件错误",
-      "description": "插件 {{id}} 发生错误，无法正常显示。",
-      "viewDetails": "查看错误详情",
-      "retry": "重试",
-      "disable": "禁用插件"
-    },
     "permission": {
       "title": "插件权限",
       "warning": "这些权限将允许插件访问相应功能，你可以稍后在插件管理中修改。",
@@ -882,32 +718,58 @@
       "cancel": "取消",
       "save": "保存更改",
       "saving": "保存中…",
-      "noDescription": "暂无描述",
       "saveFailed": "保存权限失败",
       "selectAll": "全选",
       "selectNone": "全不选",
       "noPermissionWarning": "未授权任何权限，插件可能无法正常工作",
       "items": {
-        "editor": { "name": "编辑器", "description": "注册自定义文件编辑器以扩展支持的文件类型" },
-        "storage": { "name": "存储", "description": "访问持久化存储以保存插件数据" },
-        "events": { "name": "事件", "description": "订阅宿主事件（笔记打开/保存、主题切换等）" },
-        "context-menu": { "name": "右键菜单", "description": "在右键菜单中添加项目" },
-        "backend": { "name": "后端", "description": "与原生 Rust 后端通信" },
-        "filesystem-read": { "name": "文件系统读取", "description": "读取系统中的文件" },
-        "filesystem-write": { "name": "文件系统写入", "description": "写入系统中的文件" },
-        "network": { "name": "网络", "description": "发起网络请求" },
-        "clipboard": { "name": "剪贴板", "description": "读取和写入剪贴板" },
-        "notifications": { "name": "通知", "description": "显示桌面通知" }
+        "editor": {
+          "name": "编辑器",
+          "description": "注册自定义文件编辑器以扩展支持的文件类型"
+        },
+        "storage": {
+          "name": "存储",
+          "description": "访问持久化存储以保存插件数据"
+        },
+        "events": {
+          "name": "事件",
+          "description": "订阅宿主事件（笔记打开/保存、主题切换等）"
+        },
+        "context-menu": {
+          "name": "右键菜单",
+          "description": "在右键菜单中添加项目"
+        },
+        "backend": {
+          "name": "后端",
+          "description": "与原生 Rust 后端通信"
+        },
+        "filesystem-read": {
+          "name": "文件系统读取",
+          "description": "读取系统中的文件"
+        },
+        "filesystem-write": {
+          "name": "文件系统写入",
+          "description": "写入系统中的文件"
+        },
+        "network": {
+          "name": "网络",
+          "description": "发起网络请求"
+        },
+        "clipboard": {
+          "name": "剪贴板",
+          "description": "读取和写入剪贴板"
+        },
+        "notifications": {
+          "name": "通知",
+          "description": "显示桌面通知"
+        }
       }
     },
     "market": {
-      "tabManage": "已安装",
-      "tabMarket": "插件市场",
       "official": "官网",
-      "repoPlaceholder": "https://…/repo.json",
-      "apply": "应用",
       "refresh": "刷新",
-      "searchPlaceholder": "搜索插件名 / 描述 / 标签",
+      "searchPlaceholder": "搜索插件名/描述/标签",
+      "searchAriaLabel": "搜索插件市场",
       "emptyTitle": "尚未配置仓库",
       "emptyHint": "在顶部粘贴一个 repo.json 的 URL，SwallowNote 会拉取并展示所有可用插件。",
       "loading": "正在加载仓库…",
@@ -915,42 +777,53 @@
       "noResultsHint": "尝试调整搜索词或清空标签过滤。",
       "local": "本地",
       "installed": "已安装 {{name}} v{{version}}",
-      "rolledBack": "已回滚到 {{version}}",
       "unknownAuthor": "未知作者",
       "unknownName": "未命名插件",
       "noDescription": "暂无描述",
       "dependencies": "依赖",
-      "versionHistory": "版本历史",
-      "localVersions": "已安装版本",
-      "active": "当前",
-      "latest": "最新",
-      "installThisVersion": "安装此版本",
-      "installedVersion": "已安装 {{name}} v{{version}}",
-      "noVersionHistory": "该插件在仓库中未提供历史版本。",
-      "rollback": "回滚",
       "install": "安装",
       "updateTo": "更新到 v{{version}}",
-      "upToDate": "已是最新",
       "badgeUpdate": "更新",
       "badgeInstalled": "已安装",
       "badgeInstall": "安装",
       "viewDetails": "查看详情",
       "installNow": "立即安装",
       "tabOverview": "基本信息",
-      "tabHistory": "历史版本",
-      "tabChangelog": "更新日志",
       "tabPermissions": "权限",
       "tabDependencies": "依赖",
-      "tabReviews": "评价",
-      "noChangelog": "该插件暂未提供更新日志。",
-      "noReviews": "暂无评价",
-      "noReviewsHint": "社区评价系统即将上线。",
       "permissionsEmpty": "市场清单未声明该插件的权限项。",
       "permissionsEmptyHint": "安装后将展示实际请求的权限。",
-      "permissionsGranted": "已授予",
-      "permissionsPending": "未授予",
       "permissionsRequested": "已请求",
-      "permissionsNotRequested": "未声明"
+      "sourceSelect": "选择来源",
+      "manageSources": "来源管理",
+      "sourceManager": "来源管理",
+      "sourceEmpty": "暂无自定义来源",
+      "sourceEmptyHint": "点击下方添加新的插件来源。",
+      "sourceSwitch": "切换",
+      "sourceCurrent": "当前",
+      "sourceRemove": "删除来源",
+      "sourceAdd": "添加来源",
+      "sourceNamePlaceholder": "名称",
+      "sourceUrlPlaceholder": "https://…/repo.json",
+      "sourceAddBtn": "添加",
+      "errorSha256Mismatch": "SHA-256 不匹配:zip 已被替换或损坏,请联系作者",
+      "errorDownload": "下载失败:网络异常或文件已被移除",
+      "errorScheme": "repo.json 中 download_url 协议被拒绝(仅允许 http/https)",
+      "errorProtocol": "repo.json 协议错误:插件元数据字段缺失",
+      "depsCycleDetected": "检测到循环依赖，无法安装",
+      "depsUnsatisfied": "依赖版本不满足，无法安装",
+      "depsAutoResolved": "已自动解决 {{count}} 个依赖",
+      "depsAutoResolveFailed": "{{count}} 个依赖安装失败: {{detail}}",
+      "depsAutoResolveFailedDetail": "{{name}} ({{id}}) 等 {{count}} 个",
+      "autoResolve": "自动解决依赖",
+      "dependenciesEmpty": "该插件没有声明任何依赖。",
+      "depsStatusCycle": "循环依赖",
+      "depsStatusInvalidRange": "清单中的依赖范围无效",
+      "depsStatusUnparseable": "已安装版本无法解析",
+      "depsStatusUnsatisfied": "本地 v{{installed}}，需要 {{required}}",
+      "depsStatusMissingWithAvailable": "仓库提供 v{{available}}",
+      "depsStatusMissingNoSource": "未找到来源",
+      "depsStatusSatisfied": "已满足"
     },
     "pa": {
       "title": "插件管理",
@@ -960,36 +833,36 @@
         "banner_plural": "{{count}} 个插件加载失败",
         "dialogTitle": "插件加载失败列表",
         "empty": "所有插件均已成功加载。",
-        "id": "ID",
-        "name": "名称",
-        "reason": "原因",
-        "time": "时间",
         "viewLogs": "查看日志",
         "uninstall": "卸载",
         "dismiss": "忽略",
-        "dismissed": "已忽略。重新打开插件管理或点击刷新可重新检测。",
-        "uninstallConfirm": {
-          "title": "确认卸载 {{name}}?",
-          "description": "这将移除该损坏的插件包及其本地文件。你可以稍后通过 .zip 重新安装。"
-        }
+        "dismissed": "已忽略。重新打开插件管理或点击刷新可重新检测。"
       },
       "card": {
-        "statusOn": "已启用",
-        "statusOff": "已停用",
         "healthHealthy": "健康",
         "healthUnhealthy": "异常",
-        "healthUnknown": "未知",
         "conflict": "冲突",
-        "tagBackend": "后端",
-        "tagPerms": "{{count}} 项权限",
-        "switchOn": "开",
-        "switchOff": "关"
+        "switchOn": "启用",
+        "switchOff": "禁用",
+        "sourceLocal": "本地",
+        "sourceUnknown": "未知来源",
+        "sourceOfficial": "官网",
+        "hasUpdate": "有新版本 v{{version}}"
       },
       "uninstall": {
         "confirmTitle": "确认卸载",
         "confirmDesc": "确定要卸载 {{name}} 吗？此操作不可撤销。",
+        "deleteData": "同时删除插件数据（不可恢复）",
         "cancel": "取消",
         "confirm": "卸载"
+      },
+      "settings": {
+        "noSettings": "该插件未提供 settings.json",
+        "loadFailed": "加载设置失败：{{error}}",
+        "saved": "设置已保存",
+        "saveFailed": "设置保存失败：{{error}}",
+        "selectPlaceholder": "请选择",
+        "requiredField": "此字段为必填"
       },
       "autoUpdate": {
         "label": "自动更新",
@@ -1028,12 +901,7 @@
           "new": "{{count}} 个新"
         }
       },
-      "viewMeta": {
-        "installed": "共 <b>{{total}}</b> · 启用 <b>{{active}}</b> · 更新 <b>{{updates}}</b> · 上次扫描 <b>{{scan}}</b>",
-        "marketplace": "<b>{{count}}</b> 项"
-      },
       "btn": {
-        "search": "搜索",
         "activity": "活动",
         "diagnostics": "诊断",
         "logs": "日志",
@@ -1041,10 +909,7 @@
         "consoleMeta": "{{events}} 事件 · {{errors}} 错误",
         "storage": "存储",
         "install": "安装插件",
-        "refresh": "刷新",
-        "upload": "上传 .zip",
-        "themeLight": "浅色",
-        "themeDark": "深色"
+        "refresh": "刷新"
       },
       "rail": {
         "stats": "安装统计",
@@ -1057,10 +922,6 @@
           "capUnknownPct": "—"
         }
       },
-      "manifestPath": "清单位置 <b>{{path}}</b>",
-      "update": {
-        "available": "{{count}} 个更新"
-      },
       "empty": {
         "title": "暂无已安装的插件",
         "hint": "上传一个 .zip 插件包以开始。"
@@ -1071,8 +932,6 @@
           "title": "插件管理控制台"
         },
         "activity": {
-          "eyebrow": "最近 24 小时",
-          "title": "活动",
           "count": "{{count}} 条事件 · 24h",
           "clear": "清空",
           "export": "导出",
@@ -1081,8 +940,6 @@
           "perPlugin": "<b>{{name}}</b> · {{events}} 个事件 · {{storage}} 次存储 · {{hooks}} 个钩子 · {{ipc}} 次 IPC"
         },
         "diagnostics": {
-          "eyebrow": "插件运行时 · 24h",
-          "title": "诊断",
           "footer": "上次扫描 <b>{{time}}</b> · 24h 窗口",
           "rescan": "重新扫描",
           "exportBundle": "导出诊断包",
@@ -1098,8 +955,6 @@
           "eventUnit": "事件"
         },
         "logs": {
-          "eyebrow": "tail -f · 实时",
-          "title": "日志",
           "footer": "跟踪 <b>host</b> · {{count}} 行",
           "filter": "过滤",
           "filterAll": "全部插件",
@@ -1125,6 +980,8 @@
           "title": "存储",
           "colKey": "键",
           "colSize": "大小",
+          "colAction": "操作",
+          "tableAriaLabel": "存储条目",
           "empty": "此插件尚未写入任何存储",
           "footer": "<b>{{count}}</b> 个键 · 合计 <b>{{bytes}}</b>",
           "refresh": "刷新",
@@ -1142,31 +999,75 @@
           "confirmCancel": "取消",
           "confirmProceed": "确认清空"
         }
-      },
-      "market": {
-        "repoLabel": "仓库",
-        "apply": "应用",
-        "keyVerified": "密钥已验证 · ed25519:7f4a…b21c",
-        "search": "搜索…",
-        "heroTitle": "浏览插件目录",
-        "heroHint": "粘贴一个 repo.json URL 来加载插件目录。"
-      },
-      "batch": {
-        "selectAll": "全选",
-        "selectAllTitle": "选择所有可见插件",
-        "selectOne": "选择 {{name}}",
-        "selected": "已选 {{count}}",
-        "barAria": "批量操作",
-        "selectedCount": "已选 {{count}} 项",
-        "enable": "启用",
-        "enableTitle": "启用所选插件",
-        "disable": "禁用",
-        "disableTitle": "禁用所选插件",
-        "uninstall": "卸载",
-        "uninstallTitle": "卸载所选插件",
-        "clear": "清除选择",
-        "summary": "成功 {{success}} 项，失败 {{failure}} 项"
       }
     }
+  },
+  "download": {
+    "progress": "正在下载 {{done}}/{{total}} 张图片… {{speed}}",
+    "preparing": "正在准备下载…",
+    "remoteFailed": "远程图片下载失败：{{message}}",
+    "success": "已下载 {{count}} 张远程图片",
+    "failedCount": "下载失败：{{count}} 张",
+    "result": "成功 {{success}} 张，失败 {{failed}} 张",
+    "noRemoteImages": "当前文档无远程图片",
+    "fileNotFound": "文件不存在: {{path}}",
+    "openFileFailed": "无法打开文件: {{path}}",
+    "downloadFailed": "下载远程图片失败：{{error}}"
+  },
+  "shortcuts": {
+    "conflict": {
+      "builtin": "与「{{key}}」冲突",
+      "plugin": "与插件命令「{{name}}」冲突"
+    }
+  },
+  "pluginLoader": {
+    "manifestMissing": "插件清单缺失",
+    "manifestInvalidPrefix": "该插件 ({{id}}) 的 ",
+    "manifestInvalidMiddle": " 未导出有效的 ",
+    "manifestInvalidSuffix": " 对象。请检查插件包是否完整、是否被部分删除，或联系插件作者。",
+    "manifestInvalidBase": "清单缺失或无效：index.js 未导出有效的 `manifest` 对象。插件包可能不完整或已损坏。",
+    "underlyingError": "底层错误: {{error}}"
+  },
+  "pluginCore": {
+    "recentNotes": {
+      "title": "最近笔记",
+      "installedAt": "安装时间",
+      "defaultView": "默认视图"
+    },
+    "themeWatcher": {
+      "theme": "主题",
+      "locale": "语言",
+      "events": "事件",
+      "lastSetting": "最后设置"
+    },
+    "wordCounter": {
+      "title": "字数统计",
+      "words": "字数",
+      "characters": "字符数",
+      "lines": "行数",
+      "readingTime": "阅读时间",
+      "refresh": "刷新字数统计"
+    },
+    "common": {
+      "pluginId": "插件 ID"
+    }
+  },
+  "theme": {
+    "light": "浅色主题",
+    "dark": "深色主题",
+    "warmSand": "暖沙",
+    "sage": "鼠尾草",
+    "inkNight": "墨夜",
+    "ember": "余烬",
+    "dawn": "晨曦",
+    "mintFrost": "薄荷霜",
+    "galaxy": "星河",
+    "lava": "熔岩",
+    "sakura": "樱花",
+    "aurora": "极光",
+    "deepSea": "深海",
+    "dusk": "暮霭",
+    "devModeChanged": "开发者模式已更改，请重启开发服务器后生效",
+    "restartFailed": "重启失败，请手动重启应用"
   }
 }

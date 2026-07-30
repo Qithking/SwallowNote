@@ -606,7 +606,7 @@ function SettingsView() {
                                           className="text-[10px] text-muted-foreground hover:text-destructive"
                                           onClick={() => updateCustomThemeColor(activeTheme.id, customThemeTab, field.gradientKey!, '')}
                                         >
-                                          {t('common.clear', 'Clear')}
+                                          {t('common.clear')}
                                         </button>
                                       )}
                                     </div>
@@ -1219,12 +1219,12 @@ function SettingsView() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setDeleteTarget(null)}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
               if (deleteTarget) deleteCustomTheme(deleteTarget)
               setDeleteTarget(null)
             }}>
-              {t('common.confirm', 'Delete')}
+              {t('common.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1239,12 +1239,12 @@ function SettingsView() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteAiModelTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setDeleteAiModelTarget(null)}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
               if (deleteAiModelTarget) removeAiModel(deleteAiModelTarget)
               setDeleteAiModelTarget(null)
             }}>
-              {t('common.confirm', 'Delete')}
+              {t('common.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1259,7 +1259,7 @@ function SettingsView() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteRoleTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setDeleteRoleTarget(null)}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={async () => {
               if (deleteRoleTarget) {
                 try {
@@ -1276,7 +1276,7 @@ function SettingsView() {
               }
               setDeleteRoleTarget(null)
             }}>
-              {t('common.confirm', 'Delete')}
+              {t('common.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1303,13 +1303,13 @@ function SettingsView() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setPluginImportConfirm(null)}>
-              {t('common.cancel', 'Cancel')}
+              {t('common.cancel')}
             </AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmImport} disabled={pluginConfigsImporting}>
               {pluginConfigsImporting ? (
                 <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" />
               ) : null}
-              {t('common.confirm', 'Import')}
+              {t('common.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

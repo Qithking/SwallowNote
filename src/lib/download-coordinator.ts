@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { downloadRemoteImages, type RemoteImageResult } from './tauri'
 import { logger } from './logger'
+import i18n from '@/i18n'
 
 interface ApplyContext {
   editor: any
@@ -105,7 +106,7 @@ class DownloadCoordinator {
       this.bytesDownloaded,
       this.startedAt ? Date.now() - this.startedAt : 0
     )
-    const text = `正在下载 ${this.done}/${this.total} 张图片… ${speedText}`
+    const text = i18n.t('download.progress', { done: this.done, total: this.total, speed: speedText })
     toast.loading(text, { id: this.toastId })
   }
 
@@ -185,7 +186,7 @@ class DownloadCoordinator {
 
     // 第一次 enqueue 时建立 toast
     if (this.toastId === null) {
-      this.toastId = toast.loading('正在准备下载…')
+      this.toastId = toast.loading(i18n.t('download.preparing'))
       this.startedAt = Date.now()
       this.done = 0
       this.successCount = 0
@@ -243,7 +244,7 @@ class DownloadCoordinator {
         logger.error('download', 'invoke failed:', err)
         // invoke 失败：本批图片算失败并提示
         const message = err instanceof Error ? err.message : String(err)
-        toast.error(`远程图片下载失败：${message}`)
+        toast.error(i18n.t('download.remoteFailed', { message }))
       }
 
       // 累加 done，补充 item-done 未处理的
@@ -292,11 +293,11 @@ class DownloadCoordinator {
 
     setTimeout(() => {
       if (failed === 0) {
-        toast.success(`已下载 ${success} 张远程图片`)
+        toast.success(i18n.t('download.success', { count: success }))
       } else if (success === 0) {
-        toast.error(`下载失败：${failed} 张`)
+        toast.error(i18n.t('download.failedCount', { count: failed }))
       } else {
-        toast.warning(`成功 ${success} 张，失败 ${failed} 张`)
+        toast.warning(i18n.t('download.result', { success, failed }))
       }
     }, 100)
   }

@@ -270,13 +270,13 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
             variant="outline"
             size="icon"
             className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover/markmap:opacity-100 transition-opacity z-10"
-            title="展开思维导图"
+            title={t('editor.markmap.expand')}
           >
             <Maximize2 className="h-3 w-3" />
           </Button>
         </DialogTrigger>
         <DialogContent className="max-w-4xl w-[90vw] h-[80vh] p-4 flex flex-col">
-          <DialogTitle className="sr-only">Markmap 思维导图</DialogTitle>
+          <DialogTitle className="sr-only">{t('editor.markmap.dialogTitle')}</DialogTitle>
           <div className="flex-1 overflow-auto flex items-center justify-center bg-white dark:bg-black/20 rounded p-4">
             <svg
               ref={dialogSvgRef}

@@ -10,6 +10,7 @@ import type { PluginMetadataRust } from '@/lib/tauri'
 import { createElement, type ReactNode } from 'react'
 import { PlugZap } from 'lucide-react'
 import { logger } from './logger'
+import i18n from '@/i18n'
 
 /** Rust 元数据转前端元数据 */
 export function rustMetaToPluginMeta(meta: PluginMetadataRust): PluginMetadata {
@@ -510,16 +511,16 @@ export async function loadAllPlugins(
             },
           },
           createElement(PlugZap, { size: 16 }),
-          createElement('strong', null, '插件清单缺失'),
+          createElement('strong', null, i18n.t('pluginLoader.manifestMissing')),
         ),
         createElement(
           'p',
           null,
-          `该插件 (${meta.id}) 的 `,
+          i18n.t('pluginLoader.manifestInvalidPrefix', { id: meta.id }),
           createElement('code', null, 'index.js'),
-          ' 未导出有效的 ',
+          i18n.t('pluginLoader.manifestInvalidMiddle'),
           createElement('code', null, 'manifest'),
-          ' 对象。请检查插件包是否完整、是否被部分删除，或联系插件作者。',
+          i18n.t('pluginLoader.manifestInvalidSuffix'),
         ),
       )
       const def = {
@@ -541,10 +542,8 @@ export async function loadAllPlugins(
         source: meta.source,
       } satisfies PluginDefinition
       // 返回占位定义，便于卸载损坏插件
-      const baseReason =
-        'manifest missing or invalid: index.js did not export a valid `manifest` object. ' +
-        'The plugin package may be incomplete or corrupted.'
-      const reason = error ? `${baseReason}\n\n底层错误: ${error}` : baseReason
+      const baseReason = i18n.t('pluginLoader.manifestInvalidBase')
+      const reason = error ? `${baseReason}\n\n${i18n.t('pluginLoader.underlyingError', { error })}` : baseReason
       return {
         definition: def,
         failure: {
