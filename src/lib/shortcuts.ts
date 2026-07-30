@@ -193,7 +193,7 @@ export function findShortcutConflictDetailed(
     if (currentKey === value) {
       return {
         source: { kind: 'builtin', key: def.key, label: def.key },
-        message: i18n.t('shortcuts.conflict.builtin', { key: def.key }),
+        message: i18n.t('shortcuts.conflict.builtin', { key: i18n.t(`shortcuts.${def.key}`) }),
       }
     }
   }
@@ -206,7 +206,7 @@ export function findShortcutConflictDetailed(
     if (def && def.defaultKey === value) continue
     return {
       source: { kind: 'custom-builtin', key: key as ShortcutKey, label: key },
-      message: i18n.t('shortcuts.conflict.builtin', { key }),
+      message: i18n.t('shortcuts.conflict.builtin', { key: i18n.t(`shortcuts.${key}`) }),
     }
   }
   // 3. 插件命令快捷键
