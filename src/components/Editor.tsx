@@ -278,10 +278,10 @@ function WelcomeScreen() {
 
         {/* Keyboard Shortcuts Hint */}
         <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-          <span><kbd className="font-mono px-1 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>⌘P</kbd> {t('welcome.quickOpen')}</span>
-          <span><kbd className="font-mono px-1 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>⌘N</kbd> {t('welcome.newFile')}</span>
-          <span><kbd className="font-mono px-1 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>⌘S</kbd> {t('welcome.save')}</span>
-          <span><kbd className="font-mono px-1 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>⌘,</kbd> {t('welcome.settings')}</span>
+          <span><kbd className="font-mono px-1 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>{getShortcut('commandPalette')}</kbd> {t('welcome.quickOpen')}</span>
+          <span><kbd className="font-mono px-1 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>{getShortcut('newFile')}</kbd> {t('welcome.newFile')}</span>
+          <span><kbd className="font-mono px-1 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>{getShortcut('saveFile')}</kbd> {t('welcome.save')}</span>
+          <span><kbd className="font-mono px-1 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}>{getShortcut('settings')}</kbd> {t('welcome.settings')}</span>
         </div>
       </div>
     </div>

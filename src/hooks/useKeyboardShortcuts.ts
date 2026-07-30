@@ -397,11 +397,11 @@ export function useKeyboardShortcuts() {
       for (const [bindingKey, value] of Object.entries(bindings)) {
         if (!value) continue
         if (!matchShortcut(e, value)) continue
-        // bindingKey 格式 pluginId:commandId
-        const firstColon = bindingKey.indexOf(':')
-        if (firstColon <= 0) continue
-        const pluginId = bindingKey.slice(0, firstColon)
-        const commandId = bindingKey.slice(firstColon + 1)
+        // bindingKey 格式 pluginId:commandId（pluginId 可能含冒号，如 reverse-DNS）
+        const lastColon = bindingKey.lastIndexOf(':')
+        if (lastColon <= 0) continue
+        const pluginId = bindingKey.slice(0, lastColon)
+        const commandId = bindingKey.slice(lastColon + 1)
         const registered = listPluginCommands().find(
           (cmd) =>
             cmd.id === commandId &&

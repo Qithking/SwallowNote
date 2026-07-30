@@ -96,6 +96,11 @@ function codeToKeyName(code: string): string | null {
   return CODE_TO_KEY[code] ?? null
 }
 
+/** 检测当前是否为 macOS 平台（使用 navigator.userAgent，避免已废弃的 navigator.platform） */
+function isMacPlatform(): boolean {
+  return navigator.userAgent.toUpperCase().includes('MAC')
+}
+
 export function matchShortcut(
   e: KeyboardEvent,
   shortcutString: string
@@ -117,10 +122,12 @@ export function matchShortcut(
   // 主匹配：直接比较 e.key
   let keyMatch = keyLower === mainKey
 
-  // macOS Delete 与 Backspace 互相兼容
-  if (!keyMatch) {
-    if (mainKey === 'delete' && keyLower === 'backspace') keyMatch = true
-    else if (mainKey === 'backspace' && keyLower === 'delete') keyMatch = true
+  // macOS 兼容：Mac 键盘的 Backspace 键物理标记为 "Delete"，
+  // 但 e.key 仍为 'Backspace'。当用户在 Mac 上按物理 Delete 键时，
+  // e.key === 'backspace'，但期望匹配 shortcut 中的 'delete'。
+  // 仅在 macOS 上启用此兼容，避免 Windows 上 Ctrl+Backspace 误匹配 Ctrl+Delete。
+  if (!keyMatch && isMacPlatform() && mainKey === 'delete' && keyLower === 'backspace') {
+    keyMatch = true
   }
 
   if (!keyMatch) {
@@ -215,8 +222,7 @@ export function findShortcutConflictDetailed(
 }
 
 export function formatShortcutForDisplay(shortcut: string): string {
-  const isMac = navigator.platform.toUpperCase().includes('MAC')
-  if (!isMac) return shortcut
+  if (!isMacPlatform()) return shortcut
   return shortcut
     .replace('Ctrl+', '⌘+')
     .replace('Shift+', '⇧+')

@@ -57,16 +57,22 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
     if (!recording) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-
       if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
         handleStopRecording()
         return
       }
 
       const parsed = parseKeyEvent(e)
-      if (!parsed) return
+      if (!parsed) {
+        // 纯修饰键放行，不阻止默认行为
+        return
+      }
+
+      // 确认 chord 后消费事件并阻止冒泡
+      e.preventDefault()
+      e.stopPropagation()
 
       // Use the detailed conflict checker so both built-in and
       // plugin-command clashes are detected.
