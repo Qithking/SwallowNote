@@ -58,6 +58,10 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     disconnect() {}
   } as any
 }
+// jsdom 不实现 Element.scrollIntoView, 组件 (如 SettingsView) 调用会抛 TypeError
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function () {}
+}
 
 // ─── Per-file cleanup ──────────────────────────────────────────────────────
 // The plugin permission guard stores grants in localStorage. Tests

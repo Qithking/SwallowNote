@@ -154,9 +154,11 @@ function SettingsView() {
   useEffect(() => {
     loadAiRolePrompts()
       .then((prompts) => {
-        setRolePrompts(prompts)
-        if (prompts.length > 0) {
-          setSelectedRoleKey(prompts[0].role_key)
+        // 防御: Tauri 命令可能返回 undefined (测试环境或后端 bug), fallback 为空数组
+        const safePrompts = Array.isArray(prompts) ? prompts : []
+        setRolePrompts(safePrompts)
+        if (safePrompts.length > 0) {
+          setSelectedRoleKey(safePrompts[0].role_key)
         }
       })
       .catch((e) => logger.error('settings', 'Failed to load AI role prompts:', e))
