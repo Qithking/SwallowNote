@@ -55,8 +55,8 @@ pub fn cleanup_stale_askpass_scripts() {
 ///   即使脚本残留也不会泄露凭证。
 pub fn create_askpass_script(
     prefix: &str,
-    _username: &str,
-    _password: &str,
+    username: &str,
+    password: &str,
 ) -> Result<(String, TempScriptGuard), String> {
     let temp_dir = std::env::temp_dir();
     let unique_id = uuid::Uuid::new_v4().to_string();
