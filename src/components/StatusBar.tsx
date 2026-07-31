@@ -36,6 +36,8 @@ function StatusBar() {
   const toggleLogViewer = useUIStore((s) => s.toggleLogViewer)
   const customShortcuts = useUIStore((s) => s.customShortcuts)
   const syncStatus = useGitStore((s) => s.syncStatus)
+  // 订阅实时 conflictRepos, 解决冲突后立即归零 (syncStatus.conflicted 是 pull 快照, 不实时)
+  const conflictRepos = useGitStore((s) => s.conflictRepos)
   const cloneIsRunning = useCloneStore((s) => s.isCloning)
   const statusCloneUrl = useCloneStore((s) => s.cloneUrl)
   const statusClonePercent = useCloneStore((s) => s.clonePercent)
@@ -532,11 +534,11 @@ function StatusBar() {
                         <XCircle size={12} className="text-red-500" />
                         <span className="text-[11px]">{syncStatus.failed}</span>
                       </span>
-                      {/* 冲突图标+数量 */}
-                      {syncStatus.conflicted > 0 && (
+                      {/* 冲突图标+数量 — 基于 conflictRepos 实时状态, 解决后立即归零 */}
+                      {conflictRepos.length > 0 && (
                         <span className="flex items-center gap-0.5">
                           <AlertTriangle size={12} className="text-yellow-500" />
-                          <span className="text-[11px]">{syncStatus.conflicted}</span>
+                          <span className="text-[11px]">{conflictRepos.length}</span>
                         </span>
                       )}
                     </>
@@ -549,7 +551,7 @@ function StatusBar() {
                   : t('statusBar.syncResultTooltip', {
                       succeeded: syncStatus.succeeded,
                       failed: syncStatus.failed,
-                      conflicted: syncStatus.conflicted,
+                      conflicted: conflictRepos.length,
                     })}
               </TooltipContent>
             </Tooltip>
