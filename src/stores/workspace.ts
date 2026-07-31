@@ -2,13 +2,13 @@
  * Workspace Store - Manages workspace state
  */
 import { create } from 'zustand'
-import { getLatestFolder, saveFolderHistory, getFolderHistory, scanGitRepos, watchDirectory, unwatchDirectory } from '@/lib/tauri'
+import { logger } from '@/lib/logger'
+import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory } from '@/lib/tauri'
 import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
 import { useEditorStore, EditorTab } from './editor'
-import { useGitStore, mapRepoInfosToRepositories } from './git'
-import i18n from '@/i18n'
+import { useGitStore } from './git'
 
 export interface WorkspaceState {
   rootPath: string | null
@@ -54,11 +54,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({ rootPath: path, isLoading: false })
 
       // 非阻塞：保存历史、启动文件监听和frontmatter扫描
-      saveFolderHistory(path).catch(err => console.warn('Failed to save folder history:', err))
-      watchDirectory(path).catch(err => console.warn(`Failed to watch directory ${path}:`, err))
-      triggerFrontmatterScan(path).catch(err => console.warn(`Failed to trigger frontmatter scan for ${path}:`, err))
+      saveFolderHistory(path).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
+      watchDirectory(path).catch(err => logger.warn('workspace-store', `Failed to watch directory ${path}:`, err))
+      triggerFrontmatterScan(path).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${path}:`, err))
     } catch (err) {
-      console.error('Failed to open folder:', err)
+      logger.error('workspace-store', 'Failed to open folder:', err)
       set({ error: `Failed to open folder: ${err}`, isLoading: false, rootPath: null })
       const fileTreeStore = useFileTreeStore.getState()
       fileTreeStore.clearAll()
@@ -71,7 +71,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         await get().openFolder(lastPath)
       }
     } catch (err) {
-      console.warn('Failed to load last folder:', err)
+      logger.warn('workspace-store', 'Failed to load last folder:', err)
     }
   },
   loadLatestByMode: async () => {
@@ -99,11 +99,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
       
       // 异步扫描并缓存 Git 仓库 (延迟执行，避免与文件树加载竞争)
+      // fire-and-forget：App.tsx 的 checkReady 会通过 cachedRepositories.length > 0 等待扫描完成
       setTimeout(() => {
         scanAndCacheGitRepos()
       }, 500)
     } catch (err) {
-      console.warn('Failed to load latest by mode:', err)
+      logger.warn('workspace-store', 'Failed to load latest by mode:', err)
       // Clear state on error to ensure consistent state
       const fileTreeStore = useFileTreeStore.getState()
       fileTreeStore.clearAll()
@@ -119,8 +120,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const fileTreeStore = useFileTreeStore.getState()
     await fileTreeStore.addRoot(path)
     
-    await watchDirectory(path)
-    
+    await watchDirectory(path).catch(err => logger.warn('workspace-store', `Failed to watch directory ${path}:`, err))
+
     // 触发 frontmatter 索引扫描
     triggerFrontmatterScan(path)
     
@@ -191,14 +192,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         })
 
         // 非阻塞：保存历史、启动文件监听和frontmatter扫描
-        saveFolderHistory(workspacePath).catch(err => console.warn('Failed to save folder history:', err))
+        saveFolderHistory(workspacePath).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
         for (const folder of workspace.folders) {
-          watchDirectory(folder).catch(err => console.warn(`Failed to watch directory ${folder}:`, err))
-          triggerFrontmatterScan(folder).catch(err => console.warn(`Failed to trigger frontmatter scan for ${folder}:`, err))
+          watchDirectory(folder).catch(err => logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err))
+          triggerFrontmatterScan(folder).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
         }
       }
     } catch (err) {
-      console.error('Failed to load workspace:', err)
+      logger.error('workspace-store', 'Failed to load workspace:', err)
       set({ error: `Failed to load workspace: ${err}`, isLoading: false, workspaceFolders: [], currentWorkspacePath: null })
       // Clear file tree on error
       const fileTreeStore = useFileTreeStore.getState()
@@ -261,7 +262,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       : state.rootPath
     if (currentPath) {
       saveFolderHistory(currentPath).catch((err) => {
-        console.warn('Failed to save folder history:', err)
+        logger.warn('workspace-store', 'Failed to save folder history:', err)
       })
     }
 
@@ -270,10 +271,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     paths.forEach((folder, index) => {
       setTimeout(() => {
         watchDirectory(folder).catch((err) => {
-          console.warn(`Failed to watch directory ${folder}:`, err)
+          logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err)
         })
         triggerFrontmatterScan(folder).catch((err) => {
-          console.warn(`Failed to trigger frontmatter scan for ${folder}:`, err)
+          logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err)
         })
       }, index * 200)
     })
@@ -286,42 +287,13 @@ async function promptWorkspacePath(): Promise<string | null> {
 }
 
 async function scanAndCacheGitRepos() {
-  try {
-    const { workspaceMode } = useUIStore.getState()
-    const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
-    const gitStore = useGitStore.getState()
+  const { workspaceMode } = useUIStore.getState()
+  const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
+  const gitStore = useGitStore.getState()
 
-    const scanPaths = workspaceMode === 'workspace'
-      ? (workspaceFolders || [])
-      : (rootPath ? [rootPath] : [])
+  const scanPaths = workspaceMode === 'workspace'
+    ? (workspaceFolders || [])
+    : (rootPath ? [rootPath] : [])
 
-    if (scanPaths.length === 0) {
-      gitStore.setCachedRepositories([])
-      return
-    }
-
-    gitStore.setScanProgress({ current: 0, total: scanPaths.length, message: i18n.t('git.scanning') })
-
-    const scanPromises = scanPaths.map(async (path, index) => {
-      try {
-        gitStore.setScanProgress({ current: index, total: scanPaths.length, message: i18n.t('git.scanningPath', { path }) })
-        const repos = await scanGitRepos(path)
-        return repos
-      } catch (e) {
-        console.error(`Failed to scan git repos in ${path}:`, e)
-        return []
-      }
-    })
-
-    const results = await Promise.all(scanPromises)
-    const allRepos = results.flat()
-
-    const cachedRepos = mapRepoInfosToRepositories(allRepos)
-
-    gitStore.setCachedRepositories(cachedRepos)
-    gitStore.clearScanProgress()
-  } catch (e) {
-    console.error('Failed to scan and cache git repos:', e)
-    useGitStore.getState().clearScanProgress()
-  }
+  await gitStore.scanAndCacheRepos(scanPaths)
 }

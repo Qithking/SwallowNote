@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { invoke } from '@tauri-apps/api/core'
 import { cn } from '@/lib/utils'
+import { logger } from '@/lib/logger'
 import { FullPathTooltip } from './FullPathTooltip'
 
 type SearchResult = TSearchResult
@@ -270,7 +271,7 @@ const SearchView = memo(function SearchView() {
       setYamlResults(result)
       setShowYamlFilter(false)
     } catch (e) {
-      console.error('YAML search failed:', e)
+      logger.error('search', 'YAML search failed:', e)
       setYamlResults([])
     } finally {
       setIsYamlSearching(false)
@@ -312,7 +313,7 @@ const SearchView = memo(function SearchView() {
         }, 200)
       }
     } catch (e) {
-      console.error('Failed to open file:', e)
+      logger.error('search', 'Failed to open file:', e)
     }
   }, [addTab])
 

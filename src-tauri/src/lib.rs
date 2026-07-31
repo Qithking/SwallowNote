@@ -12,9 +12,10 @@ use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_autostart::MacosLauncher;
+use log::{info, warn, error};
 
 // 安全地记录窗口首次聚焦时刻；替代 run() 回调里不安全的 static mut。
 static STARTUP_T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
@@ -27,7 +28,7 @@ fn greet(name: &str) -> String {
 
 #[tauri::command]
 fn log_startup_time(stage: &str, elapsed_ms: u64) {
-    println!("[STARTUP-TIME] {} t={}", stage, elapsed_ms);
+    info!("[STARTUP-TIME] {} t={}", stage, elapsed_ms);
 }
 
 /// macOS Dock 图标可见性切换（Regular/Accessory 策略）。
@@ -85,6 +86,45 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .level({
+                    // LOG_LEVEL 环境变量覆盖 > dev/release 默认
+                    match std::env::var("LOG_LEVEL").ok().as_deref() {
+                        Some("trace") => log::LevelFilter::Trace,
+                        Some("debug") => log::LevelFilter::Debug,
+                        Some("info") => log::LevelFilter::Info,
+                        Some("warn") => log::LevelFilter::Warn,
+                        Some("error") => log::LevelFilter::Error,
+                        _ => {
+                            if cfg!(debug_assertions) {
+                                log::LevelFilter::Debug
+                            } else {
+                                log::LevelFilter::Info
+                            }
+                        }
+                    }
+                })
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+                .max_file_size(5 * 1024 * 1024)
+                .targets({
+                    // 日志目录：SWALLOWNOTE_LOG_DIR 环境变量 > exe 父目录/logs > ./logs
+                    let log_dir = resolve_log_dir(
+                        std::env::current_exe().ok().as_deref(),
+                        std::env::var("SWALLOWNOTE_LOG_DIR").ok().as_deref(),
+                    );
+                    [
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                            path: log_dir,
+                            file_name: Some("app.log".to_string()),
+                        }),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                    ]
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![]),
@@ -99,6 +139,7 @@ pub fn run() {
         }))
         .invoke_handler(tauri::generate_handler![
             greet,
+            commands::app::restart_app,
             log_startup_time,
             commands::file::path_exists,
             commands::file::get_file_metadata,
@@ -236,55 +277,96 @@ commands::upgrade::download_latest_release,
         ])
         .setup(|app| {
             let startup_t0 = std::time::Instant::now();
-            println!("[STARTUP-TIME] setup_begin t=0");
+            info!("[STARTUP-TIME] setup_begin t=0");
             // 获取 app_data_dir；测量模式下可通过 SWALLOWNOTE_DATA_DIR 覆盖，避免污染/锁定生产数据
             let app_data_dir = if let Ok(dir) = std::env::var("SWALLOWNOTE_DATA_DIR") {
                 let p = std::path::PathBuf::from(dir);
-                println!("[STARTUP-TIME] app_data_dir_override path={}", p.display());
+                info!("[STARTUP-TIME] app_data_dir_override path={}", p.display());
                 p
             } else {
                 match app.path().app_data_dir() {
                     Ok(d) => d,
                     Err(e) => {
-                        eprintln!("Failed to get app data dir, skipping DB init: {}", e);
+                        error!("Failed to get app data dir, skipping DB init: {}", e);
                         std::path::PathBuf::new()
                     }
                 }
             };
-            std::fs::create_dir_all(&app_data_dir).ok();
-            println!("[STARTUP-TIME] app_data_dir_ready t={}", startup_t0.elapsed().as_millis());
+            if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
+                warn!("create_dir_all failed: {}", e);
+            }
+            info!("[STARTUP-TIME] app_data_dir_ready t={}", startup_t0.elapsed().as_millis());
 
             // 应用启动时清理上次崩溃可能残留的 askpass 脚本，防止明文凭证泄露
             commands::git::cleanup_stale_askpass_scripts();
-            println!("[STARTUP-TIME] askpass_cleanup_done t={}", startup_t0.elapsed().as_millis());
+            info!("[STARTUP-TIME] askpass_cleanup_done t={}", startup_t0.elapsed().as_millis());
 
             // 初始化后端 i18n 翻译
             crate::i18n::init_translations();
-            println!("[STARTUP-TIME] i18n_init_done t={}", startup_t0.elapsed().as_millis());
+            info!("[STARTUP-TIME] i18n_init_done t={}", startup_t0.elapsed().as_millis());
 
             // 仅在成功获取 app_data_dir 时初始化 DB
-            if !app_data_dir.as_os_str().is_empty() {
+            let developer_mode = if !app_data_dir.as_os_str().is_empty() {
                 match db::init_db(app_data_dir.clone()) {
                     Ok(db) => {
+                        // 读取开发者模式设置，用于控制是否启用 DevTools（F12）
+                        let developer_mode = match crate::db::session_state::get_session_state(&db) {
+                            Ok(states) => states
+                                .get("settings.developerMode")
+                                .map(|v| v.trim().eq_ignore_ascii_case("true"))
+                                .unwrap_or(false),
+                            Err(e) => {
+                                warn!("Failed to read developerMode setting: {}", e);
+                                false
+                            }
+                        };
+
                         app.handle().manage(db);
-                        println!("[STARTUP-TIME] db_init_done t={}", startup_t0.elapsed().as_millis());
+                        info!("[STARTUP-TIME] db_init_done t={}", startup_t0.elapsed().as_millis());
                         // 启动 frontmatter 索引子线程（使用独立数据库连接）
                         let index_db_path = app_data_dir.join("swallownote.db");
                         services::frontmatter_index::start_index_thread(index_db_path, app.handle().clone());
-                        println!("[STARTUP-TIME] frontmatter_thread_started t={}", startup_t0.elapsed().as_millis());
+                        info!("[STARTUP-TIME] frontmatter_thread_started t={}", startup_t0.elapsed().as_millis());
+
+                        developer_mode
                     }
                     Err(e) => {
-                        eprintln!("Failed to initialize database: {}", e);
+                        error!("Failed to initialize database: {}", e);
+                        false
                     }
                 }
-            }
+            } else {
+                false
+            };
 
+            // 根据开发者模式设置动态创建主窗口，控制 DevTools（F12）是否可用。
+            // 配置文件中的 app.windows 已移除，防止 Tauri 自动创建默认窗口。
+            // 显式设置 256x256 窗口图标，避免 Tauri 默认从 bundle.icon 数组取第一个 PNG（32x32.png）
+            // 导致任务栏图标在高 DPI 屏幕上显示过小。
+            let _main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("SwallowNote")
+                .inner_size(1200.0, 800.0)
+                .min_inner_size(1000.0, 700.0)
+                .resizable(true)
+                .fullscreen(false)
+                .decorations(false)
+                .transparent(true)
+                .shadow(false)
+                .visible(false)
+                .devtools(developer_mode)
+                .icon(
+                    tauri::image::Image::from_bytes(include_bytes!("../icons/128x128@2x.png"))
+                        .expect("Failed to load window icon"),
+                )?
+                .build()
+                .map_err(|e| format!("Failed to create main window: {}", e))?;
+            info!("[STARTUP-TIME] main_window_created devtools={} t={}", developer_mode, startup_t0.elapsed().as_millis());
 
             let app_handle = app.handle().clone();
             services::file_watcher::init_watcher(app_handle.clone());
             // 监听 plugins 树，外部 storage.json 变更时通知前端。幂等。
             services::file_watcher::watch_plugin_storage(app_handle.clone());
-            println!("[STARTUP-TIME] file_watcher_ready t={}", startup_t0.elapsed().as_millis());
+            info!("[STARTUP-TIME] file_watcher_ready t={}", startup_t0.elapsed().as_millis());
 
             app.handle().manage(commands::git::new_clone_pid_state());
             app.handle().manage(commands::ai::new_shared_ai_proxy_state());
@@ -293,7 +375,7 @@ commands::upgrade::download_latest_release,
             // 启动空闲回收定时器：每 5 分钟扫描，kill 超过 10 分钟未用的插件后端进程
             commands::plugin_invoke::start_idle_reaper(plugin_process_state.clone());
             app.handle().manage(plugin_process_state);
-            println!("[STARTUP-TIME] plugin_state_ready t={}", startup_t0.elapsed().as_millis());
+            info!("[STARTUP-TIME] plugin_state_ready t={}", startup_t0.elapsed().as_millis());
 
             // AI 代理按需启动以节省内存
 
@@ -333,7 +415,18 @@ commands::upgrade::download_latest_release,
                         show_dock_icon();
                     }
                     "quit" => {
-                        app.exit(0);
+                        // 先 emit 事件让前端设置 forceQuit 标志（跳过 closeWithoutExit 的 hide 分支），
+                        // 再立即 window.close() 触发 close-requested。
+                        // emit 是同步派发到 webview，close 触发的 close-requested 时 forceQuit 已设置。
+                        // close-requested handler 使用 onCloseRequested（await async handler），
+                        // 确保 saveSessionStateNow 等 async 保存逻辑完成后再 destroy。
+                        let _ = app.emit("tray-quit-requested", ());
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.close();
+                        } else {
+                            // 窗口不存在时回退到直接退出
+                            app.exit(0);
+                        }
                     }
                     _ => {}
                 })
@@ -353,7 +446,7 @@ commands::upgrade::download_latest_release,
                     }
                 })
                 .build(app)?;
-            println!("[STARTUP-TIME] tray_ready t={}", startup_t0.elapsed().as_millis());
+            info!("[STARTUP-TIME] tray_ready t={}", startup_t0.elapsed().as_millis());
 
             Ok(())
         })
@@ -367,7 +460,7 @@ commands::upgrade::download_latest_release,
             // 记录窗口首次可见/可交互，作为 Rust 侧能观测到的最近似“窗口已显示”时刻
             if let tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Focused(true), .. } = &event {
                 WINDOW_SHOWN_LOGGED.call_once(|| {
-                    println!("[STARTUP-TIME] rust_window_focused t={}", t0.elapsed().as_millis());
+                    info!("[STARTUP-TIME] rust_window_focused t={}", t0.elapsed().as_millis());
                 });
             }
 
@@ -378,7 +471,7 @@ commands::upgrade::download_latest_release,
                 if let Some(db) = app_handle.try_state::<crate::db::Database>() {
                     if let Ok(conn) = db.conn.lock() {
                         if let Err(e) = conn.execute_batch("PRAGMA optimize;") {
-                            eprintln!("[lib] PRAGMA optimize failed: {}", e);
+                            error!("[lib] PRAGMA optimize failed: {}", e);
                         }
                     }
                 }
@@ -396,4 +489,57 @@ commands::upgrade::download_latest_release,
                 }
             }
         });
+}
+
+/// 计算日志目录路径（纯函数，便于测试）。
+///
+/// 优先级：
+/// 1. `SWALLOWNOTE_LOG_DIR` 环境变量（测试/自定义覆盖）
+/// 2. exe 父目录下的 `logs/` 子目录（应用安装目录）
+/// 3. 当前工作目录下的 `logs/`（兜底）
+fn resolve_log_dir(exe_path: Option<&std::path::Path>, env_override: Option<&str>) -> std::path::PathBuf {
+    // 1. 环境变量覆盖（测试/自定义）
+    if let Some(dir) = env_override {
+        return std::path::PathBuf::from(dir);
+    }
+    // 2. exe 父目录下的 logs/ 子目录（应用安装目录）
+    if let Some(exe) = exe_path {
+        if let Some(parent) = exe.parent() {
+            return parent.join("logs");
+        }
+    }
+    // 3. 兜底：当前工作目录下的 logs/
+    std::path::PathBuf::from("logs")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_log_dir;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn resolve_log_dir_uses_exe_parent_logs_subdir() {
+        let exe = Path::new("/usr/local/app/swallownote.exe");
+        let dir = resolve_log_dir(Some(exe), None);
+        assert_eq!(dir, PathBuf::from("/usr/local/app/logs"));
+    }
+
+    #[test]
+    fn resolve_log_dir_env_override_wins() {
+        let exe = Path::new("/usr/local/app/swallownote.exe");
+        let dir = resolve_log_dir(Some(exe), Some("/custom/logs"));
+        assert_eq!(dir, PathBuf::from("/custom/logs"));
+    }
+
+    #[test]
+    fn resolve_log_dir_no_exe_falls_back_to_cwd_logs() {
+        let dir = resolve_log_dir(None, None);
+        assert_eq!(dir, PathBuf::from("logs"));
+    }
+
+    #[test]
+    fn resolve_log_dir_env_override_without_exe() {
+        let dir = resolve_log_dir(None, Some("/var/log/swallownote"));
+        assert_eq!(dir, PathBuf::from("/var/log/swallownote"));
+    }
 }

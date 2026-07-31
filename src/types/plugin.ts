@@ -93,11 +93,22 @@ export type PluginEventHandler<E extends PluginEvent = PluginEvent> = (
 
 // 插件清单（来自 index.js）
 
+/** 插件 logger 接口：5 级日志方法，自动带 plugin:<pluginId> source 前缀 */
+export interface PluginLogger {
+  trace(message: string, ...args: unknown[]): void
+  debug(message: string, ...args: unknown[]): void
+  info(message: string, ...args: unknown[]): void
+  warn(message: string, ...args: unknown[]): void
+  error(message: string, ...args: unknown[]): void
+}
+
 /** 运行时上下文，传递给生命周期 hook */
 export interface PluginContext {
   pluginId: string
   pluginPath: string
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 统一日志通道，自动带 plugin:<pluginId> source 前缀 */
+  log: PluginLogger
 }
 
 /** 生命周期 hook 签名，可同步或异步 */
@@ -339,9 +350,6 @@ export interface PluginIndexEntryVersion {
   changelog: string
   publishedAt: string
 }
-
-/** 市场详情 UI 的别名，规范名为 PluginIndexEntryVersion */
-export type PluginIndexVersion = PluginIndexEntryVersion
 
 export interface PluginIndex {
   schemaVersion: number

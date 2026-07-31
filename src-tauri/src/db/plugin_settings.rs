@@ -1,6 +1,7 @@
 //! 插件设置存储：单表 plugin_settings，values 以 JSON blob 存储 + schema_version。
 
 use rusqlite::{params, Connection, Result};
+use log::error;
 
 /// One field in a `settings.json` schema.
 // 镜像 JS 侧 SettingsField；未知 type 在 install 时拒绝。
@@ -189,7 +190,7 @@ fn parse_values_map(
     let value: serde_json::Value = match serde_json::from_str(trimmed) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!(
+            error!(
                 "[plugin_settings] values_json for {} is corrupt: {}; treating as empty",
                 plugin_id, e
             );

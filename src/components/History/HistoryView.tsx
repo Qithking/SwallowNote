@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { logger } from '@/lib/logger'
 
 const PAGE_SIZE = 50
 
@@ -70,7 +71,7 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       }
       skipRef.current = skip + result.length
     } catch (e) {
-      console.error('gitFileLog error:', e)
+      logger.error('history', 'gitFileLog error:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)
       if (errorMsg === 'NOT_IN_GIT_REPO' || errorMsg.includes('NOT_IN_GIT_REPO')) {
         setNotInRepo(true)
@@ -142,7 +143,7 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       // Update the editor tab content
       updateTabContent(activeTabId, content)
     } catch (e) {
-      console.error('Failed to restore file:', e)
+      logger.error('history', 'Failed to restore file:', e)
     } finally {
       setRestoring(false)
       setRestoreEntry(null)
@@ -193,8 +194,9 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       setHasMore(true)
       skipRef.current = 0
       loadHistory(activeTabPath, 0)
+      toast.success(t('history.pullLatestSuccess'))
     } catch (e) {
-      console.error('Failed to pull latest:', e)
+      logger.error('history', 'Failed to pull latest:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)
       if (errorMsg === 'NO_REMOTE') {
         // 使用 toast 替代原生 alert，与 GitView/SettingsView 等模块保持一致的提示风格
@@ -227,12 +229,16 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
       setHasMore(true)
       skipRef.current = 0
       loadHistory(activeTabPath, 0)
+      toast.success(t('history.forceUploadSuccess'))
     } catch (e) {
-      console.error('Failed to force upload:', e)
+      logger.error('history', 'Failed to force upload:', e)
       const errorMsg = e instanceof Error ? e.message : String(e)
       if (errorMsg === 'NO_REMOTE') {
         // 使用 toast 替代原生 alert，与 pullLatest 分支保持一致
         toast.error(t('history.noRemote'))
+      } else if (errorMsg === 'ALREADY_UP_TO_DATE') {
+        // 本地无改动且与远端同步,提示用户无须重复操作
+        toast.info(t('history.forceUploadAlreadyUpToDate'))
       } else {
         toast.error(t('history.forceUploadFailed', { error: errorMsg }))
       }

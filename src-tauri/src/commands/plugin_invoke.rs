@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
+use log::{info, warn, error};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::oneshot;
@@ -150,7 +151,7 @@ pub fn start_idle_reaper(state: SharedPluginProcessState) {
                 };
                 if let Some(proc) = proc_to_kill {
                     kill_removed_proc(&proc, &plugin_id).await;
-                    eprintln!(
+                    info!(
                         "[plugin_invoke] idle plugin backend reaped (plugin_id={})",
                         plugin_id
                     );
@@ -165,7 +166,6 @@ fn build_command(program: &str) -> Command {
     let mut cmd = Command::new(program);
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
@@ -253,7 +253,7 @@ async fn spawn_plugin_process(
                         continue;
                     }
                     let Some(resp) = JsonRpcResponse::parse(&line) else {
-                        eprintln!(
+                        error!(
                             "[plugin-host] malformed response from '{}': {}",
                             plugin_id_for_reader, line
                         );
@@ -264,7 +264,7 @@ async fn spawn_plugin_process(
                         // receiver 可能已因超时 drop，send 静默失败。
                         let _ = tx.send(resp);
                     } else {
-                        eprintln!(
+                        warn!(
                             "[plugin-host] response with no pending request from '{}': id={}",
                             plugin_id_for_reader, resp.id
                         );
@@ -286,7 +286,7 @@ async fn spawn_plugin_process(
                     break;
                 }
                 Err(e) => {
-                    eprintln!(
+                    error!(
                         "[plugin-host] stdout read error from '{}': {}",
                         plugin_id_for_reader, e
                     );
@@ -296,14 +296,13 @@ async fn spawn_plugin_process(
         }
     });
 
-    // Stderr task: tee the child's stderr to the host's log. We use
-    // eprintln! rather than the `log` crate because the rest of the
-    // codebase does too (no tracing dependency in src-tauri).
+    // Stderr task: tee the child's stderr to the host's log via the
+    // `log` crate so plugin output respects the configured log level.
     let plugin_id_for_stderr = plugin_id.clone();
     let stderr_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
-            eprintln!("[plugin:{}] {}", plugin_id_for_stderr, line);
+            info!("[plugin:{}] {}", plugin_id_for_stderr, line);
         }
     });
 
@@ -457,7 +456,7 @@ pub async fn invoke_plugin(
             drop(pending);
             // 超时诊断日志：便于定位是哪个插件/命令卡住。
             let prev = proc.timeout_count.fetch_add(1, Ordering::Relaxed);
-            eprintln!(
+            warn!(
                 "[plugin_invoke] plugin '{}' command '{}' timed out after {}s (consecutive timeout #{})",
                 proc.plugin_id,
                 command,
@@ -468,7 +467,7 @@ pub async fn invoke_plugin(
             // 避免频繁超时的插件累积僵尸进程；下一次调用会由 get_or_spawn 重新拉起。
             const TIMEOUT_THRESHOLD: u32 = 3;
             if prev + 1 >= TIMEOUT_THRESHOLD {
-                eprintln!(
+                warn!(
                     "[plugin_invoke] plugin '{}' reached consecutive timeout threshold ({}), killing backend to reclaim resources",
                     proc.plugin_id, TIMEOUT_THRESHOLD
                 );

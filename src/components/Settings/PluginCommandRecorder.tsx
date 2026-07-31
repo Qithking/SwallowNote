@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/stores'
@@ -44,7 +45,14 @@ export function PluginCommandRecorder({ bindingKey, command }: PluginCommandReco
     pluginCommandShortcuts,
     setPluginCommandShortcut,
     resetPluginCommandShortcut,
-  } = useUIStore()
+  } = useUIStore(
+    useShallow((s) => ({
+      customShortcuts: s.customShortcuts,
+      pluginCommandShortcuts: s.pluginCommandShortcuts,
+      setPluginCommandShortcut: s.setPluginCommandShortcut,
+      resetPluginCommandShortcut: s.resetPluginCommandShortcut,
+    })),
+  )
   const [recording, setRecording] = useState(false)
   const [conflict, setConflict] = useState<ShortcutConflict | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -132,7 +140,7 @@ export function PluginCommandRecorder({ bindingKey, command }: PluginCommandReco
             variant="outline"
             className="font-mono text-xs px-2 py-1 border-primary text-primary animate-pulse"
           >
-            {t('settings.shortcuts.recording')}
+            {t('shortcuts.recording')}
           </Badge>
         ) : (
           <Badge
@@ -156,7 +164,7 @@ export function PluginCommandRecorder({ bindingKey, command }: PluginCommandReco
             resetPluginCommandShortcut(bindingKey)
             setConflict(null)
           }}
-          title={t('settings.shortcuts.reset')}
+          title={t('shortcuts.reset')}
         >
           <RotateCcw size={12} />
         </Button>

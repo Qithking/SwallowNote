@@ -6,14 +6,13 @@
  * 工具函数来自 @/lib/utils/treeUtils
  */
 import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
-import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, Pin, ArrowUpDown, ClipboardPaste } from 'lucide-react'
+import { FilePlus, FolderPlus, Folder, FolderOpen, RefreshCw, ChevronRight, Save, Loader2, Pin, ArrowUpDown } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
-import { loadFileContent, loadDirectory } from '@/lib/api'
-import { openFolderDialog, deleteFile } from '@/lib/tauri'
-import { invoke } from '@tauri-apps/api/core'
+import { loadFileContent } from '@/lib/api'
+import { openFolderDialog } from '@/lib/tauri'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -23,12 +22,9 @@ import { useTranslation } from 'react-i18next'
 import { dispatchBuiltin } from '@/hooks/useKeyboardShortcuts'
 import { useFileTreeActions } from '@/hooks/useFileTreeActions'
 import { useFileTreeDragDrop } from '@/hooks/useFileTreeDragDrop'
-import { findNodeByPath, collectAllPaths, updateNodesWithChildren } from '@/lib/utils/treeUtils'
+import { findNodeByPath, collectAllPaths } from '@/lib/utils/treeUtils'
 import { countWords } from '@/lib/utils/wordCount'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
-import { ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
-import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { getFileFrontmatter, getFileFrontmattersByPrefix } from '@/lib/utils/searchQuery'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
+import { logger } from '@/lib/logger'
 
 export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
 
@@ -329,12 +326,6 @@ const TreeNodeItem = memo(function TreeNodeItem({
       onDragLeave={onDragLeave}
       onDrop={(e) => onDrop(e, node)}
       onDragEnd={onDragEnd}
-      // Stop the contextmenu event from bubbling to the outer
-      // ScrollArea trigger (fileTreeEmpty) so per-node and empty-area
-      // menus don't both open on the same right-click. Use the native
-      // event because Radix registers its listener via
-      // addEventListener, which sits below React's synthetic handler.
-      onContextMenu={(e) => e.nativeEvent.stopImmediatePropagation()}
     >
       <TreeNodeContextMenu
         node={node}
@@ -365,75 +356,8 @@ export const FileTreeView = memo(function FileTreeView() {
   const lastClickedPath = useFileTreeStore((s) => s.lastClickedPath)
   const setLastClickedPath = useFileTreeStore((s) => s.setLastClickedPath)
 const clearMultiSelection = useFileTreeStore((s) => s.clearMultiSelection)
-  const setNodes = useFileTreeStore((s) => s.setNodes)
-  const clipboardFiles = useUIStore((s) => s.clipboardFiles)
-  const clipboardIsCut = useUIStore((s) => s.clipboardIsCut)
-  const setClipboardFiles = useUIStore((s) => s.setClipboardFiles)
-  const showToast = useUIStore((s) => s.showToast)
-  const showAllFiles = useUIStore((s) => s.showAllFiles)
-  const markdownOnly = useUIStore((s) => s.markdownOnly)
   const rootPath = useWorkspaceStore((s) => s.rootPath)
-  const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
 const { t } = useTranslation()
-
-  const hasClipboard = clipboardFiles.length > 0
-
-  // 空白区域粘贴的目标目录
-  const getEmptyAreaPasteTarget = useCallback((): string | null => {
-    if (workspaceMode === 'folder') return rootPath
-    // 工作区模式：优先用选中路径的根目录，否则用第一个根目录
-    if (selectedPath && workspaceFolders.length > 0) {
-      const folder = workspaceFolders.find(f => selectedPath.startsWith(f))
-      if (folder) return folder
-    }
-    return workspaceFolders[0] || null
-  }, [workspaceMode, rootPath, selectedPath, workspaceFolders])
-
-  // 空白区域粘贴处理
-  const handleEmptyAreaPaste = useCallback(async () => {
-    const targetDir = getEmptyAreaPasteTarget()
-    if (!targetDir || !hasClipboard) return
-
-    let successCount = 0
-    let failCount = 0
-    let skipCount = 0
-
-    for (const sourcePath of clipboardFiles) {
-      const fileName = sourcePath.split(/[\\/]/).pop() || sourcePath
-      const destPath = `${targetDir}/${fileName}`
-      if (sourcePath === destPath) { skipCount++; continue }
-      try {
-        await invoke('copy_file', { req: { old_path: sourcePath, new_path: destPath } })
-        successCount++
-        if (clipboardIsCut) {
-          await deleteFile(sourcePath)
-          const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          invalidateFrontmatterCache(sourcePath)
-          const editorStore = useEditorStore.getState()
-          editorStore.updateTabPath(sourcePath, destPath, fileName)
-        }
-      } catch (e) {
-        console.error('Failed to paste:', e)
-        failCount++
-      }
-    }
-
-    if (clipboardIsCut) {
-      setClipboardFiles([], false)
-    }
-
-    // 刷新目标目录
-    const currentNodes = useFileTreeStore.getState().nodes
-    const children = await loadDirectory(targetDir, showAllFiles, markdownOnly)
-    const updatedNodes = updateNodesWithChildren(currentNodes, targetDir, children)
-    setNodes(updatedNodes)
-
-    if (failCount === 0 && skipCount === 0) {
-      showToast(t('contextMenu.pastedSuccess', { count: successCount }))
-    } else if (failCount > 0) {
-      showToast(t('contextMenu.pastedPartial', { count: successCount, failCount }))
-    }
-  }, [getEmptyAreaPasteTarget, hasClipboard, clipboardFiles, clipboardIsCut, setClipboardFiles, showAllFiles, markdownOnly, setNodes, showToast, t])
 
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [sortMode, setSortMode] = useState<FileTreeSortMode>('default')
@@ -627,12 +551,6 @@ const { t } = useTranslation()
     handleDeleteSelected,
   } = useFileTreeActions()
 
-  // ── 空区域右键菜单（fileTreeEmpty）──
-  // 节点自身已带 trigger；外层 trigger 接收不到节点区域的右键事件
-  // （Radix 通过 capture 找到最近的 trigger 打开 menu）。
-  // 我们不需要在空白区域做特殊处理——外层 trigger 监听 ScrollArea
-  // 整体右键，节点 trigger 在子元素上优先触发，自然分流。
-
   // ── 拖拽逻辑 ──
   const {
     dragOverPath,
@@ -650,7 +568,7 @@ const { t } = useTranslation()
     try {
       await useFileTreeStore.getState().refreshExpanded()
     } catch (e) {
-      console.error('Failed to refresh:', e)
+      logger.error('file-tree', 'Failed to refresh:', e)
     } finally {
       setIsRefreshing(false)
     }
@@ -701,7 +619,7 @@ const { t } = useTranslation()
           wordCount: countWords(content),
         })
       })
-      .catch(console.error)
+      .catch((e) => logger.error('file-tree', 'Failed to open file from tree:', e))
   }, [editingPath, lastClickedPath, clearMultiSelection, setSelectedPath, setLastClickedPath, toggleNode, addTab, setMultiSelectedPaths])
 
   const handleOpenFolder = async () => {
@@ -867,130 +785,100 @@ const { t } = useTranslation()
           )}
         </div>
       </div>
-      <ContextMenuPrimitive.Root>
-        <ContextMenuPrimitive.Trigger asChild>
-          <ScrollArea className="flex-1 py-1">
-            {isLoading ? (
-              <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
-                <RefreshCw size={16} className="animate-spin" />
-              </div>
-            ) : nodes.length > 0 ? (
-              <div ref={parentRef} data-file-tree-scroll style={{ height: '100%', overflow: 'auto' }}>
-                <div
-                  style={{
-                    height: `${virtualizer.getTotalSize()}px`,
-                    width: '100%',
-                    position: 'relative',
-                  }}
-                >
-                  {virtualItems.map((virtualItem) => {
-                    const { node, depth, isPinned, isPinnedSeparator } = flattenedNodes[virtualItem.index]
-
-                    // Pinned separator
-                    if (isPinnedSeparator) {
-                      return (
-                        <div
-                          key={node.path}
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            height: `${virtualItem.size}px`,
-                            transform: `translateY(${virtualItem.start}px)`,
-                          }}
-                        >
-                          <div
-                            className="flex items-center h-[22px] px-2"
-                            style={{ paddingLeft: `${depth * 12 + 8}px` }}
-                          >
-                            <div className="flex-1 border-b" style={{ borderColor: 'var(--border-color)' }} />
-                          </div>
-                        </div>
-                      )
-                    }
-
-                    return (
-                      <div
-                        key={node.path}
-                        style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          width: '100%',
-                          height: `${virtualItem.size}px`,
-                          transform: `translateY(${virtualItem.start}px)`,
-                        }}
-                      >
-                        <TreeNodeItem
-                          node={node}
-                          depth={depth}
-                          isEditing={editingPath === node.path}
-                          isSelected={node.path === selectedPath}
-                          isMultiSelected={multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1}
-                          isDragOver={dragOverPath === node.path}
-                          isDragging={dragSourcePaths.includes(node.path)}
-                          isPinned={isPinned}
-                          isExpanded={expanded.has(node.path)}
-                          editingName={editingName}
-                          newItem={newItem}
-                          inputRef={inputRef}
-                          onSelect={handleSelect}
-                          onToggle={toggleNode}
-                          onStartEdit={handleStartEdit}
-                          onNewItem={handleNewItem}
-                          onFinishEdit={handleFinishEdit}
-                          onCancelEdit={handleCancelEdit}
-                          onFinishNewItem={handleFinishNewItem}
-                          onCancelNewItem={handleCancelNewItem}
-                          onDragStart={handleDragStart}
-                          onDragOver={handleDragOver}
-                          onDragLeave={handleDragLeave}
-                          onDrop={handleDrop}
-                          onDragEnd={handleDragEnd}
-                          setEditingName={setEditingName}
-                          setNewItem={setNewItem}
-                        />
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
-                <FolderOpen size={24} className="mb-2 opacity-50" />
-                <p>{t('fileTree.noFolderOpened')}</p>
-              </div>
-            )}
-          </ScrollArea>
-        </ContextMenuPrimitive.Trigger>
-        {/* Plugin-contributed items for the file-tree empty area. The
-            helper renders nothing when no plugin is registered, so
-            the menu is invisible until a contribution exists.
-            Per-node right-clicks open TreeNodeContextMenu (the inner
-            trigger fires first), so this outer menu is effectively
-            only shown for the empty / non-node region. */}
-        <ContextMenuContent
-          className="min-w-[160px]"
-          style={{
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border-color)',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-          }}
-        >
-          {hasClipboard && (
-            <ContextMenuItem
-              onClick={handleEmptyAreaPaste}
-              style={{ color: 'var(--text-secondary)' }}
-              className="cursor-pointer"
+      <ScrollArea className="flex-1 py-1">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
+            <RefreshCw size={16} className="animate-spin" />
+          </div>
+        ) : nodes.length > 0 ? (
+          <div ref={parentRef} data-file-tree-scroll style={{ height: '100%' }}>
+            <div
+              style={{
+                height: `${virtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
             >
-              <ClipboardPaste size={12} />
-              <span>{t('contextMenu.paste')}</span>
-            </ContextMenuItem>
-          )}
-          <PluginContextMenuItems location="fileTreeEmpty" ctx={{}} />
-        </ContextMenuContent>
-      </ContextMenuPrimitive.Root>
+              {virtualItems.map((virtualItem) => {
+                const { node, depth, isPinned, isPinnedSeparator } = flattenedNodes[virtualItem.index]
+
+                // Pinned separator
+                if (isPinnedSeparator) {
+                  return (
+                    <div
+                      key={node.path}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: `${virtualItem.size}px`,
+                        transform: `translateY(${virtualItem.start}px)`,
+                      }}
+                    >
+                      <div
+                        className="flex items-center h-[22px] px-2"
+                        style={{ paddingLeft: `${depth * 12 + 8}px` }}
+                      >
+                        <div className="flex-1 border-b" style={{ borderColor: 'var(--border-color)' }} />
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div
+                    key={node.path}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualItem.size}px`,
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                  >
+                    <TreeNodeItem
+                      node={node}
+                      depth={depth}
+                      isEditing={editingPath === node.path}
+                      isSelected={node.path === selectedPath}
+                      isMultiSelected={multiSelectedPaths.has(node.path) && multiSelectedPaths.size > 1}
+                      isDragOver={dragOverPath === node.path}
+                      isDragging={dragSourcePaths.includes(node.path)}
+                      isPinned={isPinned}
+                      isExpanded={expanded.has(node.path)}
+                      editingName={editingName}
+                      newItem={newItem}
+                      inputRef={inputRef}
+                      onSelect={handleSelect}
+                      onToggle={toggleNode}
+                      onStartEdit={handleStartEdit}
+                      onNewItem={handleNewItem}
+                      onFinishEdit={handleFinishEdit}
+                      onCancelEdit={handleCancelEdit}
+                      onFinishNewItem={handleFinishNewItem}
+                      onCancelNewItem={handleCancelNewItem}
+                      onDragStart={handleDragStart}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onDragEnd={handleDragEnd}
+                      setEditingName={setEditingName}
+                      setNewItem={setNewItem}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
+            <FolderOpen size={24} className="mb-2 opacity-50" />
+            <p>{t('fileTree.noFolderOpened')}</p>
+          </div>
+        )}
+      </ScrollArea>
     </div>
   )
 })

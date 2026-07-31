@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { logger } from '@/lib/logger'
 import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { openFolderDialog, openWorkspaceDialog, createFile, writeFile } from '@/lib/tauri'
@@ -106,7 +107,7 @@ export async function handleNewFile() {
     )
     useFileTreeStore.getState().setSelectedPath(fullPath)
   } catch (e) {
-    console.error('Failed to create file:', e)
+    logger.error('keyboard', 'Failed to create file:', e)
   }
 }
 
@@ -138,7 +139,7 @@ async function handleNewFolder() {
       updateNodesWithChildren(nodes, targetDir, newChildren)
     )
   } catch (e) {
-    console.error('Failed to create folder:', e)
+    logger.error('keyboard', 'Failed to create folder:', e)
   }
 }
 
@@ -157,7 +158,7 @@ export async function handleOpenFile() {
       }
     }
   } catch (e) {
-    console.error('Failed to open:', e)
+    logger.error('keyboard', 'Failed to open:', e)
   }
 }
 
@@ -197,7 +198,7 @@ export async function handleSaveFile() {
         await invoke('index_saved_file', { path: activeTab.path })
       } catch (e) {
         // 索引线程会异步补偿，记录日志便于排查
-        console.error('Failed to index saved file:', activeTab.path, e)
+        logger.error('keyboard', 'Failed to index saved file:', activeTab.path, e)
       }
     }
     // CAS 保护：仅期间无新编辑才清脏标记
@@ -221,10 +222,10 @@ export async function handleSaveFile() {
     try {
       await gitAutoCommit(activeTab.path)
     } catch (e) {
-      console.debug('[useKeyboardShortcuts] Git auto-commit skipped:', e)
+      logger.debug('keyboard', 'Git auto-commit skipped:', e)
     }
   } catch (e) {
-    console.error('Failed to save file:', e)
+    logger.error('keyboard', 'Failed to save file:', e)
   } finally {
     // 延迟移除 savingPaths，等 file-watcher 平息
     const savedPath = activeTab.path
@@ -283,7 +284,7 @@ async function handleOpenExplorer() {
   try {
     await invoke('open_in_finder', { path: selectedPath })
   } catch (e) {
-    console.error('Failed to open in explorer:', e)
+    logger.error('keyboard', 'Failed to open in explorer:', e)
   }
 }
 
@@ -331,13 +332,14 @@ export async function handleRefreshFileTree() {
   try {
     await useFileTreeStore.getState().refreshExpanded()
   } catch (e) {
-    console.error('Failed to refresh file tree:', e)
+    logger.error('keyboard', 'Failed to refresh file tree:', e)
   }
 }
 
 export function useKeyboardShortcuts() {
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
+  const toggleLogViewer = useUIStore((s) => s.toggleLogViewer)
 
   // 用 ref 持有 tabs，避免每次切换重新绑定 listener
   const tabsRef = useRef(useEditorStore.getState().tabs)
@@ -376,23 +378,30 @@ export function useKeyboardShortcuts() {
 
       if (dispatchBuiltin(e, 'commandPalette', toggleCommandPalette)) return
 
-      // CodeMirror 内不拦截 Ctrl+F，交给其内置搜索
-      const isInCodeMirror = !!(e.target as HTMLElement | null)?.closest?.('.cm-editor')
-      if (!isInCodeMirror && dispatchBuiltin(e, 'searchPanel', handleToggleSearch)) return
+      // Ctrl+F → 编辑器查找/替换;Ctrl+Shift+F → 全局搜索侧边栏
+      // CodeMirror editor 已获得焦点时由 CodeEditor 内部 keymap 处理,避免双重派发
+      const activeElement = document.activeElement
+      const isCodeMirrorFocused = activeElement && activeElement.closest('.cm-editor') != null
+      if (!isCodeMirrorFocused && dispatchBuiltin(e, 'findReplace', () => {
+        window.dispatchEvent(new CustomEvent('editor:toggle-find-replace'))
+      })) return
+
+      if (dispatchBuiltin(e, 'searchPanel', handleToggleSearch)) return
 
       if (dispatchBuiltin(e, 'toggleSidebar', toggleSidebar)) return
       if (dispatchBuiltin(e, 'settings', handleToggleSettings)) return
+      if (dispatchBuiltin(e, 'logViewer', toggleLogViewer)) return
 
       // 派发插件命令快捷键；每次 keypress 查最新绑定
       const bindings = useUIStore.getState().pluginCommandShortcuts
       for (const [bindingKey, value] of Object.entries(bindings)) {
         if (!value) continue
         if (!matchShortcut(e, value)) continue
-        // bindingKey 格式 pluginId:commandId
-        const firstColon = bindingKey.indexOf(':')
-        if (firstColon <= 0) continue
-        const pluginId = bindingKey.slice(0, firstColon)
-        const commandId = bindingKey.slice(firstColon + 1)
+        // bindingKey 格式 pluginId:commandId（pluginId 可能含冒号，如 reverse-DNS）
+        const lastColon = bindingKey.lastIndexOf(':')
+        if (lastColon <= 0) continue
+        const pluginId = bindingKey.slice(0, lastColon)
+        const commandId = bindingKey.slice(lastColon + 1)
         const registered = listPluginCommands().find(
           (cmd) =>
             cmd.id === commandId &&
@@ -405,7 +414,7 @@ export function useKeyboardShortcuts() {
           void registered.onTrigger()
         } catch (err) {
           // buggy 插件不能破坏全局 listener
-          console.error('[useKeyboardShortcuts] plugin onTrigger threw:', err)
+          logger.error('keyboard', 'plugin onTrigger threw:', err)
         }
         return
       }
@@ -447,5 +456,6 @@ export function useKeyboardShortcuts() {
   }, [
     toggleCommandPalette,
     toggleSidebar,
+    toggleLogViewer,
   ])
 }

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import {
   Settings as SettingsIcon,
   Palette,
@@ -52,6 +53,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/components/ui/alert-dialog'
+import { logger } from '@/lib/logger'
 
 type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | 'development'
 
@@ -91,7 +93,27 @@ function SettingsView() {
     customThemes, activeLightCustomThemeId, activeDarkCustomThemeId,
     setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
     developerMode, setDeveloperMode,
-  } = useUIStore()
+  } = useUIStore(
+    useShallow((s) => ({
+      theme: s.theme, setTheme: s.setTheme,
+      autoStart: s.autoStart, setAutoStart: s.setAutoStart,
+      autoCheckUpdate: s.autoCheckUpdate, setAutoCheckUpdate: s.setAutoCheckUpdate,
+      closeWithoutExit: s.closeWithoutExit, setCloseWithoutExit: s.setCloseWithoutExit,
+      noteWidth: s.noteWidth, setNoteWidth: s.setNoteWidth,
+      showAllFiles: s.showAllFiles, setShowAllFiles: s.setShowAllFiles,
+      markdownOnly: s.markdownOnly, setMarkdownOnly: s.setMarkdownOnly,
+      syncInterval: s.syncInterval, setSyncInterval: s.setSyncInterval,
+      autoSyncPush: s.autoSyncPush, setAutoSyncPush: s.setAutoSyncPush,
+      uploadPath: s.uploadPath, setUploadPath: s.setUploadPath,
+      showConflictBadge: s.showConflictBadge, setShowConflictBadge: s.setShowConflictBadge,
+      aiPort: s.aiPort, setAiPort: s.setAiPort,
+      aiModels: s.aiModels, activeAiModelId: s.activeAiModelId, defaultAiModelId: s.defaultAiModelId,
+      addAiModel: s.addAiModel, removeAiModel: s.removeAiModel, setActiveAiModel: s.setActiveAiModel, setDefaultAiModel: s.setDefaultAiModel, updateAiModelApiKey: s.updateAiModelApiKey,
+      customThemes: s.customThemes, activeLightCustomThemeId: s.activeLightCustomThemeId, activeDarkCustomThemeId: s.activeDarkCustomThemeId,
+      setActiveCustomThemeId: s.setActiveCustomThemeId, addCustomTheme: s.addCustomTheme, deleteCustomTheme: s.deleteCustomTheme, renameCustomTheme: s.renameCustomTheme, updateCustomThemeColor: s.updateCustomThemeColor,
+      developerMode: s.developerMode, setDeveloperMode: s.setDeveloperMode,
+    })),
+  )
 
   const [customThemeTab, setCustomThemeTab] = useState<'light' | 'dark'>('light')
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -132,12 +154,14 @@ function SettingsView() {
   useEffect(() => {
     loadAiRolePrompts()
       .then((prompts) => {
-        setRolePrompts(prompts)
-        if (prompts.length > 0) {
-          setSelectedRoleKey(prompts[0].role_key)
+        // 防御: Tauri 命令可能返回 undefined (测试环境或后端 bug), fallback 为空数组
+        const safePrompts = Array.isArray(prompts) ? prompts : []
+        setRolePrompts(safePrompts)
+        if (safePrompts.length > 0) {
+          setSelectedRoleKey(safePrompts[0].role_key)
         }
       })
-      .catch(console.error)
+      .catch((e) => logger.error('settings', 'Failed to load AI role prompts:', e))
   }, [])
 
   // Notify AI panel to reload role prompts after any change
@@ -290,7 +314,7 @@ function SettingsView() {
         } catch (err) {
           // Non-fatal — the file-watcher subscription
           // (Plan B) will catch up within ~500 ms.
-          console.warn('[Settings] failed to re-seed storage sizes after import:', err)
+          logger.warn('settings', 'failed to re-seed storage sizes after import:', err)
         }
       }
     } catch (e) {
@@ -584,7 +608,7 @@ function SettingsView() {
                                           className="text-[10px] text-muted-foreground hover:text-destructive"
                                           onClick={() => updateCustomThemeColor(activeTheme.id, customThemeTab, field.gradientKey!, '')}
                                         >
-                                          {t('common.clear', 'Clear')}
+                                          {t('common.clear')}
                                         </button>
                                       )}
                                     </div>
@@ -1074,13 +1098,13 @@ function SettingsView() {
             {/* ===== 快捷键 ===== */}
             <section id="section-shortcuts" className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold">{t('settings.shortcuts.title')}</h2>
+                <h2 className="text-base font-semibold">{t('shortcuts.title')}</h2>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => useUIStore.getState().resetAllShortcuts()}
                 >
-                  {t('settings.shortcuts.resetAll')}
+                  {t('shortcuts.resetAll')}
                 </Button>
               </div>
               <Card>
@@ -1091,8 +1115,8 @@ function SettingsView() {
                       className="flex items-center justify-between px-4 py-3"
                     >
                       <div className="flex-1 mr-4">
-                        <Label className="text-sm font-medium">{t(`settings.shortcuts.${item.key}`)}</Label>
-                        <p className="text-xs text-muted-foreground mt-0.5">{t(`settings.shortcuts.${item.key}.desc`)}</p>
+                        <Label className="text-sm font-medium">{t(`shortcuts.${item.key}`)}</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t(`shortcuts.${item.key}.desc`)}</p>
                       </div>
                       <ShortcutRecorder shortcutKey={item.key} />
                     </div>
@@ -1197,12 +1221,12 @@ function SettingsView() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setDeleteTarget(null)}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
               if (deleteTarget) deleteCustomTheme(deleteTarget)
               setDeleteTarget(null)
             }}>
-              {t('common.confirm', 'Delete')}
+              {t('common.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1217,12 +1241,12 @@ function SettingsView() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteAiModelTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setDeleteAiModelTarget(null)}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
               if (deleteAiModelTarget) removeAiModel(deleteAiModelTarget)
               setDeleteAiModelTarget(null)
             }}>
-              {t('common.confirm', 'Delete')}
+              {t('common.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1237,7 +1261,7 @@ function SettingsView() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteRoleTarget(null)}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setDeleteRoleTarget(null)}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={async () => {
               if (deleteRoleTarget) {
                 try {
@@ -1254,7 +1278,7 @@ function SettingsView() {
               }
               setDeleteRoleTarget(null)
             }}>
-              {t('common.confirm', 'Delete')}
+              {t('common.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1281,13 +1305,13 @@ function SettingsView() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setPluginImportConfirm(null)}>
-              {t('common.cancel', 'Cancel')}
+              {t('common.cancel')}
             </AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmImport} disabled={pluginConfigsImporting}>
               {pluginConfigsImporting ? (
                 <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" />
               ) : null}
-              {t('common.confirm', 'Import')}
+              {t('common.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

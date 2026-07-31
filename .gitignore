@@ -29,6 +29,10 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# 测试输出残留(防 PowerShell 重定向意外生成)
+test-output.txt
+.scratch/
+
 # Environment
 .env
 .env.local
@@ -53,3 +57,4 @@ coverage/
 vite.config.ts.timestamp-*
 vite.config.js.timestamp-*
 scripts/
+.claude/

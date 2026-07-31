@@ -3,6 +3,7 @@
  * 负责：拖拽开始、悬停、离开、放置、结束
  */
 import { useState, useCallback } from 'react'
+import { logger } from '@/lib/logger'
 import { useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
 import { loadDirectory } from '@/lib/api'
@@ -91,7 +92,7 @@ export function useFileTreeDragDrop(nodes: FileNode[]) {
         editorStore.updateTabPath(srcPath, destPath, fileName)
         successCount++
       } catch (err) {
-        console.error('Failed to move:', srcPath, err)
+        logger.error('file-tree-drag', 'Failed to move:', srcPath, err)
         failCount++
       }
     }
@@ -113,7 +114,7 @@ export function useFileTreeDragDrop(nodes: FileNode[]) {
         const currentNodes = useFileTreeStore.getState().nodes
         setNodes(updateNodesWithChildren(currentNodes, dirPath, children))
       } catch (err) {
-        console.error('Failed to refresh directory:', dirPath, err)
+        logger.error('file-tree-drag', 'Failed to refresh directory:', dirPath, err)
       }
     }
 

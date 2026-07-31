@@ -26,6 +26,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { getAiProxyUrl } from '@/lib/ai'
 import { loadFileContent } from '@/lib/api'
 import { restartAiProxy, saveAiMessage, loadAiMessages, loadAiRolePrompts, writeFile, createFile, type AiRolePrompt } from '@/lib/tauri'
+import { logger } from '@/lib/logger'
 
 function getMessageText(message: { parts?: Array<{ type: string; text?: string }> }): string {
   if (!message.parts) return ''
@@ -47,6 +48,7 @@ function AIView() {
   // Maximum number of messages kept in memory to prevent unbounded growth
   const MAX_IN_MEMORY_MESSAGES = 100
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const copiedIdTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [inputValue, setInputValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isOverflow, setIsOverflow] = useState(false)
@@ -59,6 +61,10 @@ function AIView() {
       setIsOverflow(el.scrollHeight > 200)
     }
   }, [inputValue])
+  // Cleanup copy-feedback timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(copiedIdTimer.current)
+  }, [])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollViewportRef = useRef<HTMLDivElement | null>(null)
   const savedMessageIds = useRef<Set<string>>(new Set())
@@ -99,8 +105,8 @@ function AIView() {
   const setRightPanelType = useUIStore((s) => s.setRightPanelType)
   const insertAtCursor = useEditorStore((s) => s.insertAtCursor)
   const replaceContent = useEditorStore((s) => s.replaceContent)
-  const editorTabs = useEditorStore((s) => s.tabs)
-  const editorActiveTabId = useEditorStore((s) => s.activeTabId)
+  // 只订阅 active tab 引用，避免订阅整个 tabs 数组导致任意 tab 内容变更都重渲染
+  const activeEditorTab = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId))
   const rootPath = useWorkspaceStore((s) => s.rootPath)
 
   // 使用 ref 让 mount-only useEffect 能读取到最新的 aiPort / activeAiModelId，
@@ -120,6 +126,15 @@ function AIView() {
 
   const { messages, status, stop, error, sendMessage, setMessages } = chat
   const isLoading = status === 'submitted' || status === 'streaming'
+
+  // Stop any in-flight AI stream on unmount so callbacks don't update state (R-M4)
+  const stopRef = useRef(stop)
+  stopRef.current = stop
+  useEffect(() => {
+    return () => {
+      stopRef.current()
+    }
+  }, [])
 
   // 当 messages 变化时，按 FIFO 顺序把待映射展示文本匹配到新出现的 user 消息（Task 21）
   useEffect(() => {
@@ -209,7 +224,7 @@ function AIView() {
               // 标记为已入库，避免下次 effect 重试时重复写入
               savedMessageIds.current.add(msg.id)
             } catch (e) {
-              console.error('[AIView] Failed to flush user message before trim, skipping trim:', e)
+              logger.error('ai-view', 'Failed to flush user message before trim, skipping trim:', e)
               // flush 失败则不裁剪，保留在内存中，等待下次 effect 重新尝试
               return
             }
@@ -248,7 +263,7 @@ function AIView() {
       const model = aiModels.find((m) => m.id === currentActiveAiModelId)
       if (model) {
         const apiKey = model._decryptedApiKey || ''
-        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, currentAiPort).catch(console.error)
+        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, currentAiPort).catch((e) => logger.error('ai-view', 'Failed to restart AI proxy:', e))
       }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -257,7 +272,7 @@ function AIView() {
   const reloadRolePrompts = useCallback(() => {
     loadAiRolePrompts()
       .then((prompts) => setAiRolePrompts(prompts))
-      .catch((e) => console.error('Failed to load AI role prompts:', e))
+      .catch((e) => logger.error('ai-view', 'Failed to load AI role prompts:', e))
   }, [])
 
   useEffect(() => {
@@ -289,7 +304,7 @@ function AIView() {
           setHasMoreHistory(dbMessages.length >= 30)
         }
       } catch (e) {
-        console.error('Failed to load AI chat history:', e)
+        logger.error('ai-view', 'Failed to load AI chat history:', e)
       } finally {
         // Mark history as ready even if loading failed, so pending requests can proceed
         historyReadyRef.current = true
@@ -309,7 +324,7 @@ function AIView() {
         const now = new Date()
         const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
         setMessageTimestamps((prev) => ({ ...prev, [lastMsg.id]: timeStr }))
-        saveAiMessage('assistant', text, activeAiModelId || '').catch(console.error)
+        saveAiMessage('assistant', text, activeAiModelId || '').catch((e) => logger.error('ai-view', 'Failed to save AI assistant message:', e))
       }
     }
   }, [status])
@@ -348,7 +363,7 @@ function AIView() {
         setHasMoreHistory(false)
       }
     } catch (e) {
-      console.error('Failed to load more history:', e)
+      logger.error('ai-view', 'Failed to load more history:', e)
     } finally {
       setIsLoadingHistory(false)
     }
@@ -374,7 +389,7 @@ function AIView() {
       try {
         await restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, aiPort)
       } catch (e) {
-        console.error('Failed to restart AI proxy:', e)
+        logger.error('ai-view', 'Failed to restart AI proxy:', e)
       }
     }
   }
@@ -382,7 +397,8 @@ function AIView() {
   const handleCopy = async (content: string, id: string) => {
     await navigator.clipboard.writeText(content)
     setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 2000)
+    clearTimeout(copiedIdTimer.current)
+    copiedIdTimer.current = setTimeout(() => setCopiedId(null), 2000)
   }
 
   /**
@@ -399,7 +415,7 @@ function AIView() {
   }, [setSettingsSection, setSettingsPanelVisible, setSidebarView])
 
   const handleSaveAsNewFile = async (content: string) => {
-    const activeTab = editorTabs.find((t) => t.id === editorActiveTabId)
+    const activeTab = activeEditorTab
     if (!activeTab?.path) return
     // Get directory of the active tab file
     const dirPath = activeTab.path.includes('/') ? activeTab.path.substring(0, activeTab.path.lastIndexOf('/')) : ''
@@ -416,7 +432,7 @@ function AIView() {
       const { useFileTreeStore } = await import('@/stores/filetree')
       await useFileTreeStore.getState().refreshExpanded()
     } catch (e) {
-      console.error('Failed to save as new file:', e)
+      logger.error('ai-view', 'Failed to save as new file:', e)
     }
   }
 
@@ -520,7 +536,7 @@ function AIView() {
       }
 
       // Save display message to DB (not the full content)
-      saveAiMessage('user', displayMessage, activeAiModelId || '').catch(console.error)
+      saveAiMessage('user', displayMessage, activeAiModelId || '').catch((e) => logger.error('ai-view', 'Failed to save AI user message:', e))
     }
 
     // If chat history hasn't finished loading yet, wait for it.
@@ -588,7 +604,7 @@ function AIView() {
           displayNames.push(relPath)
           fileParts.push(`--- ${relPath} ---\n${content}`)
         } catch (e) {
-          console.error('Failed to read attached file:', filePath, e)
+          logger.error('ai-view', 'Failed to read attached file:', filePath, e)
         }
       }
       if (fileParts.length > 0) {
@@ -605,7 +621,7 @@ function AIView() {
       // For non-chat roles (e.g. polish, format, summary), automatically attach
       // the active tab's file content so the AI can operate on it.
       // The user's input (e.g. "整理格式") is treated as an instruction for that file.
-      const activeTab = editorTabs.find((t) => t.id === editorActiveTabId)
+      const activeTab = activeEditorTab
       if (activeTab?.content) {
         // Compute relative file path for display
         let filePath = activeTab.path || ''
@@ -630,7 +646,7 @@ function AIView() {
     }
 
     // Save the display text (not the full file content) to DB
-    saveAiMessage('user', displayText, activeAiModelId || '').catch(console.error)
+    saveAiMessage('user', displayText, activeAiModelId || '').catch((e) => logger.error('ai-view', 'Failed to save AI user message:', e))
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -750,7 +766,7 @@ function AIView() {
                     )}
                   >
                     {message.role === 'user' ? (
-                      <span className="text-xs text-foreground">You</span>
+                      <span className="text-xs text-foreground">{t('ai.you')}</span>
                     ) : (
                       <Bot size={14} />
                     )}

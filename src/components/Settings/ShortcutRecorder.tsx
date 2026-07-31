@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useShallow } from 'zustand/react/shallow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useUIStore } from '@/stores'
@@ -14,7 +15,14 @@ interface ShortcutRecorderProps {
 
 export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
   const { t } = useTranslation()
-  const { customShortcuts, pluginCommandShortcuts, setShortcut, resetShortcut } = useUIStore()
+  const { customShortcuts, pluginCommandShortcuts, setShortcut, resetShortcut } = useUIStore(
+    useShallow((s) => ({
+      customShortcuts: s.customShortcuts,
+      pluginCommandShortcuts: s.pluginCommandShortcuts,
+      setShortcut: s.setShortcut,
+      resetShortcut: s.resetShortcut,
+    })),
+  )
   const [recording, setRecording] = useState(false)
   const [conflict, setConflict] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -49,16 +57,22 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
     if (!recording) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-
       if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
         handleStopRecording()
         return
       }
 
       const parsed = parseKeyEvent(e)
-      if (!parsed) return
+      if (!parsed) {
+        // 纯修饰键放行，不阻止默认行为
+        return
+      }
+
+      // 确认 chord 后消费事件并阻止冒泡
+      e.preventDefault()
+      e.stopPropagation()
 
       // Use the detailed conflict checker so both built-in and
       // plugin-command clashes are detected.
@@ -79,7 +93,7 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
         if (found.source.kind === 'plugin-command') {
           setConflict(found.message)
         } else {
-          setConflict(t('settings.shortcuts.conflict', { key: t(`settings.shortcuts.${found.source.key}`) }))
+          setConflict(t('shortcuts.conflict', { key: t(`shortcuts.${found.source.key}`) }))
         }
       } else {
         setConflict(null)
@@ -109,7 +123,7 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
       >
         {recording ? (
           <Badge variant="outline" className="font-mono text-xs px-2 py-1 border-primary text-primary animate-pulse">
-            {t('settings.shortcuts.recording')}
+            {t('shortcuts.recording')}
           </Badge>
         ) : (
           <Badge
@@ -133,7 +147,7 @@ export function ShortcutRecorder({ shortcutKey }: ShortcutRecorderProps) {
             resetShortcut(shortcutKey)
             setConflict(null)
           }}
-          title={t('settings.shortcuts.reset')}
+          title={t('shortcuts.reset')}
         >
           <RotateCcw size={12} />
         </Button>

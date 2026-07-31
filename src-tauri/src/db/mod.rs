@@ -16,6 +16,16 @@ pub struct Database {
     pub conn: Mutex<Connection>,
 }
 
+impl Database {
+    /// 获取数据库连接的 MutexGuard，处理 poison 错误
+    pub fn conn_lock(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+        self.conn.lock().unwrap_or_else(|e| {
+            log::error!("db conn lock poisoned: {}", e);
+            e.into_inner()
+        })
+    }
+}
+
 pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     let db_path = app_data_dir.join("swallownote.db");
     let mut conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)?;

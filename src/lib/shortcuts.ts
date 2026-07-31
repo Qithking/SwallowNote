@@ -1,3 +1,5 @@
+import i18n from '@/i18n'
+
 export type ShortcutKey =
   | 'newFile'
   | 'newFolder'
@@ -12,10 +14,12 @@ export type ShortcutKey =
   | 'openExplorer'
   | 'commandPalette'
   | 'searchPanel'
+  | 'findReplace'
   | 'toggleSidebar'
   | 'settings'
   | 'renameFile'
   | 'deleteFile'
+  | 'logViewer'
 
 export interface ShortcutDefinition {
   key: ShortcutKey
@@ -35,11 +39,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { key: 'toggleLanguage', defaultKey: 'Ctrl+Shift+L' },
   { key: 'openExplorer', defaultKey: 'Ctrl+Shift+R' },
   { key: 'commandPalette', defaultKey: 'Ctrl+P' },
-  { key: 'searchPanel', defaultKey: 'Ctrl+F' },
+  { key: 'searchPanel', defaultKey: 'Ctrl+Shift+F' },
+  { key: 'findReplace', defaultKey: 'Ctrl+F' },
   { key: 'toggleSidebar', defaultKey: 'Ctrl+B' },
   { key: 'settings', defaultKey: 'Ctrl+,' },
   { key: 'renameFile', defaultKey: 'F2' },
   { key: 'deleteFile', defaultKey: 'Ctrl+Delete' },
+  { key: 'logViewer', defaultKey: 'Ctrl+Shift+Y' },
 ]
 
 export const DEFAULT_SHORTCUTS_MAP: Record<ShortcutKey, string> = Object.fromEntries(
@@ -90,6 +96,11 @@ function codeToKeyName(code: string): string | null {
   return CODE_TO_KEY[code] ?? null
 }
 
+/** 检测当前是否为 macOS 平台（使用 navigator.userAgent，避免已废弃的 navigator.platform） */
+function isMacPlatform(): boolean {
+  return navigator.userAgent.toUpperCase().includes('MAC')
+}
+
 export function matchShortcut(
   e: KeyboardEvent,
   shortcutString: string
@@ -111,10 +122,12 @@ export function matchShortcut(
   // 主匹配：直接比较 e.key
   let keyMatch = keyLower === mainKey
 
-  // macOS Delete 与 Backspace 互相兼容
-  if (!keyMatch) {
-    if (mainKey === 'delete' && keyLower === 'backspace') keyMatch = true
-    else if (mainKey === 'backspace' && keyLower === 'delete') keyMatch = true
+  // macOS 兼容：Mac 键盘的 Backspace 键物理标记为 "Delete"，
+  // 但 e.key 仍为 'Backspace'。当用户在 Mac 上按物理 Delete 键时，
+  // e.key === 'backspace'，但期望匹配 shortcut 中的 'delete'。
+  // 仅在 macOS 上启用此兼容，避免 Windows 上 Ctrl+Backspace 误匹配 Ctrl+Delete。
+  if (!keyMatch && isMacPlatform() && mainKey === 'delete' && keyLower === 'backspace') {
+    keyMatch = true
   }
 
   if (!keyMatch) {
@@ -180,7 +193,7 @@ export function findShortcutConflictDetailed(
     if (currentKey === value) {
       return {
         source: { kind: 'builtin', key: def.key, label: def.key },
-        message: `与「${def.key}」冲突`,
+        message: i18n.t('shortcuts.conflict.builtin', { key: i18n.t(`shortcuts.${def.key}`) }),
       }
     }
   }
@@ -193,7 +206,7 @@ export function findShortcutConflictDetailed(
     if (def && def.defaultKey === value) continue
     return {
       source: { kind: 'custom-builtin', key: key as ShortcutKey, label: key },
-      message: `与「${key}」冲突`,
+      message: i18n.t('shortcuts.conflict.builtin', { key: i18n.t(`shortcuts.${key}`) }),
     }
   }
   // 3. 插件命令快捷键
@@ -202,15 +215,14 @@ export function findShortcutConflictDetailed(
     if (currentKey !== value) continue
     return {
       source: { kind: 'plugin-command', bindingKey, label: pluginCommandLabels[bindingKey] ?? bindingKey },
-      message: `与插件命令「${pluginCommandLabels[bindingKey] ?? bindingKey}」冲突`,
+      message: i18n.t('shortcuts.conflict.plugin', { name: pluginCommandLabels[bindingKey] ?? bindingKey }),
     }
   }
   return null
 }
 
 export function formatShortcutForDisplay(shortcut: string): string {
-  const isMac = navigator.platform.toUpperCase().includes('MAC')
-  if (!isMac) return shortcut
+  if (!isMacPlatform()) return shortcut
   return shortcut
     .replace('Ctrl+', '⌘+')
     .replace('Shift+', '⇧+')

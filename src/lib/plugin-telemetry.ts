@@ -2,6 +2,7 @@
 
 import type { PluginEvent, PluginEventPayloadMap } from '@/types/plugin'
 import { getPluginStorageSize } from './tauri'
+import { logger } from './logger'
 
 // 指标类型
 
@@ -154,6 +155,15 @@ export function recordEventMetric(
   _metricsCache = null
   _groupsCache = null
   bumpMetricsVersion()
+
+  // 合并到统一 LogStore（AC-8）：'ok'→info, 'err'→error
+  const source = `plugin:${pluginId}`
+  const msg = `event ${event} · ${handlerCount} handlers · ${totalDurationMs.toFixed(2)}ms${errors > 0 ? ` · ${errors} error(s)` : ''}`
+  if (errors > 0) {
+    logger.error(source, msg)
+  } else {
+    logger.info(source, msg)
+  }
 }
 
 /** Record a storage operation */
@@ -183,6 +193,15 @@ export function recordStorageMetric(
   _metricsCache = null
   _groupsCache = null
   bumpMetricsVersion()
+
+  // 合并到统一 LogStore（AC-8）
+  const source = `plugin:${pluginId}`
+  const msg = `storage.${operation} · ${keyCount} keys · ${dataSize}B · ${durationMs.toFixed(2)}ms${error ? ` · ${error}` : ''}`
+  if (success) {
+    logger.info(source, msg)
+  } else {
+    logger.error(source, msg)
+  }
 
   // dataSize 为 set/delete 的尺寸增量（正增长/负收缩）。
   if (success && operation === 'set') {
@@ -219,6 +238,15 @@ export function recordHookMetric(
   _metricsCache = null
   _groupsCache = null
   bumpMetricsVersion()
+
+  // 合并到统一 LogStore（AC-8）
+  const source = `plugin:${pluginId}`
+  const msg = `hook ${hook} · ${durationMs.toFixed(2)}ms${error ? ` · ${error}` : ''}`
+  if (success) {
+    logger.info(source, msg)
+  } else {
+    logger.error(source, msg)
+  }
 }
 
 /** Record a backend IPC call */
@@ -244,6 +272,15 @@ export function recordBackendMetric(
   _metricsCache = null
   _groupsCache = null
   bumpMetricsVersion()
+
+  // 合并到统一 LogStore（AC-8）
+  const source = `plugin:${pluginId}`
+  const msg = `ipc ${command} · ${durationMs.toFixed(2)}ms${error ? ` · ${error}` : ''}`
+  if (success) {
+    logger.info(source, msg)
+  } else {
+    logger.error(source, msg)
+  }
 }
 
 // 查询函数
@@ -551,6 +588,9 @@ export function recordPluginConflict(message: string): void {
   _groupsCache = null
   // bump 以让 Logs 弹窗感知新冲突。
   bumpMetricsVersion()
+
+  // 合并到统一 LogStore（AC-8）：冲突归为 warn 级别
+  logger.warn(`plugin:${HOST_PLUGIN_ID}`, message)
 }
 
 // 辅助函数

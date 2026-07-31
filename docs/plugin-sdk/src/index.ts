@@ -67,6 +67,17 @@ export interface PluginContext {
   pluginId: string
   pluginPath: string
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 统一日志通道，自动带 plugin:<pluginId> source 前缀 */
+  log: PluginLogger
+}
+
+/** 插件 logger 接口：5 级日志方法 */
+export interface PluginLogger {
+  trace(message: string, ...args: unknown[]): void
+  debug(message: string, ...args: unknown[]): void
+  info(message: string, ...args: unknown[]): void
+  warn(message: string, ...args: unknown[]): void
+  error(message: string, ...args: unknown[]): void
 }
 
 export type PluginLifecycleHook = (context: PluginContext) => void | Promise<void>
@@ -1221,6 +1232,14 @@ export function buildPluginContext(plugin: Pick<PluginDefinition, 'id' | 'plugin
       if (hostInvoke) return hostInvoke(cmd, args)
       console.warn(`[plugin-sdk] invokeBackend(${cmd}) called in standalone mode; returning null`)
       return null
+    },
+    // 默认 console-based logger；host 会覆盖为统一日志通道
+    log: {
+      trace: (msg, ...args) => console.trace(`[plugin:${plugin.id}] ${msg}`, ...args),
+      debug: (msg, ...args) => console.debug(`[plugin:${plugin.id}] ${msg}`, ...args),
+      info: (msg, ...args) => console.info(`[plugin:${plugin.id}] ${msg}`, ...args),
+      warn: (msg, ...args) => console.warn(`[plugin:${plugin.id}] ${msg}`, ...args),
+      error: (msg, ...args) => console.error(`[plugin:${plugin.id}] ${msg}`, ...args),
     },
   }
 }

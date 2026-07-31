@@ -2,8 +2,9 @@
  * StatusBar Component - Bottom status bar
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Database, GitBranch } from 'lucide-react'
+import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Database, GitBranch, ScrollText } from 'lucide-react'
 import { useUIStore, useGitStore, useCloneStore } from '@/stores'
+import { getShortcutKey, formatShortcutForDisplay } from '@/lib/shortcuts'
 import { checkLatestVersion, downloadLatestRelease, openInstaller, installAndRestart, DownloadProgress } from '@/lib/tauri'
 import { open } from '@tauri-apps/plugin-shell'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -22,6 +23,7 @@ import packageJson from '../../package.json'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
+import { logger } from '@/lib/logger'
 
 type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-failed' | 'downloading' | 'download-ready' | 'download-failed'
 
@@ -30,10 +32,19 @@ const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000 // 1 hour in ms
 function StatusBar() {
   const showToast = useUIStore((s) => s.showToast)
   const autoCheckUpdate = useUIStore((s) => s.autoCheckUpdate)
+  const developerMode = useUIStore((s) => s.developerMode)
+  const toggleLogViewer = useUIStore((s) => s.toggleLogViewer)
+  const customShortcuts = useUIStore((s) => s.customShortcuts)
   const syncStatus = useGitStore((s) => s.syncStatus)
+  // 订阅实时 conflictRepos, 解决冲突后立即归零 (syncStatus.conflicted 是 pull 快照, 不实时)
+  const conflictRepos = useGitStore((s) => s.conflictRepos)
   const cloneIsRunning = useCloneStore((s) => s.isCloning)
   const statusCloneUrl = useCloneStore((s) => s.cloneUrl)
   const statusClonePercent = useCloneStore((s) => s.clonePercent)
+  const getShortcut = useCallback(
+    (key: string) => formatShortcutForDisplay(getShortcutKey(key as any, customShortcuts)),
+    [customShortcuts]
+  )
   // Also listen to git-clone-progress events directly as a local mirror,
   // so the status bar updates in real-time even if the store subscription
   // has rendering timing issues.
@@ -42,31 +53,31 @@ function StatusBar() {
   const [localClonePercent, setLocalClonePercent] = useState<number | null>(null)
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined
-    const setup = async () => {
-      unlisten = await listen<{ status: string; message: string; percent?: number; url?: string; local_path?: string }>(
-        'git-clone-progress',
-        (event) => {
-          const payload = event.payload
-          if (payload.status === 'started') {
-            setLocalCloneRunning(true)
-            setLocalCloneUrl(payload.url ?? '')
-            setLocalClonePercent(null)
-          } else if (payload.status === 'progress') {
-            setLocalCloneRunning(true)
-            setLocalClonePercent(payload.percent ?? null)
-          } else if (payload.status === 'completed') {
-            setLocalCloneRunning(false)
-            setLocalClonePercent(null)
-          } else if (payload.status === 'error') {
-            setLocalCloneRunning(false)
-            setLocalClonePercent(null)
-          }
-        },
-      )
+    // 捕获 listen() 返回的 Promise，即使组件在 listen resolve 前卸载，
+    // cleanup 也会在 resolve 后调用 unlisten，避免监听器泄漏
+    const unlistenPromise = listen<{ status: string; message: string; percent?: number; url?: string; local_path?: string }>(
+      'git-clone-progress',
+      (event) => {
+        const payload = event.payload
+        if (payload.status === 'started') {
+          setLocalCloneRunning(true)
+          setLocalCloneUrl(payload.url ?? '')
+          setLocalClonePercent(null)
+        } else if (payload.status === 'progress') {
+          setLocalCloneRunning(true)
+          setLocalClonePercent(payload.percent ?? null)
+        } else if (payload.status === 'completed') {
+          setLocalCloneRunning(false)
+          setLocalClonePercent(null)
+        } else if (payload.status === 'error') {
+          setLocalCloneRunning(false)
+          setLocalClonePercent(null)
+        }
+      },
+    )
+    return () => {
+      unlistenPromise.then((fn) => fn())
     }
-    setup()
-    return () => { unlisten?.() }
   }, [])
 
   const showCloneProgress = cloneIsRunning || localCloneRunning
@@ -178,8 +189,8 @@ function StatusBar() {
         })
       }
       // If no update, or check failed: do nothing (silent)
-    } catch {
-      // Silent: ignore errors
+    } catch (e) {
+      logger.warn('statusbar', 'update check failed', e)
     } finally {
       isCheckingRef.current = false
     }
@@ -440,6 +451,22 @@ function StatusBar() {
       >
         {/* Left Section */}
         <div className="flex items-center gap-2">
+          {/* 查看日志（仅开发者模式可见） */}
+          {developerMode && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  data-testid="statusbar-log-button"
+                  className="opacity-60 hover:opacity-100 cursor-pointer flex items-center gap-1"
+                  onClick={toggleLogViewer}
+                >
+                  <ScrollText size={12} />
+                  <span className="text-[11px]">{t('statusBar.viewLogs')}</span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{t('statusBar.viewLogsTooltip', { shortcut: getShortcut('logViewer') })}</TooltipContent>
+            </Tooltip>
+          )}
           {/* Git 克隆进度 */}
           {showCloneProgress && (
             <Tooltip>
@@ -507,11 +534,11 @@ function StatusBar() {
                         <XCircle size={12} className="text-red-500" />
                         <span className="text-[11px]">{syncStatus.failed}</span>
                       </span>
-                      {/* 冲突图标+数量 */}
-                      {syncStatus.conflicted > 0 && (
+                      {/* 冲突图标+数量 — 基于 conflictRepos 实时状态, 解决后立即归零 */}
+                      {conflictRepos.length > 0 && (
                         <span className="flex items-center gap-0.5">
                           <AlertTriangle size={12} className="text-yellow-500" />
-                          <span className="text-[11px]">{syncStatus.conflicted}</span>
+                          <span className="text-[11px]">{conflictRepos.length}</span>
                         </span>
                       )}
                     </>
@@ -524,7 +551,7 @@ function StatusBar() {
                   : t('statusBar.syncResultTooltip', {
                       succeeded: syncStatus.succeeded,
                       failed: syncStatus.failed,
-                      conflicted: syncStatus.conflicted,
+                      conflicted: conflictRepos.length,
                     })}
               </TooltipContent>
             </Tooltip>

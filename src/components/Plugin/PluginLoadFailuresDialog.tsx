@@ -197,7 +197,7 @@ export function PluginLoadFailuresDialog({
             type="button"
             className="pa-popup-close"
             onClick={() => onOpenChange(false)}
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <X />
           </button>
@@ -246,7 +246,7 @@ export function PluginLoadFailuresDialog({
                             onClick={() => setConfirming(null)}
                             disabled={isBusy}
                           >
-                            {t('common.cancel', { defaultValue: '取消' })}
+                            {t('common.cancel')}
                           </button>
                           <button
                             type="button"

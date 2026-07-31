@@ -32,6 +32,11 @@ import {
 } from '@/lib/tauri'
 import { usePluginStore } from './plugin'
 
+// Track in-flight index fetches so a new refresh aborts the previous one,
+// preventing slow responses from overwriting faster ones (R-M3).
+let indexFetchAbort: AbortController | null = null
+let indexProgressAbort: AbortController | null = null
+
 export const OFFICIAL_REPO_URL = 'https://raw.githubusercontent.com/Qithking/SwallowNote/refs/heads/main/plugins/repo.json'
 
 export interface RepoSource {
@@ -160,14 +165,22 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       set({ index: null, fetchError: null })
       return
     }
+    // Abort any in-flight fetch so a slow response can't overwrite a newer one (R-M3)
+    if (indexFetchAbort) {
+      indexFetchAbort.abort()
+    }
+    const abort = new AbortController()
+    indexFetchAbort = abort
     // If background refresh, don't clear isFetchingIndex to avoid UI flicker
     if (!options?.background) {
       set({ isFetchingIndex: true, fetchError: null, fetchProgress: 0 })
     }
     try {
-      const index = await fetchPluginIndexCached(url)
+      const index = await fetchPluginIndexCached(url, abort.signal)
+      if (abort.signal.aborted) return
       set({ index, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
+      if (e?.name === 'AbortError' || abort.signal.aborted) return
       set({
         isFetchingIndex: false,
         fetchError: e?.message ?? String(e),
@@ -181,15 +194,23 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       set({ index: null, fetchError: null, fetchProgress: 0 })
       return
     }
+    // Abort any in-flight progress fetch (R-M3)
+    if (indexProgressAbort) {
+      indexProgressAbort.abort()
+    }
+    const abort = new AbortController()
+    indexProgressAbort = abort
     set({ isFetchingIndex: true, fetchError: null, fetchProgress: 0 })
     try {
       const text = await fetchWithProgress(url, (percent) => {
-        set({ fetchProgress: percent })
-      })
+        if (!abort.signal.aborted) set({ fetchProgress: percent })
+      }, abort.signal)
+      if (abort.signal.aborted) return
       const raw = JSON.parse(text)
       const index = normaliseIndex(raw)
       set({ index, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
+      if (e?.name === 'AbortError' || abort.signal.aborted) return
       set({
         isFetchingIndex: false,
         fetchError: e?.message ?? String(e),

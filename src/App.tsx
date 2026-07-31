@@ -9,7 +9,11 @@ import { EditorView } from '@/components/Editor'
 import { RightPanelContent, FullPanelPluginContent } from '@/components/PanelContent'
 import { SettingsView } from '@/components/Settings/SettingsView'
 import { flushAllEditors } from '@/lib/editor-flush'
+import { readActiveEditorScrollTop } from '@/stores/editor'
+import { attachLogger, logger } from '@/lib/logger'
+import { GitErrorCode } from '@/lib/git/errors'
 const PluginManagerView = lazy(() => import('@/components/Plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })))
+const LogViewer = lazy(() => import('@/components/LogViewer').then(m => ({ default: m.LogViewer })))
 
 // Simple loading placeholder for PluginManager
 function PluginManagerLoading() {
@@ -50,9 +54,9 @@ import { invoke } from '@tauri-apps/api/core'
 
 function logTime(stage: string, t0: number) {
   const elapsed = Math.round(performance.now() - t0)
-  console.log(`[STARTUP-TIME] ${stage} t=${elapsed}`)
+  logger.info('app', `[STARTUP-TIME] ${stage} t=${elapsed}`)
   try {
-    invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch(() => {})
+    invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch((e) => logger.warn('app', 'log_startup_time failed', e))
   } catch { /* ignore */ }
 }
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog'
@@ -71,6 +75,8 @@ function App() {
     tRef.current = t
   }, [t])
   const settingsPanelVisible = useUIStore((s: UIState) => s.settingsPanelVisible)
+  const logViewerVisible = useUIStore((s: UIState) => s.logViewerVisible)
+  const toggleLogViewer = useUIStore((s: UIState) => s.toggleLogViewer)
   const rightPanelType = useUIStore((s: UIState) => s.rightPanelType)
   const sidebarWidth = useUIStore((s: UIState) => s.sidebarWidth)
   const rightPanelWidth = useUIStore((s: UIState) => s.rightPanelWidth)
@@ -95,10 +101,15 @@ function App() {
   const pendingCloseRef = useRef(false)
   // 防止 Radix AlertDialog 的 onOpenChange 在 Save/Discard 点击后干扰关闭流程
   const actionTakenRef = useRef(false)
+  // 托盘"退出"菜单请求标志：由 tray-quit-requested listener 设置，
+  // close-requested handler 读取后重置。为 true 时跳过 closeWithoutExit 的 hide 分支，走真正退出。
+  const forceQuitRef = useRef(false)
   // rAF 节流：拖拽面板宽度时每帧最多更新一次
   const rafRef = useRef<number | null>(null)
   // StrictMode 双调用导致副作用重复执行
   const initRef = useRef(false)
+  // 标记启动关键路径已完成，自动同步可以开始
+  const startupReadyRef = useRef(false)
 
   // ── Session 持久化 (提取自 App.tsx 的独立 hook) ──
   const { saveSessionStateNow, restoreSessionState, restoreWindowGeometry } = useSessionPersistence()
@@ -109,6 +120,8 @@ function App() {
     const init = async () => {
       const appInitT0 = performance.now()
       logTime('app_init_begin', appInitT0)
+      // 初始化统一日志模块（注入 @tauri-apps/plugin-log 为 fileWriter）
+      await attachLogger()
       const { initMode, loadLatestByMode } = useWorkspaceStore.getState()
       const { loadSettings: loadEditorSettings } = useEditorSettingsStore.getState()
       const { loadSettings: loadUISettings } = useUIStore.getState()
@@ -134,7 +147,7 @@ function App() {
         await getCurrentWindow().show()
         logTime('app_window_shown', appInitT0)
       } catch (e) {
-        console.warn('[App] Failed to show window:', e)
+        logger.warn('app', 'Failed to show window:', e)
       }
 
       // 显示窗口后立即应用 macOS 圆角窗口样式
@@ -153,7 +166,7 @@ function App() {
         }
         logTime('app_init_window_style', appInitT0)
       } catch (e) {
-        console.warn('[App] Failed to set window style:', e)
+        logger.warn('app', 'Failed to set window style:', e)
       }
 
       // Step 4: 窗口可见后加载文件树与恢复会话
@@ -162,12 +175,16 @@ function App() {
       logTime('app_init_filetree', appInitT0)
       await restoreSessionState()
       logTime('app_init_session_restored', appInitT0)
+
+      // 启动关键路径已完成，自动同步可以开始
+      // checkReady 会通过 cachedRepositories.length > 0 等待首次仓库扫描完成
+      startupReadyRef.current = true
       
       // Step 5: 延迟加载插件和后台服务，确保编辑器先就绪可交互
 
       // Sync current i18n language to the Rust backend (fire-and-forget)
       import('i18next').then(({ default: i18n }) => {
-        setAppLocale(i18n.language).catch(() => {})
+        setAppLocale(i18n.language).catch((e) => logger.warn('app', 'setAppLocale failed', e))
       }).catch(() => {})
 
       // 窗口可见后发射 app:ready（fire-and-forget，不阻塞）
@@ -199,26 +216,26 @@ function App() {
               void getAllPluginStorageSizes()
                 .then((sizes) => seedPluginStorageSizes(sizes))
                 .catch((err) => {
-                  console.warn('[App] failed to seed plugin storage sizes:', err)
+                  logger.warn('app', 'failed to seed plugin storage sizes:', err)
                 })
             } catch (err) {
-              console.warn('[App] failed to init plugin storage sizes:', err)
+              logger.warn('app', 'failed to init plugin storage sizes:', err)
             }
 
             try {
               const { subscribeToPluginStorageChanges } = await import('@/lib/plugin-telemetry')
               void subscribeToPluginStorageChanges().catch((err) => {
-                console.warn('[App] failed to subscribe to plugin storage changes:', err)
+                logger.warn('app', 'failed to subscribe to plugin storage changes:', err)
               })
             } catch (err) {
-              console.warn('[App] failed to subscribe plugin storage changes:', err)
+              logger.warn('app', 'failed to subscribe plugin storage changes:', err)
             }
 
             try {
               const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
               void hydratePermissionGuard(defs.map((d) => d.id))
             } catch (err) {
-              console.warn('[App] failed to hydrate permission guard:', err)
+              logger.warn('app', 'failed to hydrate permission guard:', err)
             }
 
             try {
@@ -227,7 +244,7 @@ function App() {
               hydrateAutoUpdateFromLocalStorage()
               void runAutoUpdateOnStartup()
             } catch (err) {
-              console.warn('[App] failed to init plugin auto update:', err)
+              logger.warn('app', 'failed to init plugin auto update:', err)
             }
 
             // 后台检查插件更新以显示角标
@@ -238,10 +255,10 @@ function App() {
               void marketStore.refreshIndex({ background: true })
               void marketStore.refreshUpdates({ background: true })
             } catch (err) {
-              console.warn('[App] failed to check plugin updates on startup:', err)
+              logger.warn('app', 'failed to check plugin updates on startup:', err)
             }
           } catch (err) {
-            console.error('[App] Failed to load plugins on startup:', err)
+            logger.error('app', 'Failed to load plugins on startup:', err)
             usePluginStore.getState().setLoaded(true)
           }
         })()
@@ -267,7 +284,24 @@ function App() {
 
   useEffect(() => {
     const win = getCurrentWindow()
-    const unlisten = win.listen('tauri://close-requested', async () => {
+    // 使用 onCloseRequested 而非 win.listen('tauri://close-requested', ...)：
+    // onCloseRequested 会 await handler 完成，handler 完成后才自动 destroy；
+    // win.listen 是 fire-and-forget，Tauri 不等 async handler，会在第一个 await 后销毁窗口，
+    // 导致 saveSessionStateNow 等 async 保存逻辑被打断（Layer 5 根因）。
+    const unlistenPromise = win.onCloseRequested(async (event) => {
+      // 关闭前保存当前活动 tab 的滚动位置
+      try {
+        const activeId = useEditorStore.getState().activeTabId
+        if (activeId) {
+          const top = readActiveEditorScrollTop()
+          if (top != null && top > 0) {
+            useEditorStore.getState().updateScrollTop(activeId, top)
+          }
+        }
+      } catch (e) {
+        logger.warn('app', 'save scrollTop on close failed', e)
+      }
+
       // 通知插件 app 退出（不 await）
       try {
         const { emitAppExit } = await import('@/lib/plugin-host')
@@ -279,7 +313,7 @@ function App() {
         const { flushAllPluginStorage } = await import('@/lib/plugin-host')
         await flushAllPluginStorage()
       } catch (e) {
-        console.warn('[App] flushAllPluginStorage on close failed', e)
+        logger.warn('app', 'flushAllPluginStorage on close failed', e)
       }
 
       // 先 flush 编辑器防抖内容避免丢失
@@ -287,11 +321,16 @@ function App() {
         const { flushAllEditors } = await import('@/lib/editor-flush')
         await flushAllEditors()
       } catch (e) {
-        console.warn('[App] flushAllEditors on close failed', e)
+        logger.warn('app', 'flushAllEditors on close failed', e)
       }
 
       const { closeWithoutExit } = useUIStore.getState()
       const dirtyCount = useEditorStore.getState().getDirtyTabsCount()
+      // 托盘"退出"菜单触发时 forceQuitRef=true，跳过 closeWithoutExit 的 hide 分支，走真正退出。
+      // dirty>0 走 SaveDialog 分支时不 reset forceQuitRef——交给 handleSaveAndClose /
+      // handleDiscardAndClose / handleCancelClose 在流程结束时消费，否则这些 handler 读不到标志，
+      // 会按 closeWithoutExit 走 win.hide() 而非 win.destroy()，导致托盘"退出"被拦截为"隐藏"。
+      const isForceQuit = forceQuitRef.current
       if (dirtyCount > 0) {
         const dirtyTabs = useEditorStore.getState().tabs.filter((t) => t.isDirty || t.frontmatterDirty)
         const names = dirtyTabs.slice(0, 5).map((t) => t.name)
@@ -299,18 +338,37 @@ function App() {
         setDirtyFileNames(names)
         setShowSaveDialog(true)
         pendingCloseRef.current = true
-      } else if (closeWithoutExit) {
+        // 阻止默认关闭，等用户在 SaveDialog 选择后再处理
+        event.preventDefault()
+      } else if (closeWithoutExit && !isForceQuit) {
+        // closeWithoutExit 模式：保存后隐藏而非销毁，阻止默认 destroy
         await saveSessionStateNow()
         await win.hide()
         const { setDockIconVisibility } = await import('@/lib/tauri')
         // 次要副作用，失败不阻塞退出
-        setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
+        setDockIconVisibility(false).catch((err) => logger.warn('app', 'setDockIconVisibility failed', err))
+        event.preventDefault()
       } else {
+        // 真正退出：保存后允许默认 destroy（不调 preventDefault）
         await saveSessionStateNow()
-        await win.destroy()
       }
     })
-    return () => { unlisten.then(fn => fn()) }
+    return () => { unlistenPromise.then(fn => fn()) }
+  }, [])
+
+  // 托盘"退出"菜单：Rust 端 emit tray-quit-requested 设置 forceQuit 标志后立即 window.close()，
+  // 前端收到事件只设置 forceQuit 标志（不调 window.close()，避免与 Rust 端重复 close）。
+  // close 触发的 close-requested handler 检测 forceQuit 后跳过 closeWithoutExit 的 hide 分支。
+  useEffect(() => {
+    let unlistenFn: (() => void) | null = null
+    listen('tray-quit-requested', () => {
+      forceQuitRef.current = true
+    }).then((fn) => {
+      unlistenFn = fn
+    })
+    return () => {
+      if (unlistenFn) unlistenFn()
+    }
   }, [])
 
   useEffect(() => {
@@ -361,7 +419,7 @@ function App() {
           const editorStore = useEditorStore.getState()
           // 原子写 .tmp→rename 可能触发 remove 事件
           if (editorStore.isPathSaving(path)) return
-          // Check if the removed path matches any open tab (file) or is a parent of any tab (directory)
+          // Check if removed path matches any open tab or is a parent of a tab
           const tabsToClose = editorStore.tabs.filter(tab =>
             tab.path === path || tab.path.startsWith(path + '/')
           )
@@ -407,7 +465,7 @@ function App() {
     const scheduleSave = () => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => {
-        saveSessionStateNow().catch(console.error)
+        saveSessionStateNow().catch((err) => logger.error('app', 'Session save failed:', err))
         saveTimer = null
       }, 500)
     }
@@ -425,7 +483,7 @@ function App() {
 
     // Listen for save-session-now events (e.g., before install & restart)
     const handleSaveSessionNow = () => {
-      saveSessionStateNow().catch(console.error)
+      saveSessionStateNow().catch((err) => logger.error('app', 'Session save failed:', err))
     }
     window.addEventListener('save-session-now', handleSaveSessionNow)
 
@@ -448,6 +506,10 @@ function App() {
   pullAllReposRef.current = pullAllRepos
   // 防止 setInterval 触发的 doSync 与上一次重叠（弱网下 pull 120s 超时 + push 可能超过 syncInterval）
   const isSyncingRef = useRef(false)
+  // 标记当前是否为启动首次同步，用于跳过同步后的冗余重扫
+  const isInitialStartupSyncRef = useRef(true)
+  // 标记启动首次同步是否已尝试完成，用于收紧 30s 去重兜底
+  const hasCompletedInitialStartupSyncRef = useRef(false)
 
   useEffect(() => {
     const doSync = async () => {
@@ -460,6 +522,14 @@ function App() {
         return
       }
       const gitStore = useGitStore.getState()
+
+      // 启动阶段兜底：启动首次同步完成前，30 秒内已成功同步过则跳过，避免重复触发
+      const last = gitStore.syncStatus.lastSyncTime
+      if (!hasCompletedInitialStartupSyncRef.current && last && Date.now() - last < 30_000) {
+        isSyncingRef.current = false
+        return
+      }
+
       gitStore.setSyncStatus({ isSyncing: true })
       try {
         // Step 1: Always pull first
@@ -478,60 +548,39 @@ function App() {
           const conflictedPaths = new Set(results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.path))
           const reposWithChanges = repos.filter((r: GitRepository) => r.hasUncommittedChanges && r.remoteUrl && !conflictedPaths.has(r.path))
           if (reposWithChanges.length > 0) {
-            const { gitCommitAndPush, gitCredentialGet, gitPushWithCredentials } = await import('@/lib/tauri')
+            const { commitAndPushRepo } = await import('@/lib/git/service')
             for (const repo of reposWithChanges) {
-              try {
-                // G-02 修复：后端返回 CommitPushResult，auto sync 只统计有实际提交或推送的
-                const result = await gitCommitAndPush(repo.path, 'Auto sync')
-                if (result.committed || result.pushed) {
+              const r = await commitAndPushRepo(repo, 'Auto sync')
+              if (r.success) {
+                // G-02 修复：auto sync 只统计有实际提交或推送的
+                if (r.committed || r.pushed) {
                   pushSucceeded++
                 }
-              } catch (e) {
-                const errorMessage = String(e).trim()
-                // Track conflict repos from push phase
-                if (errorMessage.startsWith('REBASE_CONFLICT:') || errorMessage.includes('rebase/merge is in progress')) {
-                  pushConflictPaths.push(repo.path)
-                  continue
-                }
-                // G-04 修复：rebase --continue 或 merge commit 失败，按冲突处理
-                if (errorMessage.startsWith('REBASE_CONTINUE_FAILED:') || errorMessage.startsWith('MERGE_COMMIT_FAILED:')) {
-                  pushConflictPaths.push(repo.path)
-                  continue
-                }
-                // G-06 修复：detached HEAD 跳过，不重试
-                if (errorMessage.startsWith('DETACHED_HEAD:')) {
-                  continue
-                }
-                // Try saved credentials on auth error
-                if (errorMessage.startsWith('AUTH_REQUIRED:')) {
-                  try {
-                    const savedCred = await gitCredentialGet(repo.path)
-                    if (savedCred) {
-                      try {
-                        // gitCommitAndPush 内部 pull 阶段也可能因认证失败返回 AUTH_REQUIRED，
-                        // 仅调 gitPushWithCredentials 会跳过 pull，导致远端新提交未集成。
-                        // 先 pull 再 push，pull 已成功时为 no-op。
-                        const { gitPullWithCredentials } = await import('@/lib/tauri')
-                        await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
-                        await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
-                        pushSucceeded++
-                        continue
-                      } catch {
-                        // Saved credentials failed
-                      }
-                    }
-                  } catch {
-                    // Failed to get credentials
-                  }
-                }
-                // G-02 修复：后端不再返回 "nothing to commit" 错误，而是返回 committed=false。
-                // 此处只需排除 AUTH_REQUIRED（已在上面处理），其他错误计入 pushFailed。
-                if (!errorMessage.startsWith('AUTH_REQUIRED:')) {
-                  pushFailed++
-                  pushErrorPaths.push(repo.path)
-                  console.error('Auto sync push failed:', repo.path, errorMessage)
-                }
+                continue
               }
+              if (r.needsCredential) {
+                // auto-sync 静默跳过, 无凭证不弹 dialog
+                continue
+              }
+              const code = r.errorCode ?? GitErrorCode.Unknown
+              const errorMessage = r.error || ''
+              // Track conflict repos from push phase
+              if (code === GitErrorCode.RebaseConflict || errorMessage.includes('rebase/merge is in progress')) {
+                pushConflictPaths.push(repo.path)
+                continue
+              }
+              // G-04 修复：rebase --continue 或 merge commit 失败，按冲突处理
+              if (code === GitErrorCode.RebaseContinueFailed || code === GitErrorCode.MergeCommitFailed) {
+                pushConflictPaths.push(repo.path)
+                continue
+              }
+              // G-06 修复：detached HEAD 跳过，不重试
+              if (code === GitErrorCode.DetachedHead) {
+                continue
+              }
+              pushFailed++
+              pushErrorPaths.push(repo.path)
+              logger.error('app', 'Auto sync push failed:', repo.path, errorMessage)
             }
           }
         }
@@ -544,35 +593,37 @@ function App() {
         ]
         gitStore.updateRepositoryStatuses(allResults)
 
-        // Refresh repository list to update hasUncommittedChanges etc.
-        try {
-          const { scanGitRepos } = await import('@/lib/tauri')
-          const { mapRepoInfosToRepositories } = await import('@/stores/git')
-          const uiState = useUIStore.getState()
-          const wsState = useWorkspaceStore.getState()
-          const scanPaths = uiState.workspaceMode === 'workspace'
-            ? (wsState.workspaceFolders || [])
-            : (wsState.rootPath ? [wsState.rootPath] : [])
-          const scanPromises = scanPaths.map(async (path) => {
-            try { return await scanGitRepos(path) } catch { return [] }
-          })
-          const scanResults = await Promise.all(scanPromises)
-          const freshRepos = mapRepoInfosToRepositories(scanResults.flat())
-          // Preserve non-normal statuses from the sync results
-          const statusMap = new Map<string, 'conflict' | 'error'>()
-          for (const r of allResults) {
-            if (r.isConflict) statusMap.set(r.path, 'conflict')
-            else if (!r.success) statusMap.set(r.path, 'error')
+        // 启动首次同步刚完成过扫描，无需立即重扫；后续周期同步仍需刷新 hasUncommittedChanges
+        if (!isInitialStartupSyncRef.current) {
+          try {
+            const { scanGitRepos } = await import('@/lib/tauri')
+            const { mapRepoInfosToRepositories } = await import('@/stores/git')
+            const uiState = useUIStore.getState()
+            const wsState = useWorkspaceStore.getState()
+            const scanPaths = uiState.workspaceMode === 'workspace'
+              ? (wsState.workspaceFolders || [])
+              : (wsState.rootPath ? [wsState.rootPath] : [])
+            const scanPromises = scanPaths.map(async (path) => {
+              try { return await scanGitRepos(path) } catch { return [] }
+            })
+            const scanResults = await Promise.all(scanPromises)
+            const freshRepos = mapRepoInfosToRepositories(scanResults.flat())
+            // Preserve non-normal statuses from the sync results
+            const statusMap = new Map<string, 'conflict' | 'error'>()
+            for (const r of allResults) {
+              if (r.isConflict) statusMap.set(r.path, 'conflict')
+              else if (!r.success) statusMap.set(r.path, 'error')
+            }
+            const mergedRepos = freshRepos.map((repo: GitRepository) => {
+              const status = statusMap.get(repo.path)
+              if (status) return { ...repo, status }
+              return repo
+            })
+            gitStore.setRepositories(mergedRepos)
+            gitStore.setCachedRepositories(mergedRepos)
+          } catch {
+            // Ignore scan errors after sync
           }
-          const mergedRepos = freshRepos.map((repo: GitRepository) => {
-            const status = statusMap.get(repo.path)
-            if (status) return { ...repo, status }
-            return repo
-          })
-          gitStore.setRepositories(mergedRepos)
-          gitStore.setCachedRepositories(mergedRepos)
-        } catch {
-          // Ignore scan errors after sync
         }
 
         gitStore.setSyncStatus({
@@ -597,34 +648,83 @@ function App() {
           await gitStore.syncConflictReposFromPullResults(allResults)
         }
       } catch (e) {
-        console.error('Auto sync failed:', e)
+        logger.error('app', 'Auto sync failed:', e)
         gitStore.setSyncStatus({ isSyncing: false })
       } finally {
         isSyncingRef.current = false
       }
     }
 
-    // Initial sync after a short delay
-    const initialTimer = setTimeout(() => {
-      doSync()
-    }, 5000)
+    let intervalId: ReturnType<typeof setInterval> | null = null
+    let checkId: ReturnType<typeof setTimeout> | null = null
+    let postReadyDelayId: ReturnType<typeof setTimeout> | null = null
+    let maxWaitId: ReturnType<typeof setTimeout> | null = null
+    let isCancelled = false
 
-    // Set up periodic sync
-    const intervalMs = syncInterval * 60 * 1000
-    const intervalId = setInterval(() => {
-      doSync()
-    }, intervalMs)
+    const scheduleInterval = () => {
+      if (intervalId) clearInterval(intervalId)
+      const intervalMs = syncIntervalRef.current * 60 * 1000
+      if (intervalMs > 0) {
+        intervalId = setInterval(() => {
+          doSync()
+        }, intervalMs)
+      }
+    }
+
+    const startInitialSync = () => {
+      // 启动就绪后再延迟 2 秒，确保 UI 完全稳定
+      postReadyDelayId = setTimeout(() => {
+        isInitialStartupSyncRef.current = true
+        doSync().finally(() => {
+          hasCompletedInitialStartupSyncRef.current = true
+          isInitialStartupSyncRef.current = false
+          scheduleInterval()
+        })
+      }, 2000)
+    }
+
+    const checkReady = () => {
+      if (isCancelled) return
+      if (startupReadyRef.current && cachedReposRef.current.length > 0) {
+        startInitialSync()
+        return
+      }
+      checkId = setTimeout(checkReady, 500)
+    }
+
+    // 最多等待 30 秒启动就绪，超时则只建立周期同步
+    maxWaitId = setTimeout(() => {
+      if (checkId) clearTimeout(checkId)
+      if (!intervalId) scheduleInterval()
+    }, 30_000)
+
+    checkReady()
+
+    // 运行时修改 syncInterval 需要重建周期定时器
+    const unsubscribe = useUIStore.subscribe((state: UIState, prevState: UIState | undefined) => {
+      if (prevState && state.syncInterval !== prevState.syncInterval) {
+        syncIntervalRef.current = state.syncInterval
+        scheduleInterval()
+      }
+    })
 
     return () => {
-      clearTimeout(initialTimer)
-      clearInterval(intervalId)
+      isCancelled = true
+      if (checkId) clearTimeout(checkId)
+      if (postReadyDelayId) clearTimeout(postReadyDelayId)
+      if (maxWaitId) clearTimeout(maxWaitId)
+      if (intervalId) clearInterval(intervalId)
+      unsubscribe()
     }
-  }, [syncInterval])
+  }, [])
 
   const handleSaveAndClose = async () => {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose
     actionTakenRef.current = true
     const shouldClose = pendingCloseRef.current
+    // 消费 forceQuit 标志：托盘"退出"触发 close-requested 时设置，dirty>0 走 SaveDialog 分支保留至此
+    const isForceQuit = forceQuitRef.current
+    forceQuitRef.current = false
     setShowSaveDialog(false)
     pendingCloseRef.current = false
     if (!shouldClose) { actionTakenRef.current = false; return }
@@ -633,11 +733,11 @@ function App() {
     const win = getCurrentWindow()
     await saveSessionStateNow()
     const { closeWithoutExit } = useUIStore.getState()
-    if (closeWithoutExit) {
+    if (closeWithoutExit && !isForceQuit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
       // 次要副作用，失败不阻塞退出
-      setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
+      setDockIconVisibility(false).catch((err) => logger.warn('app', 'setDockIconVisibility failed', err))
     } else {
       await win.destroy()
     }
@@ -648,6 +748,9 @@ function App() {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose
     actionTakenRef.current = true
     const shouldClose = pendingCloseRef.current
+    // 消费 forceQuit 标志：托盘"退出"触发 close-requested 时设置，dirty>0 走 SaveDialog 分支保留至此
+    const isForceQuit = forceQuitRef.current
+    forceQuitRef.current = false
     setShowSaveDialog(false)
     pendingCloseRef.current = false
     if (!shouldClose) { actionTakenRef.current = false; return }
@@ -655,11 +758,11 @@ function App() {
     const win = getCurrentWindow()
     await saveSessionStateNow()
     const { closeWithoutExit } = useUIStore.getState()
-    if (closeWithoutExit) {
+    if (closeWithoutExit && !isForceQuit) {
       await win.hide()
       const { setDockIconVisibility } = await import('@/lib/tauri')
       // 次要副作用，失败不阻塞退出
-      setDockIconVisibility(false).catch((err) => console.warn('[App] setDockIconVisibility failed', err))
+      setDockIconVisibility(false).catch((err) => logger.warn('app', 'setDockIconVisibility failed', err))
     } else {
       await win.destroy()
     }
@@ -671,6 +774,8 @@ function App() {
     if (actionTakenRef.current) return
     setShowSaveDialog(false)
     pendingCloseRef.current = false
+    // 用户取消则放弃退出意图，托盘"退出"也被取消（应用保持打开）
+    forceQuitRef.current = false
   }
 
   const handleMouseDownLeft = useCallback(() => {
@@ -717,7 +822,7 @@ function App() {
     setIsDraggingLeft(false)
     setIsDraggingRight(false)
     // 拖拽结束后保存会话状态（面板宽度等），避免崩溃或强制关闭后丢失
-    saveSessionStateNow().catch(console.error)
+    saveSessionStateNow().catch((err) => logger.error('app', 'Session save failed:', err))
   }, [saveSessionStateNow])
 
   // Disable text selection while dragging to prevent content being selected
@@ -803,7 +908,7 @@ function App() {
           {/* Activity Bar */}
           <ActivityBar />
 
-          {/* Sidebar - hidden when settings/fullPanel/pluginManager is open, sidebar is collapsed, or sidebar view is 'settings' (settings shown in main area) */}
+          {/* Sidebar - hidden when settings/fullPanel/pluginManager open or collapsed */}
           {!settingsPanelVisible && sidebarVisible && sidebarView !== 'settings' && !activeFullPanelPlugin && !isPluginManagerActive && (
             <div 
               className="flex-shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" 
@@ -951,6 +1056,11 @@ function App() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* LogViewer Dialog (Ctrl+Shift+Y) */}
+        <Suspense fallback={null}>
+          <LogViewer open={logViewerVisible} onOpenChange={(o) => { if (!o) toggleLogViewer() }} />
+        </Suspense>
         </div>
       </div>
     </TooltipProvider>

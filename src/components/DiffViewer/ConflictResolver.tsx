@@ -32,6 +32,7 @@ import {
 } from '@/lib/tauri'
 import { useUIStore, useGitStore, useFileTreeStore, useEditorStore } from '@/stores'
 import type { GitRepository } from '@/stores/git'
+import { logger } from '@/lib/logger'
 
 interface ConflictRepo {
   path: string
@@ -188,13 +189,13 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
             stalePaths.push(path)
           }
         } catch (e) {
-          console.error('Failed to get conflict files for:', path, e)
+          logger.error('conflict-resolver', 'Failed to get conflict files for:', path, e)
         }
       }
 
       // If ALL repos have no actual conflict files, clean up stale state
       if (repos.length === 0 && stalePaths.length > 0) {
-        console.warn('[ConflictResolver] All repos have no actual conflict files - cleaning up stale state')
+        logger.warn('conflict-resolver', 'All repos have no actual conflict files - cleaning up stale state')
         const gitStoreNow = useGitStore.getState()
         for (const path of stalePaths) {
           gitStoreNow.updateRepository(path, { status: 'normal' })
@@ -243,7 +244,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
           }
         }
         if (!fileFound) {
-          console.warn('[ConflictResolver] No match for initialFile="' + currentInitialFile + '" among conflict files:', repos.flatMap(r => r.files).map(f => f.path))
+          logger.warn('conflict-resolver', 'No match for initialFile="' + currentInitialFile + '" among conflict files:', repos.flatMap(r => r.files).map(f => f.path))
         }
       } else if (currentAutoHideTree) {
         // Tree is hidden, no need to expand any directories
@@ -258,7 +259,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
         setExpandedDirs(allDirs)
       }
     } catch (e) {
-      console.error('Failed to load conflicts:', e)
+      logger.error('conflict-resolver', 'Failed to load conflicts:', e)
     } finally {
       setIsLoadingRepos(false)
     }
@@ -341,7 +342,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
         try {
           local = await gitGetConflictLocalContent(selectedFile.repoPath, selectedFile.file.path)
         } catch (e) {
-          console.warn('[ConflictResolver] gitGetConflictLocalContent failed:', e)
+          logger.warn('conflict-resolver', 'gitGetConflictLocalContent failed:', e)
         }
         const remote = await gitGetConflictRemoteContent(selectedFile.repoPath, selectedFile.file.path)
         // Set all content atomically to prevent SplitDiffViewer from seeing mismatched states
@@ -351,7 +352,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
         // Bump version to force SplitDiffViewer remount with fresh content
         setContentVersion(prev => prev + 1)
       } catch (e) {
-        console.error('[ConflictResolver] Failed to load conflict content:', e)
+        logger.error('conflict-resolver', 'Failed to load conflict content:', e)
         showToast(t('git.loadContentFailed') + ': ' + String(e), 'error')
       } finally {
         setIsLoadingContent(false)
@@ -401,7 +402,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       setEditedLocalContent(contentToSave)
       showToast(t('git.saved'), 'success')
     } catch (e) {
-      console.error('Failed to save:', e)
+      logger.error('conflict-resolver', 'Failed to save:', e)
       showToast(t('git.conflictResolveFailed', { error: String(e) }), 'error')
     } finally {
       setIsResolving(false)
@@ -432,7 +433,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       setResolvedFiles(prev => new Set(prev).add(selectedFile.file.abs_path))
       await handlePostResolve()
     } catch (e) {
-      console.error('Failed to mark resolved:', e)
+      logger.error('conflict-resolver', 'Failed to mark resolved:', e)
       showToast(t('git.conflictResolveFailed', { error: String(e) }), 'error')
     } finally {
       setIsResolving(false)
@@ -458,7 +459,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       setResolvedFiles(prev => new Set(prev).add(selectedFile.file.abs_path))
       await handlePostResolve()
     } catch (e) {
-      console.error('Failed to accept remote:', e)
+      logger.error('conflict-resolver', 'Failed to accept remote:', e)
       showToast(t('git.conflictResolveFailed', { error: String(e) }), 'error')
     } finally {
       setIsResolving(false)
@@ -485,7 +486,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       setResolvedFiles(prev => new Set(prev).add(selectedFile.file.abs_path))
       await handlePostResolve()
     } catch (e) {
-      console.error('Failed to accept local:', e)
+      logger.error('conflict-resolver', 'Failed to accept local:', e)
       showToast(t('git.conflictResolveFailed', { error: String(e) }), 'error')
     } finally {
       setIsResolving(false)
@@ -515,7 +516,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       try {
         await removeConflictRepoRecord(repoPath)
       } catch (e) {
-        console.error('Failed to remove conflict repo record:', e)
+        logger.error('conflict-resolver', 'Failed to remove conflict repo record:', e)
       }
 
       // Reload conflict repos to update badge and state
@@ -537,7 +538,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
         const repoName = currentRepo?.name || repoPath.split('/').pop() || repoPath
         await checkAndUpdateConflictRepo(repoPath, repoName)
       } catch (e) {
-        console.error('Failed to update conflict repo record:', e)
+        logger.error('conflict-resolver', 'Failed to update conflict repo record:', e)
       }
       await useGitStore.getState().loadConflictRepos()
     }

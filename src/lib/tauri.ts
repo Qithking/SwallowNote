@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { platform } from '@tauri-apps/plugin-os'
+import { logger } from './logger'
 
 /**
  * Tauri v2 参数命名约定：
@@ -314,8 +315,9 @@ export async function getStorageCap(): Promise<number | null> {
     return raw
   } catch (err) {
     // 记录错误便于调试
-    console.warn(
-      '[plugin-storage] getStorageCap() failed — storage meter will show "cap unknown". ' +
+    logger.warn(
+      'tauri',
+      'getStorageCap() failed — storage meter will show "cap unknown". ' +
         'If this is unexpected, try rebuilding the host binary (cargo tauri dev).',
       err,
     )
@@ -689,6 +691,11 @@ export async function setAppLocale(locale: string): Promise<void> {
   await invoke('set_app_locale', { locale })
 }
 
+// 重启应用（用于需要重新初始化窗口的设置项，如 DevTools 开关）
+export async function restartApp(): Promise<void> {
+  await invoke('restart_app')
+}
+
 // 会话状态 API
 export async function saveSessionState(states: Record<string, string>): Promise<void> {
   await invoke('save_session_state', { states })
@@ -815,7 +822,7 @@ export async function checkLatestVersion(): Promise<{ latest: string; current: s
     const [latest, hasUpdate] = await invoke<[string, boolean]>('check_latest_version', { currentVersion: current })
     return { latest, current, hasUpdate }
   } catch (e) {
-    console.error('Failed to check latest version:', e)
+    logger.error('tauri', 'Failed to check latest version:', e)
     return null
   }
 }

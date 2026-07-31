@@ -63,12 +63,12 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
   // Resolve source URL → display name and style variant for the source label.
   const repoSources = usePluginMarketStore(useShallow((s) => s.repoSources))
   const sourceInfo = useMemo(() => {
-    if (plugin.source === 'local') return { label: '本地', variant: 'local' as const }
-    if (!plugin.source) return { label: '未知来源', variant: 'unknown' as const }
-    if (plugin.source === OFFICIAL_REPO_URL) return { label: '官网', variant: 'official' as const }
+    if (plugin.source === 'local') return { label: t('plugin.pa.card.sourceLocal'), variant: 'local' as const }
+    if (!plugin.source) return { label: t('plugin.pa.card.sourceUnknown'), variant: 'unknown' as const }
+    if (plugin.source === OFFICIAL_REPO_URL) return { label: t('plugin.pa.card.sourceOfficial'), variant: 'official' as const }
     const match = repoSources.find((s) => s.url === plugin.source)
-    return match ? { label: match.name, variant: 'custom' as const } : { label: '未知来源', variant: 'unknown' as const }
-  }, [plugin.source, repoSources])
+    return match ? { label: match.name, variant: 'custom' as const } : { label: t('plugin.pa.card.sourceUnknown'), variant: 'unknown' as const }
+  }, [plugin.source, repoSources, t])
   // Local switch state. The host's `plugin.enabled` is the
   // source of truth, but we mirror it locally for snappy
   // optimistic feedback (the host often round-trips to a
@@ -113,14 +113,14 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
     if (health === 'unhealthy') {
       return {
         cls: 'pa-market-badge is-unhealthy inline-flex items-center',
-        label: t('plugin.pa.card.healthUnhealthy', { defaultValue: 'Unhealthy' }),
+        label: t('plugin.pa.card.healthUnhealthy'),
         Icon: HeartPulse,
       }
     }
     if (health === 'healthy') {
       return {
         cls: 'pa-market-badge is-healthy inline-flex items-center',
-        label: t('plugin.pa.card.healthHealthy', { defaultValue: 'Healthy' }),
+        label: t('plugin.pa.card.healthHealthy'),
         Icon: CheckCircle2,
       }
     }
@@ -139,8 +139,8 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
         <div
           className="pa-installed-corner-flag"
           data-plugin-corner-flag="update"
-          title={remoteVersion ? `有新版本 v${remoteVersion}` : t('plugin.market.updateTo', { defaultValue: 'Update' })}
-          aria-label={t('plugin.market.updateTo', { defaultValue: 'Update' })}
+          title={remoteVersion ? t('plugin.pa.card.hasUpdate', { version: remoteVersion }) : t('plugin.market.updateTo')}
+          aria-label={t('plugin.market.updateTo')}
         />
       )}
       <div className="pa-market-card-body">
@@ -166,11 +166,11 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
             <span
               className="pa-market-badge is-conflict"
               title={conflictTooltip}
-              aria-label={t('plugin.pa.card.conflict', { defaultValue: 'Conflict' })}
+              aria-label={t('plugin.pa.card.conflict')}
               data-plugin-conflict="yes"
             >
               <AlertCircle size={9} style={{ marginRight: 3, verticalAlign: -1 }} />
-              {t('plugin.pa.card.conflict', { defaultValue: 'Conflict' })}
+              {t('plugin.pa.card.conflict')}
             </span>
           )}
           <span className={`pa-source-label is-${sourceInfo.variant}`}>{sourceInfo.label}</span>
@@ -227,16 +227,14 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
             <span className="pa-switch-track">
               <span className="pa-switch-thumb" />
             </span>
-            <span className="pa-switch-label">{switchOn ? '启用' : '禁用'}</span>
+            <span className="pa-switch-label">{switchOn ? t('plugin.pa.card.switchOn') : t('plugin.pa.card.switchOff')}</span>
           </button>
           <div className="pa-icon-row" style={{ marginLeft: 'auto' }}>
             <button
               type="button"
               className={`pa-icon-btn ${autoUpdateOn ? 'is-on' : ''}`}
-              title={t('plugin.pa.autoUpdate.labelTitle', {
-                defaultValue: 'Allow SwallowNote to install newer versions on startup',
-              })}
-              aria-label={t('plugin.pa.autoUpdate.label', { defaultValue: 'Auto-update' })}
+              title={t('plugin.pa.autoUpdate.labelTitle')}
+              aria-label={t('plugin.pa.autoUpdate.label')}
               aria-pressed={autoUpdateOn}
               data-plugin-auto-update={autoUpdateOn ? 'on' : 'off'}
               onClick={() => {
@@ -249,7 +247,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               <button
                 type="button"
                 className="pa-icon-btn"
-                title={remoteVersion ? `更新到 v${remoteVersion}` : t('plugin.market.updateTo', { defaultValue: 'Update' })}
+                title={remoteVersion ? t('plugin.pa.card.hasUpdate', { version: remoteVersion }) : t('plugin.market.updateTo')}
                 onClick={onUpdate}
               >
                 <Download />
@@ -269,7 +267,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               <button
                 type="button"
                 className="pa-icon-btn"
-                title={t('plugin.settings', { defaultValue: 'Plugin settings' })}
+                title={t('plugin.settings')}
                 onClick={onOpenSchemaSettings}
               >
                 <SettingsIcon />
@@ -279,7 +277,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               <button
                 type="button"
                 className="pa-icon-btn"
-                title={t('plugin.pa.dialog.storage', { defaultValue: 'Storage' })}
+                title={t('plugin.pa.btn.storage')}
                 onClick={onStorage}
               >
                 <Database />
@@ -299,7 +297,7 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
               <button
                 type="button"
                 className="pa-icon-btn is-danger"
-                title={t('plugin.pa.uninstall.confirm', { defaultValue: '卸载' })}
+                title={t('plugin.pa.uninstall.confirm')}
                 onClick={onUninstall}
               >
                 <Trash2 />

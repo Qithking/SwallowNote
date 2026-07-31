@@ -21,6 +21,7 @@ import type { LinkToolbarProps } from '@blocknote/react'
 import { codeBlockOptions } from '@blocknote/code-block'
 import { TextSelection } from 'prosemirror-state'
 import { useUIStore, useEditorStore, useEditorSettingsStore, useWorkspaceStore } from '@/stores'
+import { useShallow } from 'zustand/react/shallow'
 import { registerFlushFn } from '@/lib/editor-flush'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { compactMarkdown } from '@/utils/compact-markdown'
@@ -30,11 +31,13 @@ import { buildTableOfContents } from '@/utils/tableOfContents'
 import { writeBinaryFile, getHomeDir, readClipboardFilePaths, copyFile, readFile, pathExists, getFileMetadata } from '@/lib/tauri'
 import { downloadCoordinator } from '@/lib/download-coordinator'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { open as openExternal } from '@tauri-apps/plugin-shell'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Network, Sigma, ExternalLink } from 'lucide-react'
 import { countWords } from '@/lib/utils/wordCount'
 import { EditorContextMenu } from './EditorContextMenu'
+import { useEditorSearchIntegration } from './useEditorSearchIntegration'
 import { MermaidBlockSpec, transformMermaidBlocks, MERMAID_BLOCK_TYPE } from './mermaidBlockSpec'
 import {
   KatexBlockSpec,
@@ -47,6 +50,7 @@ import {
   MARKMAP_BLOCK_TYPE,
 } from './markmapBlockSpec'
 import '@blocknote/mantine/style.css'
+import { logger } from '@/lib/logger'
 
 /** Check if a URL is an external protocol (http, https, mailto, etc.) */
 function isExternalUrl(url: string): boolean {
@@ -133,7 +137,14 @@ function BlockNoteInner({
     normalPaddingHorizontal,
     widePaddingVertical,
     widePaddingHorizontal,
-  } = useEditorSettingsStore()
+  } = useEditorSettingsStore(
+    useShallow((s) => ({
+      normalPaddingVertical: s.normalPaddingVertical,
+      normalPaddingHorizontal: s.normalPaddingHorizontal,
+      widePaddingVertical: s.widePaddingVertical,
+      widePaddingHorizontal: s.widePaddingHorizontal,
+    })),
+  )
   const noteWidth = useUIStore((state) => state.noteWidth)
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
@@ -380,7 +391,7 @@ function BlockNoteInner({
                 } as PartialBlock)
               }
             } catch (e) {
-              console.error('Failed to paste file from clipboard:', sourcePath, e)
+              logger.error('markdown-editor', 'Failed to paste file from clipboard:', sourcePath, e)
             }
           }
         }
@@ -398,7 +409,7 @@ function BlockNoteInner({
       // 先检查文件是否存在，给出更友好的提示
       const exists = await pathExists(filePath)
       if (!exists) {
-        toast.error(`文件不存在: ${filePath}`)
+        toast.error(t('download.fileNotFound', { path: filePath }))
         return
       }
       const [content, meta] = await Promise.all([
@@ -426,10 +437,10 @@ function BlockNoteInner({
         wordCount: countWords(content),
       })
     } catch (e) {
-      console.error('Failed to open file from link:', e)
-      toast.error(`无法打开文件: ${filePath}`)
+      logger.error('markdown-editor', 'Failed to open file from link:', e)
+      toast.error(t('download.openFileFailed', { path: filePath }))
     }
-  }, [])
+  }, [t])
 
   // links.onClick 回调：处理链接点击跳转。
   // 注意：capture-phase listener 作为拦截 Tauri webview 导航的第一道防线，
@@ -448,7 +459,7 @@ function BlockNoteInner({
     event.preventDefault()
 
     if (isExternalUrl(href)) {
-      window.open(href, '_blank')
+      openExternal(href).catch((e) => logger.warn('markdown-editor', 'openExternal failed', href, e))
       return true
     }
 
@@ -491,12 +502,15 @@ function BlockNoteInner({
     },
   })
 
+  // 挂载查找/替换事件桥接 hook
+  useEditorSearchIntegration({ editorType: 'blocknote', editor })
+
   // Capture-phase click listener: 在捕获阶段拦截链接点击，调用 preventDefault()
   // 并执行跳转。此 listener 对预览模式必需——BlockNote 的 links.onClick 在只读模式
   // 下不会被调用（clickHandler.ts 中 !view.editable 时直接 return false）。
-  // 外部链接跳转统一交给 handleLinkClick 处理（编辑模式下），capture listener 仅
-  // 负责 preventDefault 以避免双重 window.open；内部文件链接与锚点跳转仍由 capture
-  // listener 处理（预览模式下 handleLinkClick 不会被调用）。
+  // 外部链接由 handleLinkClick 统一打开（编辑模式下），capture listener 仅负责
+  // preventDefault；内部文件链接与锚点跳转由 capture listener 处理（预览模式下
+  // handleLinkClick 不会被调用）。
   useEffect(() => {
     const container = editorContainerRef.current
     if (!container) return
@@ -518,8 +532,8 @@ function BlockNoteInner({
       event.preventDefault()
 
       if (isExternalUrl(href)) {
-        // 外部链接跳转交给 handleLinkClick 统一处理，避免双重 window.open。
-        // 这里仅 preventDefault 后 return，不执行 window.open。
+        // 编辑模式下 handleLinkClick 会处理外部链接打开，这里仅 preventDefault 避免双重打开。
+        // 若未来引入只读模式（editor.setEditable(false)），需改为直接 openExternal(href)。
         return
       }
 
@@ -559,7 +573,7 @@ function BlockNoteInner({
         doScrollToBlockId(block.id)
       }
     } catch (e) {
-      console.error('Failed to scroll to line:', e)
+      logger.error('markdown-editor', 'Failed to scroll to line:', e)
     }
   }
 
@@ -626,10 +640,10 @@ function BlockNoteInner({
           targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
         }
       } else {
-        console.warn('Block element not found:', blockId, 'fallback:', fallbackText)
+        logger.warn('markdown-editor', 'Block element not found:', blockId, 'fallback:', fallbackText)
       }
     } catch (e) {
-      console.error('Failed to scroll to block:', e)
+      logger.error('markdown-editor', 'Failed to scroll to block:', e)
     }
   }
 
@@ -688,7 +702,7 @@ function BlockNoteInner({
         })
 
         if (remoteBlocks.length === 0) {
-          toast.info('当前文档无远程图片')
+          toast.info(t('download.noRemoteImages'))
           return
         }
 
@@ -721,8 +735,8 @@ function BlockNoteInner({
           rootPath: rootPath || '',
         })
       } catch (err) {
-        console.error('Failed to enqueue download remote images:', err)
-        toast.error(`下载远程图片失败：${String(err)}`)
+        logger.error('markdown-editor', 'Failed to enqueue download remote images:', err)
+        toast.error(t('download.downloadFailed', { error: String(err) }))
       }
     }
     window.addEventListener('editor:download-remote-images', handler)
@@ -730,7 +744,7 @@ function BlockNoteInner({
       cancelled = true
       window.removeEventListener('editor:download-remote-images', handler)
     }
-  }, [editor, activeTabId, activeTabPath, rootPath, uploadPath])
+  }, [editor, activeTabId, activeTabPath, rootPath, uploadPath, t])
 
   // Insert text at cursor position in BlockNote
   // AI results are Markdown, so we need to parse them into BlockNote blocks
@@ -753,7 +767,7 @@ function BlockNoteInner({
           // Transform markmap code blocks to markmap blocks
           blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
-          console.warn('[MarkdownEditor] Failed to parse markdown for insert, treating as plain text:', parseError)
+          logger.warn('markdown-editor', 'Failed to parse markdown for insert, treating as plain text:', parseError)
           // Fallback: treat as plain text
           const lines = text.split('\n')
           blocks = lines.map((line: string) => ({
@@ -761,7 +775,7 @@ function BlockNoteInner({
             content: line || undefined
           }))
         }
-        
+
         if (blocks.length > 0) {
           const currentBlock = editor.getTextCursorPosition().block
           if (Array.isArray(currentBlock.content) && currentBlock.content.length === 0) {
@@ -777,7 +791,7 @@ function BlockNoteInner({
           }
         }
       } catch (err) {
-        console.error('Failed to insert at cursor in BlockNote:', err)
+        logger.error('markdown-editor', 'Failed to insert at cursor in BlockNote:', err)
       }
     }
     window.addEventListener('insert-at-cursor', handler)
@@ -835,7 +849,7 @@ function BlockNoteInner({
           const tr = state.tr.setSelection(selection)
           dispatch(tr)
         } catch (err) {
-          console.error('Failed to select all:', err)
+          logger.error('markdown-editor', 'Failed to select all:', err)
         }
         return false
       }
@@ -871,7 +885,7 @@ function BlockNoteInner({
           // Transform markmap code blocks to markmap blocks
           blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
-          console.warn('[MarkdownEditor] Failed to parse markdown for replace, treating as plain text:', parseError)
+          logger.warn('markdown-editor', 'Failed to parse markdown for replace, treating as plain text:', parseError)
           // Fallback: treat as plain text
           const lines = text.split('\n')
           blocks = lines.map((line: string) => ({
@@ -918,7 +932,7 @@ function BlockNoteInner({
           }
         }
       } catch (err) {
-        console.error('Failed to replace content in BlockNote:', err)
+        logger.error('markdown-editor', 'Failed to replace content in BlockNote:', err)
       }
     }
     window.addEventListener('replace-content', handler)
@@ -1007,10 +1021,10 @@ function BlockNoteInner({
           detail: { toc, isBlockNote: true }
         }))
       } catch (error) {
-        console.error('Error building table of contents:', error)
+        logger.error('markdown-editor', 'Error building table of contents:', error)
       }
     } catch (e) {
-      console.error('[MarkdownEditor] Failed to convert blocks to markdown:', e)
+      logger.error('markdown-editor', 'Failed to convert blocks to markdown:', e)
       // Don't propagate error to avoid breaking the editor
     }
   }, [onChange, editor, activeTabName, t])
@@ -1069,7 +1083,7 @@ function BlockNoteInner({
         detail: { toc, isBlockNote: true }
       }))
     } catch (error) {
-      console.error('Error building table of contents:', error)
+      logger.error('markdown-editor', 'Error building table of contents:', error)
     }
   }, [editor, activeTabName, t])
 
@@ -1129,7 +1143,7 @@ function BlockNoteInner({
         return tiptapEditor.state.doc.textContent || ''
       }
     } catch (e) {
-      console.warn('[MarkdownEditor] Failed to get editor text content:', e)
+      logger.warn('markdown-editor', 'Failed to get editor text content:', e)
     }
     return ''
   }, [editor])
@@ -1427,7 +1441,7 @@ function BlockNoteInner({
       const handleOpen = () => {
         const url = props.url
         if (isExternalUrl(url)) {
-          window.open(url, '_blank')
+          openExternal(url).catch((e) => logger.warn('markdown-editor', 'openExternal failed', url, e))
           return
         }
         if (url.startsWith('#')) {
@@ -1578,7 +1592,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
           // Transform markmap code blocks to markmap blocks
           blocks = transformMarkmapBlocks(blocks) as PartialBlock[]
         } catch (parseError) {
-          console.warn('[MarkdownEditor] Markdown parsing failed, treating as plain text:', parseError)
+          logger.warn('markdown-editor', 'Markdown parsing failed, treating as plain text:', parseError)
           // If markdown parsing fails, treat content as plain text
           // Split by newlines and create paragraph blocks
           const lines = body.split('\n')
@@ -1601,7 +1615,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
         }
       } catch (e) {
         if (cancelled) return
-        console.error('[MarkdownEditor] Failed to parse markdown:', e)
+        logger.error('markdown-editor', 'Failed to parse markdown:', e)
         // Don't show error UI, instead show content as plain text
         const lines = stripFrontmatter(content).split('\n')
         setInitialBlocks(lines.map(line => ({

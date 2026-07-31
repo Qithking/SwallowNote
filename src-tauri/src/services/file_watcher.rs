@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
+use log::error;
 
 /// watched_paths 上限，FIFO 淘汰
 const MAX_WATCHED_PATHS: usize = 32;
@@ -29,7 +30,7 @@ static FILE_WATCHER: Mutex<Option<FileWatcherState>> = Mutex::new(None);
 pub fn init_watcher(app_handle: AppHandle) {
     // 锁中毒（持有锁的线程 panic）时恢复内部数据，避免当前线程连锁 panic
     let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
-        eprintln!("锁中毒: {}", e);
+        error!("锁中毒: {}", e);
         e.into_inner()
     });
     if guard.is_some() {
@@ -80,7 +81,7 @@ pub fn init_watcher(app_handle: AppHandle) {
                 }
                 Err(errors) => {
                     for error in errors {
-                        eprintln!("File watcher error: {:?}", error);
+                        error!("File watcher error: {:?}", error);
                     }
                 }
             }
@@ -89,7 +90,7 @@ pub fn init_watcher(app_handle: AppHandle) {
         Ok(d) => d,
         Err(e) => {
             // 优雅降级：创建失败时记录日志并直接返回，避免 panic 导致启动崩溃
-            eprintln!("Failed to create debouncer: {}", e);
+            error!("Failed to create debouncer: {}", e);
             return;
         }
     };
@@ -104,7 +105,7 @@ pub fn init_watcher(app_handle: AppHandle) {
 pub async fn watch_directory(path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
-            eprintln!("锁中毒: {}", e);
+            error!("锁中毒: {}", e);
             e.into_inner()
         });
         let state = guard.as_mut().ok_or("File watcher not initialized")?;
@@ -147,7 +148,7 @@ pub async fn watch_directory(path: String) -> Result<(), String> {
 pub async fn unwatch_directory(path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let mut guard = FILE_WATCHER.lock().unwrap_or_else(|e| {
-            eprintln!("锁中毒: {}", e);
+            error!("锁中毒: {}", e);
             e.into_inner()
         });
         let state = guard.as_mut().ok_or("File watcher not initialized")?;
@@ -175,7 +176,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
     let mut guard = match FILE_WATCHER.lock() {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("[file_watcher] lock poisoned, skipping plugin watch: {e}");
+            error!("[file_watcher] lock poisoned, skipping plugin watch: {e}");
             return;
         }
     };
@@ -187,7 +188,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
     let app_data_dir = match app_handle.path().app_data_dir() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[file_watcher] failed to resolve app_data_dir: {e}");
+            error!("[file_watcher] failed to resolve app_data_dir: {e}");
             return;
         }
     };
@@ -196,7 +197,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
     // 插件目录不存在时立即创建
     if !plugins_root.exists() {
         if let Err(e) = std::fs::create_dir_all(&plugins_root) {
-            eprintln!(
+            error!(
                 "[file_watcher] failed to create {}: {e}",
                 plugins_root.display()
             );
@@ -211,7 +212,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
 
     if let Some(ref mut debouncer) = state.debouncer {
         if let Err(e) = debouncer.watch(&plugins_root, RecursiveMode::Recursive) {
-            eprintln!(
+            error!(
                 "[file_watcher] failed to watch {}: {e}",
                 plugins_root.display()
             );
@@ -234,7 +235,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
                 Ok(events) => events,
                 Err(errors) => {
                     for error in errors {
-                        eprintln!("[file_watcher] plugin-storage error: {:?}", error);
+                        error!("[file_watcher] plugin-storage error: {:?}", error);
                     }
                     return;
                 }
@@ -263,7 +264,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
     ) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("[file_watcher] failed to start storage debouncer: {e:?}");
+            error!("[file_watcher] failed to start storage debouncer: {e:?}");
             return;
         }
     };

@@ -58,6 +58,7 @@ import type { LucideIcon } from 'lucide-react'
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu'
 import { getContextMenuItems } from '@/lib/plugin-menu'
 import type { ContextMenuContext, ContextMenuItem as PluginContextMenuItem } from '@/types/plugin'
+import { logger } from '@/lib/logger'
 
 /** Map of icon names a plugin may declare to actual Lucide components.
  *  Keep this list small and curated; new entries are cheap to add but
@@ -136,7 +137,7 @@ export function PluginContextMenuItems({ location, ctx }: PluginContextMenuItems
               void Promise.resolve(
                 item.onClick({ ...ctx, location })
               ).catch((err) => {
-                console.error(`[plugin-menu] handler for ${item.id} failed:`, err)
+                logger.error('plugin-menu', `handler for ${item.id} failed:`, err)
               })
             }}
             style={{ color: 'var(--text-secondary)' }}

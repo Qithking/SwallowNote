@@ -35,6 +35,7 @@
     "dialog:allow-message",
     "dialog:allow-ask",
     "dialog:allow-confirm",
-    "core:webview:allow-print"
+    "core:webview:allow-print",
+    "log:default"
   ]
 }

@@ -6,7 +6,7 @@
  * data on a 2s interval and never touches the plugin lifecycle.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Activity, Download, Trash2, AlertCircle, BarChart3, HardDrive, Zap, Bug } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -25,6 +25,11 @@ export function PluginDiagnosticsPanel() {
   const [metrics, setMetrics] = useState<PluginMetrics[]>([])
   const [activeTab, setActiveTab] = useState<'overview' | 'events' | 'storage' | 'hooks' | 'backend'>('overview')
   const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimer.current)
+  }, [])
 
   // Refresh metrics periodically. We poll the in-memory store because
   // the host's lifecycle calls (emit, storage, hooks) all push into it
@@ -44,7 +49,8 @@ export function PluginDiagnosticsPanel() {
   const handleCopy = async () => {
     await copyDiagnosticBundleToClipboard()
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    clearTimeout(copyTimer.current)
+    copyTimer.current = setTimeout(() => setCopied(false), 2000)
   }
 
   const handleClear = () => {
