@@ -337,7 +337,7 @@ pub fn get_download_dir() -> String {
 
 // 安装下载的更新并重启。macOS：attach DMG → 替换 .app → xattr/lsregister → detach → spawn 重启脚本 → exit。Windows：回退到打开 installer。
 #[tauri::command]
-pub async fn install_and_restart(_app: AppHandle, dmg_path: String) -> Result<(), String> {
+pub async fn install_and_restart(app: AppHandle, dmg_path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let dmg = PathBuf::from(&dmg_path);
