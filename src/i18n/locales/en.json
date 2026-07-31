@@ -600,7 +600,7 @@
     "syncRepos": "Sync Repos",
     "syncResultTooltip": "{{succeeded}} succeeded, {{failed}} failed, {{conflicted}} conflicted",
     "viewLogs": "Logs",
-    "viewLogsTooltip": "View application logs (Ctrl+Shift+Y)"
+    "viewLogsTooltip": "View application logs ({{shortcut}})"
   },
   "error": {
     "componentRenderError": "Component render error",

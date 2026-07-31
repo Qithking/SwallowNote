@@ -4,6 +4,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link, User, RefreshCw, CheckCircle2, XCircle, AlertTriangle, Database, GitBranch, ScrollText } from 'lucide-react'
 import { useUIStore, useGitStore, useCloneStore } from '@/stores'
+import { getShortcutKey, formatShortcutForDisplay } from '@/lib/shortcuts'
 import { checkLatestVersion, downloadLatestRelease, openInstaller, installAndRestart, DownloadProgress } from '@/lib/tauri'
 import { open } from '@tauri-apps/plugin-shell'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -33,10 +34,15 @@ function StatusBar() {
   const autoCheckUpdate = useUIStore((s) => s.autoCheckUpdate)
   const developerMode = useUIStore((s) => s.developerMode)
   const toggleLogViewer = useUIStore((s) => s.toggleLogViewer)
+  const customShortcuts = useUIStore((s) => s.customShortcuts)
   const syncStatus = useGitStore((s) => s.syncStatus)
   const cloneIsRunning = useCloneStore((s) => s.isCloning)
   const statusCloneUrl = useCloneStore((s) => s.cloneUrl)
   const statusClonePercent = useCloneStore((s) => s.clonePercent)
+  const getShortcut = useCallback(
+    (key: string) => formatShortcutForDisplay(getShortcutKey(key as any, customShortcuts)),
+    [customShortcuts]
+  )
   // Also listen to git-clone-progress events directly as a local mirror,
   // so the status bar updates in real-time even if the store subscription
   // has rendering timing issues.
@@ -456,7 +462,7 @@ function StatusBar() {
                   <span className="text-[11px]">{t('statusBar.viewLogs')}</span>
                 </span>
               </TooltipTrigger>
-              <TooltipContent>{t('statusBar.viewLogsTooltip')}</TooltipContent>
+              <TooltipContent>{t('statusBar.viewLogsTooltip', { shortcut: getShortcut('logViewer') })}</TooltipContent>
             </Tooltip>
           )}
           {/* Git 克隆进度 */}

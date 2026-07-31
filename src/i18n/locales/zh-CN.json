@@ -600,7 +600,7 @@
     "syncRepos": "同步仓库",
     "syncResultTooltip": "成功{{succeeded}}个，失败{{failed}}个，冲突{{conflicted}}个",
     "viewLogs": "日志",
-    "viewLogsTooltip": "查看应用日志（Ctrl+Shift+Y）"
+    "viewLogsTooltip": "查看应用日志 ({{shortcut}})"
   },
   "error": {
     "componentRenderError": "组件渲染出错",

@@ -49,6 +49,16 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
   })),
 }))
 
+// ─── Browser API shims for jsdom ────────────────────────────────────────────
+// Radix Tooltip / Dialog use ResizeObserver internally; jsdom lacks it.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as any
+}
+
 // ─── Per-file cleanup ──────────────────────────────────────────────────────
 // The plugin permission guard stores grants in localStorage. Tests
 // within a file may set/clear grants, but those grants should not
