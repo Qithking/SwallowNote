@@ -11,7 +11,7 @@ import { SettingsView } from '@/components/Settings/SettingsView'
 import { flushAllEditors } from '@/lib/editor-flush'
 import { readActiveEditorScrollTop } from '@/stores/editor'
 import { attachLogger, logger } from '@/lib/logger'
-import { parseGitError, GitErrorCode } from '@/lib/git/errors'
+import { GitErrorCode } from '@/lib/git/errors'
 const PluginManagerView = lazy(() => import('@/components/Plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })))
 const LogViewer = lazy(() => import('@/components/LogViewer').then(m => ({ default: m.LogViewer })))
 
@@ -548,61 +548,39 @@ function App() {
           const conflictedPaths = new Set(results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.path))
           const reposWithChanges = repos.filter((r: GitRepository) => r.hasUncommittedChanges && r.remoteUrl && !conflictedPaths.has(r.path))
           if (reposWithChanges.length > 0) {
-            const { gitCommitAndPush, gitCredentialGet, gitPushWithCredentials } = await import('@/lib/tauri')
+            const { commitAndPushRepo } = await import('@/lib/git/service')
             for (const repo of reposWithChanges) {
-              try {
-                // G-02 修复：后端返回 CommitPushResult，auto sync 只统计有实际提交或推送的
-                const result = await gitCommitAndPush(repo.path, 'Auto sync')
-                if (result.committed || result.pushed) {
+              const r = await commitAndPushRepo(repo, 'Auto sync')
+              if (r.success) {
+                // G-02 修复：auto sync 只统计有实际提交或推送的
+                if (r.committed || r.pushed) {
                   pushSucceeded++
                 }
-              } catch (e) {
-                const errorMessage = String(e).trim()
-                const error = parseGitError(errorMessage)
-                // Track conflict repos from push phase
-                if (error.code === GitErrorCode.RebaseConflict || errorMessage.includes('rebase/merge is in progress')) {
-                  pushConflictPaths.push(repo.path)
-                  continue
-                }
-                // G-04 修复：rebase --continue 或 merge commit 失败，按冲突处理
-                if (error.code === GitErrorCode.RebaseContinueFailed || error.code === GitErrorCode.MergeCommitFailed) {
-                  pushConflictPaths.push(repo.path)
-                  continue
-                }
-                // G-06 修复：detached HEAD 跳过，不重试
-                if (error.code === GitErrorCode.DetachedHead) {
-                  continue
-                }
-                // Try saved credentials on auth error
-                if (error.code === GitErrorCode.AuthRequired) {
-                  try {
-                    const savedCred = await gitCredentialGet(repo.path)
-                    if (savedCred) {
-                      try {
-                        // gitCommitAndPush 内部 pull 阶段也可能因认证失败返回 AUTH_REQUIRED，
-                        // 仅调 gitPushWithCredentials 会跳过 pull，导致远端新提交未集成。
-                        // 先 pull 再 push，pull 已成功时为 no-op。
-                        const { gitPullWithCredentials } = await import('@/lib/tauri')
-                        await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
-                        await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
-                        pushSucceeded++
-                        continue
-                      } catch (e) {
-                        logger.error('app', 'auto-sync credentials failed', e)
-                      }
-                    }
-                  } catch {
-                    // Failed to get credentials
-                  }
-                }
-                // G-02 修复：后端不再返回 "nothing to commit" 错误，而是返回 committed=false。
-                // 此处只需排除 AUTH_REQUIRED（已在上面处理），其他错误计入 pushFailed。
-                if (error.code !== GitErrorCode.AuthRequired) {
-                  pushFailed++
-                  pushErrorPaths.push(repo.path)
-                  logger.error('app', 'Auto sync push failed:', repo.path, errorMessage)
-                }
+                continue
               }
+              if (r.needsCredential) {
+                // auto-sync 静默跳过, 无凭证不弹 dialog
+                continue
+              }
+              const code = r.errorCode ?? GitErrorCode.Unknown
+              const errorMessage = r.error || ''
+              // Track conflict repos from push phase
+              if (code === GitErrorCode.RebaseConflict || errorMessage.includes('rebase/merge is in progress')) {
+                pushConflictPaths.push(repo.path)
+                continue
+              }
+              // G-04 修复：rebase --continue 或 merge commit 失败，按冲突处理
+              if (code === GitErrorCode.RebaseContinueFailed || code === GitErrorCode.MergeCommitFailed) {
+                pushConflictPaths.push(repo.path)
+                continue
+              }
+              // G-06 修复：detached HEAD 跳过，不重试
+              if (code === GitErrorCode.DetachedHead) {
+                continue
+              }
+              pushFailed++
+              pushErrorPaths.push(repo.path)
+              logger.error('app', 'Auto sync push failed:', repo.path, errorMessage)
             }
           }
         }

@@ -18,7 +18,9 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, PullResult } from '@/stores/git'
-import { gitCommitAndPush, gitPushWithCredentials, gitPullWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitForcePush, gitForcePull } from '@/lib/tauri'
+import { gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete } from '@/lib/tauri'
+import { withCredentialFallback, commitAndPushRepo } from '@/lib/git/service'
+import { GitErrorCode } from '@/lib/git/errors'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +35,6 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
 import { logger } from '@/lib/logger'
-import { parseGitError, GitErrorCode } from '@/lib/git/errors'
 import {
   Dialog,
   DialogContent,
@@ -248,73 +249,51 @@ function CommitSection({
     const errorPaths: string[] = []
 
     for (const repo of finalRepos) {
-      try {
-        // G-02 修复：后端返回 CommitPushResult，让前端区分"无改动"/"已提交"/"已推送"。
-        // 无改动且未推送时仍然计入 success（静默跳过，不显示"提交成功"误导）。
-        await gitCommitAndPush(repo.path, commitMessage)
+      const r = await commitAndPushRepo(repo, commitMessage)
+      if (r.success) {
         successCount++
-      } catch (e) {
-        const errorMessage = String(e).trim()
-        const error = parseGitError(errorMessage)
-        logger.error('git-view', 'Failed to commit and push:', repo.path, errorMessage)
-        // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
-        if (error.code === GitErrorCode.DetachedHead) {
-          failCount++
-          errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
-          errorPaths.push(repo.path)
-        } else if (error.code === GitErrorCode.AuthRequired) {
-          // Try to use saved credentials from keyring first
-          let pushedWithSavedCred = false
-          try {
-            const savedCred = await gitCredentialGet(repo.path)
-            if (savedCred) {
-              try {
-                // gitCommitAndPush 内部 pull 阶段也可能因认证失败返回 AUTH_REQUIRED，
-                // 仅调 gitPushWithCredentials 会跳过 pull，导致远端新提交未集成。
-                // 先 pull 再 push，pull 已成功时为 no-op。
-                await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
-                await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
-                pushedWithSavedCred = true
-                successCount++
-              } catch {
-                // Saved credentials failed, fall through to show dialog
-              }
-            }
-          } catch {
-            // Failed to get saved credentials, fall through
-          }
-          if (!pushedWithSavedCred) {
-            // Show credential dialog for manual input
-            // Don't count as success or failure since user can retry with credentials
-            setCredentialDialog({
-              open: true,
-              repoPath: repo.path,
-              repoName: repo.name,
-            })
-          }
-        } else if (error.code === GitErrorCode.SubmoduleUncommitted) {
-          successCount++
-          errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
-          errorPaths.push(repo.path)
-        } else if (error.code === GitErrorCode.SubmoduleRefNeedsUpdate) {
-          successCount++
-          errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
-          errorPaths.push(repo.path)
-        } else if (error.code === GitErrorCode.RebaseConflict) {
-          failCount++
-          errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
-          conflictPaths.push(repo.path)
-          // Do NOT auto-open conflict tab — user must click conflict icon or repo to open
-        } else if (error.code === GitErrorCode.RebaseContinueFailed || error.code === GitErrorCode.MergeCommitFailed) {
-          // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
-          failCount++
-          errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { error: errorMessage })}`)
-          conflictPaths.push(repo.path)
-        } else {
-          failCount++
-          errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
-          errorPaths.push(repo.path)
-        }
+        continue
+      }
+      if (r.error) {
+        logger.error('git-view', 'Failed to commit and push:', repo.path, r.error)
+      }
+      if (r.needsCredential) {
+        // Show credential dialog for manual input
+        setCredentialDialog({
+          open: true,
+          repoPath: repo.path,
+          repoName: repo.name,
+        })
+        continue
+      }
+      const code = r.errorCode ?? GitErrorCode.Unknown
+      const errorMessage = r.error || ''
+      // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
+      if (code === GitErrorCode.DetachedHead) {
+        failCount++
+        errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
+        errorPaths.push(repo.path)
+      } else if (code === GitErrorCode.SubmoduleUncommitted) {
+        successCount++
+        errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
+        errorPaths.push(repo.path)
+      } else if (code === GitErrorCode.SubmoduleRefNeedsUpdate) {
+        successCount++
+        errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
+        errorPaths.push(repo.path)
+      } else if (code === GitErrorCode.RebaseConflict) {
+        failCount++
+        errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
+        conflictPaths.push(repo.path)
+      } else if (code === GitErrorCode.RebaseContinueFailed || code === GitErrorCode.MergeCommitFailed) {
+        // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
+        failCount++
+        errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { error: errorMessage })}`)
+        conflictPaths.push(repo.path)
+      } else {
+        failCount++
+        errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
+        errorPaths.push(repo.path)
       }
     }
 
@@ -425,35 +404,17 @@ function RepositoryItem({
     setIsForceAction(true)
     setConfirmAction(null)
     try {
-      await gitForcePush(repo.path)
-      showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
-      await onRefresh()
-    } catch (e) {
-      const errorMessage = String(e).trim()
-      const error = parseGitError(errorMessage)
-      if (error.code === GitErrorCode.AuthRequired) {
-        // Try saved credentials
-        try {
-          const savedCred = await gitCredentialGet(repo.path)
-          if (savedCred) {
-            try {
-              // Force push with credentials
-              await gitForcePushWithCredentials(repo.path, savedCred.username, savedCred.password)
-              showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
-              onRefresh()
-              return
-            } catch {
-              // Saved credentials failed
-            }
-          }
-        } catch {
-          // Failed to get credentials
-        }
-        // 保存凭证也失败，弹出凭证对话框让用户手动输入
-        setCredentialDialog({ open: true, action: 'forcePush' })
-      } else {
-        showToast(t('git.forcePushFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      const r = await withCredentialFallback(repo, 'forcePush')
+      if (r.success) {
+        showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
+        await onRefresh()
+        return
       }
+      if (r.needsCredential) {
+        setCredentialDialog({ open: true, action: 'forcePush' })
+        return
+      }
+      showToast(t('git.forcePushFailed', { repo: repo.name, error: r.error || t('git.unknownError') }), 'error')
     } finally {
       setIsForceAction(false)
     }
@@ -463,34 +424,17 @@ function RepositoryItem({
     setIsForceAction(true)
     setConfirmAction(null)
     try {
-      await gitForcePull(repo.path)
-      showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
-      await onRefresh()
-    } catch (e) {
-      const errorMessage = String(e).trim()
-      const error = parseGitError(errorMessage)
-      if (error.code === GitErrorCode.AuthRequired) {
-        // Try saved credentials
-        try {
-          const savedCred = await gitCredentialGet(repo.path)
-          if (savedCred) {
-            try {
-              await gitForcePullWithCredentials(repo.path, savedCred.username, savedCred.password)
-              showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
-              onRefresh()
-              return
-            } catch {
-              // Saved credentials failed
-            }
-          }
-        } catch {
-          // Failed to get credentials
-        }
-        // 保存凭证也失败，弹出凭证对话框让用户手动输入
-        setCredentialDialog({ open: true, action: 'forcePull' })
-      } else {
-        showToast(t('git.forcePullFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      const r = await withCredentialFallback(repo, 'forcePull')
+      if (r.success) {
+        showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
+        await onRefresh()
+        return
       }
+      if (r.needsCredential) {
+        setCredentialDialog({ open: true, action: 'forcePull' })
+        return
+      }
+      showToast(t('git.forcePullFailed', { repo: repo.name, error: r.error || t('git.unknownError') }), 'error')
     } finally {
       setIsForceAction(false)
     }

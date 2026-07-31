@@ -3,8 +3,9 @@
  */
 import { create } from 'zustand'
 import { logger } from '@/lib/logger'
-import { GitRepositoryInfo, gitPull, gitCredentialGet, gitPullWithCredentials, getConflictRepoRecords, removeConflictRepoRecord, syncConflictRepoRecords, gitGetConflictFiles, scanGitRepos, type ConflictRepoRecord } from '@/lib/tauri'
-import { parseGitError, GitErrorCode } from '@/lib/git/errors'
+import { GitRepositoryInfo, getConflictRepoRecords, removeConflictRepoRecord, syncConflictRepoRecords, gitGetConflictFiles, scanGitRepos, type ConflictRepoRecord } from '@/lib/tauri'
+import { withCredentialFallback } from '@/lib/git/service'
+import { GitErrorCode } from '@/lib/git/errors'
 import i18n from '@/i18n'
 
 export type RepoStatus = 'normal' | 'conflict' | 'error'
@@ -201,45 +202,16 @@ export const useGitStore = create<GitState>((set, get) => ({
         const batch = reposWithRemote.slice(i, i + CONCURRENCY)
         const batchResults = await Promise.allSettled(
           batch.map(async (repo): Promise<PullResult> => {
-            try {
-              await gitPull(repo.path)
-              return { path: repo.path, name: repo.name, success: true }
-            } catch (e) {
-              const errorMessage = String(e).trim()
-              const error = parseGitError(errorMessage)
-              // 需要认证时尝试 keyring 中的凭证
-              if (error.code === GitErrorCode.AuthRequired) {
-                try {
-                  const savedCred = await gitCredentialGet(repo.path)
-                  if (savedCred) {
-                    try {
-                      await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
-                      return { path: repo.path, name: repo.name, success: true }
-                    } catch (credPullError) {
-                      // 检查凭证拉取是否产生冲突
-                      const credErrorMessage = String(credPullError).trim()
-                      const credError = parseGitError(credErrorMessage)
-                      if (credError.code === GitErrorCode.RebaseConflict) {
-                        return { path: repo.path, name: repo.name, success: false, error: credErrorMessage, isConflict: true }
-                      }
-                      // 凭证拉取失败（非冲突）直接返回，避免丢失真实原因
-                      return { path: repo.path, name: repo.name, success: false, error: credErrorMessage }
-                    }
-                  }
-                } catch {
-                  // Failed to get saved credentials
-                }
-              }
-              // Check for rebase conflict
-              if (error.code === GitErrorCode.RebaseConflict) {
-                return { path: repo.path, name: repo.name, success: false, error: errorMessage, isConflict: true }
-              }
-              // G-06 修复：detached HEAD 时 pull 无法执行，标记专门状态以便前端提示
-              if (error.code === GitErrorCode.DetachedHead) {
-                return { path: repo.path, name: repo.name, success: false, error: errorMessage, isDetachedHead: true }
-              }
-              return { path: repo.path, name: repo.name, success: false, error: errorMessage }
+            const r = await withCredentialFallback(repo, 'pull')
+            const result: PullResult = {
+              path: repo.path,
+              name: repo.name,
+              success: r.success,
             }
+            if (r.error) result.error = r.error
+            if (r.errorCode === GitErrorCode.RebaseConflict) result.isConflict = true
+            if (r.errorCode === GitErrorCode.DetachedHead) result.isDetachedHead = true
+            return result
           })
         )
         // 将本批结果收集到总结果数组中
