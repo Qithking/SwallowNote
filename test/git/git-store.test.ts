@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useGitStore, mapRepoInfoToRepository, mapRepoInfosToRepositories, type GitRepository, type GitRepositoryInfo, type RepoStatus } from '@/stores/git'
-import { gitPull } from '@/lib/tauri'
+import { gitPull, gitCredentialGet, gitPullWithCredentials } from '@/lib/tauri'
 
 vi.mock('@/lib/tauri', () => ({
   gitPull: vi.fn().mockResolvedValue(undefined),
@@ -355,6 +355,115 @@ describe('TC-033: pullAllRepos 并发限流与防重入测试', () => {
     // 应直接返回空数组，不调用 gitPull
     expect(results).toEqual([])
     expect(gitPull).not.toHaveBeenCalled()
+  })
+})
+
+describe('TC-035: pullAllRepos 错误分类 characterization', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useGitStore.setState({
+      repositories: [],
+      cachedRepositories: [],
+      activeRepository: null,
+      conflictRepos: [],
+      conflictFilesMap: {},
+      isGitLoading: false,
+      isPulling: false,
+      scanProgress: null,
+      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+    })
+  })
+
+  afterEach(() => {
+    vi.resetAllMocks()
+  })
+
+  const createTestRepo = (path: string, name: string): GitRepository => ({
+    name,
+    path,
+    remoteUrl: 'https://github.com/test/repo.git',
+    hasUncommittedChanges: false,
+    uncommittedCount: 0,
+    currentBranch: 'main',
+    isSubmodule: false,
+    parentPath: null,
+    status: 'normal',
+  })
+
+  it('TC-035-01: AUTH_REQUIRED 无凭证 → success:false, error 含 AUTH_REQUIRED', async () => {
+    vi.mocked(gitPull).mockRejectedValueOnce('AUTH_REQUIRED:fatal: could not read Username')
+    vi.mocked(gitCredentialGet).mockResolvedValue(null)
+
+    const repos = [createTestRepo('/ws/repo1', 'repo1')]
+    const results = await useGitStore.getState().pullAllRepos(repos)
+
+    expect(results).toHaveLength(1)
+    expect(results[0].success).toBe(false)
+    expect(results[0].error).toContain('AUTH_REQUIRED')
+    expect(results[0].isConflict).toBeUndefined()
+    expect(results[0].isDetachedHead).toBeUndefined()
+  })
+
+  it('TC-035-02: AUTH_REQUIRED + 凭证成功 → success:true', async () => {
+    vi.mocked(gitPull).mockRejectedValueOnce('AUTH_REQUIRED:fatal: could not read Username')
+    vi.mocked(gitCredentialGet).mockResolvedValue({ username: 'u', password: 'p' } as any)
+    vi.mocked(gitPullWithCredentials).mockResolvedValueOnce(undefined)
+
+    const repos = [createTestRepo('/ws/repo1', 'repo1')]
+    const results = await useGitStore.getState().pullAllRepos(repos)
+
+    expect(results).toHaveLength(1)
+    expect(results[0].success).toBe(true)
+    expect(gitPullWithCredentials).toHaveBeenCalledWith('/ws/repo1', 'u', 'p')
+  })
+
+  it('TC-035-03: AUTH_REQUIRED + 凭证拉取 REBASE_CONFLICT → isConflict:true', async () => {
+    vi.mocked(gitPull).mockRejectedValueOnce('AUTH_REQUIRED:fatal: could not read Username')
+    vi.mocked(gitCredentialGet).mockResolvedValue({ username: 'u', password: 'p' } as any)
+    vi.mocked(gitPullWithCredentials).mockRejectedValueOnce('REBASE_CONFLICT:CONFLICT in file')
+
+    const repos = [createTestRepo('/ws/repo1', 'repo1')]
+    const results = await useGitStore.getState().pullAllRepos(repos)
+
+    expect(results).toHaveLength(1)
+    expect(results[0].success).toBe(false)
+    expect(results[0].isConflict).toBe(true)
+    expect(results[0].error).toContain('REBASE_CONFLICT')
+  })
+
+  it('TC-035-04: REBASE_CONFLICT → isConflict:true', async () => {
+    vi.mocked(gitPull).mockRejectedValueOnce('REBASE_CONFLICT:merge conflict in file.txt')
+
+    const repos = [createTestRepo('/ws/repo1', 'repo1')]
+    const results = await useGitStore.getState().pullAllRepos(repos)
+
+    expect(results).toHaveLength(1)
+    expect(results[0].success).toBe(false)
+    expect(results[0].isConflict).toBe(true)
+  })
+
+  it('TC-035-05: DETACHED_HEAD → isDetachedHead:true', async () => {
+    vi.mocked(gitPull).mockRejectedValueOnce('DETACHED_HEAD:HEAD is detached')
+
+    const repos = [createTestRepo('/ws/repo1', 'repo1')]
+    const results = await useGitStore.getState().pullAllRepos(repos)
+
+    expect(results).toHaveLength(1)
+    expect(results[0].success).toBe(false)
+    expect(results[0].isDetachedHead).toBe(true)
+  })
+
+  it('TC-035-06: 其他错误 → success:false, 无特殊标志', async () => {
+    vi.mocked(gitPull).mockRejectedValueOnce('fatal: network error')
+
+    const repos = [createTestRepo('/ws/repo1', 'repo1')]
+    const results = await useGitStore.getState().pullAllRepos(repos)
+
+    expect(results).toHaveLength(1)
+    expect(results[0].success).toBe(false)
+    expect(results[0].error).toBe('fatal: network error')
+    expect(results[0].isConflict).toBeUndefined()
+    expect(results[0].isDetachedHead).toBeUndefined()
   })
 })
 

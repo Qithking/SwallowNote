@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
 import { logger } from '@/lib/logger'
+import { parseGitError, GitErrorCode } from '@/lib/git/errors'
 import {
   Dialog,
   DialogContent,
@@ -254,13 +255,14 @@ function CommitSection({
         successCount++
       } catch (e) {
         const errorMessage = String(e).trim()
+        const error = parseGitError(errorMessage)
         logger.error('git-view', 'Failed to commit and push:', repo.path, errorMessage)
         // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
-        if (errorMessage.startsWith('DETACHED_HEAD:')) {
+        if (error.code === GitErrorCode.DetachedHead) {
           failCount++
           errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
           errorPaths.push(repo.path)
-        } else if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+        } else if (error.code === GitErrorCode.AuthRequired) {
           // Try to use saved credentials from keyring first
           let pushedWithSavedCred = false
           try {
@@ -290,20 +292,20 @@ function CommitSection({
               repoName: repo.name,
             })
           }
-        } else if (errorMessage.startsWith('SUBMODULE_UNCOMMITTED:')) {
+        } else if (error.code === GitErrorCode.SubmoduleUncommitted) {
           successCount++
           errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
           errorPaths.push(repo.path)
-        } else if (errorMessage.startsWith('SUBMODULE_REF_NEEDS_UPDATE:')) {
+        } else if (error.code === GitErrorCode.SubmoduleRefNeedsUpdate) {
           successCount++
           errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
           errorPaths.push(repo.path)
-        } else if (errorMessage.startsWith('REBASE_CONFLICT:')) {
+        } else if (error.code === GitErrorCode.RebaseConflict) {
           failCount++
           errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
           conflictPaths.push(repo.path)
           // Do NOT auto-open conflict tab — user must click conflict icon or repo to open
-        } else if (errorMessage.startsWith('REBASE_CONTINUE_FAILED:') || errorMessage.startsWith('MERGE_COMMIT_FAILED:')) {
+        } else if (error.code === GitErrorCode.RebaseContinueFailed || error.code === GitErrorCode.MergeCommitFailed) {
           // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
           failCount++
           errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { error: errorMessage })}`)
@@ -428,7 +430,8 @@ function RepositoryItem({
       await onRefresh()
     } catch (e) {
       const errorMessage = String(e).trim()
-      if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+      const error = parseGitError(errorMessage)
+      if (error.code === GitErrorCode.AuthRequired) {
         // Try saved credentials
         try {
           const savedCred = await gitCredentialGet(repo.path)
@@ -465,7 +468,8 @@ function RepositoryItem({
       await onRefresh()
     } catch (e) {
       const errorMessage = String(e).trim()
-      if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+      const error = parseGitError(errorMessage)
+      if (error.code === GitErrorCode.AuthRequired) {
         // Try saved credentials
         try {
           const savedCred = await gitCredentialGet(repo.path)

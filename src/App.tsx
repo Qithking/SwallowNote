@@ -11,6 +11,7 @@ import { SettingsView } from '@/components/Settings/SettingsView'
 import { flushAllEditors } from '@/lib/editor-flush'
 import { readActiveEditorScrollTop } from '@/stores/editor'
 import { attachLogger, logger } from '@/lib/logger'
+import { parseGitError, GitErrorCode } from '@/lib/git/errors'
 const PluginManagerView = lazy(() => import('@/components/Plugin/PluginManagerView').then(m => ({ default: m.PluginManagerView })))
 const LogViewer = lazy(() => import('@/components/LogViewer').then(m => ({ default: m.LogViewer })))
 
@@ -557,22 +558,23 @@ function App() {
                 }
               } catch (e) {
                 const errorMessage = String(e).trim()
+                const error = parseGitError(errorMessage)
                 // Track conflict repos from push phase
-                if (errorMessage.startsWith('REBASE_CONFLICT:') || errorMessage.includes('rebase/merge is in progress')) {
+                if (error.code === GitErrorCode.RebaseConflict || errorMessage.includes('rebase/merge is in progress')) {
                   pushConflictPaths.push(repo.path)
                   continue
                 }
                 // G-04 修复：rebase --continue 或 merge commit 失败，按冲突处理
-                if (errorMessage.startsWith('REBASE_CONTINUE_FAILED:') || errorMessage.startsWith('MERGE_COMMIT_FAILED:')) {
+                if (error.code === GitErrorCode.RebaseContinueFailed || error.code === GitErrorCode.MergeCommitFailed) {
                   pushConflictPaths.push(repo.path)
                   continue
                 }
                 // G-06 修复：detached HEAD 跳过，不重试
-                if (errorMessage.startsWith('DETACHED_HEAD:')) {
+                if (error.code === GitErrorCode.DetachedHead) {
                   continue
                 }
                 // Try saved credentials on auth error
-                if (errorMessage.startsWith('AUTH_REQUIRED:')) {
+                if (error.code === GitErrorCode.AuthRequired) {
                   try {
                     const savedCred = await gitCredentialGet(repo.path)
                     if (savedCred) {
@@ -595,7 +597,7 @@ function App() {
                 }
                 // G-02 修复：后端不再返回 "nothing to commit" 错误，而是返回 committed=false。
                 // 此处只需排除 AUTH_REQUIRED（已在上面处理），其他错误计入 pushFailed。
-                if (!errorMessage.startsWith('AUTH_REQUIRED:')) {
+                if (error.code !== GitErrorCode.AuthRequired) {
                   pushFailed++
                   pushErrorPaths.push(repo.path)
                   logger.error('app', 'Auto sync push failed:', repo.path, errorMessage)
