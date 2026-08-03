@@ -53,6 +53,7 @@ pub fn cleanup_stale_askpass_scripts() {
 /// - Unix: 脚本内嵌凭证，权限 0600，RAII 自动清理。
 /// - Windows: 脚本不含凭证，从环境变量 GIT_USERNAME/GIT_PASSWORD 读取，RAII 自动清理。
 ///   即使脚本残留也不会泄露凭证。
+#[allow(unused_variables)]
 pub fn create_askpass_script(
     prefix: &str,
     username: &str,
