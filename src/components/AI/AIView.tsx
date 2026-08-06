@@ -1,92 +1,34 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useChat } from '@ai-sdk/react'
-import { DefaultChatTransport } from 'ai'
-import {
-  Bot,
-  Send,
-  Loader2,
-  Sparkles,
-  Check,
-  Settings,
-  Square,
-  X,
-  ClipboardPaste,
-  PenLine,
-  Replace,
-  FilePlus,
-} from 'lucide-react'
+import { Bot, Settings } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { useUIStore, useEditorStore, useWorkspaceStore } from '@/stores'
-import { MarkdownRenderer } from './MarkdownRenderer'
-import { getAiProxyUrl } from '@/lib/ai'
 import { loadFileContent } from '@/lib/api'
-import { restartAiProxy, saveAiMessage, loadAiMessages, loadAiRolePrompts, writeFile, createFile, type AiRolePrompt } from '@/lib/tauri'
+import { restartAiProxy, saveAiMessage, loadAiRolePrompts, writeFile, createFile, type AiRolePrompt } from '@/lib/tauri'
 import { logger } from '@/lib/logger'
-
-function getMessageText(message: { parts?: Array<{ type: string; text?: string }> }): string {
-  if (!message.parts) return ''
-  return message.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text)
-    .join('')
-}
-
-function formatTimeStr(timeStr: string): string {
-  if (!timeStr) return ''
-  const match = timeStr.match(/(\d{2}):(\d{2}):(\d{2})/)
-  if (match) return `${match[1]}:${match[2]}:${match[3]}`
-  return timeStr
-}
+import { useAiChat } from '@/hooks/useAiChat'
+import { useAiMessageDisplay } from '@/hooks/useAiMessageDisplay'
+import { useAiScroll } from '@/hooks/useAiScroll'
+import { useAiMessageTrimming } from '@/hooks/useAiMessageTrimming'
+import { MessageList } from './MessageList'
+import { InputArea } from './InputArea'
+import { useAiHistory } from '@/hooks/useAiHistory'
+import { useAiContextMenu } from '@/hooks/useAiContextMenu'
 
 function AIView() {
   const { t } = useTranslation()
-  // Maximum number of messages kept in memory to prevent unbounded growth
-  const MAX_IN_MEMORY_MESSAGES = 100
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const copiedIdTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [inputValue, setInputValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isOverflow, setIsOverflow] = useState(false)
-  useEffect(() => {
-    const el = textareaRef.current
-    if (el) {
-      el.style.height = 'auto'
-      const height = Math.min(Math.max(el.scrollHeight, 50), 200)
-      el.style.height = height + 'px'
-      setIsOverflow(el.scrollHeight > 200)
-    }
-  }, [inputValue])
-  // Cleanup copy-feedback timer on unmount
-  useEffect(() => {
-    return () => clearTimeout(copiedIdTimer.current)
-  }, [])
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const scrollViewportRef = useRef<HTMLDivElement | null>(null)
   const savedMessageIds = useRef<Set<string>>(new Set())
   const [messageTimestamps, setMessageTimestamps] = useState<Record<string, string>>({})
-  const [oldestDbId, setOldestDbId] = useState<number | null>(null)
-  const [hasMoreHistory, setHasMoreHistory] = useState(false)
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
-  const historyLoadedRef = useRef(false)
-  // 标记历史是否加载完成，避免覆盖新消息
-  const historyReadyRef = useRef(false)
   const [aiRolePrompts, setAiRolePrompts] = useState<AiRolePrompt[]>([])
   const [activeRoleKey, setActiveRoleKey] = useState('chat')
-  // 右键消息的展示文本映射，避免显示全文
-  const contextMenuDisplayTexts = useRef<Map<string, string>>(new Map())
-
-  // 待映射的展示文本：以发送时生成的稳定 correlation id 为 key（Task 21）
-  // 使用稳定 id 而非 messages.length，避免 history 头部插入消息后索引错位
-  const pendingDisplayTexts = useRef<Map<string, string>>(new Map())
-  // 发送顺序队列：按 FIFO 将 pending 展示文本匹配到新出现的 user 消息
-  const pendingDisplayTextQueue = useRef<Array<string>>([])
-  // 已匹配过展示文本的 user 消息 id 集合，避免重复匹配
-  const displayTextMappedIds = useRef<Set<string>>(new Set())
+  const pendingUserTimestampsByCount = useRef<Map<number, string>>(new Map())
 
   // Use Zustand selectors to avoid unnecessary re-renders from unrelated state changes
   const aiModels = useUIStore((s) => s.aiModels)
@@ -109,164 +51,49 @@ function AIView() {
   const activeEditorTab = useEditorStore((s) => s.tabs.find((t) => t.id === s.activeTabId))
   const rootPath = useWorkspaceStore((s) => s.rootPath)
 
-  // 使用 ref 让 mount-only useEffect 能读取到最新的 aiPort / activeAiModelId，
-  // 避免空依赖数组导致的 stale closure（Task 19）
-  const aiPortRef = useRef(aiPort)
-  aiPortRef.current = aiPort
-  const activeAiModelIdRef = useRef(activeAiModelId)
-  activeAiModelIdRef.current = activeAiModelId
-
   const isConfigured = aiModels.length > 0
 
-  const chat = useChat({
-    transport: new DefaultChatTransport({
-      api: getAiProxyUrl(aiPort),
-    }),
+  // useChat 集成、stopRef 与模型初始化逻辑 (原 AIView 121-131, 252-280)
+  const { messages, status, stop, error, sendMessage, setMessages, isLoading, activeAiModelIdRef } = useAiChat({
+    aiPort,
+    activeAiModelId,
+    aiModels,
+    defaultAiModelId,
+    setActiveAiModel,
   })
 
-  const { messages, status, stop, error, sendMessage, setMessages } = chat
-  const isLoading = status === 'submitted' || status === 'streaming'
+  // 右键消息展示文本映射子系统 (原 AIView 81-159)
+  const { contextMenuDisplayTexts, pendingDisplayTexts, pendingDisplayTextQueue, displayTextMappedIds } = useAiMessageDisplay(messages)
 
-  // Stop any in-flight AI stream on unmount so callbacks don't update state (R-M4)
-  const stopRef = useRef(stop)
-  stopRef.current = stop
+  // 滚动到底节流与滚动容器 ref (原 AIView 68-69, 160-180)
+  const { messagesEndRef, scrollViewportRef } = useAiScroll(messages)
+
+  // 内存消息超限裁剪 (原 AIView 181-250)
+  useAiMessageTrimming({
+    messages,
+    isLoading,
+    setMessages,
+    savedMessageIds,
+    contextMenuDisplayTexts,
+    displayTextMappedIds,
+    setMessageTimestamps,
+    pendingUserTimestampsByCount,
+    activeAiModelIdRef,
+  })
+
   useEffect(() => {
-    return () => {
-      stopRef.current()
+    const el = textareaRef.current
+    if (el) {
+      el.style.height = 'auto'
+      const height = Math.min(Math.max(el.scrollHeight, 50), 200)
+      el.style.height = height + 'px'
+      setIsOverflow(el.scrollHeight > 200)
     }
+  }, [inputValue])
+  // Cleanup copy-feedback timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(copiedIdTimer.current)
   }, [])
-
-  // 当 messages 变化时，按 FIFO 顺序把待映射展示文本匹配到新出现的 user 消息（Task 21）
-  useEffect(() => {
-    if (pendingDisplayTextQueue.current.length === 0) return
-    // 找出尚未匹配展示文本的 user 消息
-    const unmapped = messages.filter(
-      (msg) => msg.role === 'user' && !displayTextMappedIds.current.has(msg.id)
-    )
-    // 按 FIFO 顺序消费待映射项，与 unmapped user 消息一一对应
-    while (pendingDisplayTextQueue.current.length > 0 && unmapped.length > 0) {
-      const correlationId = pendingDisplayTextQueue.current.shift()!
-      const msg = unmapped.shift()!
-      const displayText = pendingDisplayTexts.current.get(correlationId)
-      if (displayText !== undefined) {
-        contextMenuDisplayTexts.current.set(msg.id, displayText)
-        pendingDisplayTexts.current.delete(correlationId)
-      }
-      displayTextMappedIds.current.add(msg.id)
-    }
-  }, [messages])
-
-  // Throttled scroll-to-bottom: avoids excessive scroll calls during streaming
-  const scrollToBottomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const scrollToBottom = useCallback(() => {
-    if (scrollToBottomTimerRef.current) return
-    scrollToBottomTimerRef.current = setTimeout(() => {
-      scrollToBottomTimerRef.current = null
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, 100)
-  }, [])
-
-  useEffect(() => {
-    scrollToBottom()
-    return () => {
-      if (scrollToBottomTimerRef.current) {
-        clearTimeout(scrollToBottomTimerRef.current)
-        scrollToBottomTimerRef.current = null
-      }
-    }
-  }, [messages, scrollToBottom])
-
-  // 集中清理按 id 索引的辅助容器：裁剪 messages 时同步释放对应数据，
-  // 避免这些容器只增不删导致内存泄漏（P0）
-  const pruneAuxiliaryRefs = (trimmedIds: string[]) => {
-    for (const id of trimmedIds) {
-      savedMessageIds.current.delete(id)
-      contextMenuDisplayTexts.current.delete(id)
-      displayTextMappedIds.current.delete(id)
-    }
-    // messageTimestamps 是 useState，需通过 setter 构造新对象以触发渲染
-    if (trimmedIds.length > 0) {
-      const idSet = new Set(trimmedIds)
-      setMessageTimestamps((prev) => {
-        const next: Record<string, string> = {}
-        let changed = false
-        for (const key in prev) {
-          if (idSet.has(key)) {
-            changed = true
-          } else {
-            next[key] = prev[key]
-          }
-        }
-        return changed ? next : prev
-      })
-    }
-  }
-
-  // Trim in-memory messages when they exceed the limit to prevent unbounded memory growth
-  useEffect(() => {
-    if (messages.length <= MAX_IN_MEMORY_MESSAGES) return
-    // Don't trim during active streaming to avoid disrupting the response
-    if (isLoading) return
-    // 裁剪前先把尚未入库的 user 消息保存到 DB，避免丢弃后无法找回（Task 20）
-    // assistant 消息在流式结束时已保存；db- 前缀消息已存在于 DB，跳过避免重复入库
-    const discardCount = messages.length - MAX_IN_MEMORY_MESSAGES
-    const toDiscard = messages.slice(0, discardCount)
-    // 裁剪前先把待裁剪的 user 消息 flush 到 DB，失败则跳过裁剪保留在内存，下次 effect 重新尝试（P0 NEW-3）
-    // 使用内部 async 函数，避免 useEffect 回调本身返回 Promise（React 不允许）
-    let cancelled = false
-    const flushAndTrim = async () => {
-      for (const msg of toDiscard) {
-        if (msg.role === 'user' && !savedMessageIds.current.has(msg.id)) {
-          const text = getMessageText(msg)
-          if (text) {
-            try {
-              await saveAiMessage('user', text, activeAiModelIdRef.current || '')
-              // 标记为已入库，避免下次 effect 重试时重复写入
-              savedMessageIds.current.add(msg.id)
-            } catch (e) {
-              logger.error('ai-view', 'Failed to flush user message before trim, skipping trim:', e)
-              // flush 失败则不裁剪，保留在内存中，等待下次 effect 重新尝试
-              return
-            }
-          }
-        }
-      }
-      // flush 全部成功后才裁剪；若 effect 已被清理（依赖变化）则跳过 setMessages 避免竞态
-      if (cancelled) return
-      const trimmed = messages.slice(messages.length - MAX_IN_MEMORY_MESSAGES)
-      // 裁剪 messages 时同步清理辅助数据结构，避免按 id/count 索引的容器只增不删导致内存泄漏（P0）
-      pruneAuxiliaryRefs(toDiscard.map((m) => m.id))
-      // 裁剪后 messages 数组重排，所有基于旧 messages.length 记录的 countAtSend 索引均已失效
-      // （key 是发送时的 messages.length，裁剪后该索引指向的消息已变化，继续匹配会误赋 timestamp），
-      // 因此直接清空整个 Map。正在发送中的消息会丢失时间戳显示，但裁剪仅在消息累积超上限时触发，
-      // 极少与发送中消息重叠，且时间戳丢失不影响功能。下游 useEffect 已处理空 Map 情况。
-      pendingUserTimestampsByCount.current.clear()
-      setMessages(trimmed)
-    }
-    flushAndTrim()
-    return () => {
-      cancelled = true
-    }
-  }, [messages.length, isLoading])
-
-  useEffect(() => {
-    // 通过 ref 读取最新值，避免空依赖数组导致的 stale closure（Task 19）
-    const currentActiveAiModelId = activeAiModelIdRef.current
-    const currentAiPort = aiPortRef.current
-    // If no active model or active model not in list, set default model
-    if ((!currentActiveAiModelId || !aiModels.find((m) => m.id === currentActiveAiModelId)) && aiModels.length > 0) {
-      // Priority: 1. defaultAiModelId if valid, 2. first available model
-      const defaultModel = defaultAiModelId && aiModels.find((m) => m.id === defaultAiModelId)
-      setActiveAiModel(defaultModel ? defaultModel.id : aiModels[0].id)
-    }
-    if (currentActiveAiModelId) {
-      const model = aiModels.find((m) => m.id === currentActiveAiModelId)
-      if (model) {
-        const apiKey = model._decryptedApiKey || ''
-        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, currentAiPort).catch((e) => logger.error('ai-view', 'Failed to restart AI proxy:', e))
-      }
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load role prompts on mount and listen for changes from settings panel
   const reloadRolePrompts = useCallback(() => {
@@ -281,105 +108,17 @@ function AIView() {
     return () => window.removeEventListener('ai-role-prompts-changed', reloadRolePrompts)
   }, [reloadRolePrompts])
 
-  useEffect(() => {
-    if (historyLoadedRef.current || !isConfigured) return
-    historyLoadedRef.current = true
-    const loadHistory = async () => {
-      try {
-        const dbMessages = await loadAiMessages(undefined, 30)
-        if (dbMessages.length > 0) {
-          const chatMessages = dbMessages.reverse().map((msg) => ({
-            id: `db-${msg.id}`,
-            role: msg.role as 'user' | 'assistant',
-            parts: [{ type: 'text' as const, text: msg.content }],
-          }))
-          setMessages(chatMessages)
-          const timestamps: Record<string, string> = {}
-          dbMessages.forEach((msg) => {
-            savedMessageIds.current.add(`db-${msg.id}`)
-            timestamps[`db-${msg.id}`] = msg.created_at
-          })
-          setMessageTimestamps((prev) => ({ ...prev, ...timestamps }))
-          setOldestDbId(dbMessages[0].id)
-          setHasMoreHistory(dbMessages.length >= 30)
-        }
-      } catch (e) {
-        logger.error('ai-view', 'Failed to load AI chat history:', e)
-      } finally {
-        // Mark history as ready even if loading failed, so pending requests can proceed
-        historyReadyRef.current = true
-      }
-    }
-    loadHistory()
-  }, [isConfigured])
-
-  useEffect(() => {
-    if (status !== 'ready') return
-    if (messages.length === 0) return
-    const lastMsg = messages[messages.length - 1]
-    if (lastMsg?.role === 'assistant' && !savedMessageIds.current.has(lastMsg.id)) {
-      const text = getMessageText(lastMsg)
-      if (text) {
-        savedMessageIds.current.add(lastMsg.id)
-        const now = new Date()
-        const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-        setMessageTimestamps((prev) => ({ ...prev, [lastMsg.id]: timeStr }))
-        saveAiMessage('assistant', text, activeAiModelId || '').catch((e) => logger.error('ai-view', 'Failed to save AI assistant message:', e))
-      }
-    }
-  }, [status])
-
-  const loadMoreHistory = useCallback(async () => {
-    if (isLoadingHistory || !hasMoreHistory || oldestDbId === null) return
-    setIsLoadingHistory(true)
-    try {
-      const viewport = scrollViewportRef.current
-      const prevScrollHeight = viewport?.scrollHeight || 0
-
-      const dbMessages = await loadAiMessages(oldestDbId, 30)
-      if (dbMessages.length > 0) {
-        const chatMessages = dbMessages.reverse().map((msg) => ({
-          id: `db-${msg.id}`,
-          role: msg.role as 'user' | 'assistant',
-          parts: [{ type: 'text' as const, text: msg.content }],
-        }))
-        setMessages((prev) => [...chatMessages, ...prev])
-        const timestamps: Record<string, string> = {}
-        dbMessages.forEach((msg) => {
-          savedMessageIds.current.add(`db-${msg.id}`)
-          timestamps[`db-${msg.id}`] = msg.created_at
-        })
-        setMessageTimestamps((prev) => ({ ...prev, ...timestamps }))
-        setOldestDbId(dbMessages[0].id)
-        setHasMoreHistory(dbMessages.length >= 30)
-
-        requestAnimationFrame(() => {
-          if (viewport) {
-            const newScrollHeight = viewport.scrollHeight
-            viewport.scrollTop = newScrollHeight - prevScrollHeight
-          }
-        })
-      } else {
-        setHasMoreHistory(false)
-      }
-    } catch (e) {
-      logger.error('ai-view', 'Failed to load more history:', e)
-    } finally {
-      setIsLoadingHistory(false)
-    }
-  }, [isLoadingHistory, hasMoreHistory, oldestDbId])
-
-  useEffect(() => {
-    const viewport = scrollViewportRef.current
-    if (!viewport) return
-    const handleScroll = () => {
-      if (viewport.scrollTop < 50 && hasMoreHistory && !isLoadingHistory) {
-        loadMoreHistory()
-      }
-    }
-    viewport.addEventListener('scroll', handleScroll)
-    return () => viewport.removeEventListener('scroll', handleScroll)
-  }, [hasMoreHistory, isLoadingHistory, loadMoreHistory])
+  // 历史加载、分页加载更多、滚动监听、assistant 消息自动保存 (原 AIView 112-210)
+  const { isLoadingHistory, historyReadyRef } = useAiHistory({
+    isConfigured,
+    status,
+    messages,
+    setMessages,
+    savedMessageIds,
+    setMessageTimestamps,
+    scrollViewportRef,
+    activeAiModelId,
+  })
 
   const handleModelChange = async (modelId: string) => {
     setActiveAiModel(modelId)
@@ -401,13 +140,7 @@ function AIView() {
     copiedIdTimer.current = setTimeout(() => setCopiedId(null), 2000)
   }
 
-  /**
-   * Open the Settings panel and jump directly to the AI section.
-   * Mirrors the behaviour of clicking the activity-bar gear icon,
-   * which also sets `sidebarView = 'settings'` (the rendering
-   * condition in `App.tsx` requires BOTH `settingsPanelVisible`
-   * AND `sidebarView === 'settings'` for the panel to appear).
-   */
+  // 打开设置面板并跳转 AI section; 需同时设 sidebarView='settings' 才能渲染
   const openAiSettings = useCallback(() => {
     setSettingsSection('ai')
     setSettingsPanelVisible(true)
@@ -436,8 +169,6 @@ function AIView() {
     }
   }
 
-  // Track pending user timestamps: maps a snapshot of messages.length at send time to the timestamp
-  const pendingUserTimestampsByCount = useRef<Map<number, string>>(new Map())
   // pendingUserTimestampsByCount 的 LRU 上限：超过 50 条时删除最旧的 key，避免无界增长
   const MAX_PENDING_TIMESTAMPS = 50
   const trimPendingTimestampsLRU = () => {
@@ -468,110 +199,23 @@ function AIView() {
     }
   }, [messages])
 
-  // Listen for context menu requests from the store — process once and clear
-  // Uses a processed-ID set to prevent duplicate processing from React re-renders or Strict Mode
-  // Limited to 100 entries to prevent memory leaks
-  const processedRequestIds = useRef<Set<string>>(new Set())
-  const MAX_PROCESSED_IDS = 100
-
-  useEffect(() => {
-    if (!aiContextMenuRequest || !isConfigured) return
-
-    // Use the request's unique ID to detect duplicates (React Strict Mode double-fire)
-    const requestId = aiContextMenuRequest.id
-
-    // Skip if this request was already processed (prevents React Strict Mode double-fire)
-    if (processedRequestIds.current.has(requestId)) return
-    processedRequestIds.current.add(requestId)
-    // Evict oldest entries to prevent unbounded growth
-    if (processedRequestIds.current.size > MAX_PROCESSED_IDS) {
-      const iter = processedRequestIds.current.values()
-      processedRequestIds.current.delete(iter.next().value!)
-    }
-
-    // Clear from store immediately to prevent re-trigger
-    setAiContextMenuRequest(null)
-
-    const { roleKey, roleName, hasSelection, content, lineRange, filePath } = aiContextMenuRequest
-
-    // Switch to AI panel
-    setRightPanelType('ai')
-
-    // Build the display message (what the user sees in the chat bubble)
-    let displayMessage: string
-    if (hasSelection && lineRange) {
-      displayMessage = `[${roleName}] ${filePath} (L${lineRange[0]}-L${lineRange[1]})`
-    } else {
-      displayMessage = `[${roleName}] ${filePath}`
-    }
-
-    // Build the actual content sent to AI
-    const aiContent = `${displayMessage}\n\n${content}`
-
-    // Set the role key
-    setActiveRoleKey(roleKey)
-
-    // Helper: actually send the message (called once history is ready)
-    const doSend = () => {
-      // Record the local timestamp
-      const now = new Date()
-      const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-      const countBeforeSend = messages.length
-      pendingUserTimestampsByCount.current.set(countBeforeSend, timeStr)
-      trimPendingTimestampsLRU()
-
-      // 生成稳定 correlation id 作为 key，避免 messages.length 索引错位（Task 21）
-      const correlationId = crypto.randomUUID()
-      pendingDisplayTexts.current.set(correlationId, displayMessage)
-      pendingDisplayTextQueue.current.push(correlationId)
-
-      const rolePrompt = aiRolePrompts.find((p) => p.role_key === roleKey)
-      const systemPrompt = rolePrompt?.prompt || ''
-
-      // Send to AI with full content
-      if (systemPrompt) {
-        sendMessage({ text: aiContent }, { body: { systemPrompt } })
-      } else {
-        sendMessage({ text: aiContent })
-      }
-
-      // Save display message to DB (not the full content)
-      saveAiMessage('user', displayMessage, activeAiModelId || '').catch((e) => logger.error('ai-view', 'Failed to save AI user message:', e))
-    }
-
-    // If chat history hasn't finished loading yet, wait for it.
-    // Otherwise setMessages(history) will overwrite the newly sent user message.
-    if (historyReadyRef.current) {
-      doSend()
-    } else {
-      // 轮询等待 history 加载完成，带 cleanup 防止组件卸载或依赖变化时泄漏
-      let checkInterval: ReturnType<typeof setInterval> | null = null
-      let safetyTimeout: ReturnType<typeof setTimeout> | null = null
-
-      checkInterval = setInterval(() => {
-        if (historyReadyRef.current) {
-          if (checkInterval) clearInterval(checkInterval)
-          if (safetyTimeout) clearTimeout(safetyTimeout)
-          doSend()
-        }
-      }, 50)
-
-      // 安全超时：最多等待 3 秒
-      safetyTimeout = setTimeout(() => {
-        if (checkInterval) clearInterval(checkInterval)
-        if (!historyReadyRef.current) {
-          historyReadyRef.current = true
-          doSend()
-        }
-      }, 3000)
-
-      // cleanup: 组件卸载或依赖变化时清理定时器
-      return () => {
-        if (checkInterval) clearInterval(checkInterval)
-        if (safetyTimeout) clearTimeout(safetyTimeout)
-      }
-    }
-  }, [aiContextMenuRequest]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 右键菜单触发的 AI 对话请求处理 (原 AIView 209-308)
+  useAiContextMenu({
+    aiContextMenuRequest,
+    isConfigured,
+    setAiContextMenuRequest,
+    setRightPanelType,
+    setActiveRoleKey,
+    messages,
+    pendingUserTimestampsByCount,
+    trimPendingTimestampsLRU,
+    pendingDisplayTexts,
+    pendingDisplayTextQueue,
+    aiRolePrompts,
+    sendMessage,
+    activeAiModelId,
+    historyReadyRef,
+  })
 
   const persistAndSend = async (text: string) => {
     // Record the local timestamp and current message count before sending
@@ -713,261 +357,40 @@ function AIView() {
         </div>
       </div>
 
-      <ScrollArea ref={scrollAreaRef} className="flex-1 p-3">
-        <div className="py-[5px]">
-        {!isConfigured ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <Sparkles size={32} className="mb-3 opacity-50" />
-            <p className="text-sm text-center mb-4">
-              {t('ai.notConfigured')}
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={openAiSettings}
-            >
-              <Settings size={14} className="mr-1.5" />
-              {t('ai.goToSettings')}
-            </Button>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <Sparkles size={32} className="mb-3 opacity-50" />
-            <p className="text-sm text-center font-medium">
-              {t('ai.placeholderResponse')}
-            </p>
-          </div>
-        ) : (
-          <>
-            {isLoadingHistory && (
-              <div className="flex items-center justify-center py-2">
-                <Loader2 size={14} className="animate-spin text-muted-foreground" />
-              </div>
-            )}
-            {messages.map((message) => {
-              const text = getMessageText(message)
-              // For context-menu-triggered messages, show the display summary instead of full content
-              const displayText = message.role === 'user' && contextMenuDisplayTexts.current.has(message.id)
-                ? contextMenuDisplayTexts.current.get(message.id)!
-                : text
-              return (
-                <div
-                  key={message.id}
-                  className={cn(
-                    'flex gap-3 mt-4',
-                    message.role === 'user' && 'flex-row-reverse'
-                  )}
-                  style={{ maxWidth: '100%' }}
-                >
-                  <div
-                    className={cn(
-                      'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-md',
-                      message.role === 'user' ? 'bg-primary/20 text-foreground' : 'bg-accent'
-                    )}
-                  >
-                    {message.role === 'user' ? (
-                      <span className="text-xs text-foreground">{t('ai.you')}</span>
-                    ) : (
-                      <Bot size={14} />
-                    )}
-                  </div>
-                  <div
-                    className={cn(
-                      'p-3 rounded-lg overflow-hidden shadow-md',
-                      message.role === 'user'
-                        ? 'bg-primary/15 text-foreground max-w-[85%]'
-                        : 'bg-accent max-w-[85%]'
-                    )}
-                  >
-                    {message.role === 'assistant' ? (
-                      <div className="min-w-0 overflow-hidden">
-                        <MarkdownRenderer content={displayText} />
-                      </div>
-                    ) : (
-                      <p className="text-xs whitespace-pre-wrap break-words">{displayText}</p>
-                    )}
-                    {message.role === 'user' && messageTimestamps[message.id] && (
-                      <div className="flex items-center justify-between gap-1 mt-1">
-                        <span />
-                        <div className="flex items-center gap-1">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                onClick={() => handleCopy(text, message.id)}
-                                className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
-                              >
-                                {copiedId === message.id ? (
-                                  <Check size={12} />
-                                ) : (
-                                  <ClipboardPaste size={12} />
-                                )}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t('ai.copyContent')}</TooltipContent>
-                          </Tooltip>
-                          <span className="text-[10px] text-muted-foreground">
-                            {formatTimeStr(messageTimestamps[message.id])}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    {message.role === 'assistant' && text && (
-                      <div className="flex items-center justify-end gap-1 mt-2">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => insertAtCursor(text)}
-                              className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
-                            >
-                              <PenLine size={12} />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('ai.insertAtCursor')}</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => replaceContent(text)}
-                              className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
-                            >
-                              <Replace size={12} />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('ai.replaceContent')}</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => handleCopy(text, message.id)}
-                              className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
-                            >
-                              {copiedId === message.id ? (
-                                <Check size={12} />
-                              ) : (
-                                <ClipboardPaste size={12} />
-                              )}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('ai.copyContent')}</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => handleSaveAsNewFile(text)}
-                              className="p-1 rounded hover:bg-black/10 text-xs opacity-50 hover:opacity-100"
-                            >
-                              <FilePlus size={12} />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('ai.saveAsNewFile')}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </>
-        )}
-        {isLoading && (() => {
-          const lastMsg = messages[messages.length - 1]
-          return !lastMsg || lastMsg.role !== 'assistant' || !getMessageText(lastMsg)
-        })() && (
-          <div className="flex gap-3 mt-4">
-            <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center shadow-md">
-              <Bot size={14} />
-            </div>
-            <div className="max-w-[85%] p-3 rounded-lg bg-accent shadow-md">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Loader2 size={14} className="animate-spin" />
-                <span className="text-xs">{t('ai.thinking')}</span>
-              </div>
-            </div>
-          </div>
-        )}
-        {error && (
-          <div className="p-3 mt-2 rounded-lg bg-destructive/10 text-destructive text-xs">
-            {error.message || t('ai.error')}
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-        </div>
-      </ScrollArea>
+      <MessageList
+        isConfigured={isConfigured}
+        messages={messages}
+        isLoadingHistory={isLoadingHistory}
+        contextMenuDisplayTexts={contextMenuDisplayTexts}
+        messageTimestamps={messageTimestamps}
+        copiedId={copiedId}
+        isLoading={isLoading}
+        error={error}
+        messagesEndRef={messagesEndRef}
+        scrollAreaRef={scrollAreaRef}
+        handleCopy={handleCopy}
+        insertAtCursor={insertAtCursor}
+        replaceContent={replaceContent}
+        handleSaveAsNewFile={handleSaveAsNewFile}
+        openAiSettings={openAiSettings}
+      />
 
-      <div className="p-3 ">
-        {aiAttachedFiles.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {aiAttachedFiles.map((filePath, index) => {
-              const fileName = filePath.split(/[\\/]/).pop() || filePath
-              return (
-                <span
-                  key={filePath}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-xs text-primary max-w-[180px] truncate"
-                  title={filePath}
-                >
-                  <span className="truncate">{fileName}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeAiAttachedFile(index)}
-                    className="ml-0.5 p-0.5 rounded hover:bg-primary/20 text-muted-foreground hover:text-foreground"
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              )
-            })}
-          </div>
-        )}
-        <form onSubmit={onFormSubmit} className="relative rounded-lg border border-border overflow-hidden" style={{ background: 'var(--bg-secondary)' }}>
-          <div className="w-full  pt-3">
-            <textarea
-              ref={textareaRef}
-              className={cn("w-full px-3 text-xs min-h-[50px] max-h-[200px] resize-none outline-none bg-transparent", isOverflow ? "overflow-y-auto" : "overflow-y-hidden")}
-              placeholder={isConfigured ? t('ai.placeholder') : t('ai.notConfigured')}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={!isConfigured}
-            />
-          </div>
-          <div className="w-full flex items-center justify-between px-2 py-1.5 rounded-b-lg" style={{ background: 'var(--bg-secondary)' }}>
-            <div className="flex items-center gap-1">
-              {isConfigured && (
-                <Select value={activeRoleKey} onValueChange={setActiveRoleKey}>
-                  <SelectTrigger className="h-6 w-auto border-0 bg-transparent shadow-none px-1 text-[11px] text-muted-foreground hover:text-foreground focus:ring-0 max-w-[100px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="min-w-[120px]">
-                    {aiRolePrompts.map((role) => (
-                      <SelectItem key={role.role_key} value={role.role_key} className="text-xs py-1 pl-7 pr-2">
-                        {role.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {isLoading && (
-                <button
-                  type="button"
-                  onClick={() => stop()}
-                  className="p-1.5 rounded-md bg-destructive text-destructive-foreground hover:opacity-90"
-                >
-                  <Square size={12} />
-                </button>
-              )}
-              <button
-                type="submit"
-                disabled={!isConfigured || !inputValue.trim() || isLoading}
-                className="p-1.5 rounded-md bg-primary text-primary-foreground disabled:opacity-50 hover:opacity-90"
-              >
-                <Send size={12} />
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
+      <InputArea
+        isConfigured={isConfigured}
+        inputValue={inputValue}
+        setInputValue={setInputValue}
+        isOverflow={isOverflow}
+        textareaRef={textareaRef}
+        isLoading={isLoading}
+        aiAttachedFiles={aiAttachedFiles}
+        removeAiAttachedFile={removeAiAttachedFile}
+        aiRolePrompts={aiRolePrompts}
+        activeRoleKey={activeRoleKey}
+        setActiveRoleKey={setActiveRoleKey}
+        onFormSubmit={onFormSubmit}
+        handleKeyDown={handleKeyDown}
+        stop={stop}
+      />
     </div>
   )
 }
