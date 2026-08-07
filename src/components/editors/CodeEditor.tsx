@@ -40,7 +40,8 @@ import { java } from '@codemirror/lang-java'
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EditorContextMenu } from './EditorContextMenu'
-import { useEditorSearchIntegration } from './useEditorSearchIntegration'
+import { useEditorSearchIntegration, adaptCodeMirrorSearch } from './useEditorSearchIntegration'
+import { useCodeMirrorSearch } from './useCodeMirrorSearch'
 import { logger } from '@/lib/logger'
 
 interface CodeEditorProps {
@@ -215,7 +216,8 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
   const viewRef = useRef<EditorView | null>(null)
 
   // 挂载查找/替换事件桥接 hook
-  useEditorSearchIntegration({ editorType: 'codemirror', viewRef })
+  const cmSearch = useCodeMirrorSearch({ viewRef })
+  useEditorSearchIntegration(adaptCodeMirrorSearch(cmSearch))
 
   // 实际执行行定位的内部函数：把光标移到目标行并滚动到视口中央
   const doScrollToLine = (lineNumber: number) => {

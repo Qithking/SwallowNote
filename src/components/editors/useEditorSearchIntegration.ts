@@ -1,27 +1,25 @@
 /**
  * useEditorSearchIntegration — 编辑器查找/替换事件桥接 hook
  *
- * 在 MarkdownEditor / CodeEditor 中挂载此 hook,自动:
- * 1. 根据编辑器类型调用 useBlockNoteSearch / useCodeMirrorSearch
- * 2. 监听 window 的 editor:find-replace:* 事件并调用对应 hook 方法
- * 3. 当 matchCount 变化时派发 editor:find-replace:match-count 事件
- *
- * Source: plan/editor-find-replace step 8
+ * 接收统一的 EditorSearchAdapter,监听 window 的 editor:find-replace:* 事件
+ * 并转发到 adapter。各编辑器用 adaptBlockNoteSearch / adaptCodeMirrorSearch
+ * 把自己的 search hook 输出适配为 EditorSearchAdapter,消除编辑器类型分支。
  */
 import { useEffect, useRef } from 'react'
-import type { EditorView } from '@codemirror/view'
-import { useBlockNoteSearch } from './useBlockNoteSearch'
-import { useCodeMirrorSearch } from './useCodeMirrorSearch'
 import type { FindReplaceOptions } from '@/components/FindReplacePanel'
+import type { useBlockNoteSearch } from './useBlockNoteSearch'
+import type { useCodeMirrorSearch } from './useCodeMirrorSearch'
 
-export type EditorSearchType = 'codemirror' | 'blocknote'
-
-interface UseEditorSearchIntegrationArgs {
-  editorType: EditorSearchType
-  /** BlockNote editor 实例(editorType === 'blocknote' 时必需) */
-  editor?: unknown
-  /** CodeMirror viewRef(editorType === 'codemirror' 时必需) */
-  viewRef?: React.MutableRefObject<EditorView | null>
+/** 统一的搜索适配器契约 */
+export interface EditorSearchAdapter {
+  setQuery: (text: string, options: FindReplaceOptions) => void
+  setReplaceText: (text: string) => void
+  findNext: () => void
+  findPrev: () => void
+  replaceNext: (text: string) => void
+  replaceAll: (text: string) => void
+  clear: () => void
+  matchCount: { current: number; total: number }
 }
 
 /** 跨编辑器实例共享当前查询,CM/BN 切换后新编辑器可自动恢复搜索 */
@@ -49,47 +47,74 @@ export function getSharedFindReplaceText(): string {
   return sharedReplaceText
 }
 
-export function useEditorSearchIntegration({ editorType, editor, viewRef }: UseEditorSearchIntegrationArgs) {
-  // 始终调用两个 hook(React hooks rules),但根据 editorType 使用对应的 API
-  const bnSearch = useBlockNoteSearch({ editor: editor ?? null } as any)
-  const cmSearch = useCodeMirrorSearch({ viewRef: viewRef ?? { current: null } } as any)
+/** BlockNote search hook → EditorSearchAdapter */
+export function adaptBlockNoteSearch(
+  bn: ReturnType<typeof useBlockNoteSearch>,
+): EditorSearchAdapter {
+  return {
+    setQuery: (text, options) => bn.setQuery(text, { caseSensitive: options.caseSensitive }),
+    setReplaceText: (text) => bn.setReplaceText(text),
+    findNext: () => bn.findNext(),
+    findPrev: () => bn.findPrev(),
+    replaceNext: (text) => bn.replaceNext(text),
+    replaceAll: (text) => bn.replaceAll(text),
+    clear: () => bn.clear(),
+    matchCount: bn.matchCount,
+  }
+}
 
-  const searchApi = editorType === 'codemirror' ? cmSearch : bnSearch
-  const matchCount = searchApi.matchCount
+/** CodeMirror search hook → EditorSearchAdapter */
+export function adaptCodeMirrorSearch(
+  cm: ReturnType<typeof useCodeMirrorSearch>,
+): EditorSearchAdapter {
+  return {
+    setQuery: (text, options) =>
+      cm.setQuery({
+        text,
+        caseSensitive: options.caseSensitive,
+        wholeWord: options.wholeWord,
+        regexp: options.regexp,
+      }),
+    setReplaceText: (text) => cm.setReplaceText(text),
+    findNext: () => cm.findNext(),
+    findPrev: () => cm.findPrev(),
+    replaceNext: (text) => cm.replaceNext(text),
+    replaceAll: (text) => cm.replaceAll(text),
+    clear: () =>
+      cm.setQuery({ text: '', caseSensitive: false, wholeWord: false, regexp: false }),
+    matchCount: cm.matchCount,
+  }
+}
 
-  // 用 ref 持有最新 hook API,避免同步 effect 依赖频繁变化
-  const bnSearchRef = useRef(bnSearch)
-  const cmSearchRef = useRef(cmSearch)
-  bnSearchRef.current = bnSearch
-  cmSearchRef.current = cmSearch
+export function useEditorSearchIntegration(adapter: EditorSearchAdapter) {
+  // 用 ref 持有最新 adapter,避免事件监听 effect 依赖频繁变化
+  const adapterRef = useRef(adapter)
+  adapterRef.current = adapter
+  const matchCount = adapter.matchCount
 
-  // CM/BN 切换或 hook 初始化时,自动同步已存在的查询/替换文本
+  // mount 时同步已存在的 shared query(CM/BN 切换后恢复搜索)
   useEffect(() => {
     const q = getSharedFindReplaceQuery()
     if (!q.text) return
-    if (editorType === 'codemirror') {
-      cmSearchRef.current.setQuery({
-        text: q.text,
-        caseSensitive: q.caseSensitive,
-        wholeWord: q.wholeWord,
-        regexp: q.regexp,
-      })
-      cmSearchRef.current.setReplaceText(getSharedFindReplaceText())
-    } else {
-      bnSearchRef.current.setQuery(q.text, { caseSensitive: q.caseSensitive })
-      bnSearchRef.current.setReplaceText(getSharedFindReplaceText())
-    }
-  }, [editorType])
+    adapterRef.current.setQuery(q.text, {
+      caseSensitive: q.caseSensitive,
+      wholeWord: q.wholeWord,
+      regexp: q.regexp,
+    })
+    adapterRef.current.setReplaceText(getSharedFindReplaceText())
+  }, [])
 
   // matchCount 变化时派发事件
   useEffect(() => {
-    window.dispatchEvent(new CustomEvent('editor:find-replace:match-count', {
-      detail: { current: matchCount.current, total: matchCount.total },
-    }))
+    window.dispatchEvent(
+      new CustomEvent('editor:find-replace:match-count', {
+        detail: { current: matchCount.current, total: matchCount.total },
+      }),
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchCount.current, matchCount.total])
 
-  // 监听 find-replace 事件
+  // 监听 find-replace 事件,转发到 adapter
   useEffect(() => {
     const onQuery = (e: Event) => {
       const detail = (e as CustomEvent).detail || {}
@@ -100,40 +125,24 @@ export function useEditorSearchIntegration({ editorType, editor, viewRef }: UseE
         regexp: !!detail.regexp,
       }
       setSharedFindReplaceQuery(text, options)
-      if (editorType === 'codemirror') {
-        cmSearch.setQuery({ text, ...options })
-      } else {
-        bnSearch.setQuery(text, { caseSensitive: options.caseSensitive })
-      }
+      adapterRef.current.setQuery(text, options)
     }
     const onReplaceText = (e: Event) => {
-      const detail = (e as CustomEvent).detail || {}
-      const text = detail.text ?? ''
+      const text = (e as CustomEvent).detail?.text ?? ''
       setSharedFindReplaceText(text)
-      if (editorType === 'codemirror') {
-        cmSearch.setReplaceText(text)
-      } else {
-        bnSearch.setReplaceText(text)
-      }
+      adapterRef.current.setReplaceText(text)
     }
-    const onFindNext = () => searchApi.findNext()
-    const onFindPrev = () => searchApi.findPrev()
+    const onFindNext = () => adapterRef.current.findNext()
+    const onFindPrev = () => adapterRef.current.findPrev()
     const onReplaceNext = (e: Event) => {
-      const detail = (e as CustomEvent).detail || {}
-      searchApi.replaceNext(detail.text ?? '')
+      const text = (e as CustomEvent).detail?.text ?? ''
+      adapterRef.current.replaceNext(text)
     }
     const onReplaceAll = (e: Event) => {
-      const detail = (e as CustomEvent).detail || {}
-      searchApi.replaceAll(detail.text ?? '')
+      const text = (e as CustomEvent).detail?.text ?? ''
+      adapterRef.current.replaceAll(text)
     }
-    const onClear = () => {
-      if (editorType === 'blocknote') {
-        bnSearch.clear()
-      } else {
-        // CM: 用空查询重置
-        cmSearch.setQuery({ text: '', caseSensitive: false, wholeWord: false, regexp: false })
-      }
-    }
+    const onClear = () => adapterRef.current.clear()
 
     window.addEventListener('editor:find-replace:query', onQuery)
     window.addEventListener('editor:find-replace:replace-text', onReplaceText)
@@ -151,5 +160,5 @@ export function useEditorSearchIntegration({ editorType, editor, viewRef }: UseE
       window.removeEventListener('editor:find-replace:replace-all', onReplaceAll)
       window.removeEventListener('editor:find-replace:clear', onClear)
     }
-  }, [editorType, bnSearch, cmSearch, searchApi])
+  }, [])
 }

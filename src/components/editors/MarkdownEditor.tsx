@@ -37,7 +37,8 @@ import { toast } from 'sonner'
 import { Network, Sigma, ExternalLink } from 'lucide-react'
 import { countWords } from '@/lib/utils/wordCount'
 import { EditorContextMenu } from './EditorContextMenu'
-import { useEditorSearchIntegration } from './useEditorSearchIntegration'
+import { useEditorSearchIntegration, adaptBlockNoteSearch } from './useEditorSearchIntegration'
+import { useBlockNoteSearch } from './useBlockNoteSearch'
 import { MermaidBlockSpec, transformMermaidBlocks, MERMAID_BLOCK_TYPE } from './mermaidBlockSpec'
 import {
   KatexBlockSpec,
@@ -503,7 +504,8 @@ function BlockNoteInner({
   })
 
   // 挂载查找/替换事件桥接 hook
-  useEditorSearchIntegration({ editorType: 'blocknote', editor })
+  const bnSearch = useBlockNoteSearch({ editor })
+  useEditorSearchIntegration(adaptBlockNoteSearch(bnSearch))
 
   // Capture-phase click listener: 在捕获阶段拦截链接点击，调用 preventDefault()
   // 并执行跳转。此 listener 对预览模式必需——BlockNote 的 links.onClick 在只读模式
