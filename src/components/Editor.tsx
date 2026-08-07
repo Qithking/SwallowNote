@@ -2,19 +2,15 @@
  * Editor Component - Main editor area
  * Shows the content of the active tab with appropriate editor
  */
-import { useEffect, useRef, useState, useCallback, useMemo, lazy, Suspense } from 'react'
+import { useEffect, useRef, useState, useCallback, Suspense } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore } from '@/stores'
 import { setEditorContainerEl, setLastScrollTop } from '@/stores/editor'
 import { detectFileType } from '@/lib/utils/fileTypeUtils'
-import { usePluginEditors, pluginEditorRegistry, getEditorForExtension } from '@/stores/pluginEditor'
-const MarkdownEditor = lazy(() => import('./editors/MarkdownEditor').then(m => ({ default: m.MarkdownEditor })))
-const CodeEditor = lazy(() => import('./editors/CodeEditor').then(m => ({ default: m.CodeEditor })))
-import { serializeFrontmatter, parseFrontmatter } from '@/lib/utils/frontmatter'
+import { pluginEditorRegistry } from '@/stores/pluginEditor'
 import { restoreScrollTop } from '@/lib/scroll-position'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-const MindMapEditor = lazy(() => import('./editors/MindMapEditor').then(m => ({ default: m.MindMapEditor })))
-const DiffViewer = lazy(() => import('./DiffViewer/DiffViewer'))
-const ConflictResolver = lazy(() => import('./DiffViewer/ConflictResolver'))
+import { builtinEditorRegistry, registerBuiltinEditors, usePluginEditorBridge } from '@/components/editors/builtin-editors'
+import type { EditorProps } from '@/components/editors/editor-registry'
 import { FileCode, FolderOpen, FileText, Clock, GitFork, ArrowRight, Layers } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import { useTranslation } from 'react-i18next'
@@ -22,6 +18,9 @@ import { openFolderDialog, openFileDialog, getFolderHistory } from '@/lib/tauri'
 import { formatShortcutForDisplay, getShortcutKey } from '@/lib/shortcuts'
 import appIconUrl from '@/assets/app-icon.png'
 import { logger } from '@/lib/logger'
+
+// 注册内置编辑器(幂等)
+registerBuiltinEditors()
 
 interface UnsupportedEditorProps {
   filename: string
@@ -345,7 +344,7 @@ export function EditorView() {
   // output (so a user who disables → re-enables the mind-map
   // plugin sees the open tab swap from the shim to the live
   // editor without a manual reload).
-  const { revision: editorRegistryRev } = usePluginEditors()
+  const { revision: editorRegistryRev } = usePluginEditorBridge()
 
   // Listen for scroll-to-line events
   useEffect(() => {
@@ -409,83 +408,53 @@ export function EditorView() {
     }
   }, [activeTab?.id, activeTab?.scrollTop, activeTab?.content])
 
-  // For source mode: compose full file content (frontmatter + body) for display.
-  // Must be called before any conditional returns (Rules of Hooks).
-  const sourceContent = useMemo(() => {
-    if (!activeTab || !activeTab.frontmatter || Object.keys(activeTab.frontmatter).length === 0) {
-      return activeTab?.content ?? ''
-    }
-    return serializeFrontmatter(activeTab.frontmatter, activeTab.content ?? '')
-  }, [activeTab?.frontmatter, activeTab?.content])
-
-  // Guard against infinite loops in source mode:
-  // handleSourceContentChange → store update → sourceContent change →
-  // CodeEditor content update → onChange → handleSourceContentChange → ...
-  const isUpdatingFromEditor = useRef(false)
-
-  const handleSourceContentChange = useCallback((content: string) => {
-    if (!activeTab) return
-    if (isUpdatingFromEditor.current) return
-    isUpdatingFromEditor.current = true
-    const isMarkdown = activeTab.name.toLowerCase().endsWith('.md')
-    if (isMarkdown) {
-      const { data, body } = parseFrontmatter(content)
-      useEditorStore.setState((state) => ({
-        tabs: state.tabs.map((t) =>
-          t.id === activeTab.id ? { ...t, frontmatter: data, frontmatterDirty: false } : t
-        ),
-      }))
-      updateTabContent(activeTab.id, body)
-    } else {
-      updateTabContent(activeTab.id, content)
-    }
-    // Reset flag after React has processed the state update
-    queueMicrotask(() => { isUpdatingFromEditor.current = false })
-  }, [activeTab?.id, activeTab?.name, updateTabContent])
-
   if (!activeTab) {
     return <WelcomeScreen />
   }
 
-  // Handle diff tab
-  if (activeTab.type === 'diff') {
-    return (
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-          <DiffViewer diffContent={activeTab.diffContent || ''} />
-        </Suspense>
-      </div>
-    )
-  }
-
-  // Handle conflict tab
-  if (activeTab.type === 'conflict' && activeTab.conflictRepoPath && activeTab.conflictRepoName) {
-    return (
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-          <ConflictResolver
-            repoPath={activeTab.conflictRepoPath}
-            repoName={activeTab.conflictRepoName}
-            initialSelectedFile={activeTab.conflictSelectedFile}
-            initialCursorLine={activeTab.conflictCursorLine}
-            autoHideTree={activeTab.conflictAutoHideTree}
-          />
-        </Suspense>
-      </div>
-    )
-  }
-
-  // 插件 tab：内容由插件通过 openEditorTab 提供，强制按 markdown 类型渲染，
-  // 复用下方 markdown 分支的 CodeEditor/MarkdownEditor 切换逻辑。
-  // updateTabContent 在 store 层已处理 plugin tab 的 onChange 回调通知插件保存。
+  const pluginExtensions = pluginEditorRegistry.getActivePluginExtensions()
   const fileType = activeTab.type === 'plugin'
     ? 'markdown'
-    : detectFileType(activeTab.name, activeTab.content, pluginEditorRegistry.getActivePluginExtensions())
-  const viewMode = activeTab.viewMode
+    : detectFileType(activeTab.name, activeTab.content, pluginExtensions)
 
   const handleContentChange = (content: string) => {
     updateTabContent(activeTab.id, content)
   }
+
+  // 查表:用 registry resolve 替代 if-else 树
+  const descriptor = builtinEditorRegistry.resolve({
+    tab: activeTab,
+    fileType,
+    pluginExtensions,
+  })
+
+  // BinaryView fallback:registry 返回 null(内置 + 插件均未命中)
+  if (!descriptor) {
+    return (
+      <div ref={setContainerRef} className="flex-1 flex flex-col overflow-hidden relative">
+        {activeTab.isLoading && (
+          <div className="absolute top-0 left-0 right-0 z-10">
+            <Progress />
+          </div>
+        )}
+        <ErrorBoundary>
+          <UnsupportedEditor filename={activeTab.name} reason={t('editor.binaryFile')} />
+        </ErrorBoundary>
+      </div>
+    )
+  }
+
+  // 构造统一 EditorProps:adapter 负责 content 转换和 onChange 包装
+  // source mode 的 frontmatter 处理已下沉到 sourceModeAdapter
+  const editorProps: EditorProps = descriptor.adapter({
+    tab: activeTab,
+    onChange: handleContentChange,
+  })
+
+  // 渲染组件:统一走 descriptor(内置 + 插件均已通过 registry 注册)
+  const EditorComponent = descriptor.component
+  // 插件 enable/disable 时 revision 变化,强制 remount 以切换组件实现
+  const editorKey = `${activeTab.id}:${descriptor.id}:${editorRegistryRev}`
 
   return (
     <div ref={setContainerRef} className="flex-1 flex flex-col overflow-hidden relative">
@@ -494,105 +463,13 @@ export function EditorView() {
           <Progress />
         </div>
       )}
-
-      {fileType === 'markdown' && (
-        <div className="flex-1 overflow-hidden">
-          {viewMode === 'source' ? (
-            <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-              <ErrorBoundary key={activeTab.id}>
-                <CodeEditor
-                  key={activeTab.id}
-                  content={sourceContent ?? ''}
-                  filename={activeTab.name}
-                  onChange={handleSourceContentChange}
-                  className="flex-1"
-                />
-              </ErrorBoundary>
-            </Suspense>
-          ) : (
-            <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-              <ErrorBoundary key={activeTab.id}>
-                <MarkdownEditor
-                  key={activeTab.id}
-                  content={activeTab.content}
-                  onChange={handleContentChange}
-                />
-              </ErrorBoundary>
-            </Suspense>
-          )}
-        </div>
-      )}
-
-      {fileType === 'code' && (
-        <div className="flex-1 flex overflow-hidden">
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-            <ErrorBoundary key={activeTab.id}>
-              <CodeEditor
-                key={activeTab.id}
-                content={activeTab.content}
-                filename={activeTab.name}
-                onChange={handleContentChange}
-                className="flex-1"
-              />
-            </ErrorBoundary>
-          </Suspense>
-        </div>
-      )}
-
-      {fileType === 'binary' && (
-        <ErrorBoundary>
-          <UnsupportedEditor
-            filename={activeTab.name}
-            reason={t('editor.binaryFile')}
-          />
-        </ErrorBoundary>
-      )}
-
-      {fileType === 'mindmap' && (() => {
-        // Plugin-based dispatch: any plugin that declared
-        // `editorFileExtensions` matching the active note's
-        // extension takes over rendering. Otherwise we fall
-        // back to the built-in `MindMapEditor` shim, which
-        // surfaces a clear "please install the plugin" hint
-        // for users on older hosts / who disabled the plugin.
-        const PluginEditor = getEditorForExtension(
-          `.${(activeTab.name.split('.').pop() || '').toLowerCase()}`,
-        )?.component
-        const Editor = PluginEditor || MindMapEditor
-        // Pass `filename` so the compatibility shim can show
-        // a useful "please open Plugin Manager to install
-        // the plugin" hint for the specific file the user is
-        // trying to open. Plugin components ignore it.
-        const isShim = !PluginEditor
-        // Bake both `isShim` and `editorRegistryRev` into the
-        // key. The plugin's editor and the host's compatibility
-        // shim are different component types, so React *should*
-        // unmount + remount when the toggle fires
-        // `editor:registered` / `editor:unregistered` — but in
-        // practice the `editorRegistryRev` bump can race with
-        // the JSX evaluation and React sometimes reuses the
-        // mounted instance when the type at the position is
-        // memoised by a parent. Including the rev in the key
-        // guarantees a clean remount on every plugin toggle,
-        // so a user who disables → re-enables the mind-map
-        // plugin sees the open tab swap from the shim to the
-        // live editor (and back) immediately, with no manual
-        // reload and no stale state leaking across the
-        // transition.
-        return (
-          <div className="flex-1 flex overflow-hidden">
-            <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
-              <ErrorBoundary key={`${activeTab.id}:${isShim ? 'shim' : 'plugin'}:${editorRegistryRev}`}>
-                <Editor
-                  content={activeTab.content}
-                  onChange={handleContentChange}
-                  {...(isShim ? { filename: activeTab.name } : {})}
-                />
-              </ErrorBoundary>
-            </Suspense>
-          </div>
-        )
-      })()}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
+          <ErrorBoundary key={editorKey}>
+            <EditorComponent {...editorProps} />
+          </ErrorBoundary>
+        </Suspense>
+      </div>
     </div>
   )
 }

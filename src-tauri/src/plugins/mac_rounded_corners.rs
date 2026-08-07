@@ -1,6 +1,8 @@
 // Unterdrücke Warnings von veralteten Cocoa APIs
 #![allow(unexpected_cfgs)]
 #![allow(deprecated)]
+// TDD compile-time guard: this module must stay warning-free on every platform
+#![deny(unused_variables, dead_code)]
 
 use tauri::{AppHandle, Runtime, WebviewWindow};
 
@@ -15,6 +17,7 @@ use cocoa::{
 use objc::{msg_send, sel, sel_impl};
 
 /// Configuration for Traffic Lights positioning
+#[cfg(target_os = "macos")]
 pub struct TrafficLightsConfig {
     /// Offset in pixels from default position (positive = right, negative = left)
     pub offset_x: f64,
@@ -22,6 +25,7 @@ pub struct TrafficLightsConfig {
     pub offset_y: f64,
 }
 
+#[cfg(target_os = "macos")]
 impl Default for TrafficLightsConfig {
     fn default() -> Self {
         Self {
@@ -33,6 +37,7 @@ impl Default for TrafficLightsConfig {
 
 /// Enables rounded corners for the window (macOS only)
 /// Uses only public APIs - App Store compatible
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 #[tauri::command]
 pub fn enable_rounded_corners<R: Runtime>(
     _app: AppHandle<R>,
@@ -83,6 +88,7 @@ pub fn enable_rounded_corners<R: Runtime>(
 }
 
 /// Enables modern window style with rounded corners and shadow
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 #[tauri::command]
 pub fn enable_modern_window_style<R: Runtime>(
     _app: AppHandle<R>,
@@ -143,6 +149,7 @@ pub fn enable_modern_window_style<R: Runtime>(
 }
 
 /// Repositions Traffic Lights only (useful after fullscreen toggle)
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 #[tauri::command]
 pub fn reposition_traffic_lights<R: Runtime>(
     _app: AppHandle<R>,

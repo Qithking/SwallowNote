@@ -16,4 +16,6 @@
 | FindReplacePanel | 编辑器工具栏查找图标触发的内嵌下拉层(非弹框、非 popover) | 共用组件,按编辑器类型分发到 CodeMirror search API 或 ProseMirror Decoration 实现 |
 | SearchQuery | 查找面板当前的查询参数:`{ text, caseSensitive, wholeWord, regexp }` | CodeMirror 与 BlockNote 各持一份,字段语义对齐 |
 | MatchDecoration | BlockNote 查找高亮的 ProseMirror Decoration 实现 | 通过 `_tiptapEditor.view` 派发 transaction;高亮用 DecorationSet,替换用 ProseMirror transaction 的 replaceWith |
+| ImagePreviewEditor | 只读图片查看器组件:滚轮缩放 + 拖拽平移 + 双击还原 | 注册为 `image-preview` descriptor 到 builtinEditorRegistry;图片路径经 `convertFileSrc` 转为 asset 协议 URL |
+| FileType='image' | FileType 联合类型成员,用于浏览器可显示的图片格式 | detectFileType 对 `.png .jpg .jpeg .gif .webp .bmp .ico .svg .avif .apng` 返回此类型;SVG 从 `code` 改为 `image` 路由 |
 

@@ -1,12 +1,16 @@
 /**
  * useEditorSearchIntegration BlockNote 端到端测试
- * 用真实 BlockNoteEditor 验证事件桥接: query 事件 → match-count 事件
- * 不渲染完整 MarkdownEditor(避免 jsdom 缺少 getClientRects)
+ * 用真实 BlockNoteEditor + useBlockNoteSearch + adaptBlockNoteSearch 验证
+ * 事件桥接: query 事件 → match-count 事件
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { BlockNoteEditor } from '@blocknote/core'
-import { useEditorSearchIntegration } from '@/components/editors/useEditorSearchIntegration'
+import {
+  useEditorSearchIntegration,
+  adaptBlockNoteSearch,
+} from '@/components/editors/useEditorSearchIntegration'
+import { useBlockNoteSearch } from '@/components/editors/useBlockNoteSearch'
 
 // jsdom 缺少 matchMedia
 beforeEach(() => {
@@ -45,10 +49,10 @@ describe('useEditorSearchIntegration BlockNote 端到端', () => {
   })
 
   it('BlockNote 模式: query 事件应触发 match-count 事件,total=2', () => {
-    renderHook(() => useEditorSearchIntegration({
-      editorType: 'blocknote',
-      editor,
-    }))
+    renderHook(() => {
+      const bnSearch = useBlockNoteSearch({ editor })
+      return useEditorSearchIntegration(adaptBlockNoteSearch(bnSearch))
+    })
 
     act(() => {
       window.dispatchEvent(new CustomEvent('editor:find-replace:query', {
@@ -63,10 +67,10 @@ describe('useEditorSearchIntegration BlockNote 端到端', () => {
   })
 
   it('BlockNote 模式: 空查询应触发 total=0', () => {
-    renderHook(() => useEditorSearchIntegration({
-      editorType: 'blocknote',
-      editor,
-    }))
+    renderHook(() => {
+      const bnSearch = useBlockNoteSearch({ editor })
+      return useEditorSearchIntegration(adaptBlockNoteSearch(bnSearch))
+    })
 
     act(() => {
       window.dispatchEvent(new CustomEvent('editor:find-replace:query', {
@@ -80,10 +84,10 @@ describe('useEditorSearchIntegration BlockNote 端到端', () => {
   })
 
   it('BlockNote 模式: find-next 事件应工作', () => {
-    renderHook(() => useEditorSearchIntegration({
-      editorType: 'blocknote',
-      editor,
-    }))
+    renderHook(() => {
+      const bnSearch = useBlockNoteSearch({ editor })
+      return useEditorSearchIntegration(adaptBlockNoteSearch(bnSearch))
+    })
 
     act(() => {
       window.dispatchEvent(new CustomEvent('editor:find-replace:query', {

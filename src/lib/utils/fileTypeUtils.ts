@@ -2,10 +2,19 @@
  * File type detection utilities
  */
 
-export type FileType = 'markdown' | 'code' | 'binary' | 'mindmap'
+export type FileType = 'markdown' | 'code' | 'binary' | 'mindmap' | 'image'
 
 // Markdown files
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown', '.mdown', '.mkd', '.mkdn']
+
+// 浏览器可显示的图片格式
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg', '.avif', '.apng']
+
+// 图片文件无需读取 content,用 tab.path 直接预览
+export function isImageFile(filename: string): boolean {
+  const ext = '.' + (filename.split('.').pop() || '').toLowerCase()
+  return IMAGE_EXTENSIONS.includes(ext)
+}
 
 // Mind map extensions are owned by the `com.swallownote.mindmap`
 // plugin. The host keeps no hard-coded list of "file types that
@@ -308,6 +317,11 @@ export function detectFileType(
   // Check for markdown first
   if (MARKDOWN_EXTENSIONS.includes(ext)) {
     return 'markdown'
+  }
+
+  // 图片优先级高于 binary(PNG/JPG 等含 null bytes 但应识别为 image)
+  if (IMAGE_EXTENSIONS.includes(ext)) {
+    return 'image'
   }
 
   // If content is provided, check if it's binary

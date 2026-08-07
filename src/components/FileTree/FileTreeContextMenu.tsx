@@ -27,6 +27,7 @@ import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGit
 import type { GitRepository } from '@/stores/git'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { deleteFile } from '@/lib/tauri'
+import { isImageFile } from '@/lib/utils/fileTypeUtils'
 import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
 import { removeFolderHistory } from '@/lib/tauri'
@@ -126,6 +127,21 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       clearMultiSelection()
       setSelectedPath(node.path)
       setLastClickedPath(node.path)
+      // 图片文件无需读取 content(二进制非 UTF-8 会 read 失败),用 tab.path 直接预览
+      if (isImageFile(node.name)) {
+        addTab({
+          id: node.id,
+          path: node.path,
+          name: node.name,
+          content: '',
+          isDirty: false,
+          isEdited: false,
+          viewMode: 'preview',
+          fileSize: '-',
+          modifiedTime: new Date().toLocaleString(),
+        })
+        return
+      }
       try {
         const content = await loadFileContent(node.path)
         addTab({

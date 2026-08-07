@@ -17,6 +17,7 @@ import { downloadCoordinator } from '@/lib/download-coordinator'
 import { logger } from '@/lib/logger'
 import { FindReplacePanel } from '@/components/FindReplacePanel'
 import type { FindReplaceEditorType, FindReplaceMatchCount, FindReplaceOptions } from '@/components/FindReplacePanel'
+import { isImageFile } from '@/lib/utils/fileTypeUtils'
 
 function EditorToolbar() {
   const toggleViewMode = useEditorStore((s) => s.toggleViewMode)
@@ -417,27 +418,28 @@ function EditorToolbar() {
               <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
             </Tooltip>
           )}
-          {show('downloadRemoteImages') && viewMode !== 'source' && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => window.dispatchEvent(new CustomEvent('editor:download-remote-images', { detail: { tabId: activeTab.id } }))}
-                  disabled={downloading}
-                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                  style={{ color: 'var(--text-primary)' }}
-                  aria-label={t('editorToolbar.downloadRemoteImages')}
-                >
-                  {downloading ? (
-                    <Loader2 size={14} className="animate-spin" style={{ color: 'inherit' }} />
-                  ) : (
-                    <DownloadCloud size={14} style={{ color: 'inherit' }} />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t('editorToolbar.downloadRemoteImages')}</TooltipContent>
-            </Tooltip>
-          )}
         </>)}
+        {/* 下载远程图片:markdown 和 code 文件支持,图片预览不支持 */}
+        {show('downloadRemoteImages') && !isImageFile(path) && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('editor:download-remote-images', { detail: { tabId: activeTab.id } }))}
+                disabled={downloading}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+                title={t('editorToolbar.downloadRemoteImages')}
+              >
+                {downloading ? (
+                  <Loader2 size={14} className="animate-spin" style={{ color: 'inherit' }} />
+                ) : (
+                  <DownloadCloud size={14} style={{ color: 'inherit' }} />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.downloadRemoteImages')}</TooltipContent>
+          </Tooltip>
+        )}
         {/* History, Open Folder, Copy - available for all file types */}
         {show('openHistory') && (
           <Tooltip>
@@ -467,8 +469,8 @@ function EditorToolbar() {
             <TooltipContent>{t('editorToolbar.openLocation')}</TooltipContent>
           </Tooltip>
         )}
-        {/* 查找/替换:file/plugin tab 显示,CM/BN 均支持查找与替换 */}
-        {show('showFindReplace') && (
+        {/* 查找/替换:markdown 和 code 文件显示,图片预览不支持 */}
+        {show('showFindReplace') && !isImageFile(path) && (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
