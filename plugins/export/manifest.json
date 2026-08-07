@@ -3,6 +3,7 @@
   "name": "文档导出",
   "description": "将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式",
   "version": "0.2.4",
+  "manifestVersion": 1,
   "author": "SwallowNote",
   "publishedAt": "2026-06-30T07:16:12Z",
   "iconPosition": "editorToolbar",
