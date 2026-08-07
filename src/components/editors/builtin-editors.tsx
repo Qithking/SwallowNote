@@ -27,6 +27,9 @@ const ConflictResolver = lazy(() => import('../DiffViewer/ConflictResolver'))
 const MindMapEditor = lazy(() =>
   import('./MindMapEditor').then((m) => ({ default: m.MindMapEditor })),
 )
+const ImagePreviewEditor = lazy(() =>
+  import('./ImagePreviewEditor').then((m) => ({ default: m.ImagePreviewEditor })),
+)
 
 // ---- Adapter wrappers: 统一 EditorProps → 各编辑器原始 props ----
 
@@ -150,6 +153,13 @@ const descriptors: EditorDescriptor[] = [
     component: MindMapEditorWrapper,
     adapter: defaultAdapter,
     priority: 1, // shim 优先级最低
+  },
+  {
+    id: 'image-preview',
+    match: (c) => c.fileType === 'image',
+    component: ImagePreviewEditor,
+    adapter: defaultAdapter,
+    priority: 10,
   },
 ]
 

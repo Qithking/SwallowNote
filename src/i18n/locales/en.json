@@ -361,6 +361,9 @@
     "loading": "Loading...",
     "binaryFile": "Binary file cannot be displayed in editor",
     "cannotOpen": "Cannot open this file type",
+    "image": {
+      "loadFailed": "Failed to load image"
+    },
     "mindmapPluginMissingTitle": "Mind map plugin not installed",
     "mindmapPluginMissingBody": "Please install the «Mind Map» plugin in Plugin Manager to open {{filename}}",
     "mindmapPluginInstall": "Open Plugin Manager",

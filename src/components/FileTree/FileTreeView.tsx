@@ -13,6 +13,7 @@ import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
 import { loadFileContent } from '@/lib/api'
 import { openFolderDialog } from '@/lib/tauri'
+import { isImageFile } from '@/lib/utils/fileTypeUtils'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -602,6 +603,21 @@ const { t } = useTranslation()
 
     if (node.isDirectory) {
       toggleNode(node.path)
+      return
+    }
+    // 图片文件无需读取 content(二进制非 UTF-8 会 read 失败),用 tab.path 直接预览
+    if (isImageFile(node.name)) {
+      addTab({
+        id: node.id,
+        path: node.path,
+        name: node.name,
+        content: '',
+        isDirty: false,
+        isEdited: false,
+        viewMode: 'preview',
+        fileSize: '-',
+        modifiedTime: new Date().toLocaleString(),
+      })
       return
     }
     loadFileContent(node.path)

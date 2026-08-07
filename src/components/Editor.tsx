@@ -463,7 +463,7 @@ export function EditorView() {
           <Progress />
         </div>
       )}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden flex flex-col">
         <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Progress /></div>}>
           <ErrorBoundary key={editorKey}>
             <EditorComponent {...editorProps} />

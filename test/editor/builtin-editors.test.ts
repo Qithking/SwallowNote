@@ -125,6 +125,22 @@ describe('builtin editors registration', () => {
     expect(builtinEditorRegistry.resolve(c)).toBeNull()
   })
 
+  it('image fileType → resolve 到 image-preview descriptor', () => {
+    registerBuiltinEditors()
+    const tab = makeTab({ name: 'photo.png', path: '/img/photo.png' })
+    const c = ctx({ tab, fileType: 'image' })
+    const desc = builtinEditorRegistry.resolve(c)
+    expect(desc?.id).toBe('image-preview')
+  })
+
+  it('image-preview descriptor 优先级为 10(与内置同级)', () => {
+    registerBuiltinEditors()
+    const tab = makeTab({ name: 'photo.png' })
+    const c = ctx({ tab, fileType: 'image' })
+    const desc = builtinEditorRegistry.resolve(c)
+    expect(desc?.priority).toBe(10)
+  })
+
   it('adapter 产出统一 EditorProps 含 tab + onChange', () => {
     registerBuiltinEditors()
     const tab = makeTab({ content: 'hello', name: 'a.md' })

@@ -53,7 +53,9 @@ vi.mock('@/lib/utils/fileTypeUtils', () => ({
   detectFileType: vi.fn((name: string) => {
     if (name.endsWith('.md')) return 'markdown'
     if (name.endsWith('.smm')) return 'mindmap'
-    if (name.endsWith('.png')) return 'binary'
+    const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg', '.avif', '.apng']
+    const ext = '.' + (name.split('.').pop() || '').toLowerCase()
+    if (imageExts.includes(ext)) return 'image'
     return 'code'
   }),
 }))
@@ -193,5 +195,44 @@ describe('Editor registry integration', () => {
       pluginExtensions: new Set(),
     })
     expect(desc).toBeNull()
+  })
+
+  it('PNG 文件 → detectFileType 返回 image → resolve 到 image-preview', () => {
+    const tab = makeTab({ name: 'photo.png', path: '/img/photo.png' })
+    const fileType = detectFileType(tab.name, tab.content, new Set())
+    expect(fileType).toBe('image')
+    const desc = builtinEditorRegistry.resolve({
+      tab,
+      fileType,
+      pluginExtensions: new Set(),
+    })
+    expect(desc?.id).toBe('image-preview')
+  })
+
+  it('SVG 文件 → detectFileType 返回 image(不是 code)→ resolve 到 image-preview', () => {
+    const tab = makeTab({ name: 'logo.svg', path: '/img/logo.svg' })
+    const fileType = detectFileType(tab.name, tab.content, new Set())
+    expect(fileType).toBe('image')
+    const desc = builtinEditorRegistry.resolve({
+      tab,
+      fileType,
+      pluginExtensions: new Set(),
+    })
+    expect(desc?.id).toBe('image-preview')
+  })
+
+  it('JPG/GIF/WebP/BMP/ICO/AVIF 文件 → resolve 到 image-preview', () => {
+    const exts = ['.jpg', '.gif', '.webp', '.bmp', '.ico', '.avif', '.apng']
+    for (const ext of exts) {
+      const tab = makeTab({ name: `test${ext}`, path: `/img/test${ext}` })
+      const fileType = detectFileType(tab.name, tab.content, new Set())
+      expect(fileType).toBe('image')
+      const desc = builtinEditorRegistry.resolve({
+        tab,
+        fileType,
+        pluginExtensions: new Set(),
+      })
+      expect(desc?.id).toBe('image-preview')
+    }
   })
 })

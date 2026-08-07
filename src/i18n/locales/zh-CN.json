@@ -361,6 +361,9 @@
     "loading": "加载中...",
     "binaryFile": "二进制文件无法在编辑器中显示",
     "cannotOpen": "无法打开此文件类型",
+    "image": {
+      "loadFailed": "无法加载图片"
+    },
     "mindmapPluginMissingTitle": "思维导图插件未安装",
     "mindmapPluginMissingBody": "请在插件管理中安装「思维导图」插件以打开 {{filename}}",
     "mindmapPluginInstall": "打开插件管理",
