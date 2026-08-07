@@ -201,6 +201,13 @@ function EditorToolbar() {
   const isBlockNoteEditor = isMarkdown && viewMode !== 'source'
   const findReplaceEditorType: FindReplaceEditorType = isBlockNoteEditor ? 'blocknote' : 'codemirror'
 
+  // 非 BlockNote 富文本模式时，自动关闭内容排版设置面板（排版设置仅对 BlockNote 有效）
+  useEffect(() => {
+    if (rightPanelType === 'editorSettings' && !isBlockNoteEditor) {
+      setRightPanelType(null)
+    }
+  }, [isBlockNoteEditor, rightPanelType, setRightPanelType])
+
   // Get path relative to workspace root directory, starting with /rootDir/
   const getRelativePath = (absolutePath: string): string => {
     // Normalize path separators for comparison
@@ -404,13 +411,14 @@ function EditorToolbar() {
               <TooltipContent>{t('editorToolbar.toggleWidth')}</TooltipContent>
             </Tooltip>
           )}
-          {show('contentLayout') && (
+          {show('contentLayout') && viewMode !== 'source' && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
                   className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
                   style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                  title={t('editorToolbar.contentLayout')}
                 >
                   <Type size={14} style={{ color: 'inherit' }} />
                 </button>
