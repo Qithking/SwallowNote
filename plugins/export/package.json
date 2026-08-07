@@ -14,14 +14,14 @@
     "@swallow-note/plugin-sdk": "file:../../docs/plugin-sdk",
     "jspdf": "^4.2.1",
     "modern-screenshot": "^4.7.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@tauri-apps/api": "^2.0",
     "@tauri-apps/plugin-dialog": "^2.0",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.0",
     "d3": "^7.9.0",
     "i18next": "^23.0.0",

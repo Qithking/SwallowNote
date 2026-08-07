@@ -8,6 +8,7 @@
   "publishedAt": "2026-06-18T07:45:35Z",
   "order": 50,
   "enabled": true,
+  "hasBackend": false,
   "editorFileExtensions": [
     ".smm"
   ],
