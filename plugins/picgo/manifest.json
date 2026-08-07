@@ -3,6 +3,7 @@
   "name": "图床",
   "description": "将本地/剪贴板图片一键上传到云端图床（SM.MS / Imgur / GitHub / 自定义端点），并插入到当前笔记。",
   "version": "0.1.2",
+  "manifestVersion": 1,
   "author": "SwallowNote",
   "publishedAt": "2026-06-18T07:45:57Z",
   "iconPosition": "titleBar",
