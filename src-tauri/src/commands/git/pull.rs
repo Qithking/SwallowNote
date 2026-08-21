@@ -14,13 +14,9 @@ pub async fn git_pull(path: String) -> Result<(), String> {
         return Ok(());
     }
 
-    // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
-    // 按用户场景，clone 后默认分支存在且未手动切换分支，应用应自动把 HEAD 挂回分支，无需用户操作。
-    if is_detached_head(&path) {
-        fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
-    }
-
     // 检查 rebase/merge 状态：有真实冲突则报错；仅 stale 状态则清理后继续。永不自动 resolve/continue。
+    // 必须在 is_detached_head 检查之前执行：stale state 文件存在时 is_detached_head 返回 false，
+    // 会导致 fix_detached_head 被跳过，pull 报 "You are not currently on a branch"。
     if is_rebase_or_merge_in_progress(&path) {
         if has_real_conflicts(&path) {
             // Real conflicts exist - require explicit user resolution
@@ -29,6 +25,12 @@ pub async fn git_pull(path: String) -> Result<(), String> {
             // Stale rebase/merge state: clean up before proceeding with the pull.
             cleanup_stale_rebase_state(&path);
         }
+    }
+
+    // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
+    // 必须在 cleanup_stale_rebase_state 之后检查，否则 stale state 文件导致检测失效。
+    if is_detached_head(&path) {
+        fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
     }
 
     // G-13 修复：尊重用户 git 配置 pull.rebase，决定使用 rebase 还是 merge
@@ -71,8 +73,18 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
         return Ok(());
     }
 
+    // 清理 stale rebase/merge 状态（必须在 is_detached_head 之前执行，
+    // 否则 stale state 文件导致 is_detached_head 返回 false，fix_detached_head 被跳过）
+    if is_rebase_or_merge_in_progress(&path) {
+        if has_real_conflicts(&path) {
+            return Err("REBASE_CONFLICT:Already in a conflict state. Please resolve conflicts first.".to_string());
+        } else {
+            cleanup_stale_rebase_state(&path);
+        }
+    }
+
     // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
-    // 按用户场景自动把 HEAD 挂回分支，无需用户操作。
+    // 必须在 cleanup_stale_rebase_state 之后检查。
     if is_detached_head(&path) {
         fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
     }
@@ -194,4 +206,69 @@ pub async fn git_force_pull_with_credentials(
     run_git(&path, &["clean", "-fd"]).map_err(|e| format!("Failed to clean: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::test_utils::git_cmd;
+
+    /// Reproduces the user's bug: stale rebase state + detached HEAD causes
+    /// git_pull to fail with "You are not currently on a branch".
+    ///
+    /// Root cause: is_detached_head is checked BEFORE cleanup_stale_rebase_state.
+    /// When stale rebase state files exist, is_detached_head returns false,
+    /// so fix_detached_head is skipped. After cleanup removes the state files,
+    /// HEAD is still detached, and `git pull` fails.
+    #[tokio::test]
+    async fn test_git_pull_does_not_fail_with_stale_rebase_state_and_detached_head() {
+        // Setup: bare repo as remote
+        let remote_tmp = tempfile::tempdir().unwrap();
+        let remote_path = remote_tmp.path();
+        git_cmd(remote_path, &["init", "--bare", "-q", "-b", "main"]);
+
+        // Setup: working repo with remote configured
+        let work_tmp = tempfile::tempdir().unwrap();
+        let work_repo = work_tmp.path();
+        let work_str = work_repo.to_str().unwrap();
+        git_cmd(work_repo, &["init", "-q", "-b", "main"]);
+        git_cmd(work_repo, &["config", "user.email", "test@example.com"]);
+        git_cmd(work_repo, &["config", "user.name", "Test"]);
+        std::fs::write(work_repo.join("file.txt"), "line1\n").unwrap();
+        git_cmd(work_repo, &["add", "file.txt"]);
+        git_cmd(work_repo, &["commit", "-q", "-m", "initial"]);
+        git_cmd(work_repo, &["remote", "add", "origin", remote_path.to_str().unwrap()]);
+        git_cmd(work_repo, &["push", "-q", "origin", "main"]);
+        git_cmd(work_repo, &["branch", "--set-upstream-to=origin/main", "main"]);
+
+        // Detach HEAD by checking out the commit hash directly
+        let head_hash = std::process::Command::new("git")
+            .current_dir(work_repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let head_hash = String::from_utf8_lossy(&head_hash.stdout).trim().to_string();
+        git_cmd(work_repo, &["checkout", "-q", &head_hash]);
+
+        // Simulate stale rebase state (crashed/interrupted rebase left state files)
+        let rebase_merge_dir = work_repo.join(".git/rebase-merge");
+        std::fs::create_dir_all(&rebase_merge_dir).unwrap();
+        std::fs::write(rebase_merge_dir.join("head-name"), "refs/heads/main\n").unwrap();
+
+        // Call git_pull
+        let result = git_pull(work_str.to_string()).await;
+
+        // Assert: no "not currently on a branch" error
+        match result {
+            Ok(_) => {} // Pull succeeded — detached HEAD was fixed
+            Err(e) => {
+                let err_lower = e.to_lowercase();
+                assert!(
+                    !err_lower.contains("not currently on a branch"),
+                    "git_pull should not fail with 'not currently on a branch' when stale rebase state is cleaned up. Got error: {}",
+                    e
+                );
+            }
+        }
+    }
 }

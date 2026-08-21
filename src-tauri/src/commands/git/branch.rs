@@ -167,26 +167,49 @@ pub fn has_real_conflicts(repo_path: &str) -> bool {
 pub fn cleanup_stale_rebase_state(repo_path: &str) {
     debug!("[INFO] Cleaning up stale rebase/merge state in {}", repo_path);
 
-    // 检查是否为交互式 rebase：rebase-merge/done 文件存在且非空说明用户正在进行交互式 rebase，
-    // 不应自动 abort，以免丢失用户尚未完成的 rebase 进度。
-    let rebase_merge_done = Path::new(&repo_path).join(".git/rebase-merge/done");
-    if rebase_merge_done.exists() {
-        if let Ok(content) = std::fs::read_to_string(&rebase_merge_done) {
-            if !content.trim().is_empty() {
-                debug!("[INFO] cleanup_stale_rebase_state: interactive rebase in progress (done file non-empty), skipping abort in {}", repo_path);
-                return;
-            }
-        }
-    }
-
-    // 存在真实冲突文件时不 abort，避免丢失未解决的冲突状态
+    // 存在真实冲突文件时不清理，避免丢失未解决的冲突状态
     if has_real_conflicts(repo_path) {
-        debug!("[INFO] cleanup_stale_rebase_state: real conflicts exist, skipping abort in {}", repo_path);
+        debug!("[INFO] cleanup_stale_rebase_state: real conflicts exist, skipping cleanup in {}", repo_path);
         return;
     }
 
     let _ = run_git(repo_path, &["rebase", "--abort"]); // cleanup failure is non-fatal; continue best-effort
     let _ = run_git(repo_path, &["merge", "--abort"]); // cleanup failure is non-fatal; continue best-effort
+
+    // Force-remove stale state files/directories if abort didn't clean them.
+    // When rebase was stale (process killed), `git rebase --abort` reports "no rebase in progress"
+    // and leaves the files behind. These files cause is_detached_head/fix_detached_head to bail
+    // out, leaving HEAD detached → git pull fails with "You are not currently on a branch".
+    force_remove_stale_state_files(repo_path);
+}
+
+/// Force-remove stale rebase/merge state files and directories.
+/// Only safe to call when has_real_conflicts() returns false.
+fn force_remove_stale_state_files(repo_path: &str) {
+    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
+    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
+    let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
+
+    if rebase_merge.exists() {
+        let done_path = rebase_merge.join("done");
+        if done_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&done_path) {
+                if !content.trim().is_empty() {
+                    warn!("[WARN] force_remove_stale_state_files: removing stale rebase-merge with non-empty done file in {}", repo_path);
+                }
+            }
+        }
+        debug!("[INFO] force_remove_stale_state_files: removing .git/rebase-merge in {}", repo_path);
+        let _ = std::fs::remove_dir_all(&rebase_merge);
+    }
+    if rebase_apply.exists() {
+        debug!("[INFO] force_remove_stale_state_files: removing .git/rebase-apply in {}", repo_path);
+        let _ = std::fs::remove_dir_all(&rebase_apply);
+    }
+    if merge_head.exists() {
+        debug!("[INFO] force_remove_stale_state_files: removing .git/MERGE_HEAD in {}", repo_path);
+        let _ = std::fs::remove_file(&merge_head);
+    }
 }
 
 /// G-14 修复：检测当前是否处于 rebase 场景（统一三处重复的检测逻辑）。
@@ -305,5 +328,53 @@ pub fn is_detached_head(repo_path: &str) -> bool {
     match run_git(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
         Ok(branch) => branch == "HEAD",
         Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::test_utils::{git_cmd, setup_conflict_repo};
+
+    /// Reproduces: stale rebase state files (with non-empty `done` file) cause
+    /// cleanup_stale_rebase_state to skip cleanup, leaving is_detached_head
+    /// unable to detect detached HEAD. This leads to
+    /// "You are not currently on a branch" during git pull.
+    #[test]
+    fn test_cleanup_stale_rebase_state_removes_stale_rebase_merge_with_done_file() {
+        let tmp = setup_conflict_repo();
+        let repo = tmp.path();
+        let repo_str = repo.to_str().unwrap();
+
+        // Detach HEAD by checking out the commit hash directly
+        let head_hash = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let head_hash = String::from_utf8_lossy(&head_hash.stdout).trim().to_string();
+        git_cmd(repo, &["checkout", "-q", &head_hash]);
+
+        // Simulate a crashed/interrupted rebase: manually create .git/rebase-merge
+        // with a non-empty `done` file (worst case: interactive rebase early-return)
+        let rebase_merge_dir = repo.join(".git/rebase-merge");
+        std::fs::create_dir_all(&rebase_merge_dir).unwrap();
+        std::fs::write(rebase_merge_dir.join("head-name"), "refs/heads/main\n").unwrap();
+        std::fs::write(rebase_merge_dir.join("done"), "pick abc1234 base commit\n").unwrap();
+
+        // Before cleanup: is_detached_head returns false because state files exist
+        assert!(!is_detached_head(repo_str),
+            "is_detached_head should return false when stale rebase state files exist (bug reproduction)");
+
+        // Call cleanup
+        cleanup_stale_rebase_state(repo_str);
+
+        // After cleanup: stale state files must be removed
+        assert!(!rebase_merge_dir.exists(),
+            "stale .git/rebase-merge must be removed by cleanup_stale_rebase_state");
+
+        // After cleanup: is_detached_head must detect detached HEAD
+        assert!(is_detached_head(repo_str),
+            "is_detached_head should return true after stale state files are removed");
     }
 }
