@@ -1,5 +1,5 @@
 use super::runner::{run_git, run_git_with_env};
-use super::branch::{is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, fix_detached_head, get_rebase_branch, resolve_push_target_branch};
+use super::branch::{is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, fix_detached_head, resolve_push_target_branch};
 use super::askpass::{create_askpass_script, build_askpass_env};
 use super::errors::is_auth_error;
 use log::debug;
@@ -26,8 +26,8 @@ pub async fn git_push(path: String) -> Result<(), String> {
             // If detached HEAD, try pushing with HEAD:<branch> format
             if err_str.contains("not currently on a branch") || err_str.contains("detached head") {
                 debug!("[INFO] git_push: detached HEAD detected, trying HEAD:<branch> push");
-                // Get the branch name from rebase state or HEAD
-                if let Some(branch) = get_rebase_branch(&path) {
+                // Get the branch name from rebase state, HEAD, or remote default
+                if let Some(branch) = resolve_push_target_branch(&path) {
                     debug!("[INFO] git_push: pushing HEAD:refs/heads/{}", branch);
                     let push_result = run_git(&path, &["push", "origin", &format!("HEAD:refs/heads/{}", branch)]);
                     match push_result {

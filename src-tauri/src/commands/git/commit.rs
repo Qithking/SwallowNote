@@ -15,6 +15,15 @@ use log::{debug, error};
 /// 让前端提示用户手动处理，避免分支切换丢失改动。
 #[tauri::command]
 pub async fn git_commit(path: String, message: String) -> Result<bool, String> {
+    // 清理 stale rebase/merge 状态（必须在 is_detached_head 之前执行），
+    // 否则 stale state 文件掩盖 detached HEAD 检测，commit 会创建在 detached HEAD 上。
+    if is_rebase_or_merge_in_progress(&path) {
+        if has_real_conflicts(&path) {
+            return Err("REBASE_CONFLICT:Cannot commit while rebase/merge is in progress".to_string());
+        }
+        cleanup_stale_rebase_state(&path);
+    }
+
     // G-06 修复：检测 detached HEAD，不自动切换分支，返回错误码让前端提示用户
     if is_detached_head(&path) {
         return Err("DETACHED_HEAD:Repository is in detached HEAD state. Please checkout a branch first.".to_string());
@@ -47,8 +56,17 @@ pub async fn git_commit(path: String, message: String) -> Result<bool, String> {
 /// Commit and push in one command
 #[tauri::command]
 pub async fn git_commit_and_push(path: String, message: String) -> Result<CommitPushResult, String> {
-    // G-06 修复：检测到 detached HEAD 时自动修复，按用户场景无需用户手动切换分支。
-    // 若无法自动修复，fix_detached_head 会返回错误，提交前失败比提交中失败更安全。
+    // 清理 stale rebase/merge 状态（必须在 is_detached_head 之前执行）。
+    // stale state 文件存在时 is_detached_head 返回 false，fix_detached_head 被跳过，
+    // commit 会创建在 detached HEAD 上，之后切回分支时 commit 被孤立丢失。
+    if is_rebase_or_merge_in_progress(&path) {
+        if has_real_conflicts(&path) {
+            return Err("REBASE_CONFLICT:Cannot commit while rebase/merge is in progress".to_string());
+        }
+        cleanup_stale_rebase_state(&path);
+    }
+
+    // G-06 修复：检测到 detached HEAD 时自动修复，必须在 cleanup 之后检查才有效。
     if is_detached_head(&path) {
         fix_detached_head(&path).map_err(|e| format!("Failed to prepare commit: {}", e))?;
     }
@@ -131,6 +149,12 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<Commit
             }
             // Stale state files - clean up before proceeding
             cleanup_stale_rebase_state(&path);
+        }
+
+        // 防御性检查：pull 前再次确认 HEAD 未 detached。
+        // 上方 line 53-63 已处理 stale state 场景，此处为安全冗余。
+        if is_detached_head(&path) {
+            fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
         }
 
         // Pull first to integrate remote changes before pushing

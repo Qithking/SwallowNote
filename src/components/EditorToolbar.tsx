@@ -185,21 +185,19 @@ function EditorToolbar() {
     window.dispatchEvent(new CustomEvent('editor:find-replace:replace-all', { detail: { text: replaceText } }))
   }, [])
 
-  if (!activeTab) return null
-
-  // Don't show toolbar for diff and conflict tabs
-  if (activeTab.type === 'diff' || activeTab.type === 'conflict') return null
-
-  const { path, viewMode } = activeTab
-  // 插件 tab 的内容为 markdown，无论 path 扩展名如何
-  const isMarkdown = activeTab.type === 'plugin' || /\.(md|markdown)$/i.test(path)
-  // 工具栏项可见性：toolbarConfig 中设置为 false 的隐藏，未设置或 true 的显示（默认显示）
-  const show = (key: keyof EditorToolbarConfig): boolean => !(activeTab.toolbarConfig?.[key] === false)
-
-  // 查找/替换:根据实际渲染的编辑器决定类型
-  // source 视图下 markdown 文件实际使用 CodeEditor,应走 codemirror 模式
-  const isBlockNoteEditor = isMarkdown && viewMode !== 'source'
-  const findReplaceEditorType: FindReplaceEditorType = isBlockNoteEditor ? 'blocknote' : 'codemirror'
+  // isMarkdown/isBlockNoteEditor 必须在条件 return 之前计算：下方 useEffect
+  // 不能位于 early return 之后，否则文件 tab ↔ diff/conflict tab 切换时
+  // hook 数量变化会触发 "Rendered fewer hooks" 并卸载整棵组件树。
+  // 插件 tab 的内容为 markdown，无论 path 扩展名如何。
+  const isMarkdown =
+    activeTab?.type === 'plugin' ||
+    (!!activeTab?.path && /\.(md|markdown)$/i.test(activeTab.path))
+  const isBlockNoteEditor =
+    !!activeTab &&
+    activeTab.type !== 'diff' &&
+    activeTab.type !== 'conflict' &&
+    isMarkdown &&
+    activeTab.viewMode !== 'source'
 
   // 非 BlockNote 富文本模式时，自动关闭内容排版设置面板（排版设置仅对 BlockNote 有效）
   useEffect(() => {
@@ -207,6 +205,20 @@ function EditorToolbar() {
       setRightPanelType(null)
     }
   }, [isBlockNoteEditor, rightPanelType, setRightPanelType])
+
+  if (!activeTab) return null
+
+  // Don't show toolbar for diff and conflict tabs
+  if (activeTab.type === 'diff' || activeTab.type === 'conflict') return null
+
+  const { path, viewMode } = activeTab
+  // 工具栏项可见性：toolbarConfig 中设置为 false 的隐藏，未设置或 true 的显示（默认显示）
+  const show = (key: keyof EditorToolbarConfig): boolean => !(activeTab.toolbarConfig?.[key] === false)
+
+  // 查找/替换:根据实际渲染的编辑器决定类型
+  // source 视图下 markdown 文件实际使用 CodeEditor,应走 codemirror 模式
+  // isBlockNoteEditor 已在条件 return 之前计算(见上)
+  const findReplaceEditorType: FindReplaceEditorType = isBlockNoteEditor ? 'blocknote' : 'codemirror'
 
   // Get path relative to workspace root directory, starting with /rootDir/
   const getRelativePath = (absolutePath: string): string => {
