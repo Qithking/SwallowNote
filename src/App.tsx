@@ -42,7 +42,7 @@ import { useSessionPersistence } from '@/hooks/useSessionPersistence'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
+import { applyWindowStyle } from '@/lib/window-style'
 import { setAppLocale } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
@@ -118,21 +118,11 @@ function App() {
         console.warn('[App] Failed to show window:', e)
       }
 
-      // 显示窗口后立即应用 macOS 圆角窗口样式
+      // 显示窗口后立即按平台应用窗口样式（圆角等）
       // （从独立 useEffect 迁移至此，避免与 init 的 IPC 调用竞争后端主线程）
       try {
         const platform = await import('@tauri-apps/plugin-os').then(m => m.platform())
-        if (platform === 'linux') {
-          document.documentElement.style.borderRadius = '12px'
-          document.body.style.borderRadius = '12px'
-        } else if (platform === 'macos') {
-          await enableModernWindowStyle({ cornerRadius: 12 })
-        } else if (platform === 'windows') {
-          await enableModernWindowStyle({ cornerRadius: 12 })
-          // Windows 11 圆角需匹配 border-radius 避免黑角
-          document.documentElement.style.borderRadius = '8px'
-          document.body.style.borderRadius = '8px'
-        }
+        await applyWindowStyle(platform)
       } catch (e) {
         console.warn('[App] Failed to set window style:', e)
       }
