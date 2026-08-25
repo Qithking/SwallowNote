@@ -522,6 +522,9 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
       // Reload conflict repos to update badge and state
       await useGitStore.getState().loadConflictRepos()
 
+      // 广播冲突解决完成：空闲自动推送监听后恢复该仓库的提交推送
+      window.dispatchEvent(new CustomEvent('git-conflict-resolved', { detail: { repoPath } }))
+
       // Close the conflict tab for this repo
       const { useEditorStore } = await import('@/stores')
       const conflictTabId = `conflict-${repoPath}`

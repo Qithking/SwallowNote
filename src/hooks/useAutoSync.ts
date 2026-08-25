@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useGitStore, useUIStore, useWorkspaceStore, useFileTreeStore } from '@/stores'
 import type { UIState, GitState, PullResult } from '@/stores'
 import type { GitRepository } from '@/stores/git'
-import { GitErrorCode } from '@/lib/git/errors'
+import { GitErrorCode, isPushConflict } from '@/lib/git/errors'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 
@@ -30,20 +30,23 @@ export function useAutoSync(
   const hasCompletedInitialStartupSyncRef = useRef(false)
 
   useEffect(() => {
-    const doSync = async () => {
-      if (isSyncingRef.current) return
+    /** 执行一轮同步；返回 false 表示被 store 级互斥跳过（调用方可重试） */
+    const doSync = async (): Promise<boolean> => {
+      if (isSyncingRef.current) return true
+      // 空闲推送或手动同步进行中（store 级互斥），跳过本轮避免并发 git 操作
+      if (useGitStore.getState().syncStatus.isSyncing) return false
       isSyncingRef.current = true
       const repos = cachedReposRef.current
       if (repos.length === 0) {
         isSyncingRef.current = false
-        return
+        return true
       }
       const gitStore = useGitStore.getState()
 
       const last = gitStore.syncStatus.lastSyncTime
       if (!hasCompletedInitialStartupSyncRef.current && last && Date.now() - last < 30_000) {
         isSyncingRef.current = false
-        return
+        return true
       }
 
       gitStore.setSyncStatus({ isSyncing: true })
@@ -74,12 +77,7 @@ export function useAutoSync(
                 continue
               }
               const code = r.errorCode ?? GitErrorCode.Unknown
-              const errorMessage = r.error || ''
-              if (code === GitErrorCode.RebaseConflict || errorMessage.includes('rebase/merge is in progress')) {
-                pushConflictPaths.push(repo.path)
-                continue
-              }
-              if (code === GitErrorCode.RebaseContinueFailed || code === GitErrorCode.MergeCommitFailed) {
+              if (isPushConflict(code, r.error || '')) {
                 pushConflictPaths.push(repo.path)
                 continue
               }
@@ -88,7 +86,7 @@ export function useAutoSync(
               }
               pushFailed++
               pushErrorPaths.push(repo.path)
-              logger.error('app', 'Auto sync push failed:', repo.path, errorMessage)
+              logger.error('app', 'Auto sync push failed:', repo.path, r.error || '')
             }
           }
         }
@@ -153,12 +151,14 @@ export function useAutoSync(
       } finally {
         isSyncingRef.current = false
       }
+      return true
     }
 
     let intervalId: ReturnType<typeof setInterval> | null = null
     let checkId: ReturnType<typeof setTimeout> | null = null
     let postReadyDelayId: ReturnType<typeof setTimeout> | null = null
     let maxWaitId: ReturnType<typeof setTimeout> | null = null
+    let startupRetryId: ReturnType<typeof setTimeout> | null = null
     let isCancelled = false
 
     const scheduleInterval = () => {
@@ -174,11 +174,23 @@ export function useAutoSync(
     const startInitialSync = () => {
       postReadyDelayId = setTimeout(() => {
         isInitialStartupSyncRef.current = true
-        doSync().finally(() => {
+        const runStartup = async () => {
+          let ran = true
+          try {
+            ran = await doSync()
+          } catch {
+            // doSync 异常按已完成处理，避免重试风暴
+          }
+          if (!ran) {
+            // 被互斥跳过：10s 后重试，不消耗一次性的启动同步机会
+            if (!isCancelled) startupRetryId = setTimeout(runStartup, 10_000)
+            return
+          }
           hasCompletedInitialStartupSyncRef.current = true
           isInitialStartupSyncRef.current = false
           scheduleInterval()
-        })
+        }
+        runStartup()
       }, 2000)
     }
 
@@ -210,6 +222,7 @@ export function useAutoSync(
       if (checkId) clearTimeout(checkId)
       if (postReadyDelayId) clearTimeout(postReadyDelayId)
       if (maxWaitId) clearTimeout(maxWaitId)
+      if (startupRetryId) clearTimeout(startupRetryId)
       if (intervalId) clearInterval(intervalId)
       unsubscribe()
     }

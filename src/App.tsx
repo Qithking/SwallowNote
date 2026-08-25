@@ -19,6 +19,7 @@ import { useUIStore, useWorkspaceStore, useEditorStore, usePluginStore } from '@
 import type { UIState } from '@/stores'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
 import { useAutoSync } from '@/hooks/useAutoSync'
+import { useIdleAutoPush } from '@/hooks/useIdleAutoPush'
 import { usePanelResize } from '@/hooks/usePanelResize'
 import { useSessionPersistence } from '@/hooks/useSessionPersistence'
 import { useSessionAutoSave } from '@/hooks/useSessionAutoSave'
@@ -29,6 +30,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
 import { setAppLocale } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { logTime } from '@/lib/app-startup'
 import { SaveConfirmDialog } from '@/components/Dialogs/SaveConfirmDialog'
@@ -123,6 +125,9 @@ function App() {
           document.body.style.borderRadius = '12px'
         } else if (platform === 'macos') {
           await enableModernWindowStyle({ cornerRadius: 12 })
+          await invoke('hide_traffic_lights_cmd').catch((e) =>
+            logger.warn('app', 'Failed to hide macOS traffic lights:', e),
+          )
         } else if (platform === 'windows') {
           // Windows: html/body 圆角匹配 DWM 窗口圆角裁剪，应用边框由外层容器 inset-[2px] + background 间隙绘制
           document.documentElement.style.borderRadius = '12px'
@@ -359,6 +364,8 @@ function App() {
   useSessionAutoSave(saveSessionStateNow)
 
   useAutoSync(startupReadyRef, tRef)
+
+  useIdleAutoPush(tRef)
 
   const handleSaveAndClose = async () => {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose

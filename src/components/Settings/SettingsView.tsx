@@ -40,6 +40,8 @@ function SettingsView() {
     markdownOnly, setMarkdownOnly,
     syncInterval, setSyncInterval,
     autoSyncPush, setAutoSyncPush,
+    idleAutoPush, setIdleAutoPush,
+    idleAutoPushDelay, setIdleAutoPushDelay,
     uploadPath, setUploadPath,
     showConflictBadge, setShowConflictBadge,
     aiPort, setAiPort,
@@ -59,6 +61,8 @@ function SettingsView() {
       markdownOnly: s.markdownOnly, setMarkdownOnly: s.setMarkdownOnly,
       syncInterval: s.syncInterval, setSyncInterval: s.setSyncInterval,
       autoSyncPush: s.autoSyncPush, setAutoSyncPush: s.setAutoSyncPush,
+      idleAutoPush: s.idleAutoPush, setIdleAutoPush: s.setIdleAutoPush,
+      idleAutoPushDelay: s.idleAutoPushDelay, setIdleAutoPushDelay: s.setIdleAutoPushDelay,
       uploadPath: s.uploadPath, setUploadPath: s.setUploadPath,
       showConflictBadge: s.showConflictBadge, setShowConflictBadge: s.setShowConflictBadge,
       aiPort: s.aiPort, setAiPort: s.setAiPort,
@@ -146,6 +150,10 @@ function SettingsView() {
               setSyncInterval={setSyncInterval}
               autoSyncPush={autoSyncPush}
               setAutoSyncPush={setAutoSyncPush}
+              idleAutoPush={idleAutoPush}
+              setIdleAutoPush={setIdleAutoPush}
+              idleAutoPushDelay={idleAutoPushDelay}
+              setIdleAutoPushDelay={setIdleAutoPushDelay}
               uploadPath={uploadPath}
               setUploadPath={setUploadPath}
               showConflictBadge={showConflictBadge}

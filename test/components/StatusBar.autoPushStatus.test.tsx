@@ -1,9 +1,10 @@
 /**
- * StatusBar 冲突数显示测试
+ * StatusBar 自动推送状态显示测试
  *
- * Bug: 解决冲突后状态栏仍显示冲突信息
- * Root cause: StatusBar 只订阅 syncStatus.conflicted (pull 快照),
- *             未订阅实时 conflictRepos, 解决冲突后不归零
+ * 需求: 开启自动提交后, 空闲自动推送进行中需在状态栏显示同步状态
+ * 缺陷 1: 同步区以 lastSyncTime != null 为唯一显示门槛,
+ *          新会话首次同步完成前即使 isSyncing=true 也不渲染 (spinner 不可见)
+ * 缺陷 2: 空闲自动推送与普通同步共用「同步仓库」文案, 无法区分
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render } from '@testing-library/react'
@@ -44,20 +45,12 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
 }
 
-// 查找冲突图标 (lucide-react AlertTriangle 的 class 为 lucide-triangle-alert)
-function queryConflictIcon(container: HTMLElement) {
-  return container.querySelector('.lucide-triangle-alert')
+// 同步 spinner (lucide-react RefreshCw 的 class 为 lucide-refresh-cw)
+function querySyncSpinner(container: HTMLElement) {
+  return container.querySelector('.lucide-refresh-cw')
 }
 
-// 获取冲突图标的数量文本
-function getConflictCountText(container: HTMLElement): string | null {
-  const svg = queryConflictIcon(container)
-  if (!svg) return null
-  const parent = svg.parentElement
-  return parent?.textContent ?? null
-}
-
-describe('StatusBar 冲突数显示', () => {
+describe('StatusBar 自动推送状态显示', () => {
   beforeEach(() => {
     useUIStore.setState({
       developerMode: false,
@@ -67,7 +60,7 @@ describe('StatusBar 冲突数显示', () => {
       syncStatus: {
         isSyncing: false,
         isAutoPushing: false,
-        lastSyncTime: Date.now(),
+        lastSyncTime: null,
         succeeded: 0,
         failed: 0,
         conflicted: 0,
@@ -76,60 +69,66 @@ describe('StatusBar 冲突数显示', () => {
     })
   })
 
-  it('解决冲突后 conflictRepos 为空, 状态栏不应显示冲突图标', () => {
-    // syncStatus.conflicted=1 (pull 快照), 但 conflictRepos=[] (已解决)
+  it('首次同步完成前 (lastSyncTime=null) 同步进行中仍显示 spinner', () => {
     useGitStore.setState({
       syncStatus: {
-        isSyncing: false,
+        isSyncing: true,
         isAutoPushing: false,
-        lastSyncTime: Date.now(),
-        succeeded: 1,
-        failed: 0,
-        conflicted: 1,
-      },
-      conflictRepos: [],
-    })
-    const { container } = renderWithProviders(<StatusBar />)
-    // AlertTriangle 图标不应出现 (conflictRepos.length === 0)
-    expect(queryConflictIcon(container)).toBeNull()
-  })
-
-  it('有未解决冲突时显示冲突数 (基于 conflictRepos.length)', () => {
-    useGitStore.setState({
-      syncStatus: {
-        isSyncing: false,
-        isAutoPushing: false,
-        lastSyncTime: Date.now(),
+        lastSyncTime: null,
         succeeded: 0,
         failed: 0,
         conflicted: 0,
       },
-      conflictRepos: [
-        { repo_path: '/ws/repo1', repo_name: 'repo1', conflict_file_count: 2 },
-      ],
     })
     const { container } = renderWithProviders(<StatusBar />)
-    // 应显示冲突图标, 数量为 1 (conflictRepos.length)
-    expect(queryConflictIcon(container)).not.toBeNull()
-    expect(getConflictCountText(container)).toBe('1')
+    expect(querySyncSpinner(container)).not.toBeNull()
   })
 
-  it('syncStatus.conflicted=2 但 conflictRepos 只剩 1 个, 应显示 1 (实时)', () => {
+  it('自动推送进行中显示「自动推送中」文案', () => {
+    useGitStore.setState({
+      syncStatus: {
+        isSyncing: true,
+        isAutoPushing: true,
+        lastSyncTime: null,
+        succeeded: 0,
+        failed: 0,
+        conflicted: 0,
+      },
+    })
+    const { container } = renderWithProviders(<StatusBar />)
+    expect(container.textContent).toContain('statusBar.autoPushing')
+    expect(container.textContent).not.toContain('statusBar.syncRepos')
+  })
+
+  it('普通同步进行中仍显示通用同步文案', () => {
+    useGitStore.setState({
+      syncStatus: {
+        isSyncing: true,
+        isAutoPushing: false,
+        lastSyncTime: null,
+        succeeded: 0,
+        failed: 0,
+        conflicted: 0,
+      },
+    })
+    const { container } = renderWithProviders(<StatusBar />)
+    expect(container.textContent).toContain('statusBar.syncRepos')
+  })
+
+  it('自动推送完成后 (isAutoPushing=false, lastSyncTime 有值) 恢复通用结果显示', () => {
     useGitStore.setState({
       syncStatus: {
         isSyncing: false,
         isAutoPushing: false,
         lastSyncTime: Date.now(),
-        succeeded: 0,
+        succeeded: 2,
         failed: 0,
-        conflicted: 2,
+        conflicted: 0,
       },
-      conflictRepos: [
-        { repo_path: '/ws/repo1', repo_name: 'repo1', conflict_file_count: 2 },
-      ],
     })
     const { container } = renderWithProviders(<StatusBar />)
-    // 应显示 1 (conflictRepos.length), 不是 2 (syncStatus 快照)
-    expect(getConflictCountText(container)).toBe('1')
+    expect(container.textContent).toContain('statusBar.syncRepos')
+    expect(container.textContent).not.toContain('statusBar.autoPushing')
+    expect(querySyncSpinner(container)).toBeNull()
   })
 })
