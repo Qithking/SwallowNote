@@ -3,6 +3,7 @@
  * Default values reference VSCode markdown preview
  */
 import { create } from 'zustand'
+import { logger } from '@/lib/logger'
 import { saveSessionState, getSessionState } from '@/lib/tauri'
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -237,7 +238,7 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
       set(partial)
       applyToCSS(partial)
     } catch (err) {
-      console.error('Failed to load editor settings:', err)
+      logger.error('editor-settings', 'Failed to load editor settings:', err)
     }
   },
   
@@ -247,7 +248,7 @@ export const useEditorSettingsStore = create<EditorSettingsState>((set, get) => 
       const settings = collectSettings(state)
       await saveSessionState(settings)
     } catch (err) {
-      console.error('Failed to save editor settings:', err)
+      logger.error('editor-settings', 'Failed to save editor settings:', err)
     }
   },
   }

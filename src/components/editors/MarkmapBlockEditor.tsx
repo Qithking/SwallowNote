@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useBlockResize } from '@/hooks/useBlockResize'
 import { BlockResizeHandles } from './BlockResizeHandles'
+import { logger } from '@/lib/logger'
 
 interface MarkmapBlockEditorProps {
   diagram: string
@@ -151,7 +152,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       const inst = markmapRef.current
       markmapRef.current = null
       if (inst) {
-        try { inst.destroy() } catch { /* noop */ }
+        try { inst.destroy() } catch (e) { logger.warn('markmap', 'destroy failed', e) }
       }
     }
   }, [diagram, scale])
@@ -187,7 +188,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       const inst = dialogMarkmapRef.current
       dialogMarkmapRef.current = null
       if (inst) {
-        try { inst.destroy() } catch { /* noop */ }
+        try { inst.destroy() } catch (e) { logger.warn('markmap', 'destroy failed', e) }
       }
     }
   }, [dialogOpen, diagram])
@@ -203,7 +204,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       rafId = requestAnimationFrame(() => {
         const inst = markmapRef.current
         if (inst) {
-          inst.fit().catch(() => { /* noop */ })
+          inst.fit().catch((e) => logger.warn('markmap', 'fit failed', e))
         }
       })
     })
@@ -226,7 +227,7 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
       rafId = requestAnimationFrame(() => {
         const inst = dialogMarkmapRef.current
         if (inst) {
-          inst.fit().catch(() => { /* noop */ })
+          inst.fit().catch((e) => logger.warn('markmap', 'fit failed', e))
         }
       })
     })
@@ -269,13 +270,13 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
             variant="outline"
             size="icon"
             className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover/markmap:opacity-100 transition-opacity z-10"
-            title="展开思维导图"
+            title={t('editor.markmap.expand')}
           >
             <Maximize2 className="h-3 w-3" />
           </Button>
         </DialogTrigger>
         <DialogContent className="max-w-4xl w-[90vw] h-[80vh] p-4 flex flex-col">
-          <DialogTitle className="sr-only">Markmap 思维导图</DialogTitle>
+          <DialogTitle className="sr-only">{t('editor.markmap.dialogTitle')}</DialogTitle>
           <div className="flex-1 overflow-auto flex items-center justify-center bg-white dark:bg-black/20 rounded p-4">
             <svg
               ref={dialogSvgRef}

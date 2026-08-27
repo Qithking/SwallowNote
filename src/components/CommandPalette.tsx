@@ -73,6 +73,7 @@ import {
   handleToggleSettings,
   handleRefreshFileTree,
 } from '@/hooks/useKeyboardShortcuts'
+import { logger } from '@/lib/logger'
 
 interface CommandItem {
   id: string
@@ -160,7 +161,7 @@ function CommandPalette() {
             // palette. Log and swallow so the host keeps
             // working. The plugin author sees the error in the
             // diagnostics popup via plugin-telemetry.
-            console.error('[command-palette] plugin command threw:', err)
+            logger.error('command-palette', 'plugin command threw:', err)
           }
         },
       }

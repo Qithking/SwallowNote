@@ -26,6 +26,7 @@ import type {
 import { getPluginStoragePath, pathExists, readFile, writeFile } from './tauri'
 import { assertPermission } from './plugin-permission-guard'
 import { buildPluginContext as sdkBuildPluginContext } from '@swallow-note/plugin-sdk'
+import { logger, createPluginLogger } from './logger'
 
 // ─── Circuit breaker (tripped plugins) ───────────────────────────────────────
 /**
@@ -224,7 +225,7 @@ class PluginEventBusImpl {
         ;(handler as PluginEventHandler<E>)(payload)
       } catch (err) {
         // One bad plugin must not stop the others. Log and continue.
-        console.error(`[plugin-host] handler for "${event}" threw:`, err)
+        logger.error('plugin-host', `handler for "${event}" threw:`, err)
         stats.errors++
       }
       stats.durationMs += performance.now() - start
@@ -237,8 +238,8 @@ class PluginEventBusImpl {
       const payloadSize = (() => {
         try {
           return JSON.stringify(payload).length
-        } catch {
-          return 0
+        } catch (e) {
+          logger.error('plugin-host', 'serialize payload failed', e); return 0
         }
       })()
       for (const [pid, stats] of perPlugin) {
@@ -378,7 +379,7 @@ class PluginStorageImpl implements PluginStorage {
         // corrupted 标志会阻止后续 flush() 用空缓存覆盖原文件，给用户/诊断工具
         // 留出抢救原始数据的机会。
         this.corrupted = true
-        console.warn(`[plugin-host] storage for ${this.pluginId} unreadable, marked corrupted:`, err)
+        logger.warn('plugin-host', `storage for ${this.pluginId} unreadable, marked corrupted:`, err)
         this.cache = {}
       }
       return this.cache!
@@ -389,8 +390,9 @@ class PluginStorageImpl implements PluginStorage {
   private async flush(): Promise<void> {
     // 损坏保护：corrupted 为 true 时拒绝任何写入，避免空缓存覆盖原始文件导致数据彻底丢失。
     if (this.corrupted) {
-      console.error(
-        `[plugin-host] storage for ${this.pluginId} is corrupted; refusing to flush to avoid overwriting the original file.`
+      logger.error(
+        'plugin-host',
+        `storage for ${this.pluginId} is corrupted; refusing to flush to avoid overwriting the original file.`
       )
       return
     }
@@ -435,7 +437,7 @@ class PluginStorageImpl implements PluginStorage {
           this.dirty = false
         }
       } catch (err) {
-        console.error(`[plugin-host] failed to persist storage for ${this.pluginId}:`, err)
+        logger.error('plugin-host', `failed to persist storage for ${this.pluginId}:`, err)
       } finally {
         this.writePromise = null
       }
@@ -691,7 +693,7 @@ export async function flushAllPluginStorage(): Promise<void> {
       try {
         await impl.flushForExit()
       } catch (err) {
-        console.warn(`[plugin-host] flushForExit failed for ${pluginId}:`, err)
+        logger.warn('plugin-host', `flushForExit failed for ${pluginId}:`, err)
       }
     }),
   )
@@ -765,6 +767,8 @@ export function buildPluginContext(plugin: PluginDefinition): PluginContext {
         `Backend IPC not available to lifecycle hooks (plugin_id=${plugin.id})`
       )
     },
+    // 覆盖 SDK 默认 console logger 为统一日志通道
+    log: createPluginLogger(plugin.id),
   }
 }
 
@@ -792,8 +796,9 @@ export async function runLifecycleHook(
   } catch (err) {
     success = false
     errorMsg = err instanceof Error ? err.message : String(err)
-    console.error(
-      `[plugin-host] lifecycle hook "${hookName}" failed for plugin "${context.pluginId}":`,
+    logger.error(
+      'plugin-host',
+      `lifecycle hook "${hookName}" failed for plugin "${context.pluginId}":`,
       err
     )
   } finally {

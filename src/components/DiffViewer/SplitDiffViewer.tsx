@@ -16,6 +16,7 @@ import { EditorState, Extension, Compartment } from '@codemirror/state'
 import { StreamLanguage } from '@codemirror/language'
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
+import { logger } from '@/lib/logger'
 
 // ──────────────────────────────────────────────
 // Types
@@ -160,6 +161,14 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
   const [localCopied, setLocalCopied] = useState(false)
   const remoteCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const localCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  // Cleanup copy-feedback timers on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(remoteCopiedTimer.current)
+      clearTimeout(localCopiedTimer.current)
+    }
+  }, [])
 
   // Expose getLocalContent via ref for parent components (e.g., ConflictResolver save logic)
   useImperativeHandle(ref, () => ({
@@ -398,11 +407,11 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
               effects: langCompartment.reconfigure(exts as Extension),
             })
           } catch (e) {
-            console.warn('[SplitDiffViewer] Failed to apply language extension:', e)
+            logger.warn('diff-viewer', 'Failed to apply language extension:', e)
           }
         }
       }).catch((e: unknown) => {
-        console.warn('[SplitDiffViewer] Failed to load language extension:', e)
+        logger.warn('diff-viewer', 'Failed to load language extension:', e)
       })
 
       // Restore initial cursor position if specified
@@ -418,7 +427,7 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
         }
       }
     } catch (e) {
-      console.error('[SplitDiffViewer] Failed to create MergeView:', e)
+      logger.error('diff-viewer', 'Failed to create MergeView:', e)
     }
 
     return () => {

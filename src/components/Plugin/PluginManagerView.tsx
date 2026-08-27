@@ -49,6 +49,7 @@ import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-
 import { getAllPluginMetrics, getTotalPluginStorageBytes } from '@/lib/plugin-telemetry'
 import { getStorageCap } from '@/lib/tauri'
 import type { PluginDefinition, PluginPanelProps, PluginPermission, PluginIndexEntry, PluginIndex } from '@/types/plugin'
+import { logger } from '@/lib/logger'
 
 
 // Lazy load dialog components - only loaded when user clicks the corresponding button
@@ -396,7 +397,7 @@ function PluginManagerView() {
       // scan/refresh is fresh.
       setLastSyncAt(new Date())
     } catch (err) {
-      console.error('Failed to reload plugins:', err)
+      logger.error('plugin-manager', 'Failed to reload plugins:', err)
     } finally {
       setIsScanning(false)
     }
@@ -549,7 +550,7 @@ function PluginManagerView() {
     // Find update info from market updates
     const updateInfo = marketUpdates.find((u) => u.id === plugin.id && u.localVersion !== u.remoteVersion)
     if (!updateInfo) {
-      toast.error(t('plugin.noUpdateAvailable', { defaultValue: '暂无可用更新' }))
+      toast.error(t('plugin.noUpdateAvailable'))
       return
     }
     // Set the pending detail ID so PluginMarketView auto-opens
@@ -733,9 +734,8 @@ function PluginManagerView() {
             </div>
             <RailButton
               icon={<LineChart size={13} />}
-              label={t('plugin.pa.btn.console', { defaultValue: 'Manager console' })}
+              label={t('plugin.pa.btn.console')}
               meta={t('plugin.pa.btn.consoleMeta', {
-                defaultValue: '{{events}} · {{errors}}',
                 events: eventCount,
                 errors: stats.errors,
               })}
@@ -852,11 +852,10 @@ function PluginManagerView() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t('plugin.pa.uninstall.confirmTitle', { defaultValue: '确认卸载' })}
+              {t('plugin.pa.uninstall.confirmTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t('plugin.pa.uninstall.confirmDesc', {
-                defaultValue: '确定要卸载 {{name}} 吗？此操作不可撤销。',
                 name: uninstallConfirmPlugin?.name ?? '',
               })}
             </AlertDialogDescription>
@@ -872,13 +871,13 @@ function PluginManagerView() {
               className="h-4 w-4 shrink-0 cursor-pointer"
             />
             <label htmlFor="delete-plugin-data" className="cursor-pointer text-sm leading-5 text-muted-foreground">
-              {t('plugin.pa.uninstall.deleteData', { defaultValue: '同时删除插件数据（不可恢复）' })}
+              {t('plugin.pa.uninstall.deleteData')}
             </label>
           </div>
 
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => { setUninstallConfirmPlugin(null); setDeleteDataOnUninstall(false) }}>
-              {t('plugin.pa.uninstall.cancel', { defaultValue: '取消' })}
+              {t('plugin.pa.uninstall.cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
@@ -888,7 +887,7 @@ function PluginManagerView() {
                 if (target) void handleUninstall(target)
               }}
             >
-              {t('plugin.pa.uninstall.confirm', { defaultValue: '卸载' })}
+              {t('plugin.pa.uninstall.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

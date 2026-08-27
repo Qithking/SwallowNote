@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use log::error;
 
 /// 索引任务消息
 enum IndexTask {
@@ -45,7 +46,7 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
             ) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("[frontmatter-index] Failed to open db: {}", e);
+                    error!("[frontmatter-index] Failed to open db: {}", e);
                     return;
                 }
             };
@@ -67,7 +68,7 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
 
             // 启动时同步分类：补全缺失的父路径
             if let Err(e) = db::md_frontmatter::sync_all_categories_from_frontmatter(&db_instance) {
-                eprintln!("[frontmatter-index] Failed to sync categories on startup: {}", e);
+                error!("[frontmatter-index] Failed to sync categories on startup: {}", e);
             }
 
             while let Ok(task) = rx.recv() {
@@ -87,7 +88,7 @@ pub fn start_index_thread(db_path: PathBuf, app_handle: AppHandle) {
             }
         })
     {
-        eprintln!("[frontmatter-index] Failed to spawn index thread: {}", e);
+        error!("[frontmatter-index] Failed to spawn index thread: {}", e);
     }
 }
 
@@ -98,10 +99,10 @@ fn submit_task(task: IndexTask, label: &str) {
             // Rust 1.94 起TrySendError 不再提供 is_full()，直接按变体匹配
             match e {
                 std::sync::mpsc::TrySendError::Full(_) => {
-                    eprintln!("[frontmatter-index] channel full, dropped {} task", label);
+                    error!("[frontmatter-index] channel full, dropped {} task", label);
                 }
                 std::sync::mpsc::TrySendError::Disconnected(_) => {
-                    eprintln!("[frontmatter-index] channel disconnected, dropped {} task", label);
+                    error!("[frontmatter-index] channel disconnected, dropped {} task", label);
                 }
             }
         }
@@ -237,14 +238,14 @@ fn handle_scan_directory(db: &db::Database, dir_path: &str, app_handle: &AppHand
     {
         // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
         let conn = db.conn.lock().unwrap_or_else(|e| {
-            eprintln!("[frontmatter-index] mutex poisoned: {}", e);
+            error!("[frontmatter-index] mutex poisoned: {}", e);
             e.into_inner()
         });
         // 按 dir_prefix 限定清理范围，避免误删其他工作区
         // 归一化为正斜杠，与 all_paths 及数据库存储格式保持一致（Windows 兼容）
         let normalized_dir = dir_path.replace('\\', "/");
         if let Err(e) = crate::db::md_frontmatter::purge_orphan_records(&conn, &valid_paths, &normalized_dir) {
-            eprintln!("[frontmatter_index] purge_orphan_records failed: {}", e);
+            error!("[frontmatter_index] purge_orphan_records failed: {}", e);
         }
     }
 
@@ -287,7 +288,7 @@ fn parse_and_upsert(db: &db::Database, file_path: &str, modified_at: &str) {
     let content = match read_frontmatter_only(file_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[frontmatter-index] Failed to read {}: {}", file_path, e);
+            error!("[frontmatter-index] Failed to read {}: {}", file_path, e);
             return;
         }
     };
@@ -301,7 +302,7 @@ fn parse_and_upsert(db: &db::Database, file_path: &str, modified_at: &str) {
         &raw_yaml,
         modified_at,
     ) {
-        eprintln!("[frontmatter-index] Failed to upsert {}: {}", file_path, e);
+        error!("[frontmatter-index] Failed to upsert {}: {}", file_path, e);
     }
 }
 
@@ -411,7 +412,7 @@ pub fn parse_frontmatter_from_content(content: &str) -> (serde_yaml::Value, Stri
     match serde_yaml::from_str(yaml_str) {
         Ok(value) => (value, raw_yaml),
         Err(e) => {
-            eprintln!("[frontmatter-index] YAML parse error: {}", e);
+            error!("[frontmatter-index] YAML parse error: {}", e);
             (serde_yaml::Value::Null, raw_yaml)
         }
     }

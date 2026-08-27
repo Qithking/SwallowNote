@@ -4,7 +4,7 @@
  * Uses react-markdown + remark-gfm for full GFM support.
  * Code blocks get syntax highlighting via shiki (lazy loaded).
  */
-import { useState, useEffect, memo, useCallback } from 'react'
+import { useState, useEffect, memo, useCallback, useRef } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -70,6 +70,11 @@ const SHIKI_LANGS = new Set([
 function CodeBlock({ code, language }: { code: string; language: string }) {
   const [html, setHtml] = useState<string>('')
   const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimer.current)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -98,7 +103,8 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(code)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    clearTimeout(copyTimer.current)
+    copyTimer.current = setTimeout(() => setCopied(false), 2000)
   }, [code])
 
   const header = (

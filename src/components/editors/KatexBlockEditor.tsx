@@ -8,6 +8,7 @@
  * Supports width/height resizing via drag handles (block mode only).
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import 'katex/dist/katex.min.css'
 import { Code2, Maximize2 } from 'lucide-react'
 import {
@@ -82,6 +83,7 @@ function renderKatex(formula: string, display: boolean): Promise<{ html: string;
 }
 
 export function KatexBlockEditor({ source, formula, display, width, height, block, editor }: KatexBlockEditorProps) {
+  const { t } = useTranslation()
   const [state, setState] = useState<RenderState>({ formula, display, html: '', error: null })
   const [isLoading, setIsLoading] = useState(true)
   const [isEditing, setIsEditing] = useState(false)
@@ -152,7 +154,7 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
         <figcaption className="flex items-center justify-between px-3 py-1 text-[10px] text-muted-foreground bg-black/5 dark:bg-white/5">
           <span className="font-mono">{display ? 'math (block)' : 'math (inline)'}</span>
           <span className="text-destructive text-[9px]">
-            {state.error ? `渲染失败: ${state.error}` : '空公式'}
+            {state.error ? t('editor.katex.renderFailed', { error: state.error }) : t('editor.katex.emptyFormula')}
           </span>
         </figcaption>
         <pre className="p-3 m-0 overflow-x-auto text-xs font-mono leading-relaxed">
@@ -167,7 +169,7 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
               onClick={handleStartEdit}
             >
               <Code2 className="w-3 h-3 mr-1" />
-              编辑
+              {t('editor.katex.edit')}
             </Button>
             <Button
               variant="ghost"
@@ -175,7 +177,7 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
               className="h-6 px-2 text-[10px]"
               onClick={handleSwitchMode}
             >
-              {display ? '转为行内' : '转为块级'}
+              {display ? t('editor.katex.switchToInline') : t('editor.katex.switchToBlock')}
             </Button>
           </div>
         )}
@@ -213,19 +215,19 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
               size="sm"
               className="h-5 px-1.5 text-[10px]"
               onClick={handleSwitchMode}
-              title={display ? '切换为行内公式' : '切换为块级公式'}
+              title={display ? t('editor.katex.switchToInlineTitle') : t('editor.katex.switchToBlockTitle')}
             >
-              {display ? '转为行内' : '转为块级'}
+              {display ? t('editor.katex.switchToInline') : t('editor.katex.switchToBlock')}
             </Button>
             <Button
               variant="ghost"
               size="sm"
               className="h-5 px-1.5 text-[10px]"
               onClick={handleStartEdit}
-              title="编辑 LaTeX"
+              title={t('editor.katex.editLatex')}
             >
               <Code2 className="w-3 h-3 mr-1" />
-              编辑
+              {t('editor.katex.edit')}
             </Button>
           </div>
         )}
@@ -250,13 +252,13 @@ export function KatexBlockEditor({ source, formula, display, width, height, bloc
               variant="outline"
               size="icon"
               className="absolute top-7 right-2 h-6 w-6 opacity-0 group-hover/katex:opacity-100 transition-opacity z-10"
-              title="放大查看"
+              title={t('editor.katex.expand')}
             >
               <Maximize2 className="h-3 w-3" />
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-4xl w-[90vw] max-h-[80vh] p-6 flex flex-col">
-            <DialogTitle className="text-sm font-semibold mb-2">LaTeX 公式</DialogTitle>
+            <DialogTitle className="text-sm font-semibold mb-2">{t('editor.katex.dialogTitle')}</DialogTitle>
             <div className="flex-1 overflow-auto flex items-center justify-center bg-white dark:bg-black/20 rounded p-6 min-h-[120px]">
               <div
                 className="[&_.katex-display]:m-0 [&_.katex]:text-2xl"
@@ -299,6 +301,7 @@ function InlineEditor({
   onSave: () => void
   onCancel: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <div
       className="px-3 py-2 border-t border-border/50 bg-black/[0.02] dark:bg-white/[0.02]"
@@ -313,10 +316,10 @@ function InlineEditor({
       />
       <div className="flex items-center justify-end gap-2 mt-2">
         <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={onCancel}>
-          取消
+          {t('editor.katex.cancel')}
         </Button>
         <Button variant="default" size="sm" className="h-6 text-[10px]" onClick={onSave}>
-          保存
+          {t('editor.katex.save')}
         </Button>
       </div>
     </div>

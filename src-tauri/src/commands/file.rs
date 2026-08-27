@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use log::error;
 
 #[derive(Serialize)]
 pub struct FileMetadata {
@@ -25,13 +26,7 @@ pub async fn get_file_metadata(path: String) -> Result<FileMetadata, String> {
     })
 }
 
-#[cfg(target_os = "macos")]
-use std::process::Command as StdCommand;
-
-#[cfg(target_os = "windows")]
-use std::process::Command as StdCommand;
-
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Command as StdCommand;
 
 #[derive(Serialize, Clone)]
@@ -506,12 +501,12 @@ pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Use PowerShell to copy file path to clipboard in a format Explorer understands
-        let escaped_path = path.display().to_string()
-            .replace('"', "\"\"");
+        // Use PowerShell to copy file path to clipboard in a format Explorer understands.
+        // 使用单引号字符串避免 $(...) 子表达式扩展（命令注入风险）。
+        let escaped_path = path.display().to_string().replace('\'', "''");
         let ps_command = format!(
             r#"Add-Type -AssemblyName System.Windows.Forms;
-[System.Windows.Forms.Clipboard]::SetFileDropList(@("{}"));"#,
+[System.Windows.Forms.Clipboard]::SetFileDropList(@('{}'));"#,
             escaped_path
         );
         super::create_command("powershell")
@@ -900,7 +895,7 @@ pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, St
                 if !line_matches.is_empty() {
                     // 锁中毒时恢复内部数据，避免 spawn_blocking 任务连锁 panic
                     let mut matches_map = file_matches_clone.lock().unwrap_or_else(|e| {
-                        eprintln!("锁中毒: {}", e);
+                        error!("锁中毒: {}", e);
                         e.into_inner()
                     });
                     let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();

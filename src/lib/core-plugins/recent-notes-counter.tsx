@@ -39,11 +39,14 @@ import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
 import { pluginEventBus, getPluginStorage, buildPluginContext } from '@/lib/plugin-host'
 import { usePluginStorage, usePluginEvent } from '@/lib/plugin-hooks'
 import { registerContextMenu, unregisterContextMenu } from '@/lib/plugin-menu'
+import { useTranslation } from 'react-i18next'
+import { logger } from '../logger'
 
 // ─── Panel component ──────────────────────────────────────────────────────────
 
 function RecentNotesPanel(panel: PluginPanelProps): ReactNode {
   const { close, pluginId, isActive } = panel
+  const { t } = useTranslation()
   // Persisted UI preference: 'list' | 'count'. Survives app restart.
   const [viewMode, setViewMode] = usePluginStorage<'list' | 'count'>(panel, 'viewMode', 'count')
   // In-memory counter that ticks on every note:change event.
@@ -64,7 +67,7 @@ function RecentNotesPanel(panel: PluginPanelProps): ReactNode {
     <div className="p-4 text-sm">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <h2 className="font-semibold">Recent Notes</h2>
+          <h2 className="font-semibold">{t('pluginCore.recentNotes.title')}</h2>
           {/* Reflect the active state so plugin authors can show
               e.g. a recording dot while the panel is in front. */}
           <span
@@ -137,6 +140,7 @@ function RecentIcon({ size = 18 }: { size?: number }): ReactNode {
  */
 function RecentNotesSettings(panel: PluginPanelProps): ReactNode {
   const { close, pluginId } = panel
+  const { t } = useTranslation()
   const [installedAt, setInstalledAt] = useState<string | null>(null)
   // Same `viewMode` key as the main panel — settings and main panel
   // share state through the host's plugin-scoped storage.
@@ -163,15 +167,15 @@ function RecentNotesSettings(panel: PluginPanelProps): ReactNode {
   return (
     <div className="p-4 text-sm space-y-4">
       <div>
-        <div className="text-xs text-muted-foreground">Plugin ID</div>
+        <div className="text-xs text-muted-foreground">{t('pluginCore.common.pluginId')}</div>
         <code className="text-xs">{pluginId}</code>
       </div>
       <div>
-        <div className="text-xs text-muted-foreground">Installed at</div>
+        <div className="text-xs text-muted-foreground">{t('pluginCore.recentNotes.installedAt')}</div>
         <div>{installedAt ?? '(unknown)'}</div>
       </div>
       <div>
-        <div className="text-xs text-muted-foreground mb-1">Default view</div>
+        <div className="text-xs text-muted-foreground mb-1">{t('pluginCore.recentNotes.defaultView')}</div>
         <div className="flex gap-2">
           <button
             type="button"
@@ -254,7 +258,7 @@ function onUnload(context: { pluginId: string }): void {
 function onEnable(context: { pluginId: string }): void {
   // For this example we just log; the host's health monitor
   // surfaces any plugin that logs >N errors/min after enable.
-  console.debug(`[recent-notes] enabled (pluginId=${context.pluginId})`)
+  logger.debug('plugin:recent-notes', `enabled (pluginId=${context.pluginId})`)
 }
 
 /**
@@ -262,7 +266,7 @@ function onEnable(context: { pluginId: string }): void {
  * anything `onEnable` set up so a disabled plugin stays quiet.
  */
 function onDisable(context: { pluginId: string }): void {
-  console.debug(`[recent-notes] disabled (pluginId=${context.pluginId})`)
+  logger.debug('plugin:recent-notes', `disabled (pluginId=${context.pluginId})`)
 }
 
 /**
@@ -286,7 +290,7 @@ function onUnmount(): void {
 
 /** onActivate — panel becomes visible; use for focus side effects. */
 function onActivate(context: { pluginId: string }): void {
-  console.debug(`[recent-notes] activated (pluginId=${context.pluginId})`)
+  logger.debug('plugin:recent-notes', `activated (pluginId=${context.pluginId})`)
 }
 
 /**
@@ -295,7 +299,7 @@ function onActivate(context: { pluginId: string }): void {
  * in-flight fetches, etc.
  */
 function onDeactivate(context: { pluginId: string }): void {
-  console.debug(`[recent-notes] deactivated (pluginId=${context.pluginId})`)
+  logger.debug('plugin:recent-notes', `deactivated (pluginId=${context.pluginId})`)
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────

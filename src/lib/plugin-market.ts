@@ -7,6 +7,7 @@ import type {
   PluginVersionInfo,
 } from '@/types/plugin'
 import type { PluginMetadataRust } from './tauri'
+import { logger } from '@/lib/logger'
 
 const ZIP_STORE_NAME = 'plugin-zips'
 const INDEX_DB = 'swallow-plugin-market'
@@ -63,8 +64,9 @@ async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
             resolve(null)
             return
           }
-        } catch {
+        } catch (e) {
           // crypto.subtle 失败按 miss 处理
+          logger.warn('plugin-market', 'cache sha256 verify failed', e)
           resolve(null)
           return
         }
@@ -119,19 +121,19 @@ async function writeZipToCache(
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
-  } catch {
-    /* 忽略错误 */
+  } catch (e) {
+    logger.warn('plugin-market', 'cache write failed', e)
   }
 }
 
 // 公共 API
 
 /** 拉取并解析 PluginIndex，snake_case 转 camelCase。 */
-export async function fetchPluginIndex(url: string): Promise<PluginIndex> {
+export async function fetchPluginIndex(url: string, signal?: AbortSignal): Promise<PluginIndex> {
   if (!url) {
     throw new Error('repo url is empty')
   }
-  const res = await fetch(url, { cache: 'no-store' })
+  const res = await fetch(url, { cache: 'no-store', signal })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching plugin index`)
   }
@@ -142,13 +144,14 @@ export async function fetchPluginIndex(url: string): Promise<PluginIndex> {
 /** 带进度的 fetch，回调百分比 */
 export async function fetchWithProgress(
   url: string,
-  onProgress: (percent: number) => void
+  onProgress: (percent: number) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   if (!url) {
     throw new Error('repo url is empty')
   }
 
-  const res = await fetch(url, { cache: 'no-store' })
+  const res = await fetch(url, { cache: 'no-store', signal })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching plugin index`)
   }
@@ -209,8 +212,9 @@ function resolveDownloadUrl(downloadUrl: string, repoUrl: string): string {
   try {
     // 绝对 URL 原样返回，相对 URL 基于 repoUrl 解析
     parsed = new URL(downloadUrl, repoUrl)
-  } catch {
+  } catch (e) {
     // 解析失败时回退原字符串。
+    logger.warn('plugin-market', 'download url parse failed', e)
     return downloadUrl
   }
   // 仅允许 http/https。
@@ -442,13 +446,13 @@ const inMemoryIndexCache = new Map<string, { index: PluginIndex; at: number }>()
 const IN_MEMORY_TTL_MS = 60_000
 
 /** 带 60s 内存缓存的 fetchPluginIndex。 */
-export async function fetchPluginIndexCached(url: string): Promise<PluginIndex> {
+export async function fetchPluginIndexCached(url: string, signal?: AbortSignal): Promise<PluginIndex> {
   const now = Date.now()
   const hit = inMemoryIndexCache.get(url)
   if (hit && now - hit.at < IN_MEMORY_TTL_MS) {
     return hit.index
   }
-  const index = await fetchPluginIndex(url)
+  const index = await fetchPluginIndex(url, signal)
   inMemoryIndexCache.set(url, { index, at: now })
   return index
 }

@@ -1,7 +1,7 @@
 /**
  * GitView Component - Git integration panel with multi-repository support
  */
-import { useState, useEffect, memo } from 'react'
+import { useState, useEffect, memo, useRef } from 'react'
 import {
   GitBranch,
   RefreshCw,
@@ -17,8 +17,10 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { useGitStore, GitRepository, mapRepoInfosToRepositories, PullResult } from '@/stores/git'
-import { scanGitRepos, gitCommitAndPush, gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitForcePush, gitForcePull } from '@/lib/tauri'
+import { useGitStore, GitRepository, PullResult } from '@/stores/git'
+import { gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete } from '@/lib/tauri'
+import { withCredentialFallback, commitAndPushRepo } from '@/lib/git/service'
+import { GitErrorCode } from '@/lib/git/errors'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +34,7 @@ import type { GitState } from '@/stores/git'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
+import { logger } from '@/lib/logger'
 import {
   Dialog,
   DialogContent,
@@ -98,7 +101,7 @@ function CredentialDialog({
     if (username.trim() && password.trim()) {
       // Save credentials to keyring if checkbox is checked
       if (saveCredential) {
-        gitCredentialSave(repoPath, username.trim(), password.trim()).catch(console.error)
+        gitCredentialSave(repoPath, username.trim(), password.trim()).catch((e) => logger.error('git-view', 'Failed to save git credential:', e))
       }
       onSubmit(username.trim(), password.trim())
     }
@@ -202,7 +205,7 @@ function CommitSection({
     repoName: string
   }>({ open: false, repoPath: '', repoName: '' })
   const [isPushingWithCredentials, setIsPushingWithCredentials] = useState(false)
-  const { showToast } = useUIStore()
+  const showToast = useUIStore((s) => s.showToast)
   const { t } = useTranslation()
 
   const handlePushWithCredentials = async (username: string, password: string) => {
@@ -246,68 +249,51 @@ function CommitSection({
     const errorPaths: string[] = []
 
     for (const repo of finalRepos) {
-      try {
-        // G-02 修复：后端返回 CommitPushResult，让前端区分"无改动"/"已提交"/"已推送"。
-        // 无改动且未推送时仍然计入 success（静默跳过，不显示"提交成功"误导）。
-        await gitCommitAndPush(repo.path, commitMessage)
+      const r = await commitAndPushRepo(repo, commitMessage)
+      if (r.success) {
         successCount++
-      } catch (e) {
-        const errorMessage = String(e).trim()
-        console.error('Failed to commit and push:', repo.path, errorMessage)
-        // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
-        if (errorMessage.startsWith('DETACHED_HEAD:')) {
-          failCount++
-          errorDetails.push(`${repo.name}: ${t('git.detachedHead', { defaultValue: '仓库处于 detached HEAD 状态，请先切换到分支再提交' })}`)
-          errorPaths.push(repo.path)
-        } else if (errorMessage.startsWith('AUTH_REQUIRED:')) {
-          // Try to use saved credentials from keyring first
-          let pushedWithSavedCred = false
-          try {
-            const savedCred = await gitCredentialGet(repo.path)
-            if (savedCred) {
-              try {
-                await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
-                pushedWithSavedCred = true
-                successCount++
-              } catch {
-                // Saved credentials failed, fall through to show dialog
-              }
-            }
-          } catch {
-            // Failed to get saved credentials, fall through
-          }
-          if (!pushedWithSavedCred) {
-            // Show credential dialog for manual input
-            // Don't count as success or failure since user can retry with credentials
-            setCredentialDialog({
-              open: true,
-              repoPath: repo.path,
-              repoName: repo.name,
-            })
-          }
-        } else if (errorMessage.startsWith('SUBMODULE_UNCOMMITTED:')) {
-          successCount++
-          errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
-          errorPaths.push(repo.path)
-        } else if (errorMessage.startsWith('SUBMODULE_REF_NEEDS_UPDATE:')) {
-          successCount++
-          errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
-          errorPaths.push(repo.path)
-        } else if (errorMessage.startsWith('REBASE_CONFLICT:')) {
-          failCount++
-          errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
-          conflictPaths.push(repo.path)
-          // Do NOT auto-open conflict tab — user must click conflict icon or repo to open
-        } else if (errorMessage.startsWith('REBASE_CONTINUE_FAILED:') || errorMessage.startsWith('MERGE_COMMIT_FAILED:')) {
-          // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
-          failCount++
-          errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { defaultValue: '冲突解决失败，请手动处理', error: errorMessage })}`)
-          conflictPaths.push(repo.path)
-        } else {
-          failCount++
-          errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
-          errorPaths.push(repo.path)
-        }
+        continue
+      }
+      if (r.error) {
+        logger.error('git-view', 'Failed to commit and push:', repo.path, r.error)
+      }
+      if (r.needsCredential) {
+        // Show credential dialog for manual input
+        setCredentialDialog({
+          open: true,
+          repoPath: repo.path,
+          repoName: repo.name,
+        })
+        continue
+      }
+      const code = r.errorCode ?? GitErrorCode.Unknown
+      const errorMessage = r.error || ''
+      // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
+      if (code === GitErrorCode.DetachedHead) {
+        failCount++
+        errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
+        errorPaths.push(repo.path)
+      } else if (code === GitErrorCode.SubmoduleUncommitted) {
+        successCount++
+        errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
+        errorPaths.push(repo.path)
+      } else if (code === GitErrorCode.SubmoduleRefNeedsUpdate) {
+        successCount++
+        errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
+        errorPaths.push(repo.path)
+      } else if (code === GitErrorCode.RebaseConflict) {
+        failCount++
+        errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
+        conflictPaths.push(repo.path)
+      } else if (code === GitErrorCode.RebaseContinueFailed || code === GitErrorCode.MergeCommitFailed) {
+        // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
+        failCount++
+        errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { error: errorMessage })}`)
+        conflictPaths.push(repo.path)
+      } else {
+        failCount++
+        errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
+        errorPaths.push(repo.path)
       }
     }
 
@@ -354,7 +340,7 @@ function CommitSection({
           type="text"
           value={commitMessage}
           onChange={(e) => setCommitMessage(e.target.value)}
-          placeholder="Sync changes"
+          placeholder={t('git.commitMessagePlaceholder')}
           className="flex h-8 w-full rounded-md border px-2.5 py-1 text-xs bg-[var(--bg-primary)] border-[var(--border-color)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           disabled={isCommitting}
         />
@@ -418,34 +404,17 @@ function RepositoryItem({
     setIsForceAction(true)
     setConfirmAction(null)
     try {
-      await gitForcePush(repo.path)
-      showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
-      await onRefresh()
-    } catch (e) {
-      const errorMessage = String(e).trim()
-      if (errorMessage.startsWith('AUTH_REQUIRED:')) {
-        // Try saved credentials
-        try {
-          const savedCred = await gitCredentialGet(repo.path)
-          if (savedCred) {
-            try {
-              // Force push with credentials
-              await gitForcePushWithCredentials(repo.path, savedCred.username, savedCred.password)
-              showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
-              onRefresh()
-              return
-            } catch {
-              // Saved credentials failed
-            }
-          }
-        } catch {
-          // Failed to get credentials
-        }
-        // 保存凭证也失败，弹出凭证对话框让用户手动输入
-        setCredentialDialog({ open: true, action: 'forcePush' })
-      } else {
-        showToast(t('git.forcePushFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      const r = await withCredentialFallback(repo, 'forcePush')
+      if (r.success) {
+        showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
+        await onRefresh()
+        return
       }
+      if (r.needsCredential) {
+        setCredentialDialog({ open: true, action: 'forcePush' })
+        return
+      }
+      showToast(t('git.forcePushFailed', { repo: repo.name, error: r.error || t('git.unknownError') }), 'error')
     } finally {
       setIsForceAction(false)
     }
@@ -455,33 +424,17 @@ function RepositoryItem({
     setIsForceAction(true)
     setConfirmAction(null)
     try {
-      await gitForcePull(repo.path)
-      showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
-      await onRefresh()
-    } catch (e) {
-      const errorMessage = String(e).trim()
-      if (errorMessage.startsWith('AUTH_REQUIRED:')) {
-        // Try saved credentials
-        try {
-          const savedCred = await gitCredentialGet(repo.path)
-          if (savedCred) {
-            try {
-              await gitForcePullWithCredentials(repo.path, savedCred.username, savedCred.password)
-              showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
-              onRefresh()
-              return
-            } catch {
-              // Saved credentials failed
-            }
-          }
-        } catch {
-          // Failed to get credentials
-        }
-        // 保存凭证也失败，弹出凭证对话框让用户手动输入
-        setCredentialDialog({ open: true, action: 'forcePull' })
-      } else {
-        showToast(t('git.forcePullFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') }), 'error')
+      const r = await withCredentialFallback(repo, 'forcePull')
+      if (r.success) {
+        showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
+        await onRefresh()
+        return
       }
+      if (r.needsCredential) {
+        setCredentialDialog({ open: true, action: 'forcePull' })
+        return
+      }
+      showToast(t('git.forcePullFailed', { repo: repo.name, error: r.error || t('git.unknownError') }), 'error')
     } finally {
       setIsForceAction(false)
     }
@@ -714,76 +667,75 @@ function RepositoryItem({
 const GitView = memo(function GitView() {
   const repositories = useGitStore((s: GitState) => s.repositories)
   const setRepositories = useGitStore((s: GitState) => s.setRepositories)
-  const setCachedRepositories = useGitStore((s: GitState) => s.setCachedRepositories)
   const scanProgress = useGitStore((s: GitState) => s.scanProgress)
   const pullAllRepos = useGitStore((s: GitState) => s.pullAllRepos)
   const updateRepositoryStatuses = useGitStore((s: GitState) => s.updateRepositoryStatuses)
   const loadConflictRepos = useGitStore((s: GitState) => s.loadConflictRepos)
-  const { rootPath, workspaceFolders } = useWorkspaceStore()
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
   const workspaceMode = useUIStore((s) => s.workspaceMode)
   const showToast = useUIStore((s) => s.showToast)
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [isPullingRepos, setIsPullingRepos] = useState(false)
   const { t } = useTranslation()
+  const hasInitialSyncRef = useRef(false)
+  // 跟踪已扫描过的路径指纹，避免启动阶段依赖变化触发重复扫描
+  const lastScannedPathsRef = useRef<string>('')
 
   // Load conflict repos from database on mount
   useEffect(() => {
     loadConflictRepos()
   }, [loadConflictRepos])
 
+  // Keep displayed repositories in sync with the canonical cache
+  useEffect(() => {
+    return useGitStore.subscribe((state, prevState) => {
+      if (prevState && state.cachedRepositories !== prevState.cachedRepositories) {
+        setRepositories(state.cachedRepositories)
+      }
+    })
+  }, [setRepositories])
+
   useEffect(() => {
     setSelectedRepos([])
+
+    const scanPaths = workspaceMode === 'workspace'
+      ? (workspaceFolders || [])
+      : (rootPath ? [rootPath] : [])
 
     const currentCached = useGitStore.getState().cachedRepositories
     if (currentCached.length > 0) {
       setRepositories(currentCached)
     }
 
-    const loadRepos = async () => {
-      const scanPaths = workspaceMode === 'workspace'
-        ? (workspaceFolders || [])
-        : (rootPath ? [rootPath] : [])
-
-      if (scanPaths.length === 0) {
-        setRepositories([])
-        return
-      }
-
-      try {
-        const scanPromises = scanPaths.map(async (path) => {
-          try {
-            return await scanGitRepos(path)
-          } catch (e) {
-            console.error(`Failed to scan git repos in ${path}:`, e)
-            return []
-          }
-        })
-
-        const results = await Promise.all(scanPromises)
-        const allRepos = results.flat()
-
-        const storeRepos = mapRepoInfosToRepositories(allRepos)
-        const prevRepos = useGitStore.getState().repositories
-        const mergedRepos = storeRepos.map((repo: GitRepository) => {
-          const prev = prevRepos.find((r: GitRepository) => r.path === repo.path)
-          if (prev && prev.status !== 'normal') {
-            return { ...repo, status: prev.status }
-          }
-          return repo
-        })
-        setRepositories(mergedRepos)
-        setCachedRepositories(mergedRepos)
-      } catch (e) {
-        console.error('Failed to scan git repos:', e)
-        const latestCached = useGitStore.getState().cachedRepositories
-        if (latestCached.length === 0) {
-          setRepositories([])
-        }
-      }
+    if (!hasInitialSyncRef.current) {
+      hasInitialSyncRef.current = true
+      lastScannedPathsRef.current = scanPaths.join(',')
+      // 首次挂载：workspace.ts 的 scanAndCacheGitRepos 会在启动时扫描，避免重复
+      return
     }
 
-    loadRepos()
-  }, [rootPath, workspaceFolders, workspaceMode, setRepositories, setCachedRepositories])
+    const pathsKey = scanPaths.join(',')
+
+    // 缓存为空时由 workspace.ts 负责首次扫描，GitView 不触发
+    if (currentCached.length === 0 && scanPaths.length > 0) {
+      lastScannedPathsRef.current = pathsKey
+      return
+    }
+
+    // 路径未变则跳过
+    if (pathsKey === lastScannedPathsRef.current) return
+    lastScannedPathsRef.current = pathsKey
+
+    // 路径/模式变化时重新扫描
+    if (scanPaths.length === 0) {
+      setRepositories([])
+      return
+    }
+
+    const gitStore = useGitStore.getState()
+    gitStore.scanAndCacheRepos(scanPaths)
+  }, [rootPath, workspaceFolders, workspaceMode, setRepositories])
 
   const toggleRepo = (path: string) => {
     setSelectedRepos(prev => 
@@ -848,7 +800,7 @@ const GitView = memo(function GitView() {
         // G-06 修复：批量 pull 遇到 detached HEAD 时给出更明确的提示
         const detachedNames = results.filter((r: PullResult) => r.isDetachedHead).map((r: PullResult) => r.name).join(', ')
         if (detachedNames) {
-          showToast(t('git.pullDetachedHead', { defaultValue: '{{repos}}: 仓库处于 detached HEAD 状态，请先切换到分支再拉取', repos: detachedNames }), 'error')
+          showToast(t('git.pullDetachedHead', { repos: detachedNames }), 'error')
         } else {
           showToast(t('git.pullResult', { success: succeeded, fail: failed }), 'error')
         }
@@ -856,7 +808,7 @@ const GitView = memo(function GitView() {
         showToast(t('git.pullSuccess', { count: succeeded }), 'success')
       }
     } catch (e) {
-      console.error('Pull failed:', e)
+      logger.error('git-view', 'Pull failed:', e)
       gitStore.setSyncStatus({ isSyncing: false })
     } finally {
       setIsPullingRepos(false)
@@ -868,42 +820,18 @@ const GitView = memo(function GitView() {
       ? (workspaceFolders || [])
       : (rootPath ? [rootPath] : [])
 
-    // Save previous repos BEFORE clearing to preserve conflict/error status
-    const prevRepos = useGitStore.getState().repositories
-
     setRepositories([])
     setSelectedRepos([])
 
     if (scanPaths.length === 0) return
 
     try {
-      const scanPromises = scanPaths.map(async (path) => {
-        try {
-          return await scanGitRepos(path)
-        } catch (e) {
-          console.error(`Failed to scan git repos in ${path}:`, e)
-          return []
-        }
-      })
-
-      const results = await Promise.all(scanPromises)
-      const allRepos = results.flat()
-
-      const storeRepos = mapRepoInfosToRepositories(allRepos)
-      const mergedRepos = storeRepos.map((repo: GitRepository) => {
-        const prev = prevRepos.find((r: GitRepository) => r.path === repo.path)
-        if (prev && prev.status !== 'normal') {
-          return { ...repo, status: prev.status }
-        }
-        return repo
-      })
-      setRepositories(mergedRepos)
-      setCachedRepositories(mergedRepos)
-
+      const gitStore = useGitStore.getState()
+      await gitStore.scanAndCacheRepos(scanPaths)
       // Reload conflict repos from database to ensure conflict status is accurate
       await loadConflictRepos()
     } catch (e) {
-      console.error('Failed to refresh repos:', e)
+      logger.error('git-view', 'Failed to refresh repos:', e)
     }
   }
 

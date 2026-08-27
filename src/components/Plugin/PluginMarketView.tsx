@@ -196,7 +196,7 @@ function PluginMarketView() {
             <select
               value={repoUrl}
               onChange={(e) => handleSourceChange(e.target.value)}
-              aria-label={t('plugin.market.sourceSelect', { defaultValue: '选择来源' })}
+              aria-label={t('plugin.market.sourceSelect')}
             >
               <option value={OFFICIAL_REPO_URL}>{t('plugin.market.official')}</option>
               {repoSources.map((source) => (
@@ -213,8 +213,8 @@ function PluginMarketView() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('plugin.market.searchPlaceholder', { defaultValue: '搜索插件名 / 描述 / 标签' })}
-              aria-label="Search marketplace"
+              placeholder={t('plugin.market.searchPlaceholder')}
+              aria-label={t('plugin.market.searchAriaLabel')}
             />
             {searchQuery && (
               <button
@@ -237,7 +237,7 @@ function PluginMarketView() {
               void refreshUpdates()
             }}
             disabled={!repoUrl || isFetchingIndex}
-            title={t('plugin.market.refresh', { defaultValue: '刷新' })}
+            title={t('plugin.market.refresh')}
           >
             <RefreshCw size={14} className={isFetchingIndex ? 'animate-spin' : ''} />
           </button>
@@ -246,7 +246,7 @@ function PluginMarketView() {
           <button
             type="button"
             className="pa-icon-btn"
-            title={t('plugin.market.manageSources', { defaultValue: '来源管理' })}
+            title={t('plugin.market.manageSources')}
             onClick={() => setShowSourceManager(true)}
           >
             <Settings2 size={14} />
@@ -279,23 +279,21 @@ function PluginMarketView() {
       {!repoUrl ? (
         <EmptyState
           icon={<Store size={28} />}
-          title={t('plugin.market.emptyTitle', { defaultValue: '尚未配置仓库' })}
-          hint={t('plugin.market.emptyHint', {
-            defaultValue: '在顶部粘贴一个 repo.json 的 URL，SwallowNote 会拉取并展示所有可用插件。',
-          })}
+          title={t('plugin.market.emptyTitle')}
+          hint={t('plugin.market.emptyHint')}
         />
       ) : isFetchingIndex && !index ? (
         <EmptyState
           icon={<RefreshCw size={28} className="animate-spin" />}
-          title={t('plugin.market.loading', { defaultValue: '正在加载仓库…' })}
+          title={t('plugin.market.loading')}
         />
       ) : filteredEntries.length === 0 ? (
         <EmptyState
           icon={<Package size={28} />}
-          title={t('plugin.market.noResults', { defaultValue: '没有匹配的插件' })}
+          title={t('plugin.market.noResults')}
           hint={
             searchQuery
-              ? t('plugin.market.noResultsHint', { defaultValue: '尝试调整搜索词或清空标签过滤。' })
+              ? t('plugin.market.noResultsHint')
               : undefined
           }
         />
@@ -420,10 +418,10 @@ const PluginMarketCard = memo(function PluginMarketCard({
   // for "Update available" and a paper-3 muted colour for the
   // fresh-install case.
   const statusBadge = isUpdateAvailable
-    ? { cls: 'pa-market-badge is-update', label: t('plugin.market.badgeUpdate', { defaultValue: 'Update' }) }
+    ? { cls: 'pa-market-badge is-update', label: t('plugin.market.badgeUpdate') }
     : isInstalled
-    ? { cls: 'pa-market-badge is-installed', label: t('plugin.market.badgeInstalled', { defaultValue: 'Installed' }) }
-    : { cls: 'pa-market-badge is-install', label: t('plugin.market.badgeInstall', { defaultValue: 'Install' }) }
+    ? { cls: 'pa-market-badge is-installed', label: t('plugin.market.badgeInstalled') }
+    : { cls: 'pa-market-badge is-install', label: t('plugin.market.badgeInstall') }
 
   // 已安装且最新时不显示下载图标，仅显示详情图标
   const showDownloadIcon = !isInstalled || isUpdateAvailable
@@ -438,7 +436,7 @@ const PluginMarketCard = memo(function PluginMarketCard({
         <div className="pa-market-card-head">
           <div style={{ minWidth: 0 }}>
             <div className="pa-market-card-name">
-              {entry.name || t('plugin.market.unknownName', { defaultValue: '未命名插件' })}
+              {entry.name || t('plugin.market.unknownName')}
             </div>
             <div className="pa-market-card-id">{entry.id}</div>
           </div>
@@ -484,7 +482,7 @@ const PluginMarketCard = memo(function PluginMarketCard({
             <button
               type="button"
               className="pa-icon-btn"
-              title={t('plugin.market.viewDetails', { defaultValue: '查看详情' })}
+              title={t('plugin.market.viewDetails')}
               onClick={onClick}
             >
               <Info />
@@ -495,8 +493,8 @@ const PluginMarketCard = memo(function PluginMarketCard({
                 className="pa-icon-btn"
                 title={
                   isUpdateAvailable
-                    ? t('plugin.market.updateTo', { defaultValue: '更新到 v{{version}}', version })
-                    : t('plugin.market.installNow', { defaultValue: '立即安装' })
+                    ? t('plugin.market.updateTo', { version })
+                    : t('plugin.market.installNow')
                 }
                 onClick={onClick}
               >
@@ -563,7 +561,7 @@ function SourceManagerDialog({
           </span>
           <span className="pmd-header-info">
             <span className="pmd-header-title">
-              {t('plugin.market.sourceManager', { defaultValue: '来源管理' })}
+              {t('plugin.market.sourceManager')}
             </span>
           </span>
         </div>
@@ -573,10 +571,10 @@ function SourceManagerDialog({
             <div className="pmd-empty">
               <span className="pmd-empty-icon"><Package size={28} /></span>
               <div className="pmd-empty-title">
-                {t('plugin.market.sourceEmpty', { defaultValue: '暂无自定义来源' })}
+                {t('plugin.market.sourceEmpty')}
               </div>
               <div className="pmd-empty-hint">
-                {t('plugin.market.sourceEmptyHint', { defaultValue: '点击下方添加新的插件来源。' })}
+                {t('plugin.market.sourceEmptyHint')}
               </div>
             </div>
           ) : (
@@ -596,19 +594,19 @@ function SourceManagerDialog({
                       className="pa-btn pa-btn-sm"
                       onClick={() => onSelect(source.url)}
                     >
-                      {t('plugin.market.sourceSwitch', { defaultValue: '切换' })}
+                      {t('plugin.market.sourceSwitch')}
                     </button>
                   )}
                   {source.url === currentUrl && (
                     <span className="pa-market-badge is-installed is-xs">
-                      {t('plugin.market.sourceCurrent', { defaultValue: '当前' })}
+                      {t('plugin.market.sourceCurrent')}
                     </span>
                   )}
                   <button
                     type="button"
                     className="pa-icon-btn is-danger"
                     style={{ width: 24, height: 24 }}
-                    title={t('plugin.market.sourceRemove', { defaultValue: '删除来源' })}
+                    title={t('plugin.market.sourceRemove')}
                     onClick={() => onRemove(source.url)}
                   >
                     <Trash2 size={12} />
@@ -621,19 +619,19 @@ function SourceManagerDialog({
           {/* 添加新来源 */}
           <div className="pa-source-add">
             <div className="pa-source-add-title">
-              {t('plugin.market.sourceAdd', { defaultValue: '添加来源' })}
+              {t('plugin.market.sourceAdd')}
             </div>
             <div className="pa-source-add-row">
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder={t('plugin.market.sourceNamePlaceholder', { defaultValue: '名称' })}
+                placeholder={t('plugin.market.sourceNamePlaceholder')}
                 className="pa-source-add-input"
               />
               <input
                 value={newUrl}
                 onChange={(e) => setNewUrl(e.target.value)}
-                placeholder={t('plugin.market.sourceUrlPlaceholder', { defaultValue: 'https://…/repo.json' })}
+                placeholder={t('plugin.market.sourceUrlPlaceholder')}
                 className="pa-source-add-input"
                 style={{ flex: 2 }}
                 onKeyDown={(e) => {
@@ -645,7 +643,7 @@ function SourceManagerDialog({
                 className="pa-icon-btn"
                 disabled={!newName.trim() || !newUrl.trim()}
                 onClick={handleAdd}
-                title={t('plugin.market.sourceAddBtn', { defaultValue: '添加' })}
+                title={t('plugin.market.sourceAddBtn')}
               >
                 <Plus size={14} />
               </button>
@@ -656,7 +654,7 @@ function SourceManagerDialog({
         <div className="pmd-footer">
           <Button variant="outline" onClick={onClose}>
             <X size={14} />
-            {t('common.close', { defaultValue: '关闭' })}
+            {t('common.close')}
           </Button>
         </div>
       </DialogContent>

@@ -66,6 +66,7 @@ import {
 import { downloadDiagnosticBundle } from '@/lib/plugin-diagnostics'
 import { writeFile } from '@/lib/tauri'
 import { usePluginStore } from '@/stores'
+import { logger } from '@/lib/logger'
 
 export interface PluginManagerConsoleDialogProps {
   open: boolean
@@ -123,11 +124,11 @@ export function PluginManagerConsoleDialog({ open, onOpenChange }: PluginManager
         <header className="pa-popup-head">
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="pa-popup-eyebrow">
-              {t('plugin.pa.console.eyebrow', { defaultValue: '任务管理器 · 24h 窗口' })}
+              {t('plugin.pa.dialog.console.eyebrow')}
             </div>
             <DialogTitle asChild>
               <h2 className="pa-popup-title">
-                {t('plugin.pa.console.title', { defaultValue: '插件管理控制台' })}
+                {t('plugin.pa.dialog.console.title')}
               </h2>
             </DialogTitle>
           </div>
@@ -236,7 +237,7 @@ function ActivityTab({ open }: { open: boolean }) {
           <div className="pa-empty">
             <div className="pa-empty-title">—</div>
             <div className="pa-empty-hint">
-              {t('plugin.pa.dialog.activity.emptyHint', { defaultValue: '暂无活动' })}
+              {t('plugin.pa.dialog.activity.emptyHint')}
             </div>
           </div>
         ) : (
@@ -375,7 +376,7 @@ function DiagnosticsTab({ open }: { open: boolean }) {
     try {
       await downloadDiagnosticBundle()
     } catch (err) {
-      console.error('Failed to export diagnostic bundle:', err)
+      logger.error('plugin-console', 'Failed to export diagnostic bundle:', err)
     }
   }
 
@@ -436,7 +437,7 @@ function DiagnosticsTab({ open }: { open: boolean }) {
                   <span className="pa-load-val">
                     {row.value}{' '}
                     <small>
-                      {t('plugin.pa.dialog.diagnostics.eventUnit', { defaultValue: '事件' })}
+                      {t('plugin.pa.dialog.diagnostics.eventUnit')}
                     </small>
                   </span>
                 </div>
@@ -551,7 +552,7 @@ function LogsTab({ open }: { open: boolean }) {
       await navigator.clipboard.writeText(text)
       toast.success(t('plugin.pa.dialog.logs.toast.copySuccess'))
     } catch (err) {
-      console.error('Failed to copy logs:', err)
+      logger.error('plugin-console', 'Failed to copy logs:', err)
       toast.error(t('plugin.pa.dialog.logs.toast.copyFailed'))
     }
   }
@@ -576,7 +577,7 @@ function LogsTab({ open }: { open: boolean }) {
         ],
       })
     } catch (err) {
-      console.error('Failed to open save dialog:', err)
+      logger.error('plugin-console', 'Failed to open save dialog:', err)
       toast.error(t('plugin.pa.dialog.logs.toast.exportOpenFailed'), { description: String(err) })
       return
     }
@@ -588,7 +589,7 @@ function LogsTab({ open }: { open: boolean }) {
         { description: target },
       )
     } catch (err) {
-      console.error('Failed to write log file:', err)
+      logger.error('plugin-console', 'Failed to write log file:', err)
       toast.error(t('plugin.pa.dialog.logs.toast.exportWriteFailed'), { description: String(err) })
     }
   }
@@ -601,7 +602,7 @@ function LogsTab({ open }: { open: boolean }) {
             <ScrollText size={20} />
             <div className="pa-empty-title">—</div>
             <div className="pa-empty-hint">
-              {t('plugin.pa.dialog.logs.emptyHint', { defaultValue: '暂无日志' })}
+              {t('plugin.pa.dialog.logs.emptyHint')}
             </div>
           </div>
         ) : filteredLines.length === 0 ? (
@@ -609,9 +610,7 @@ function LogsTab({ open }: { open: boolean }) {
             <ScrollText size={20} />
             <div className="pa-empty-title">—</div>
             <div className="pa-empty-hint">
-              {t('plugin.pa.dialog.logs.emptyFilteredHint', {
-                defaultValue: '当前过滤条件下没有日志',
-              })}
+              {t('plugin.pa.dialog.logs.emptyFilteredHint')}
             </div>
           </div>
         ) : (
@@ -620,7 +619,7 @@ function LogsTab({ open }: { open: boolean }) {
               <>
                 <div className="pa-log-group" data-log-group="conflict">
                   <span>
-                    {t('plugin.pa.dialog.logs.conflictGroup', { defaultValue: '⚠️ 冲突' })}
+                    {t('plugin.pa.dialog.logs.conflictGroup')}
                   </span>
                   <span className="pa-log-group-count">{conflictLines.length}</span>
                 </div>
@@ -632,7 +631,7 @@ function LogsTab({ open }: { open: boolean }) {
                 {conflictLines.length > 0 && (
                   <div className="pa-log-group" data-log-group="normal">
                     <span>
-                      {t('plugin.pa.dialog.logs.normalGroup', { defaultValue: '活动' })}
+                      {t('plugin.pa.dialog.logs.normalGroup')}
                     </span>
                     <span className="pa-log-group-count">{normalLines.length}</span>
                   </div>
@@ -665,16 +664,12 @@ function LogsTab({ open }: { open: boolean }) {
                 aria-label={t('plugin.pa.dialog.logs.filter')}
               >
                 <SelectValue
-                  placeholder={t('plugin.pa.dialog.logs.filterAll', {
-                    defaultValue: '全部插件',
-                  })}
+                  placeholder={t('plugin.pa.dialog.logs.filterAll')}
                 />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={FILTER_ALL}>
-                  {t('plugin.pa.dialog.logs.filterAll', {
-                    defaultValue: '全部插件',
-                  })}
+                  {t('plugin.pa.dialog.logs.filterAll')}
                 </SelectItem>
                 {pluginOptions.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
@@ -696,12 +691,10 @@ function LogsTab({ open }: { open: boolean }) {
             className="pa-btn pa-btn-outline"
             onClick={() => void handleExport()}
             disabled={filteredLines.length === 0}
-            title={t('plugin.pa.dialog.logs.exportTitle', {
-              defaultValue: '导出为 JSON Lines (.jsonl)',
-            })}
+            title={t('plugin.pa.dialog.logs.exportTitle')}
           >
             <Download size={12} />
-            {t('plugin.pa.dialog.logs.export', { defaultValue: '导出' })}
+            {t('plugin.pa.dialog.logs.export')}
           </button>
         </div>
       </footer>

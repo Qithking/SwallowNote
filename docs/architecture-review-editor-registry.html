@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>编辑器架构深化评审 — SwallowNote</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .badge-strong { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+  .badge-worth { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+  .badge-spec { background: #e0e7ff; color: #3730a3; border: 1px solid #a5b4fc; }
+  .code-mono { font-family: "JetBrains Mono", "Fira Code", Consolas, monospace; }
+  .fade-in { animation: fadeIn 0.4s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<div class="max-w-6xl mx-auto px-6 py-10">
+
+  <!-- Header -->
+  <header class="mb-12">
+    <h1 class="text-3xl font-bold text-slate-900 mb-2">编辑器架构深化评审</h1>
+    <p class="text-slate-600">SwallowNote · 基于 deep module 设计原则的架构扫描</p>
+    <div class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+      <strong>设计词汇</strong>:Module(模块) · Interface(接口) · Depth(深度) · Seam(接缝) · Adapter(适配器) · Leverage(杠杆) · Locality(局部性)
+    </div>
+  </header>
+
+  <!-- 现状概览 -->
+  <section class="mb-12">
+    <h2 class="text-xl font-bold mb-4 text-slate-900">现状:4 层嵌套条件树</h2>
+    <p class="text-slate-600 mb-4">Editor.tsx 当前的路由逻辑是一棵 4 层深的嵌套条件渲染树,而非一张路由表:</p>
+    <div class="bg-slate-900 text-slate-100 p-5 rounded-lg code-mono text-sm overflow-x-auto">
+<pre>EditorView
+├─ activeTab.type === 'diff'?      → DiffViewer      (早返回 L451)
+├─ activeTab.type === 'conflict'?  → ConflictResolver (早返回 L462)
+└─ fileType 分发 (L498-595)
+   ├─ 'markdown'
+   │  └─ viewMode === 'source'?    → CodeEditor      (L500)
+   │     └─ else                   → MarkdownEditor  (BlockNote)
+   ├─ 'code'                       → CodeEditor
+   ├─ 'binary'                     → BinaryView
+   └─ 'mindmap'
+      └─ pluginEditor 存在?        → PluginEditor    (L558)
+         └─ else                   → MindMapEditor(shim)</pre>
+    </div>
+    <div class="mt-4 grid grid-cols-3 gap-4">
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+        <div class="text-2xl font-bold text-red-600">6</div>
+        <div class="text-sm text-red-700">套不同 Props 接口</div>
+      </div>
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+        <div class="text-2xl font-bold text-red-600">12+</div>
+        <div class="text-sm text-red-700">处高扇入改动点(新增编辑器)</div>
+      </div>
+      <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+        <div class="text-2xl font-bold text-red-600">7</div>
+        <div class="text-sm text-red-700">处 isMarkdown 重复判定</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Candidate 1 -->
+  <section class="mb-10 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden fade-in">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+      <h3 class="text-lg font-bold text-slate-900">候选 1:Editor Registry — 编辑器注册中心</h3>
+      <span class="badge-strong px-3 py-1 rounded-full text-xs font-semibold">Strong</span>
+    </div>
+    <div class="px-6 py-5 space-y-5">
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">涉及文件</h4>
+        <p class="text-sm text-slate-600 code-mono">src/components/Editor.tsx · src/components/editors/*.tsx · src/stores/pluginEditor.ts · src/lib/utils/fileTypeUtils.ts</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">问题</h4>
+        <p class="text-sm text-slate-600">Editor.tsx 是一个 <strong>shallow module</strong> — 它的 interface(4 层 if-else,6 种 props 形状)几乎和它的 implementation(只是把 props 传给具体编辑器)一样复杂。新增一个编辑器需要改 <strong>12 处、跨 7 个文件</strong>。文件类型路由名义上集中在 detectFileType,实际在 7+ 处重复,且判定方法不一致(.md 后缀 vs 正则 vs type === 'plugin')。搜索集成通过 editorType 字符串字面量在 5 处 if-else 分发。这是典型的开闭原则违反。</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">方案</h4>
+        <p class="text-sm text-slate-600">创建 <strong>EditorRegistry</strong> deep module — 一个编辑器注册中心。每个编辑器(内置 + 插件)通过声明式注册接入,声明:支持的文件类型匹配器、组件 lazy loader、props 适配器、搜索能力、flush 能力、工具栏能力。Editor.tsx 退化为一个 ~20 行的查表渲染器:查 registry → 取 editor descriptor → 用统一 EditorProps 渲染。新增编辑器只需写一个注册模块,0 处现有文件改动。</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">收益</h4>
+        <ul class="text-sm text-slate-600 list-disc list-inside space-y-1">
+          <li><strong>Leverage</strong>:Editor.tsx 从 ~600 行条件树 → ~20 行查表,调用方只需学一个 <code class="code-mono bg-slate-100 px-1 rounded">resolveEditor(filename)</code> 接口</li>
+          <li><strong>Locality</strong>:新增编辑器的所有知识(类型匹配、props 适配、搜索、flush)集中在一个注册文件,而非散落 7 个文件</li>
+          <li><strong>测试</strong>:registry 接口成为测试面 — 注册一个 mock editor → 断言 resolveEditor 返回它 → 断言 props 适配正确</li>
+          <li><strong>开闭原则</strong>:新增编辑器 = 新增注册模块,0 处现有文件改动</li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-2">Before / After</h4>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="text-xs font-semibold text-red-600 mb-2">BEFORE — 4 层条件树 + 12 处高扇入</p>
+            <div class="mermaid bg-slate-50 p-3 rounded-lg">
+graph TD
+    E[Editor.tsx 600行] --> T{tab.type?}
+    T -->|diff| D[DiffViewer]
+    T -->|conflict| C[ConflictResolver]
+    T -->|file| F{fileType?}
+    F -->|markdown| V{viewMode?}
+    V -->|source| CE1[CodeEditor]
+    V -->|preview| ME[MarkdownEditor]
+    F -->|code| CE2[CodeEditor]
+    F -->|binary| BV[BinaryView]
+    F -->|mindmap| P{pluginEditor?}
+    P -->|yes| PE[PluginEditor]
+    P -->|no| SH[MindMapEditor shim]
+    style E fill:#fee,stroke:#c00
+    style F fill:#fee,stroke:#c00
+    style V fill:#fee,stroke:#c00
+    style P fill:#fee,stroke:#c00
+            </div>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-green-600 mb-2">AFTER — 查表 + 统一接口</p>
+            <div class="mermaid bg-slate-50 p-3 rounded-lg">
+graph TD
+    E[Editor.tsx 20行] --> R[EditorRegistry]
+    R -->|resolveEditor| RD[EditorDescriptor]
+    RD --> C[Component lazy]
+    RD --> A[PropsAdapter]
+    RD --> S[SearchAdapter?]
+    RD --> F[FlushFn?]
+    R -.->|注册| MD[MarkdownEditor注册]
+    R -.->|注册| CD[CodeEditor注册]
+    R -.->|注册| DD[DiffViewer注册]
+    R -.->|注册| PD[PluginEditor注册]
+    style E fill:#efe,stroke:#0a0
+    style R fill:#efe,stroke:#0a0
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Candidate 2 -->
+  <section class="mb-10 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden fade-in">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+      <h3 class="text-lg font-bold text-slate-900">候选 2:统一 EditorProps 契约</h3>
+      <span class="badge-strong px-3 py-1 rounded-full text-xs font-semibold">Strong</span>
+    </div>
+    <div class="px-6 py-5 space-y-5">
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">涉及文件</h4>
+        <p class="text-sm text-slate-600 code-mono">src/components/editors/MarkdownEditor.tsx · src/components/editors/CodeEditor.tsx · src/components/DiffViewer/*.tsx · src/components/Editor.tsx</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">问题</h4>
+        <p class="text-sm text-slate-600">6 个编辑器组件有 6 套不同的 props 签名:MarkdownEditor 用 <code class="code-mono">{content, onChange?}</code>,CodeEditor 用 <code class="code-mono">{content, filename, onChange?, className?, scrollToLine?}</code>,DiffViewer 用 <code class="code-mono">{diffContent}</code>,ConflictResolver 用 <code class="code-mono">{repoPath, repoName, ...}</code>。调用方(Editor.tsx)靠条件 spread 打补丁:<code class="code-mono">{...(isShim ? { filename } : {})}</code>。MarkdownEditor 甚至绕过 props 从 store 自己拿 filename。接口不统一导致 Editor.tsx 无法用单一调用点渲染所有编辑器。</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">方案</h4>
+        <p class="text-sm text-slate-600">定义统一的 <code class="code-mono">EditorProps</code> deep interface,每个编辑器通过 <strong>Adapter</strong> 适配到这个接口。统一接口包含:<code class="code-mono">tab: EditorTab</code>(完整 tab 上下文)、<code class="code-mono">onChange: (content: string) => void</code>、<code class="code-mono">onFlush?: () =&gt; Promise&lt;void&gt;</code>。各编辑器的特有需求(filename、repoPath 等)通过 Adapter 从 tab 上下文中提取,而非调用方手动传。DiffViewer/ConflictResolver 这类只读/特殊编辑器,通过 <code class="code-mono">canEdit: false</code> 能力声明跳过编辑接口。</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">收益</h4>
+        <ul class="text-sm text-slate-600 list-disc list-inside space-y-1">
+          <li><strong>Leverage</strong>:Editor.tsx 用 <code class="code-mono">&lt;EditorComponent {...editorProps} /&gt;</code> 单一调用点,不再条件 spread</li>
+          <li><strong>Locality</strong>:各编辑器的 props 转换逻辑集中在自己的 Adapter,而非调用方</li>
+          <li><strong>测试</strong>:EditorProps 契约成为测试面 — 传入标准 tab fixture → 断言 adapter 产出正确 props</li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-2">Before / After</h4>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="text-xs font-semibold text-red-600 mb-2">BEFORE — 6 套 props + 条件 spread</p>
+            <div class="bg-slate-900 text-slate-100 p-4 rounded-lg code-mono text-xs overflow-x-auto">
+<pre>// Editor.tsx — 6 种调用方式
+&lt;MarkdownEditor content=... onChange=... /&gt;
+&lt;CodeEditor content=... filename=...
+  onChange=... scrollToLine=... /&gt;
+&lt;PluginEditor content=... onChange=... /&gt;
+&lt;MindMapEditor content=... onChange=...
+  {...(isShim ? {filename} : {})} /&gt;
+&lt;DiffViewer diffContent=... /&gt;
+&lt;ConflictResolver repoPath=...
+  repoName=... initialSelectedFile=... /&gt;</pre>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-green-600 mb-2">AFTER — 统一 EditorProps</p>
+            <div class="bg-slate-900 text-slate-100 p-4 rounded-lg code-xs text-xs overflow-x-auto">
+<pre>// Editor.tsx — 单一调用点
+const desc = registry.resolve(tab)
+const props = desc.adapter(tab)
+&lt;desc.component {...props} /&gt;
+
+// 统一接口
+interface EditorProps {
+  tab: EditorTab
+  onChange: (c: string) =&gt; void
+  onFlush?: () =&gt; Promise&lt;void&gt;
+}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Candidate 3 -->
+  <section class="mb-10 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden fade-in">
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+      <h3 class="text-lg font-bold text-slate-900">候选 3:EditorSearchAdapter — 搜索能力适配器</h3>
+      <span class="badge-worth px-3 py-1 rounded-full text-xs font-semibold">Worth exploring</span>
+    </div>
+    <div class="px-6 py-5 space-y-5">
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">涉及文件</h4>
+        <p class="text-sm text-slate-600 code-mono">src/components/editors/useEditorSearchIntegration.ts · src/components/FindReplacePanel.tsx · src/components/EditorToolbar.tsx</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">问题</h4>
+        <p class="text-sm text-slate-600">useEditorSearchIntegration 内部有 5 处 <code class="code-mono">if (editorType === 'codemirror')</code> 分支,为绕过 Hooks 规则同时调用两个 hook 再用三元选一个。<code class="code-mono">FindReplaceEditorType</code> 和 <code class="code-mono">EditorSearchType</code> 在两个文件各定义一遍。FindReplacePanel 还自己判断 <code class="code-mono">isCodeMirror</code> 来决定 UI 差异(正则/全词选项)。新增一个支持搜索的编辑器需要改 5 处 if-else + 2 处类型定义 + 1 处 UI 分支。</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">方案</h4>
+        <p class="text-sm text-slate-600">定义 <code class="code-mono">EditorSearchAdapter</code> interface,各编辑器实现自己的搜索适配器(BlockNoteSearchAdapter、CodeMirrorSearchAdapter)。Adapter 声明能力:<code class="code-mono">supportsRegex: boolean</code>、<code class="code-mono">supportsWholeWord: boolean</code>。useEditorSearchIntegration 退化为 <code class="code-mono">const search = registry.resolveSearch(tab)</code>,无 if-else。可作为 Candidate 1 的子能力,也可独立实施。</p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-slate-700 mb-1">收益</h4>
+        <ul class="text-sm text-slate-600 list-disc list-inside space-y-1">
+          <li><strong>Locality</strong>:BlockNote 搜索逻辑在 BlockNoteSearchAdapter,CodeMirror 在 CodeMirrorSearchAdapter</li>
+          <li><strong>Leverage</strong>:useEditorSearchIntegration 从 ~140 行 → ~30 行,无 if-else</li>
+          <li><strong>测试</strong>:Adapter 接口成为测试面,可独立测试各编辑器的搜索实现</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Top Recommendation -->
+  <section class="mb-8 bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl p-6">
+    <h2 class="text-xl font-bold mb-3 text-indigo-900">Top 推荐</h2>
+    <p class="text-slate-700 mb-3"><strong>候选 1 + 候选 2 合并实施</strong> — Editor Registry 与统一 EditorProps 是天然耦合的:registry 需要 EditorProps 契约才能工作,EditorProps 需要 registry 来选择正确的 adapter。单独做任一个都会留下半成品。</p>
+    <p class="text-slate-700"><strong>实施顺序</strong>:先定义 EditorProps + EditorDescriptor 接口(候选 2)→ 创建 EditorRegistry 并迁移内置编辑器(候选 1)→ Editor.tsx 退化为查表渲染器 → 搜索适配器(候选 3)作为后续独立深化。</p>
+    <p class="text-slate-700 mt-3"><strong>风险</strong>:Editor.tsx 是启动关键路径上的模块,改动需保持行为不变。建议 TDD:先写 characterization test 锁定现有行为,再逐步迁移。MindMapEditor shim 和 PluginEditor 的 isShim 分支是最容易出问题的边界。</p>
+  </section>
+
+  <!-- Call to action -->
+  <div class="text-center py-6">
+    <p class="text-slate-600">你想深入探索哪个候选方案?</p>
+  </div>
+
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'loose' })
+</script>
+</body>
+</html>

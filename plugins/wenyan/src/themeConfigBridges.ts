@@ -78,7 +78,8 @@ export function mergeGlobalFromElementStyle(
   }
   const picked = pickFields(next, GLOBAL_FIELDS)
   // fontFamily 由上面的特殊逻辑处理，其它字段走 picked
-  const { fontFamily: _ignored, ...rest } = picked
+  const { fontFamily, ...rest } = picked
+  void fontFamily
   return {
     ...config,
     typography: {

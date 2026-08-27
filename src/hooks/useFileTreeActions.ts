@@ -1,5 +1,6 @@
 /** 文件树操作 hook：重命名、新建、删除 */
 import { useState, useRef, useEffect } from 'react'
+import { logger } from '@/lib/logger'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
 import { loadDirectory } from '@/lib/api'
@@ -129,7 +130,7 @@ export function useFileTreeActions() {
         setNodes(updateNodesWithChildren(currentNodes, rootPath || editingPath, children))
       }
     } catch (e) {
-      console.error('Failed to rename:', e)
+      logger.error('file-tree-actions', 'Failed to rename:', e)
     }
 
     setEditingPath(null); setEditingName(''); setEditingType(null)
@@ -198,7 +199,7 @@ export function useFileTreeActions() {
       const currentNodes = useFileTreeStore.getState().nodes
       setNodes(updateNodesWithChildren(currentNodes, newItem.parentPath, children))
     } catch (e) {
-      console.error('Failed to create:', e)
+      logger.error('file-tree-actions', 'Failed to create:', e)
     }
 
     setNewItem(null)
@@ -243,7 +244,7 @@ export function useFileTreeActions() {
         for (const tab of tabsToClose) editorStore.removeTab(tab.id)
         successCount++
       } catch (e) {
-        console.error('Failed to delete:', path, e)
+        logger.error('file-tree-actions', 'Failed to delete:', path, e)
         failCount++
       }
     }
@@ -263,7 +264,7 @@ export function useFileTreeActions() {
         const currentNodes = useFileTreeStore.getState().nodes
         setNodes(updateNodesWithChildren(currentNodes, dirPath, children))
       } catch (e) {
-        console.error('Failed to refresh directory:', dirPath, e)
+        logger.error('file-tree-actions', 'Failed to refresh directory:', dirPath, e)
       }
     }
 

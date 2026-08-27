@@ -27,6 +27,7 @@ import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGit
 import type { GitRepository } from '@/stores/git'
 import { loadFileContent, loadDirectory } from '@/lib/api'
 import { deleteFile } from '@/lib/tauri'
+import { isImageFile } from '@/lib/utils/fileTypeUtils'
 import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
 import { removeFolderHistory } from '@/lib/tauri'
@@ -35,10 +36,16 @@ import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuIte
 import { updateNodesWithChildren, findParentNode } from '@/lib/utils/treeUtils'
 import { usePluginEditors } from '@/stores/pluginEditor'
 import { countWords } from '@/lib/utils/wordCount'
+import { logger } from '@/lib/logger'
 
 function getRelativePath(rootPath: string, fullPath: string): string {
   if (!rootPath) return fullPath
-  return fullPath.substring(rootPath.length + 1)
+  // 归一化路径分隔符，处理 Windows 下 \ 和 / 混用问题
+  const normalizedRoot = rootPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  const normalizedFull = fullPath.replace(/\\/g, '/')
+  // 验证前缀，防止 substring 计算错误
+  if (!normalizedFull.startsWith(normalizedRoot + '/')) return normalizedFull
+  return normalizedFull.substring(normalizedRoot.length + 1)
 }
 
 function getFileName(path: string): string {
@@ -120,6 +127,21 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       clearMultiSelection()
       setSelectedPath(node.path)
       setLastClickedPath(node.path)
+      // 图片文件无需读取 content(二进制非 UTF-8 会 read 失败),用 tab.path 直接预览
+      if (isImageFile(node.name)) {
+        addTab({
+          id: node.id,
+          path: node.path,
+          name: node.name,
+          content: '',
+          isDirty: false,
+          isEdited: false,
+          viewMode: 'preview',
+          fileSize: '-',
+          modifiedTime: new Date().toLocaleString(),
+        })
+        return
+      }
       try {
         const content = await loadFileContent(node.path)
         addTab({
@@ -135,7 +157,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           wordCount: countWords(content),
         })
       } catch (e) {
-        console.error('Failed to open file:', e)
+        logger.error('file-tree-menu', 'Failed to open file:', e)
       }
     }
   }
@@ -144,7 +166,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
     try {
       await invoke('open_in_finder', { path: node.path })
     } catch (e) {
-      console.error('Failed to open in finder:', e)
+      logger.error('file-tree-menu', 'Failed to open in finder:', e)
     }
   }
 
@@ -158,18 +180,26 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       const updatedNodes = updateNodesWithChildren(nodes, node.path, children)
       setNodes(updatedNodes)
     } catch (e) {
-      console.error('Failed to init git:', e)
+      logger.error('file-tree-menu', 'Failed to init git:', e)
       showToast(t('contextMenu.gitInitFailed', { error: String(e) }))
     }
   }
 
   const handleCopyPath = async (relative: boolean) => {
-    const pathToCopy = relative && rootPath ? getRelativePath(rootPath, node.path) : node.path
+    // 在 workspace 模式下，找到文件所属的 workspace 文件夹作为相对路径基准
+    const basePath = rootPath || (workspaceMode === 'workspace'
+      ? workspaceFolders.find(f => node.path.startsWith(f.replace(/\\/g, '/') + '/'))
+      : null)
+    // 相对路径从根节点的父目录开始，包含根节点名称
+    const relativeBase = basePath && basePath.lastIndexOf('/') > 0
+      ? basePath.substring(0, basePath.lastIndexOf('/'))
+      : null
+    const pathToCopy = relative && relativeBase ? getRelativePath(relativeBase, node.path) : node.path
     try {
       await navigator.clipboard.writeText(pathToCopy)
       showToast(t('tabBar.pathCopied'))
     } catch (e) {
-      console.error('Failed to copy path:', e)
+      logger.error('file-tree-menu', 'Failed to copy path:', e)
       showToast(t('contextMenu.copied', { name: 'path' }))
     }
   }
@@ -222,7 +252,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           editorStore.updateTabPath(sourcePath, destPath, destName)
         }
       } catch (e) {
-        console.error('Failed to paste:', e)
+        logger.error('file-tree-menu', 'Failed to paste:', e)
         failCount++
       }
     }
@@ -281,8 +311,10 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
         const updatedNodes = updateNodesWithChildren(nodes, parent.path, children)
         setNodes(updatedNodes)
       }
+    showToast(t('fileTree.deleteSuccess', { count: 1 }), 'success')
     } catch (e) {
-      console.error('Failed to delete:', e)
+      logger.error('file-tree-menu', 'Failed to delete:', e)
+      showToast(t('fileTree.deletePartial', { success: 0, fail: 1 }), 'error')
     }
   }
 
@@ -297,7 +329,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       
       showToast(t('contextMenu.removed', { name: node.name }))
     } catch (e) {
-      console.error('Failed to remove record:', e)
+      logger.error('file-tree-menu', 'Failed to remove record:', e)
     }
   }
 
@@ -414,7 +446,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           </ContextMenuItem>
         )}
 
-        {(!node.isDirectory || canPaste) && (
+        {canPaste && (
           <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
         )}
 

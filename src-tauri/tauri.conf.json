@@ -12,23 +12,8 @@
   "app": {
     "withGlobalTauri": true,
     "macOSPrivateApi": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "SwallowNote",
-        "width": 1200,
-        "height": 800,
-        "resizable": true,
-        "fullscreen": false,
-        "decorations": false,
-        "transparent": true,
-        "shadow": false,
-        "dragDropEnabled": false,
-        "visible": false
-      }
-    ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: data: blob: https:; connect-src 'self' http://127.0.0.1:* http://localhost:* https: ws: wss:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' blob:",
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob: https:; connect-src 'self' http://127.0.0.1:* http://localhost:* https: ws: wss:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' blob:",
       "assetProtocol": {
         "enable": true,
         "scope": {

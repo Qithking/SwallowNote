@@ -2,8 +2,8 @@
  * EditorToolbar Component - File info bar between TabBar and EditorView
  * Shows file path, size, modified time, word count, and view toggles
  */
-import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2, DownloadCloud, Loader2 } from 'lucide-react'
-import { useState, useEffect, useMemo } from 'react'
+import { BookOpen, Code, History, FolderOpen, Clipboard, Type, Maximize2, Minimize2, AlertTriangle, RefreshCw, GitMerge, Settings2, DownloadCloud, Loader2, Search } from 'lucide-react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useGitStore, usePluginStore } from '@/stores'
 import type { EditorToolbarConfig } from '@/stores/editor'
 import { useShallow } from 'zustand/react/shallow'
@@ -14,6 +14,10 @@ import { useTranslation } from 'react-i18next'
 import { pluginRightPanelType, renderPluginIcon, pluginSidebarView, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
 import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 import { downloadCoordinator } from '@/lib/download-coordinator'
+import { logger } from '@/lib/logger'
+import { FindReplacePanel } from '@/components/FindReplacePanel'
+import type { FindReplaceEditorType, FindReplaceMatchCount, FindReplaceOptions } from '@/components/FindReplacePanel'
+import { isImageFile } from '@/lib/utils/fileTypeUtils'
 
 function EditorToolbar() {
   const toggleViewMode = useEditorStore((s) => s.toggleViewMode)
@@ -54,6 +58,25 @@ function EditorToolbar() {
     })
   )
   const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  // 查找/替换面板状态
+  const [findReplaceVisible, setFindReplaceVisible] = useState(false)
+  const findReplaceVisibleRef = useRef(findReplaceVisible)
+  useEffect(() => { findReplaceVisibleRef.current = findReplaceVisible }, [findReplaceVisible])
+  const [findReplaceMatchCount, setFindReplaceMatchCount] = useState<FindReplaceMatchCount>({ current: 0, total: 0 })
+  const [findReplaceError, setFindReplaceError] = useState<string | null>(null)
+  const [findReplaceQuery, setFindReplaceQuery] = useState('')
+  const [findReplaceReplaceText, setFindReplaceReplaceText] = useState('')
+  const [findReplaceOptions, setFindReplaceOptions] = useState<FindReplaceOptions>({
+    caseSensitive: false,
+    wholeWord: false,
+    regexp: false,
+  })
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimer.current)
+  }, [])
   // isWide 直接派生自 store，保持与 noteWidth 单一数据源同步
   const isWide = noteWidth === 'wide'
   const [downloading, setDownloading] = useState(false)
@@ -69,6 +92,55 @@ function EditorToolbar() {
     return unsubscribe
   }, [])
 
+  // 查找/替换:显隐切换(事件与图标按钮共用,关闭时清理高亮)
+  const handleToggleFindReplace = useCallback(() => {
+    if (findReplaceVisibleRef.current) {
+      window.dispatchEvent(new CustomEvent('editor:find-replace:clear'))
+      setFindReplaceMatchCount({ current: 0, total: 0 })
+      setFindReplaceError(null)
+    }
+    setFindReplaceVisible((v) => !v)
+  }, [])
+
+  // 查找/替换:监听 editor:toggle-find-replace 事件切换面板显隐
+  useEffect(() => {
+    const onMatchCount = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      const next = { current: detail.current ?? 0, total: detail.total ?? 0 }
+      setFindReplaceMatchCount(next)
+    }
+    const onReplaceText = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      setFindReplaceReplaceText(detail.text ?? '')
+    }
+    const onError = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {}
+      setFindReplaceError(detail.message ?? null)
+    }
+    window.addEventListener('editor:toggle-find-replace', handleToggleFindReplace)
+    window.addEventListener('editor:find-replace:match-count', onMatchCount)
+    window.addEventListener('editor:find-replace:replace-text', onReplaceText)
+    window.addEventListener('editor:find-replace:error', onError)
+    return () => {
+      window.removeEventListener('editor:toggle-find-replace', handleToggleFindReplace)
+      window.removeEventListener('editor:find-replace:match-count', onMatchCount)
+      window.removeEventListener('editor:find-replace:replace-text', onReplaceText)
+      window.removeEventListener('editor:find-replace:error', onError)
+    }
+  }, [handleToggleFindReplace])
+
+  // AC-11:切换 tab 时自动关闭查找面板
+  useEffect(() => {
+    setFindReplaceVisible(false)
+    // 关闭时清除编辑器内高亮
+    window.dispatchEvent(new CustomEvent('editor:find-replace:clear'))
+    setFindReplaceMatchCount({ current: 0, total: 0 })
+    setFindReplaceError(null)
+    setFindReplaceQuery('')
+    setFindReplaceReplaceText('')
+    setFindReplaceOptions({ caseSensitive: false, wholeWord: false, regexp: false })
+  }, [activeTab?.id])
+
   // 冲突文件判定与关联仓库信息（memo 化，避免每次渲染重算 filter/flatMap/includes）。
   // 因 hook 不能在条件 return 之后调用，这里用 activeTab?.path 兼容 activeTab 为 null 的场景。
   const conflictInfo = useMemo(() => {
@@ -83,16 +155,70 @@ function EditorToolbar() {
     return { isConflict, conflictRepo, relativeFilePath }
   }, [conflictRepos, conflictFilesMap, activeTab?.path])
 
+  // 查找/替换:事件处理 callback(必须在条件 return 之前定义)
+  const handleCloseFindReplace = useCallback(() => {
+    setFindReplaceVisible(false)
+    window.dispatchEvent(new CustomEvent('editor:find-replace:clear'))
+    setFindReplaceMatchCount({ current: 0, total: 0 })
+    setFindReplaceError(null)
+  }, [])
+  const handleFindReplaceQueryChange = useCallback((text: string, options: FindReplaceOptions) => {
+    // 不将输入文本回写到 findReplaceQuery,避免双向同步导致输入框光标跳动/无法输入
+    setFindReplaceOptions(options)
+    window.dispatchEvent(new CustomEvent('editor:find-replace:query', {
+      detail: { text, caseSensitive: options.caseSensitive, wholeWord: options.wholeWord, regexp: options.regexp },
+    }))
+  }, [])
+  const handleFindReplaceReplaceTextChange = useCallback((text: string) => {
+    window.dispatchEvent(new CustomEvent('editor:find-replace:replace-text', { detail: { text } }))
+  }, [])
+  const handleFindNext = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('editor:find-replace:find-next'))
+  }, [])
+  const handleFindPrev = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('editor:find-replace:find-prev'))
+  }, [])
+  const handleReplaceNext = useCallback((replaceText: string) => {
+    window.dispatchEvent(new CustomEvent('editor:find-replace:replace-next', { detail: { text: replaceText } }))
+  }, [])
+  const handleReplaceAll = useCallback((replaceText: string) => {
+    window.dispatchEvent(new CustomEvent('editor:find-replace:replace-all', { detail: { text: replaceText } }))
+  }, [])
+
+  // isMarkdown/isBlockNoteEditor 必须在条件 return 之前计算：下方 useEffect
+  // 不能位于 early return 之后，否则文件 tab ↔ diff/conflict tab 切换时
+  // hook 数量变化会触发 "Rendered fewer hooks" 并卸载整棵组件树。
+  // 插件 tab 的内容为 markdown，无论 path 扩展名如何。
+  const isMarkdown =
+    activeTab?.type === 'plugin' ||
+    (!!activeTab?.path && /\.(md|markdown)$/i.test(activeTab.path))
+  const isBlockNoteEditor =
+    !!activeTab &&
+    activeTab.type !== 'diff' &&
+    activeTab.type !== 'conflict' &&
+    isMarkdown &&
+    activeTab.viewMode !== 'source'
+
+  // 非 BlockNote 富文本模式时，自动关闭内容排版设置面板（排版设置仅对 BlockNote 有效）
+  useEffect(() => {
+    if (rightPanelType === 'editorSettings' && !isBlockNoteEditor) {
+      setRightPanelType(null)
+    }
+  }, [isBlockNoteEditor, rightPanelType, setRightPanelType])
+
   if (!activeTab) return null
 
   // Don't show toolbar for diff and conflict tabs
   if (activeTab.type === 'diff' || activeTab.type === 'conflict') return null
 
   const { path, viewMode } = activeTab
-  // 插件 tab 的内容为 markdown，无论 path 扩展名如何
-  const isMarkdown = activeTab.type === 'plugin' || /\.(md|markdown)$/i.test(path)
   // 工具栏项可见性：toolbarConfig 中设置为 false 的隐藏，未设置或 true 的显示（默认显示）
   const show = (key: keyof EditorToolbarConfig): boolean => !(activeTab.toolbarConfig?.[key] === false)
+
+  // 查找/替换:根据实际渲染的编辑器决定类型
+  // source 视图下 markdown 文件实际使用 CodeEditor,应走 codemirror 模式
+  // isBlockNoteEditor 已在条件 return 之前计算(见上)
+  const findReplaceEditorType: FindReplaceEditorType = isBlockNoteEditor ? 'blocknote' : 'codemirror'
 
   // Get path relative to workspace root directory, starting with /rootDir/
   const getRelativePath = (absolutePath: string): string => {
@@ -125,7 +251,7 @@ function EditorToolbar() {
     try {
       await invoke('open_in_finder', { path })
     } catch (err) {
-      console.error('Failed to open folder:', err)
+      logger.error('editor-toolbar', 'Failed to open folder:', err)
     }
   }
 
@@ -133,9 +259,10 @@ function EditorToolbar() {
     try {
       await navigator.clipboard.writeText(path)
       setCopied(true)
-      setTimeout(() => setCopied(false), 3000)
+      clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 3000)
     } catch (err) {
-      console.error('Failed to copy path:', err)
+      logger.error('editor-toolbar', 'Failed to copy path:', err)
     }
   }
 
@@ -197,6 +324,7 @@ function EditorToolbar() {
   }
 
   return (
+    <div className="relative">
     <div className="flex items-center justify-between h-[25px] pl-3 pr-1 text-[11px]   select-none">
       {/* Left: File path - display relative path from root */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
@@ -295,13 +423,14 @@ function EditorToolbar() {
               <TooltipContent>{t('editorToolbar.toggleWidth')}</TooltipContent>
             </Tooltip>
           )}
-          {show('contentLayout') && (
+          {show('contentLayout') && viewMode !== 'source' && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setRightPanelType(rightPanelType === 'editorSettings' ? null : 'editorSettings')}
                   className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
                   style={{ color: rightPanelType === 'editorSettings' ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                  title={t('editorToolbar.contentLayout')}
                 >
                   <Type size={14} style={{ color: 'inherit' }} />
                 </button>
@@ -309,27 +438,28 @@ function EditorToolbar() {
               <TooltipContent>{t('editorToolbar.contentLayout')}</TooltipContent>
             </Tooltip>
           )}
-          {show('downloadRemoteImages') && viewMode !== 'source' && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => window.dispatchEvent(new CustomEvent('editor:download-remote-images', { detail: { tabId: activeTab.id } }))}
-                  disabled={downloading}
-                  className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                  style={{ color: 'var(--text-primary)' }}
-                  aria-label={t('editorToolbar.downloadRemoteImages')}
-                >
-                  {downloading ? (
-                    <Loader2 size={14} className="animate-spin" style={{ color: 'inherit' }} />
-                  ) : (
-                    <DownloadCloud size={14} style={{ color: 'inherit' }} />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{t('editorToolbar.downloadRemoteImages')}</TooltipContent>
-            </Tooltip>
-          )}
         </>)}
+        {/* 下载远程图片:markdown 和 code 文件支持,图片预览不支持 */}
+        {show('downloadRemoteImages') && !isImageFile(path) && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('editor:download-remote-images', { detail: { tabId: activeTab.id } }))}
+                disabled={downloading}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                style={{ color: 'var(--text-primary)' }}
+                title={t('editorToolbar.downloadRemoteImages')}
+              >
+                {downloading ? (
+                  <Loader2 size={14} className="animate-spin" style={{ color: 'inherit' }} />
+                ) : (
+                  <DownloadCloud size={14} style={{ color: 'inherit' }} />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.downloadRemoteImages')}</TooltipContent>
+          </Tooltip>
+        )}
         {/* History, Open Folder, Copy - available for all file types */}
         {show('openHistory') && (
           <Tooltip>
@@ -357,6 +487,22 @@ function EditorToolbar() {
               </button>
             </TooltipTrigger>
             <TooltipContent>{t('editorToolbar.openLocation')}</TooltipContent>
+          </Tooltip>
+        )}
+        {/* 查找/替换:markdown 和 code 文件显示,图片预览不支持 */}
+        {show('showFindReplace') && !isImageFile(path) && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleToggleFindReplace}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-[var(--bg-hover)] cursor-pointer"
+                style={{ color: findReplaceVisible ? 'var(--theme-color)' : 'var(--text-primary)' }}
+                title={t('editorToolbar.findReplace.toggle')}
+              >
+                <Search size={14} style={{ color: 'inherit' }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('editorToolbar.findReplace.toggle')}</TooltipContent>
           </Tooltip>
         )}
         {show('copyPath') && (
@@ -390,14 +536,14 @@ function EditorToolbar() {
                   pluginName={plugin.name}
                   resetKey={`${plugin.id}-${activeTab.id}`}
                   variant="toolbar"
-                  onCrash={(_id, err) => console.error(`[EditorToolbar] Plugin ${plugin.name} crashed:`, err)}
+                  onCrash={(_id, err) => logger.error('editor-toolbar', `Plugin ${plugin.name} crashed:`, err)}
                 >
                   {renderPluginToolbarButton(plugin.toolbarButton, toolbarProps)}
                 </PluginErrorBoundary>
               )
             } catch (e) {
               // toolbarButton 同步渲染抛错：记录日志并降级为下方默认图标渲染
-              console.error('[EditorToolbar] Plugin toolbarButton render failed:', e)
+              logger.error('editor-toolbar', 'Plugin toolbarButton render failed:', e)
             }
           }
 
@@ -428,6 +574,25 @@ function EditorToolbar() {
           )
         })}
       </div>
+    </div>
+    <FindReplacePanel
+      visible={findReplaceVisible}
+      editorType={findReplaceEditorType}
+      matchCount={findReplaceMatchCount}
+      error={findReplaceError}
+      initialQuery={findReplaceQuery}
+      initialReplaceText={findReplaceReplaceText}
+      initialCaseSensitive={findReplaceOptions.caseSensitive}
+      initialWholeWord={findReplaceOptions.wholeWord}
+      initialRegexp={findReplaceOptions.regexp}
+      onClose={handleCloseFindReplace}
+      onQueryChange={handleFindReplaceQueryChange}
+      onReplaceTextChange={handleFindReplaceReplaceTextChange}
+      onFindNext={handleFindNext}
+      onFindPrev={handleFindPrev}
+      onReplaceNext={handleReplaceNext}
+      onReplaceAll={handleReplaceAll}
+    />
     </div>
   )
 }

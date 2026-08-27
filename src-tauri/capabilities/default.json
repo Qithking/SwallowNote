@@ -27,6 +27,7 @@
     "core:tray:allow-set-menu",
     "core:tray:allow-set-tooltip",
     "autostart:default",
+    "os:default",
     "shell:allow-open",
     "dialog:default",
     "dialog:allow-open",
@@ -34,6 +35,7 @@
     "dialog:allow-message",
     "dialog:allow-ask",
     "dialog:allow-confirm",
-    "core:webview:allow-print"
+    "core:webview:allow-print",
+    "log:default"
   ]
 }

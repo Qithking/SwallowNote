@@ -29,7 +29,6 @@ import {
   findSelectorLine,
   parseThemeCss,
   type ThemeConfig,
-  type HeadingLevel,
 } from './themeConfig'
 import { VisualEditor, type VisualCategory } from './CustomThemeVisual'
 import { CodeEditor, type CodeEditorRef } from '@/components/CodeEditor'
@@ -371,7 +370,7 @@ export function CustomThemeDialog(props: CustomThemeDialogProps): ReactNode {
             const obj = JSON.parse(text)
             if (typeof obj.name === 'string') name = obj.name
             if (typeof obj.css === 'string') css = obj.css
-          } catch (err) {
+          } catch {
             toast.error('JSON 解析失败')
             return
           }

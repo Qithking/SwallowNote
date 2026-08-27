@@ -1,4 +1,5 @@
 /** 编辑器内容刷新注册表 */
+import { logger } from './logger'
 
 type FlushFn = () => Promise<void>
 
@@ -19,7 +20,7 @@ export async function flushAllEditors(): Promise<void> {
   await Promise.all(
     fns.map((fn) =>
       fn().catch((e) => {
-        console.error('[editor-flush] Flush failed:', e)
+        logger.error('editor-flush', 'Flush failed:', e)
       }),
     ),
   )

@@ -5,6 +5,7 @@ import type {
   PluginCommandsListener,
 } from '@/types/plugin'
 import { assertPermission } from './plugin-permission-guard'
+import { logger } from './logger'
 
 /** 注册时标记插件 id 的命令条目 */
 export interface RegisteredPluginCommand extends PluginCommand {
@@ -71,7 +72,7 @@ class PluginCommandRegistryImpl implements PluginCommandRegistry {
         listener()
       } catch (err) {
         // 监听器异常不阻断变更
-        console.error('[plugin-commands] listener threw:', err)
+        logger.error('plugin-commands', 'listener threw:', err)
       }
     }
   }

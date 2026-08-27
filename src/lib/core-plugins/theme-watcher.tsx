@@ -26,6 +26,8 @@ import {
   usePluginStorage,
   usePluginEvents,
 } from '@/lib/plugin-hooks'
+import { useTranslation } from 'react-i18next'
+import { logger } from '../logger'
 
 // ─── Panel component ──────────────────────────────────────────────────────────
 
@@ -48,6 +50,7 @@ interface WatcherSnapshot {
 
 function ThemeWatcherPanel(panel: PluginPanelProps): ReactNode {
   const { close, pluginId } = panel
+  const { t } = useTranslation()
   // Two persisted toggles, one for verbose logging and one for
   // suppressing in-panel notifications. Settings dialog edits both.
   const [verbose, setVerbose] = usePluginStorage<boolean>(panel, 'verbose', false)
@@ -84,7 +87,7 @@ function ThemeWatcherPanel(panel: PluginPanelProps): ReactNode {
       }))
     } catch (err) {
       if (verbose) {
-        console.debug('[theme-watcher] failed to hydrate from appSettings:', err)
+        logger.debug('plugin:theme-watcher', 'failed to hydrate from appSettings:', err)
       }
     }
   }, [verbose])
@@ -123,7 +126,7 @@ function ThemeWatcherPanel(panel: PluginPanelProps): ReactNode {
     })
 
     if (verbose) {
-      console.debug(`[theme-watcher] ${event}`, payload)
+      logger.debug('plugin:theme-watcher', `${event}`, payload)
     }
     // Demo: emit a follow-up `settings:change` carrying the latest
     // theme, so other plugins (or the diagnostics panel) can
@@ -151,15 +154,15 @@ function ThemeWatcherPanel(panel: PluginPanelProps): ReactNode {
         </button>
       </div>
       <div className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
-        <span className="text-muted-foreground">Plugin</span>
+        <span className="text-muted-foreground">{t('pluginCore.common.pluginId')}</span>
         <code className="text-[11px]">{pluginId}</code>
-        <span className="text-muted-foreground">Theme</span>
+        <span className="text-muted-foreground">{t('pluginCore.themeWatcher.theme')}</span>
         <span className="font-mono">{snapshot.theme}</span>
-        <span className="text-muted-foreground">Locale</span>
+        <span className="text-muted-foreground">{t('pluginCore.themeWatcher.locale')}</span>
         <span className="font-mono">{snapshot.locale}</span>
-        <span className="text-muted-foreground">Events</span>
+        <span className="text-muted-foreground">{t('pluginCore.themeWatcher.events')}</span>
         <span className="font-mono">{snapshot.eventCount}</span>
-        <span className="text-muted-foreground">Last setting</span>
+        <span className="text-muted-foreground">{t('pluginCore.themeWatcher.lastSetting')}</span>
         <span className="font-mono truncate" title={snapshot.lastSettingValue}>
           {snapshot.lastSettingKey ?? '—'}
           {snapshot.lastSettingKey ? ` = ${snapshot.lastSettingValue}` : ''}
@@ -212,6 +215,7 @@ function ThemeWatcherIcon({ size = 18 }: { size?: number }): ReactNode {
 
 function ThemeWatcherSettings(panel: PluginPanelProps): ReactNode {
   const { close, pluginId } = panel
+  const { t } = useTranslation()
   const [verbose, setVerbose] = usePluginStorage<boolean>(panel, 'verbose', false)
   const [hideNotifications, setHideNotifications] = usePluginStorage<boolean>(
     panel,
@@ -222,7 +226,7 @@ function ThemeWatcherSettings(panel: PluginPanelProps): ReactNode {
   return (
     <div className="p-4 text-sm space-y-4">
       <div>
-        <div className="text-xs text-muted-foreground">Plugin ID</div>
+        <div className="text-xs text-muted-foreground">{t('pluginCore.common.pluginId')}</div>
         <code className="text-xs">{pluginId}</code>
       </div>
       <div className="space-y-2">
@@ -274,11 +278,11 @@ function onUnload(): void {
 }
 
 function onEnable(context: { pluginId: string }): void {
-  console.debug(`[theme-watcher] enabled (pluginId=${context.pluginId})`)
+  logger.debug('plugin:theme-watcher', `enabled (pluginId=${context.pluginId})`)
 }
 
 function onDisable(context: { pluginId: string }): void {
-  console.debug(`[theme-watcher] disabled (pluginId=${context.pluginId})`)
+  logger.debug('plugin:theme-watcher', `disabled (pluginId=${context.pluginId})`)
 }
 
 function onMount(context: { pluginId: string }): void {
@@ -290,11 +294,11 @@ function onUnmount(): void {
 }
 
 function onActivate(context: { pluginId: string }): void {
-  console.debug(`[theme-watcher] activated (pluginId=${context.pluginId})`)
+  logger.debug('plugin:theme-watcher', `activated (pluginId=${context.pluginId})`)
 }
 
 function onDeactivate(context: { pluginId: string }): void {
-  console.debug(`[theme-watcher] deactivated (pluginId=${context.pluginId})`)
+  logger.debug('plugin:theme-watcher', `deactivated (pluginId=${context.pluginId})`)
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────

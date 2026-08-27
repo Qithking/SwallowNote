@@ -4,6 +4,7 @@
  */
 import { Minus, Square, X, Sun, Moon, Monitor, Bot, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useShallow } from 'zustand/react/shallow'
 import { useUIStore, usePluginStore, useEditorStore } from '@/stores'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
@@ -23,7 +24,18 @@ import { pluginRightPanelType, pluginSidebarView, renderPluginIcon, createToolba
 import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 
 function TitleBar() {
-  const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode, sidebarVisible, setSidebarVisible, settingsPanelVisible, setSettingsPanelVisible, sidebarView } = useUIStore()
+  const { theme, setTheme, rightPanelType, setRightPanelType, workspaceMode, sidebarVisible, setSidebarVisible, settingsPanelVisible, setSettingsPanelVisible, sidebarView } = useUIStore(useShallow((s) => ({
+    theme: s.theme,
+    setTheme: s.setTheme,
+    rightPanelType: s.rightPanelType,
+    setRightPanelType: s.setRightPanelType,
+    workspaceMode: s.workspaceMode,
+    sidebarVisible: s.sidebarVisible,
+    setSidebarVisible: s.setSidebarVisible,
+    settingsPanelVisible: s.settingsPanelVisible,
+    setSettingsPanelVisible: s.setSettingsPanelVisible,
+    sidebarView: s.sidebarView,
+  })))
   const { switchMode } = useWorkspaceStore()
   const titleBarPlugins = usePluginStore((s) => s.registry.titleBar)
   // Fine-grained selectors: only re-render when the active tab's content
@@ -208,7 +220,7 @@ function TitleBar() {
               <Bot size={14} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>AI Assistant</TooltipContent>
+          <TooltipContent>{t('ai.title')}</TooltipContent>
         </Tooltip>
 
         <DropdownMenu>

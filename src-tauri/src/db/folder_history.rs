@@ -3,10 +3,7 @@ use rusqlite::Result;
 
 pub fn save_folder(db: &Database, path: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
-    let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
-        e.into_inner()
-    });
+    let conn = db.conn_lock();
     // 用 unchecked_transaction 包裹 INSERT + DELETE，保证“写入当前 + 裁剪历史”原子提交，
     // 避免裁剪失败导致历史表超出 50 条上限。
     let tx = conn.unchecked_transaction()?;
@@ -29,10 +26,7 @@ pub fn save_folder(db: &Database, path: &str) -> Result<()> {
 
 pub fn get_latest_folder(db: &Database) -> Result<Option<String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
-    let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
-        e.into_inner()
-    });
+    let conn = db.conn_lock();
     
     let mut stmt = conn.prepare(
         "SELECT path FROM folder_history ORDER BY opened_at DESC LIMIT 1"
@@ -49,10 +43,7 @@ pub fn get_latest_folder(db: &Database) -> Result<Option<String>> {
 
 pub fn get_folder_history(db: &Database) -> Result<Vec<String>> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
-    let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
-        e.into_inner()
-    });
+    let conn = db.conn_lock();
     
     let mut stmt = conn.prepare(
         "SELECT path FROM folder_history ORDER BY opened_at DESC LIMIT 50"
@@ -70,10 +61,7 @@ pub fn get_folder_history(db: &Database) -> Result<Vec<String>> {
 
 pub fn remove_folder(db: &Database, path: &str) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
-    let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
-        e.into_inner()
-    });
+    let conn = db.conn_lock();
     
     conn.execute(
         "DELETE FROM folder_history WHERE path = ?1",
@@ -85,10 +73,7 @@ pub fn remove_folder(db: &Database, path: &str) -> Result<()> {
 
 pub fn clear_other_history(db: &Database, current_path: Option<&str>) -> Result<()> {
     // 优雅降级：mutex 中毒时不 panic，记录日志后继续使用 guard
-    let conn = db.conn.lock().unwrap_or_else(|e| {
-        eprintln!("[DB] mutex poisoned: {}", e);
-        e.into_inner()
-    });
+    let conn = db.conn_lock();
     
     match current_path {
         Some(path) => {

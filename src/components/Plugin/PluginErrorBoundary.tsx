@@ -15,6 +15,7 @@
 import { Component, type ReactNode } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { logger } from '@/lib/logger'
 
 interface Props {
   children: ReactNode
@@ -47,7 +48,7 @@ export class PluginErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error(`Plugin error [${this.props.pluginId}]:`, error, errorInfo)
+    logger.error('plugin-error', `Plugin error [${this.props.pluginId}]:`, error, errorInfo)
     this.props.onCrash?.(this.props.pluginId, error)
   }
 

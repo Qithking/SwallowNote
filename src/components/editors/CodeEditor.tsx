@@ -13,9 +13,10 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorView as CMView, keymap } from '@codemirror/view'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Prec } from '@codemirror/state'
 import { StreamLanguage } from '@codemirror/language'
 import { indentWithTab } from '@codemirror/commands'
+import { search } from '@codemirror/search'
 
 // Statically import commonly used native CodeMirror 6 language packages
 import { javascript } from '@codemirror/lang-javascript'
@@ -39,6 +40,9 @@ import { java } from '@codemirror/lang-java'
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EditorContextMenu } from './EditorContextMenu'
+import { useEditorSearchIntegration, adaptCodeMirrorSearch } from './useEditorSearchIntegration'
+import { useCodeMirrorSearch } from './useCodeMirrorSearch'
+import { logger } from '@/lib/logger'
 
 interface CodeEditorProps {
   content: string
@@ -52,6 +56,40 @@ interface CodeEditorProps {
 function streamLang(parser: any): any {
   return StreamLanguage.define(parser)
 }
+
+// 拦截 basicSetup 中 searchKeymap 的快捷键,禁用 CM 自带搜索面板
+// 返回 true 阻止后续 keymap 处理,由 useKeyboardShortcuts 派发 editor:toggle-find-replace
+const disableCmSearchKeymap = Prec.highest(keymap.of([
+  {
+    key: 'Mod-f',
+    run: () => {
+      window.dispatchEvent(new CustomEvent('editor:toggle-find-replace'))
+      return true
+    },
+  },
+  {
+    key: 'Mod-g',
+    run: () => {
+      window.dispatchEvent(new CustomEvent('editor:find-replace:find-next'))
+      return true
+    },
+    shift: () => {
+      window.dispatchEvent(new CustomEvent('editor:find-replace:find-prev'))
+      return true
+    },
+  },
+  {
+    key: 'F3',
+    run: () => {
+      window.dispatchEvent(new CustomEvent('editor:find-replace:find-next'))
+      return true
+    },
+    shift: () => {
+      window.dispatchEvent(new CustomEvent('editor:find-replace:find-prev'))
+      return true
+    },
+  },
+]))
 
 // Cache for dynamically loaded language extensions to avoid re-importing
 // 设置 LRU 上限，避免无界增长占用内存
@@ -177,6 +215,10 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
 
+  // 挂载查找/替换事件桥接 hook
+  const cmSearch = useCodeMirrorSearch({ viewRef })
+  useEditorSearchIntegration(adaptCodeMirrorSearch(cmSearch))
+
   // 实际执行行定位的内部函数：把光标移到目标行并滚动到视口中央
   const doScrollToLine = (lineNumber: number) => {
     if (!viewRef.current) return
@@ -187,7 +229,7 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
         effects: EditorView.scrollIntoView(line.from, { y: 'center' })
       })
     } catch (e) {
-      console.error('Failed to scroll to line:', e)
+      logger.error('code-editor', 'Failed to scroll to line:', e)
     }
   }
 
@@ -264,10 +306,12 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
       const state = EditorState.create({
         doc: content,
         extensions: [
+          disableCmSearchKeymap,
           basicSetup,
           langExt,
           keymap.of([indentWithTab]),
           CMView.lineWrapping,
+          search({ top: true }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               onChange?.(update.state.doc.toString())

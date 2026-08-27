@@ -462,6 +462,7 @@ enum DownloadError {
 /// 1. 解析 Location（支持相对路径，基于当前 URL resolve）
 /// 2. 重新调用 validate_remote_url 进行 SSRF 校验
 /// 3. 校验通过才跟随，最多跟随 MAX_REDIRECTS 次
+///
 /// 这样可防止公网 URL 302 到 127.0.0.1 等内网地址绕过初始 SSRF 校验。
 async fn fetch_with_redirect(start_url: &str) -> Result<reqwest::Response, DownloadError> {
     let mut current_url = start_url.to_string();
@@ -561,10 +562,8 @@ fn canonicalize_for_check(path: &Path) -> Option<PathBuf> {
     let mut current = path.to_path_buf();
     let mut remaining: Vec<PathBuf> = Vec::new();
     while !current.exists() {
-        match current.file_name() {
-            Some(name) => remaining.push(PathBuf::from(name)),
-            None => return None,
-        }
+        let name = current.file_name()?;
+        remaining.push(PathBuf::from(name));
         if !current.pop() {
             return None;
         }

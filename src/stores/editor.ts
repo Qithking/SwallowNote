@@ -2,11 +2,13 @@
  * Editor Store - Manages editor state
  */
 import { create } from 'zustand'
+import { logger } from '@/lib/logger'
 import { subscribeWithSelector } from 'zustand/middleware'
 import type { ReactNode } from 'react'
 import { loadFileContent } from '@/lib/api'
 import { writeFile, gitAutoCommit } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
+import { findScrollContainer } from '@/lib/scroll-position'
 import { countWords } from '@/lib/utils/wordCount'
 import { parseFrontmatter, serializeFrontmatter, stripFrontmatter } from '@/lib/utils/frontmatter'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
@@ -40,6 +42,8 @@ export interface EditorToolbarConfig {
   externalChangeWarning?: boolean
   /** 冲突指示器（默认 true） */
   conflictIndicator?: boolean
+  /** 查找替换按钮（默认 true） */
+  showFindReplace?: boolean
 }
 
 /**
@@ -55,6 +59,80 @@ export interface PluginTabRuntime {
 
 /** 插件 tab 运行时数据注册表：tabId → 运行时数据 */
 const pluginTabRuntime = new Map<string, PluginTabRuntime>()
+
+/**
+ * 编辑器容器 DOM 引用：供 setActiveTab 在切换前精确读取编辑器 scrollTop。
+ * 不能用 document.querySelector 全局查询——页面有 14+ 个 ScrollArea 组件，
+ * 全局查询会返回错误的 viewport。
+ */
+let editorContainerEl: HTMLElement | null = null
+
+/**
+ * 编辑器 scrollTop 缓存：由 Editor.tsx 的全局 scroll 捕获监听持续更新。
+ * 用于应用退出/tab 切换时 DOM 可能已不可用（如 React 卸载、close-requested 时机）
+ * 情况下的兜底读取，避免丢失用户滚动位置。
+ */
+const lastScrollTopCache = new Map<string, number>()
+
+/** 注册/注销编辑器容器 DOM 引用（由 Editor.tsx 的 ref callback 调用） */
+export function setEditorContainerEl(el: HTMLElement | null) {
+  editorContainerEl = el
+}
+
+/** 由 Editor.tsx 的 scroll 监听器调用，持续更新指定 tab 的 scrollTop 缓存 */
+export function setLastScrollTop(tabId: string, scrollTop: number) {
+  lastScrollTopCache.set(tabId, scrollTop)
+}
+
+/** 读取指定 tab 的 scrollTop 缓存（不存在时返回 null） */
+export function getLastScrollTopForTab(tabId: string): number | null {
+  return lastScrollTopCache.get(tabId) ?? null
+}
+
+/** 清空 scrollTop 缓存（主要用于测试隔离） */
+export function clearLastScrollTopCache() {
+  lastScrollTopCache.clear()
+}
+
+/**
+ * 读取当前编辑器的 scrollTop。
+ * 通过 editorContainerEl 限定查询范围，避免命中页面其他 ScrollArea 组件。
+ * DOM 读不到时（容器为 null 或无 viewport）回退到 scroll 监听缓存，
+ * 保证应用退出等 DOM 不稳定场景下仍能取到最新滚动位置。
+ */
+export function readActiveEditorScrollTop(): number | null {
+  const el = editorContainerEl
+  let domTop: number | null = null
+  if (el) {
+    const viewport = findScrollContainer(el)
+    if (viewport) {
+      domTop = viewport.scrollTop
+    }
+  }
+  // DOM 读到非零值，直接返回
+  if (domTop != null && domTop > 0) return domTop
+  // DOM 不可用或读到 0，尝试缓存兜底
+  const activeId = useEditorStore.getState().activeTabId
+  if (activeId) {
+    const cached = getLastScrollTopForTab(activeId)
+    if (cached != null && cached > 0) return cached
+  }
+  return domTop
+}
+
+/**
+ * 在切换 activeTabId 前保存当前活动 tab 的 scrollTop。
+ * 任何改变 activeTabId 的 store action（addTab / openDiffTab / openConflictTab / setActiveTab）
+ * 都应在 set() 之前调用此函数，确保旧 tab 的滚动位置不丢失。
+ */
+function saveActiveTabScrollTopIfNeeded(get: () => EditorState) {
+  const prevActiveId = get().activeTabId
+  if (!prevActiveId) return
+  const top = readActiveEditorScrollTop()
+  if (top != null && top > 0) {
+    get().updateScrollTop(prevActiveId, top)
+  }
+}
 
 /** 注册插件 tab 运行时数据（icon、onChange 回调） */
 export function registerPluginTabRuntime(tabId: string, runtime: PluginTabRuntime) {
@@ -114,12 +192,14 @@ export interface EditorTab {
   pluginId?: string
   /** 插件 tab：工具栏显示配置（未设置的字段默认显示） */
   toolbarConfig?: EditorToolbarConfig
+  /** 编辑器垂直滚动位置（px），tab 切换/应用关闭时保存，内容渲染完成后恢复 */
+  scrollTop?: number
 }
 
 export interface EditorState {
   tabs: EditorTab[]
   activeTabId: string | null
-  /** Set of file paths currently being saved (to ignore file-watcher remove events during atomic writes) */
+  /** File paths being saved (ignore watcher remove events during atomic writes) */
   savingPaths: Set<string>
   addTab: (tab: EditorTab) => void
   openDiffTab: (filePath: string, commitHash: string, commitMessage: string) => Promise<void>
@@ -135,6 +215,7 @@ export interface EditorState {
   clearExternalChange: (id: string) => void
   updateTabPath: (oldPath: string, newPath: string, newName: string) => void
   updateCursorPosition: (id: string, line: number, column: number) => void
+  updateScrollTop: (id: string, scrollTop: number) => void
   updateConflictTabState: (id: string, selectedFile: string | undefined, cursorLine: number | undefined) => void
   toggleViewMode: () => void
   getActiveTab: () => EditorTab | undefined
@@ -191,6 +272,8 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
       }
       // 无可关闭 tab 时允许超过上限，避免数据丢失
     }
+    // 切换 activeTabId 前保存当前活动 tab 的 scrollTop
+    saveActiveTabScrollTopIfNeeded(get)
     set((state) => {
       const existing = state.tabs.find((t) => t.path === tab.path)
       if (existing) {
@@ -247,7 +330,9 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
     const diffTabId = `diff-${filePath}-${commitHash}`
     const shortHash = commitHash.slice(0, 7)
     const shortMessage = commitMessage.length > 20 ? `${commitMessage.slice(0, 20)}...` : commitMessage
-    
+
+    // 切换 activeTabId 前保存当前活动 tab 的 scrollTop
+    saveActiveTabScrollTopIfNeeded(get)
     set((state) => {
       const existing = state.tabs.find((t) => t.id === diffTabId)
       if (existing) {
@@ -275,7 +360,9 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
   },
   openConflictTab: (repoPath: string, repoName: string, options?: { autoSelectFile?: string; autoHideTree?: boolean }) => {
     const conflictTabId = `conflict-${repoPath}`
-    
+
+    // 切换 activeTabId 前保存当前活动 tab 的 scrollTop
+    saveActiveTabScrollTopIfNeeded(get)
     set((state) => {
       const existing = state.tabs.find((t) => t.id === conflictTabId)
       if (existing) {
@@ -358,6 +445,11 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
     autoCloseNoteProperties()
   },
   setActiveTab: (id) => {
+    // 切换前同步读取当前编辑器 DOM scrollTop 并保存到旧 tab
+    // （必须在 set 前读取：此时 DOM 还是旧 tab 的内容）
+    if (get().activeTabId && get().activeTabId !== id) {
+      saveActiveTabScrollTopIfNeeded(get)
+    }
     set((state) => {
       const prevActiveId = state.activeTabId
       if (prevActiveId === id) return state
@@ -416,7 +508,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         return await loadFileContent(tab.path)
       } catch (e) {
         if (currentRetry < maxRetries) {
-          console.warn(`Failed to load tab content, retrying (${currentRetry + 1}/${maxRetries}):`, tab.path)
+          logger.warn('editor-store', `Failed to load tab content, retrying (${currentRetry + 1}/${maxRetries}):`, tab.path)
           await new Promise(resolve => setTimeout(resolve, retryDelay))
           return tryLoadContent(currentRetry + 1)
         }
@@ -427,15 +519,19 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
     try {
       const rawContent = await tryLoadContent()
       const cursorPosition = tab.cursorPosition || { line: 1, column: 1 }
-      // Get actual file modification time from backend
-      let modifiedTime = new Date().toLocaleString()
+      // Get actual file modification time from backend.
+      // 失败时保留 tab 已有的 modifiedTime（不回退到当前时间），
+      // 否则用户会看到错误的"修改时间"。
+      let modifiedTime = tab.modifiedTime
       try {
         const { getFileMetadata } = await import('@/lib/tauri')
         const metadata = await getFileMetadata(tab.path)
         if (metadata?.modified_time) {
           modifiedTime = metadata.modified_time
         }
-      } catch { /* ignore */ }
+      } catch (e) {
+        logger.warn('editor-store', 'getFileMetadata failed, keeping previous modifiedTime', e)
+      }
 
       // .md 文件解析 frontmatter，存储正文为 content
       const isMarkdown = tab.path.toLowerCase().endsWith('.md')
@@ -475,7 +571,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         queueMicrotask(() => emitNoteChanged(loadedTab.id, loadedTab.path, loadedTab.content ?? ''))
       }
     } catch (e) {
-      console.error('Failed to load tab content after retries:', e)
+      logger.error('editor-store', 'Failed to load tab content after retries:', e)
       // 不关闭 tab，标记外部变更；content 置 '' 避免无限重试
       set((state) => ({
         tabs: state.tabs.map((t) =>
@@ -609,6 +705,12 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         t.id === id ? { ...t, cursorPosition: { line, column } } : t
       ),
     })),
+  updateScrollTop: (id, scrollTop) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === id ? { ...t, scrollTop } : t
+      ),
+    })),
   updateConflictTabState: (id, selectedFile, cursorLine) =>
     set((state) => ({
       tabs: state.tabs.map((t) =>
@@ -680,7 +782,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         const isMarkdown = tab.path.toLowerCase().endsWith('.md')
         // 防御：content===undefined 时跳过写入避免丢失正文
         if (tab.content === undefined && isMarkdown) {
-          console.warn(`[saveAllDirtyTabs] Skipping save for tab with undefined content: ${tab.path}`)
+          logger.warn('editor-store', `Skipping save for tab with undefined content: ${tab.path}`)
           continue
         }
 
@@ -710,7 +812,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
             await invoke('index_saved_file', { path: tab.path })
           } catch (e) {
             // 索引线程会异步补偿，但记录日志便于排查
-            console.error('Failed to index saved file:', tab.path, e)
+            logger.error('editor-store', 'Failed to index saved file:', tab.path, e)
           }
         }
         // CAS 保护：仅期间无新编辑才清脏标记
@@ -733,9 +835,11 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         // 若在 git 仓库则自动提交（异步非阻塞）
         try {
           await gitAutoCommit(tab.path)
-        } catch { /* ignore */ }
+        } catch (e) {
+          logger.warn('editor-store', 'gitAutoCommit failed for', tab.path, e)
+        }
       } catch (e) {
-        console.error('Failed to save tab:', tab.path, e)
+        logger.error('editor-store', 'Failed to save tab:', tab.path, e)
         window.dispatchEvent(new CustomEvent('save-error', { detail: { path: tab.path, error: e } }))
       } finally {
         // 延迟移除 savingPaths，等 file-watcher 平息
@@ -773,7 +877,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
           ),
         }))
       } catch (e) {
-        console.error('Failed to reset dirty tab:', tab.path, e)
+        logger.error('editor-store', 'Failed to reset dirty tab:', tab.path, e)
         set((state) => ({
           tabs: state.tabs.map((t) =>
             t.id === tab.id ? { ...t, isDirty: false, isEdited: false, frontmatterDirty: false } : t

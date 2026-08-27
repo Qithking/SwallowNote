@@ -18,6 +18,9 @@ tauri-plugin-shell = "2.0"
 tauri-plugin-dialog = "2.0"
 tauri-plugin-autostart = "2.0"
 tauri-plugin-single-instance = "2.0"
+tauri-plugin-os = "2.0"
+tauri-plugin-log = "2.0"
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -58,3 +61,6 @@ objc = "0.2.7"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = ["Win32_Graphics_Dwm", "Win32_Foundation", "Win32_Storage_FileSystem"] }
 winreg = "0.52"
+
+[dev-dependencies]
+tempfile = "3"

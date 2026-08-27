@@ -284,7 +284,7 @@ export function PluginPermissionDialog({
                 color: '#d97706',
               }}
             >
-              {t('plugin.permission.noPermissionWarning', { defaultValue: '未授权任何权限，插件可能无法正常工作' })}
+              {t('plugin.permission.noPermissionWarning')}
             </div>
           )}
           <div style={{ display: 'flex', gap: 8 }}>

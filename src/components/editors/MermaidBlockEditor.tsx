@@ -144,13 +144,13 @@ export function MermaidBlockEditor({ diagram, source, width, height, block, edit
             variant="outline"
             size="icon"
             className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover/mermaid:opacity-100 transition-opacity z-10"
-            title="展开图表"
+            title={t('editor.mermaid.expand')}
           >
             <Maximize2 className="h-3 w-3" />
           </Button>
         </DialogTrigger>
         <DialogContent className="max-w-4xl w-[90vw] h-[80vh] p-4 flex flex-col">
-          <DialogTitle className="sr-only">Mermaid 图表</DialogTitle>
+          <DialogTitle className="sr-only">{t('editor.mermaid.dialogTitle')}</DialogTitle>
           <div className="flex-1 overflow-auto flex items-center justify-center bg-white dark:bg-black/20 rounded p-4">
             <SafeSvgDiv
               svg={currentState.svg}

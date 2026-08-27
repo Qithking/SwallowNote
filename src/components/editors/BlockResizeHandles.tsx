@@ -5,6 +5,7 @@
  * 四个方向手柄（left / right / bottom / corner）统一样式和交互。
  */
 import { GripVertical, GripHorizontal } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { ResizeHandle } from '@/hooks/useBlockResize'
 
 interface BlockResizeHandlesProps {
@@ -15,6 +16,7 @@ interface BlockResizeHandlesProps {
 }
 
 export function BlockResizeHandles({ onStartResize, groupHoverClass }: BlockResizeHandlesProps) {
+  const { t } = useTranslation()
   const base = `opacity-0 ${groupHoverClass}:opacity-100 transition-opacity`
 
   return (
@@ -24,7 +26,7 @@ export function BlockResizeHandles({ onStartResize, groupHoverClass }: BlockResi
         className={`absolute left-0 top-0 h-full w-2 cursor-ew-resize ${base} bg-primary/20 hover:bg-primary/40 flex items-center justify-center`}
         onMouseDown={(e) => onStartResize('left', e)}
         onTouchStart={(e) => onStartResize('left', e)}
-        title="拖拽调整宽度"
+        title={t('editor.blockResize.resizeWidth')}
       >
         <GripVertical className="w-3 h-3 text-primary/60 rotate-90" />
       </div>
@@ -33,7 +35,7 @@ export function BlockResizeHandles({ onStartResize, groupHoverClass }: BlockResi
         className={`absolute right-0 top-0 h-full w-2 cursor-ew-resize ${base} bg-primary/20 hover:bg-primary/40 flex items-center justify-center`}
         onMouseDown={(e) => onStartResize('right', e)}
         onTouchStart={(e) => onStartResize('right', e)}
-        title="拖拽调整宽度"
+        title={t('editor.blockResize.resizeWidth')}
       >
         <GripVertical className="w-3 h-3 text-primary/60 rotate-90" />
       </div>
@@ -42,7 +44,7 @@ export function BlockResizeHandles({ onStartResize, groupHoverClass }: BlockResi
         className={`absolute bottom-0 left-0 w-full h-2 cursor-ns-resize ${base} bg-primary/20 hover:bg-primary/40 flex items-center justify-center`}
         onMouseDown={(e) => onStartResize('bottom', e)}
         onTouchStart={(e) => onStartResize('bottom', e)}
-        title="拖拽调整高度"
+        title={t('editor.blockResize.resizeHeight')}
       >
         <GripHorizontal className="w-3 h-3 text-primary/60" />
       </div>
@@ -51,7 +53,7 @@ export function BlockResizeHandles({ onStartResize, groupHoverClass }: BlockResi
         className={`absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize ${base} bg-primary/30 hover:bg-primary/50 rounded-tl-sm flex items-center justify-center`}
         onMouseDown={(e) => onStartResize('corner', e)}
         onTouchStart={(e) => onStartResize('corner', e)}
-        title="拖拽调整宽高"
+        title={t('editor.blockResize.resizeBoth')}
       >
         <svg className="w-2.5 h-2.5 text-primary/60" viewBox="0 0 10 10" fill="currentColor">
           <circle cx="8" cy="8" r="1.2" />

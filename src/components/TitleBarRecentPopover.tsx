@@ -10,14 +10,25 @@ import {
 import { useUIStore, useWorkspaceStore, useCloneStore } from '@/stores'
 import { getFolderHistory, openFolderDialog, pathExists, clearOtherFolderHistory, removeFolderHistory } from '@/lib/tauri'
 import { useState, useEffect, useRef } from 'react'
+import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
+import { logger } from '@/lib/logger'
 
 interface RecentItem {
   path: string
   name: string
   isWorkspace: boolean
 }
+
+// ── Static inline styles extracted to module level (P-L1) ──
+// Avoids creating new object literals on every render.
+const styleTextPrimary: CSSProperties = { color: 'var(--text-primary)' }
+const styleTextMuted: CSSProperties = { color: 'var(--text-muted)' }
+const styleTextSecondary: CSSProperties = { color: 'var(--text-secondary)' }
+const styleOverlay: CSSProperties = { background: 'rgba(0,0,0,0.4)' }
+const styleDialogPanel: CSSProperties = { background: 'var(--bg-secondary)', border: '1px solid var(--border)' }
+const styleInput: CSSProperties = { background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }
 
 function getInitialAndColor(path: string): { initial: string; color: string } {
   const name = path.split(/[\\/]/).pop() || path
@@ -32,8 +43,12 @@ function getInitialAndColor(path: string): { initial: string; color: string } {
 }
 
 export function TitleBarRecentPopover() {
-  const { workspaceMode } = useUIStore()
-  const { rootPath, currentWorkspacePath, openFolder, loadWorkspaceFile, switchMode } = useWorkspaceStore()
+  const workspaceMode = useUIStore((s) => s.workspaceMode)
+  const rootPath = useWorkspaceStore((s) => s.rootPath)
+  const currentWorkspacePath = useWorkspaceStore((s) => s.currentWorkspacePath)
+  const openFolder = useWorkspaceStore((s) => s.openFolder)
+  const loadWorkspaceFile = useWorkspaceStore((s) => s.loadWorkspaceFile)
+  const switchMode = useWorkspaceStore((s) => s.switchMode)
   const { t } = useTranslation()
   const { isCloning, cloneProgress, cloneError, clonePercent, startClone, cancelClone } = useCloneStore()
   const [recentItems, setRecentItems] = useState<RecentItem[]>([])
@@ -80,7 +95,7 @@ export function TitleBarRecentPopover() {
       }))
       setRecentItems(items)
     } catch (e) {
-      console.error('Failed to load history:', e)
+      logger.error('title-bar', 'Failed to load history:', e)
     }
   }
 
@@ -142,7 +157,7 @@ export function TitleBarRecentPopover() {
       await loadHistory()
       setShowClearConfirm(false)
     } catch (e) {
-      console.error('Failed to clear history:', e)
+      logger.error('title-bar', 'Failed to clear history:', e)
     }
   }
 
@@ -218,7 +233,7 @@ export function TitleBarRecentPopover() {
       await removeFolderHistory(path)
       await loadHistory()
     } catch (e) {
-      console.error('Failed to delete item:', e)
+      logger.error('title-bar', 'Failed to delete item:', e)
     }
   }
 
@@ -242,13 +257,13 @@ export function TitleBarRecentPopover() {
       {isOpen && (
         <div
           className="absolute top-full left-0 mt-1 w-72 rounded-lg shadow-lg z-50 overflow-hidden"
-          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
+          style={styleDialogPanel}
         >
           <div className="py-1">
             <button
               onClick={handleOpenFolder}
               className="w-full flex items-center gap-2 px-3 py-1 text-sm cursor-pointer hover:bg-[var(--bg-hover)]"
-              style={{ color: 'var(--text-primary)' }}
+              style={styleTextPrimary}
             >
               <FolderOpen size={14} />
               <span>{t('recent.openFolder')}</span>
@@ -256,7 +271,7 @@ export function TitleBarRecentPopover() {
             <button
               onClick={handleOpenCloneDialog}
               className="w-full flex items-center gap-2 px-3 py-1 text-sm cursor-pointer hover:bg-[var(--bg-hover)]"
-              style={{ color: 'var(--text-primary)' }}
+              style={styleTextPrimary}
             >
               <GitBranch size={14} />
               <span>{t('recent.cloneGitRepo')}</span>
@@ -264,7 +279,7 @@ export function TitleBarRecentPopover() {
             <button
               onClick={() => setShowClearConfirm(true)}
               className="w-full flex items-center gap-2 px-3 py-1 text-sm cursor-pointer hover:bg-[var(--bg-hover)]"
-              style={{ color: 'var(--text-primary)' }}
+              style={styleTextPrimary}
             >
               <AlertCircle size={14} />
               <span>{t('recent.clearHistory')}</span>
@@ -274,11 +289,11 @@ export function TitleBarRecentPopover() {
           <Separator />
 
           <div className="py-1 max-h-64 overflow-y-auto">
-            <div className="px-3 py-1.5 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+            <div className="px-3 py-1.5 text-xs font-medium" style={styleTextMuted}>
               {t('recent.recent')}
             </div>
             {recentItems.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+              <div className="px-3 py-4 text-xs text-center" style={styleTextMuted}>
                 {t('recent.noHistory')}
               </div>
             ) : (
@@ -298,10 +313,10 @@ export function TitleBarRecentPopover() {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <div className="flex-1 min-w-0 text-left">
-                          <div className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+                          <div className="text-sm truncate" style={styleTextPrimary}>
                             {displayName}
                           </div>
-                          <div className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
+                          <div className="text-xs truncate" style={styleTextMuted}>
                             {item.path}
                           </div>
                         </div>
@@ -319,7 +334,7 @@ export function TitleBarRecentPopover() {
                             className="shrink-0 mt-0.5 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)]"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <MoreHorizontal size={14} style={{ color: 'var(--text-muted)' }} />
+                            <MoreHorizontal size={14} style={styleTextMuted} />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-32">
@@ -340,17 +355,17 @@ export function TitleBarRecentPopover() {
           </div>
 
           {showClearConfirm && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
-              <div className="w-64 rounded-lg p-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-                <div className="text-sm font-medium mb-2" style={{ color: 'var(--text-primary)' }}>{t('dialog.confirmClearHistoryTitle')}</div>
-                <div className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
+            <div className="absolute inset-0 z-50 flex items-center justify-center" style={styleOverlay}>
+              <div className="w-64 rounded-lg p-4" style={styleDialogPanel}>
+                <div className="text-sm font-medium mb-2" style={styleTextPrimary}>{t('dialog.confirmClearHistoryTitle')}</div>
+                <div className="text-xs mb-4" style={styleTextSecondary}>
                   {t('dialog.confirmClearHistory')}
                 </div>
                 <div className="flex gap-2 justify-end">
                   <button
                     onClick={() => setShowClearConfirm(false)}
                     className="px-3 py-1.5 text-xs rounded cursor-pointer hover:bg-[var(--bg-hover)]"
-                    style={{ color: 'var(--text-primary)' }}
+                    style={styleTextPrimary}
                   >
                     {t('common.cancel')}
                   </button>
@@ -368,14 +383,14 @@ export function TitleBarRecentPopover() {
       )}
 
       {showCloneDialog && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}>
-          <div className="w-[480px] rounded-lg p-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center" style={styleOverlay}>
+          <div className="w-[480px] rounded-lg p-4" style={styleDialogPanel}>
             <div className="flex items-center justify-between mb-3">
-              <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{t('recent.cloneGitRepo')}</div>
+              <div className="text-sm font-medium" style={styleTextPrimary}>{t('recent.cloneGitRepo')}</div>
               <button
                 onClick={handleCloseCloneDialog}
                 className="p-1 rounded cursor-pointer hover:bg-[var(--bg-hover)]"
-                style={{ color: 'var(--text-muted)' }}
+                style={styleTextMuted}
                 title={t('common.close')}
               >
                 <X size={14} />
@@ -383,19 +398,19 @@ export function TitleBarRecentPopover() {
             </div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('recent.repoUrl')}</label>
+                <label className="text-xs mb-1 block" style={styleTextSecondary}>{t('recent.repoUrl')}</label>
                 <input
                   type="text"
                   value={cloneUrl}
                   onChange={(e) => setCloneUrl(e.target.value)}
                   placeholder="https://github.com/user/repo.git"
                   className="w-full px-2 py-1.5 text-xs rounded"
-                  style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                  style={styleInput}
                   disabled={isCloning}
                 />
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('recent.localPath')}</label>
+                <label className="text-xs mb-1 block" style={styleTextSecondary}>{t('recent.localPath')}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -403,7 +418,7 @@ export function TitleBarRecentPopover() {
                     onChange={(e) => setCloneLocalPath(e.target.value)}
                     placeholder="/path/to/local"
                     className="flex-1 px-2 py-1.5 text-xs rounded"
-                    style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                    style={styleInput}
                     disabled={isCloning}
                   />
                   <button
@@ -433,19 +448,19 @@ export function TitleBarRecentPopover() {
               {isPrivateRepo && (
                 <div className="space-y-2 p-2 rounded" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}>
                   <div>
-                    <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('recent.username')}</label>
+                    <label className="text-xs mb-1 block" style={styleTextSecondary}>{t('recent.username')}</label>
                     <input
                       type="text"
                       value={cloneUsername}
                       onChange={(e) => setCloneUsername(e.target.value)}
                       placeholder={t('recent.usernamePlaceholder')}
                       className="w-full px-2 py-1.5 text-xs rounded"
-                      style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                      style={styleInput}
                       disabled={isCloning}
                     />
                   </div>
                   <div>
-                    <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>{t('recent.passwordOrToken')}</label>
+                    <label className="text-xs mb-1 block" style={styleTextSecondary}>{t('recent.passwordOrToken')}</label>
                     <div className="relative">
                       <input
                         type={showClonePassword ? 'text' : 'password'}
@@ -453,14 +468,14 @@ export function TitleBarRecentPopover() {
                         onChange={(e) => setClonePassword(e.target.value)}
                         placeholder={t('recent.passwordPlaceholder')}
                         className="w-full px-2 py-1.5 text-xs rounded pr-7"
-                        style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border-color)' }}
+                        style={styleInput}
                         disabled={isCloning}
                       />
                       <button
                         type="button"
                         onClick={() => setShowClonePassword(!showClonePassword)}
                         className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 cursor-pointer hover:bg-[var(--bg-hover)] rounded"
-                        style={{ color: 'var(--text-muted)' }}
+                        style={styleTextMuted}
                         tabIndex={-1}
                       >
                         {showClonePassword ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -491,7 +506,7 @@ export function TitleBarRecentPopover() {
               <button
                 onClick={handleCancelClone}
                 className="px-3 py-1.5 text-xs rounded cursor-pointer hover:bg-[var(--bg-hover)]"
-                style={{ color: 'var(--text-primary)' }}
+                style={styleTextPrimary}
               >
                 {t('common.cancel')}
               </button>

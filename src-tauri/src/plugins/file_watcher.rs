@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow};
+use log::error;
 
 struct FileWatcherStateInner {
     watcher: Option<notify_debouncer_mini::Debouncer<RecommendedWatcher>>,
@@ -71,7 +72,7 @@ pub fn start_watching<R: Runtime>(
                     }
                 }
                 Err(e) => {
-                    eprintln!("File watcher error: {:?}", e);
+                    error!("File watcher error: {:?}", e);
                 }
             }
         },

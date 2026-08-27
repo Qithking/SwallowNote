@@ -19,6 +19,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
 import { usePluginStorage, usePluginEvent } from '@/lib/plugin-hooks'
+import { useTranslation } from 'react-i18next'
+import { logger } from '../logger'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -57,6 +59,7 @@ function readingMinutes(words: number): number {
 
 function WordCounterPanel(panel: PluginPanelProps): ReactNode {
   const { close, pluginId } = panel
+  const { t } = useTranslation()
   // The latest note content. Hydrated from the first note:change
   // event, then kept in sync by `usePluginEvent`.
   const [content, setContent] = useState<string>('')
@@ -93,7 +96,7 @@ function WordCounterPanel(panel: PluginPanelProps): ReactNode {
   return (
     <div className="p-3 text-xs space-y-2">
       <div className="flex items-center justify-between">
-        <span className="font-semibold">Word Counter</span>
+        <span className="font-semibold">{t('pluginCore.wordCounter.title')}</span>
         <button
           type="button"
           onClick={close}
@@ -103,15 +106,15 @@ function WordCounterPanel(panel: PluginPanelProps): ReactNode {
         </button>
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-        <span className="text-muted-foreground">Words</span>
+        <span className="text-muted-foreground">{t('pluginCore.wordCounter.words')}</span>
         <span className={overThreshold ? 'font-bold text-amber-600' : 'font-mono'}>
           {stats.words.toLocaleString()}
         </span>
-        <span className="text-muted-foreground">Characters</span>
+        <span className="text-muted-foreground">{t('pluginCore.wordCounter.characters')}</span>
         <span className="font-mono">{stats.chars.toLocaleString()}</span>
-        <span className="text-muted-foreground">Lines</span>
+        <span className="text-muted-foreground">{t('pluginCore.wordCounter.lines')}</span>
         <span className="font-mono">{stats.lines.toLocaleString()}</span>
-        <span className="text-muted-foreground">Reading time</span>
+        <span className="text-muted-foreground">{t('pluginCore.wordCounter.readingTime')}</span>
         <span className="font-mono">~{stats.minutes} min</span>
       </div>
       <div className="pt-1 border-t text-muted-foreground truncate" title={lastPath ?? ''}>
@@ -165,17 +168,19 @@ function WordCounterIcon({ size = 18 }: { size?: number }): ReactNode {
  * counter refreshes even if the user hasn't typed anything.
  */
 function WordCounterToolbarButton(panel: PluginPanelProps): ReactNode {
+  const { t } = useTranslation()
   return (
     <button
       type="button"
-      title="Refresh word count"
+      title={t('pluginCore.wordCounter.refresh')}
       className="p-1.5 rounded hover:bg-muted"
       onClick={() => {
         // In a real plugin we'd read the active editor's content
         // through the host API; for the sample we just log so the
         // user can confirm the toolbar mount point works.
-        console.debug(
-          `[word-counter] toolbar refresh (pluginId=${panel.pluginId})`,
+        logger.debug(
+          'plugin:word-counter',
+          `toolbar refresh (pluginId=${panel.pluginId})`,
         )
       }}
     >
@@ -188,6 +193,7 @@ function WordCounterToolbarButton(panel: PluginPanelProps): ReactNode {
 
 function WordCounterSettings(panel: PluginPanelProps): ReactNode {
   const { close, pluginId } = panel
+  const { t } = useTranslation()
   const [warnAt, setWarnAt] = usePluginStorage<number>(panel, 'warnAtWords', 1500)
   // Local draft so the input is responsive even when the storage
   // hook is still hydrating.
@@ -211,7 +217,7 @@ function WordCounterSettings(panel: PluginPanelProps): ReactNode {
   return (
     <div className="p-4 text-sm space-y-4">
       <div>
-        <div className="text-xs text-muted-foreground">Plugin ID</div>
+        <div className="text-xs text-muted-foreground">{t('pluginCore.common.pluginId')}</div>
         <code className="text-xs">{pluginId}</code>
       </div>
       <div>

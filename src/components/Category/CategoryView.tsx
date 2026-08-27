@@ -25,6 +25,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/components/ui/alert-dialog'
+import { logger } from '@/lib/logger'
 
 export function CategoryView() {
   const { t } = useTranslation()
@@ -85,7 +86,7 @@ export function CategoryView() {
         viewMode: 'preview',
       })
     } catch (e) {
-      console.error('Failed to open file:', e)
+      logger.error('category', 'Failed to open file:', e)
     }
   }, [addTab])
 
@@ -114,7 +115,7 @@ export function CategoryView() {
         useEditorStore.getState().renameCategoryInTabs(editingPath, newPath)
         await useCategoryStore.getState().loadTree()
       } catch (e) {
-        console.error('Failed to rename category:', editingPath, '->', newPath, e)
+        logger.error('category', 'Failed to rename category:', editingPath, '->', newPath, e)
       }
     }
     setEditingPath(null)
@@ -142,7 +143,7 @@ export function CategoryView() {
       await useEditorStore.getState().saveAllDirtyTabs()
       await useCategoryStore.getState().loadTree()
     } catch (e) {
-      console.error('Failed to delete category:', path, e)
+      logger.error('category', 'Failed to delete category:', path, e)
     }
   }, [deleteTarget])
 
@@ -168,13 +169,13 @@ export function CategoryView() {
     try {
       await invoke('create_category', { path: fullPath })
     } catch (e) {
-      console.error('Failed to create category:', fullPath, e)
-      toast.error(`创建分类失败: ${fullPath}`)
+      logger.error('category', 'Failed to create category:', fullPath, e)
+      toast.error(t('category.createFailed', { path: fullPath }))
     }
 
     await useCategoryStore.getState().loadTree()
     setNewItem(null)
-  }, [newItem])
+  }, [newItem, t])
 
   const handleCancelNew = useCallback(() => {
     setNewItem(null)

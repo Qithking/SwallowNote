@@ -1,6 +1,7 @@
 /** 插件健康监控 */
 
 import { usePluginStore } from '@/stores'
+import { logger } from './logger'
 
 // 崩溃阈值，超过自动禁用
 const CRASH_THRESHOLD = 3
@@ -41,11 +42,11 @@ export function recordPluginCrash(pluginId: string, _error: Error): void {
   record.lastCrashAt = now
   crashRecords.set(pluginId, record)
 
-  console.warn(`[plugin-health] Plugin "${pluginId}" crashed (${record.count}/${CRASH_THRESHOLD})`)
+  logger.warn('plugin-health', `Plugin "${pluginId}" crashed (${record.count}/${CRASH_THRESHOLD})`)
 
   // Auto-disable if threshold reached
   if (record.count >= CRASH_THRESHOLD) {
-    console.error(`[plugin-health] Plugin "${pluginId}" exceeded crash threshold (${CRASH_THRESHOLD}), auto-disabling`)
+    logger.error('plugin-health', `Plugin "${pluginId}" exceeded crash threshold (${CRASH_THRESHOLD}), auto-disabling`)
     disablePlugin(pluginId)
   }
 }
@@ -77,7 +78,7 @@ function disablePlugin(pluginId: string): void {
     const pluginStore = usePluginStore.getState()
     pluginStore.setPluginEnabled(pluginId, false)
   } catch (err) {
-    console.error(`[plugin-health] Failed to disable plugin "${pluginId}" in store:`, err)
+    logger.error('plugin-health', `Failed to disable plugin "${pluginId}" in store:`, err)
   }
   // Persist the disabled state to disk so it survives a restart.
   // Dynamic import avoids a circular dep at module-evaluation time
@@ -85,7 +86,7 @@ function disablePlugin(pluginId: string): void {
   void import('@/lib/tauri').then(({ togglePluginEnabled }) => {
     void togglePluginEnabled(pluginId, false)
   }).catch((err) => {
-    console.error(`[plugin-health] Failed to persist disable for plugin "${pluginId}":`, err)
+    logger.error('plugin-health', `Failed to persist disable for plugin "${pluginId}":`, err)
   })
 }
 

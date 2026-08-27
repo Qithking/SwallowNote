@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { pluginSidebarView, pluginRightPanelType, isFullPanelPluginActive, renderPluginIcon, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
 import type { PluginDefinition } from '@/types/plugin'
 import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
-import { preloadPluginManager } from '@/App'
+import { preloadPluginManager } from '@/components/PluginManagerLoading'
 
 const activityItems: { id: SidebarView; icon: typeof FolderTree }[] = [
   { id: 'explorer', icon: FolderTree },

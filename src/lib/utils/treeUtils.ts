@@ -12,7 +12,13 @@ export function updateNodesWithChildren(list: FileNode[], path: string, children
     if (n.path === path) {
       // Skip creating a new object if children reference is already the same
       if (n.children === children && !n.isLoading) return n
-      return { ...n, children, isLoading: false }
+      // 保留旧 children 的 isExpanded 状态，避免刷新后已展开目录被关闭
+      const oldChildrenMap = new Map((n.children || []).map(c => [c.path, c]))
+      const mergedChildren = children.map(c => {
+        const old = oldChildrenMap.get(c.path)
+        return old?.isExpanded ? { ...c, isExpanded: true } : c
+      })
+      return { ...n, children: mergedChildren, isLoading: false }
     }
     if (n.children) {
       const updatedChildren = updateNodesWithChildren(n.children, path, children)

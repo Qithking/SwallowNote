@@ -1,5 +1,6 @@
 /** 插件权限执行：事件/存储/IPC 沙箱 */
 import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
+import { logger } from './logger'
 
 /** assertPermission 抛出 */
 export class PluginPermissionDeniedError extends Error {
@@ -50,17 +51,19 @@ function eagerHydrateFromLocalStorage(): void {
       const parsed = JSON.parse(raw) as unknown
       // 防御：跳过非数组项
       if (!Array.isArray(parsed)) {
-        console.warn(
-          `[plugin-permission-guard] ignoring non-array permission entry for ${pluginId}`,
+        logger.warn(
+          'plugin-permission',
+          `ignoring non-array permission entry for ${pluginId}`,
         )
         continue
       }
       status = parsed
     } catch {
       // 损坏项跳过，下次保存覆盖
-      console.warn(
-        `[plugin-permission-guard] ignoring corrupt permission entry for ${pluginId}`,
-      )
+      logger.warn(
+          'plugin-permission',
+          `ignoring corrupt permission entry for ${pluginId}`,
+        )
       continue
     }
     const granted = status.filter((s) => s.granted).map((s) => s.permission)
