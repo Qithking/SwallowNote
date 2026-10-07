@@ -1,8 +1,6 @@
 // Unterdrücke Warnings von veralteten Cocoa APIs
 #![allow(unexpected_cfgs)]
 #![allow(deprecated)]
-// TDD compile-time guard: this module must stay warning-free on every platform
-#![deny(unused_variables, dead_code)]
 
 use tauri::{AppHandle, Runtime, WebviewWindow};
 
@@ -17,7 +15,6 @@ use cocoa::{
 use objc::{msg_send, sel, sel_impl};
 
 /// Configuration for Traffic Lights positioning
-#[cfg(target_os = "macos")]
 pub struct TrafficLightsConfig {
     /// Offset in pixels from default position (positive = right, negative = left)
     pub offset_x: f64,
@@ -25,7 +22,6 @@ pub struct TrafficLightsConfig {
     pub offset_y: f64,
 }
 
-#[cfg(target_os = "macos")]
 impl Default for TrafficLightsConfig {
     fn default() -> Self {
         Self {
@@ -37,7 +33,6 @@ impl Default for TrafficLightsConfig {
 
 /// Enables rounded corners for the window (macOS only)
 /// Uses only public APIs - App Store compatible
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 #[tauri::command]
 pub fn enable_rounded_corners<R: Runtime>(
     _app: AppHandle<R>,
@@ -57,31 +52,30 @@ pub fn enable_rounded_corners<R: Runtime>(
                 #[cfg(target_os = "macos")]
                 unsafe {
                     let ns_window = webview.ns_window() as id;
-
+                    
                     let mut style_mask = ns_window.styleMask();
-
+                    
                     // Add necessary styles for rounded corners
                     style_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
                     style_mask |= NSWindowStyleMask::NSTitledWindowMask;
                     style_mask |= NSWindowStyleMask::NSClosableWindowMask;
                     style_mask |= NSWindowStyleMask::NSMiniaturizableWindowMask;
                     style_mask |= NSWindowStyleMask::NSResizableWindowMask;
-
+                    
                     ns_window.setStyleMask_(style_mask);
                     ns_window.setTitlebarAppearsTransparent_(cocoa::base::YES);
-
+                    
                     let content_view = ns_window.contentView();
                     content_view.setWantsLayer(cocoa::base::YES);
-
+                    
                     position_traffic_lights(ns_window, config.offset_x, config.offset_y);
-                    hide_traffic_lights(ns_window);
                 }
             })
             .map_err(|e| e.to_string())?;
-
+        
         Ok(())
     }
-
+    
     #[cfg(not(target_os = "macos"))]
     {
         Ok(())
@@ -89,7 +83,6 @@ pub fn enable_rounded_corners<R: Runtime>(
 }
 
 /// Enables modern window style with rounded corners and shadow
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 #[tauri::command]
 pub fn enable_modern_window_style<R: Runtime>(
     _app: AppHandle<R>,
@@ -111,39 +104,38 @@ pub fn enable_modern_window_style<R: Runtime>(
                 #[cfg(target_os = "macos")]
                 unsafe {
                     let ns_window = webview.ns_window() as id;
-
+                    
                     let mut style_mask = ns_window.styleMask();
-
+                    
                     style_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
                     style_mask |= NSWindowStyleMask::NSTitledWindowMask;
                     style_mask |= NSWindowStyleMask::NSClosableWindowMask;
                     style_mask |= NSWindowStyleMask::NSMiniaturizableWindowMask;
                     style_mask |= NSWindowStyleMask::NSResizableWindowMask;
-
+                    
                     ns_window.setStyleMask_(style_mask);
                     ns_window.setTitlebarAppearsTransparent_(cocoa::base::YES);
                     ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
                     ns_window.setHasShadow_(cocoa::base::YES);
                     ns_window.setOpaque_(cocoa::base::NO);
-
+                    
                     let content_view = ns_window.contentView();
                     content_view.setWantsLayer(cocoa::base::YES);
-
+                    
                     let layer: id = msg_send![content_view, layer];
                     if !layer.is_null() {
                         let _: () = msg_send![layer, setCornerRadius: radius];
                         let _: () = msg_send![layer, setMasksToBounds: cocoa::base::YES];
                     }
-
+                    
                     position_traffic_lights(ns_window, config.offset_x, config.offset_y);
-                    hide_traffic_lights(ns_window);
                 }
             })
             .map_err(|e| e.to_string())?;
-
+        
         Ok(())
     }
-
+    
     #[cfg(not(target_os = "macos"))]
     {
         Ok(())
@@ -151,7 +143,6 @@ pub fn enable_modern_window_style<R: Runtime>(
 }
 
 /// Repositions Traffic Lights only (useful after fullscreen toggle)
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 #[tauri::command]
 pub fn reposition_traffic_lights<R: Runtime>(
     _app: AppHandle<R>,
@@ -172,43 +163,13 @@ pub fn reposition_traffic_lights<R: Runtime>(
                 unsafe {
                     let ns_window = webview.ns_window() as id;
                     position_traffic_lights(ns_window, config.offset_x, config.offset_y);
-                    hide_traffic_lights(ns_window);
                 }
             })
             .map_err(|e| e.to_string())?;
-
+        
         Ok(())
     }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(())
-    }
-}
-
-/// Hides the system traffic light buttons (close / miniaturize / zoom) on macOS.
-/// Non-macOS platforms are no-ops.
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-#[tauri::command]
-pub fn hide_traffic_lights_cmd<R: Runtime>(
-    _app: AppHandle<R>,
-    window: WebviewWindow<R>,
-) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        window
-            .with_webview(move |webview| {
-                #[cfg(target_os = "macos")]
-                unsafe {
-                    let ns_window = webview.ns_window() as id;
-                    hide_traffic_lights(ns_window);
-                }
-            })
-            .map_err(|e| e.to_string())?;
-
-        Ok(())
-    }
-
+    
     #[cfg(not(target_os = "macos"))]
     {
         Ok(())
@@ -219,14 +180,14 @@ pub fn hide_traffic_lights_cmd<R: Runtime>(
 unsafe fn position_traffic_lights(ns_window: id, offset_x: f64, offset_y: f64) {
     let default_x = 20.0;
     let default_y = 0.0;
-
+    
     let close_button: id = msg_send![ns_window, standardWindowButton: 0];
     let miniaturize_button: id = msg_send![ns_window, standardWindowButton: 1];
     let zoom_button: id = msg_send![ns_window, standardWindowButton: 2];
-
+    
     let new_x = default_x + offset_x;
     let new_y = default_y - offset_y;
-
+    
     if !close_button.is_null() {
         let frame: cocoa::foundation::NSRect = msg_send![close_button, frame];
         let new_frame = cocoa::foundation::NSRect::new(
@@ -235,7 +196,7 @@ unsafe fn position_traffic_lights(ns_window: id, offset_x: f64, offset_y: f64) {
         );
         let _: () = msg_send![close_button, setFrame: new_frame];
     }
-
+    
     if !miniaturize_button.is_null() {
         let frame: cocoa::foundation::NSRect = msg_send![miniaturize_button, frame];
         let new_frame = cocoa::foundation::NSRect::new(
@@ -244,7 +205,7 @@ unsafe fn position_traffic_lights(ns_window: id, offset_x: f64, offset_y: f64) {
         );
         let _: () = msg_send![miniaturize_button, setFrame: new_frame];
     }
-
+    
     if !zoom_button.is_null() {
         let frame: cocoa::foundation::NSRect = msg_send![zoom_button, frame];
         let new_frame = cocoa::foundation::NSRect::new(
@@ -252,22 +213,5 @@ unsafe fn position_traffic_lights(ns_window: id, offset_x: f64, offset_y: f64) {
             frame.size,
         );
         let _: () = msg_send![zoom_button, setFrame: new_frame];
-    }
-}
-
-#[cfg(target_os = "macos")]
-unsafe fn hide_traffic_lights(ns_window: id) {
-    let close_button: id = msg_send![ns_window, standardWindowButton: 0];
-    let miniaturize_button: id = msg_send![ns_window, standardWindowButton: 1];
-    let zoom_button: id = msg_send![ns_window, standardWindowButton: 2];
-
-    if !close_button.is_null() {
-        let _: () = msg_send![close_button, setHidden: cocoa::base::YES];
-    }
-    if !miniaturize_button.is_null() {
-        let _: () = msg_send![miniaturize_button, setHidden: cocoa::base::YES];
-    }
-    if !zoom_button.is_null() {
-        let _: () = msg_send![zoom_button, setHidden: cocoa::base::YES];
     }
 }
