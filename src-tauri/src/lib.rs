@@ -9,7 +9,7 @@ mod services;
 use plugins::mac_rounded_corners;
 use tauri::{
     image::Image,
-    menu::{MenuBuilder, MenuItemBuilder},
+    menu::{ContextMenu, MenuBuilder, MenuItemBuilder},
     path::BaseDirectory,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
@@ -401,11 +401,14 @@ commands::upgrade::download_latest_release,
                     .unwrap_or_else(default_tray_icon)
             };
 
+            // macOS 上 NSStatusItem.setMenu 会导致左键点击自动弹出菜单，
+            // show_menu_on_left_click(false) 无法阻止该系统级行为。
+            // 因此不在此处绑定 menu，改为右键点击时用 popup 弹出上下文菜单。
+            // 左键点击直接显示主窗口。
+            let menu_for_right_click = menu.clone();
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .tooltip("SwallowNote")
-                .menu(&menu)
-                .show_menu_on_left_click(false)
                 .on_menu_event(move |app: &AppHandle, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -430,19 +433,31 @@ commands::upgrade::download_latest_release,
                     }
                     _ => {}
                 })
-                .on_tray_icon_event(|tray, event| {
+                .on_tray_icon_event(move |tray, event| {
                     if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
+                        button,
                         button_state: MouseButtonState::Up,
                         ..
                     } = event
                     {
                         let app: &AppHandle = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                        match button {
+                            MouseButton::Left => {
+                                // 左键单击：直接显示主窗口
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                                show_dock_icon();
+                            }
+                            MouseButton::Right => {
+                                // 右键单击：弹出上下文菜单
+                                if let Some(wv) = app.get_webview_window("main") {
+                                    let _ = menu_for_right_click.popup(wv.as_ref().window());
+                                }
+                            }
+                            _ => {}
                         }
-                        show_dock_icon();
                     }
                 })
                 .build(app)?;

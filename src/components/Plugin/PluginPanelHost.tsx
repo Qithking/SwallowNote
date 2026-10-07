@@ -27,12 +27,14 @@
  *  - Wrapped in PluginErrorBoundary to catch render errors
  *  - Connected to health monitor for crash tracking and auto-disable
  */
-import { Suspense, useEffect, useRef, type ReactNode } from 'react'
-import type { PluginDefinition, PluginPanelProps } from '@/types/plugin'
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
+import type { PluginDefinition, PluginPanelProps, PluginPermissionStatus } from '@/types/plugin'
 import { buildPluginContext } from '@/lib/plugin-host'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
 import { PluginErrorBoundary } from './PluginErrorBoundary'
 import { recordPluginCrash, resetPluginCrashCount } from '@/lib/plugin-health'
+import { getPluginPermissions } from '@/lib/plugin-permissions'
+import { PluginPermissionDialog } from './PluginPermissionDialog'
 
 export interface PluginPanelHostProps {
   plugin: PluginDefinition
@@ -98,29 +100,79 @@ export function PluginPanelHost({
     resetPluginCrashCount(pluginId)
   }
 
+  // ── Permission dialog state ───────────────────────────────
+  // When the error boundary catches a PluginPermissionDeniedError,
+  // the user can click "Authorize" to open the permission dialog
+  // without leaving the panel. After granting, the boundary's
+  // resetKey bump triggers a remount so the plugin retries with
+  // the new permissions.
+  const [showPermDialog, setShowPermDialog] = useState(false)
+  const [permStatus, setPermStatus] = useState<PluginPermissionStatus[]>([])
+  const [permNonce, setPermNonce] = useState(0)
+
+  const handleRequestPermission = (_pluginId: string) => {
+    void getPluginPermissions(plugin.id).then((s) => {
+      setPermStatus(s)
+      setShowPermDialog(true)
+    })
+  }
+
+  const handlePermDialogClose = () => {
+    setShowPermDialog(false)
+    // Bump resetKey so the error boundary resets and the panel
+    // remounts with the freshly granted permissions.
+    setPermNonce((n) => n + 1)
+  }
+
+  const errorBoundaryResetKey = `${plugin.id}-${permNonce}`
+
   if (typeof panel === 'function') {
     const PanelComp = panel as unknown as React.ComponentType<typeof panelProps>
     return (
-      <PluginErrorBoundary
-        pluginId={plugin.id}
-        resetKey={plugin.id}
-        onCrash={handleCrash}
-        onRecover={handleRecover}
-      >
-        <Suspense fallback={null}>
-          <PanelComp {...panelProps} />
-        </Suspense>
-      </PluginErrorBoundary>
+      <>
+        <PluginErrorBoundary
+          pluginId={plugin.id}
+          resetKey={errorBoundaryResetKey}
+          onCrash={handleCrash}
+          onRecover={handleRecover}
+          onRequestPermission={handleRequestPermission}
+        >
+          <Suspense fallback={null}>
+            <PanelComp {...panelProps} />
+          </Suspense>
+        </PluginErrorBoundary>
+        {showPermDialog && (
+          <PluginPermissionDialog
+            pluginId={plugin.id}
+            pluginName={plugin.name}
+            permissions={plugin.permissions}
+            currentStatus={permStatus}
+            onClose={handlePermDialogClose}
+          />
+        )}
+      </>
     )
   }
   return (
-    <PluginErrorBoundary
-      pluginId={plugin.id}
-      resetKey={plugin.id}
-      onCrash={handleCrash}
-      onRecover={handleRecover}
-    >
-      <Suspense fallback={null}>{panel}</Suspense>
-    </PluginErrorBoundary>
+    <>
+      <PluginErrorBoundary
+        pluginId={plugin.id}
+        resetKey={errorBoundaryResetKey}
+        onCrash={handleCrash}
+        onRecover={handleRecover}
+        onRequestPermission={handleRequestPermission}
+      >
+        <Suspense fallback={null}>{panel}</Suspense>
+      </PluginErrorBoundary>
+      {showPermDialog && (
+        <PluginPermissionDialog
+          pluginId={plugin.id}
+          pluginName={plugin.name}
+          permissions={plugin.permissions}
+          currentStatus={permStatus}
+          onClose={handlePermDialogClose}
+        />
+      )}
+    </>
   )
 }
