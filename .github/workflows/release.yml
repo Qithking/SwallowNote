@@ -27,9 +27,9 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          # Node 24 捆绑 npm 11，与本地生成 lock 的 npm 版本保持一致，
-          # 避免 npm 10/11 对可选 peer 依赖解析差异导致 npm ci 校验失败
-          node-version: 24
+          # Node 20 固定不变：lock 必须用同版本 npm（10.8.2）生成维护，
+          # 换版本（如 Node 24/npm 11）会重写 lock 导致 npm ci 校验失败
+          node-version: 20
           cache: 'npm'
 
       # Note: NODE_OPTIONS cannot be set via $GITHUB_ENV (reserved by setup-node).
