@@ -30,7 +30,7 @@ describe('TC-030: Git状态查看测试', () => {
       isGitLoading: false,
       isPulling: false,
       scanProgress: null,
-      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+      syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
     })
   })
 
@@ -145,7 +145,7 @@ describe('TC-031: Git提交测试', () => {
       isGitLoading: false,
       isPulling: false,
       scanProgress: null,
-      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+      syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
     })
   })
 
@@ -209,7 +209,7 @@ describe('TC-032: 冲突解决测试', () => {
       isGitLoading: false,
       isPulling: false,
       scanProgress: null,
-      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+      syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
     })
   })
 
@@ -308,7 +308,7 @@ describe('TC-033: pullAllRepos 并发限流与防重入测试', () => {
       isGitLoading: false,
       isPulling: false,
       scanProgress: null,
-      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+      syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
     })
   })
 
@@ -376,7 +376,7 @@ describe('TC-035: pullAllRepos 错误分类 characterization', () => {
       isGitLoading: false,
       isPulling: false,
       scanProgress: null,
-      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+      syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
     })
   })
 
@@ -485,7 +485,7 @@ describe('TC-034: isConflictFile 边界场景测试', () => {
       isGitLoading: false,
       isPulling: false,
       scanProgress: null,
-      syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+      syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
     })
   })
 

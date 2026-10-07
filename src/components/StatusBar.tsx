@@ -29,6 +29,19 @@ type VersionStatus = 'idle' | 'checking' | 'has-update' | 'up-to-date' | 'check-
 
 const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000 // 1 hour in ms
 
+/** 格式化上次同步时间：当天显示 HH:mm，跨天显示 MM-DD HH:mm */
+function formatLastSyncTime(ts: number): string {
+  const d = new Date(ts)
+  const now = new Date()
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  if (sameDay) return hm
+  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hm}`
+}
+
 function StatusBar() {
   const showToast = useUIStore((s) => s.showToast)
   const autoCheckUpdate = useUIStore((s) => s.autoCheckUpdate)
@@ -512,14 +525,16 @@ function StatusBar() {
               </TooltipContent>
             </Tooltip>
           )}
-          {(fmIndexTotal > 0 || fmIndexDone) && syncStatus.lastSyncTime != null && (
+          {(fmIndexTotal > 0 || fmIndexDone) && (syncStatus.isSyncing || syncStatus.lastSyncTime != null) && (
             <span className="opacity-30">|</span>
           )}
-          {syncStatus.lastSyncTime != null && (
+          {(syncStatus.isSyncing || syncStatus.lastSyncTime != null) && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="flex items-center gap-1.5 opacity-60 hover:opacity-100">
-                  <span className="text-[11px]">{t('statusBar.syncRepos')}</span>
+                  <span className="text-[11px]">
+                    {syncStatus.isAutoPushing ? t('statusBar.autoPushing') : t('statusBar.syncRepos')}
+                  </span>
                   {syncStatus.isSyncing ? (
                     <RefreshCw size={12} className="animate-spin" />
                   ) : (
@@ -541,13 +556,19 @@ function StatusBar() {
                           <span className="text-[11px]">{conflictRepos.length}</span>
                         </span>
                       )}
+                      {/* 上次同步时间 */}
+                      {syncStatus.lastSyncTime != null && (
+                        <span className="text-[11px] opacity-70">
+                          {t('statusBar.lastSyncAt', { time: formatLastSyncTime(syncStatus.lastSyncTime) })}
+                        </span>
+                      )}
                     </>
                   )}
                 </span>
               </TooltipTrigger>
               <TooltipContent>
                 {syncStatus.isSyncing
-                  ? t('statusBar.syncing')
+                  ? (syncStatus.isAutoPushing ? t('statusBar.autoPushingTooltip') : t('statusBar.syncing'))
                   : t('statusBar.syncResultTooltip', {
                       succeeded: syncStatus.succeeded,
                       failed: syncStatus.failed,

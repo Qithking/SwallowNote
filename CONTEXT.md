@@ -18,4 +18,8 @@
 | MatchDecoration | BlockNote 查找高亮的 ProseMirror Decoration 实现 | 通过 `_tiptapEditor.view` 派发 transaction;高亮用 DecorationSet,替换用 ProseMirror transaction 的 replaceWith |
 | ImagePreviewEditor | 只读图片查看器组件:滚轮缩放 + 拖拽平移 + 双击还原 | 注册为 `image-preview` descriptor 到 builtinEditorRegistry;图片路径经 `convertFileSrc` 转为 asset 协议 URL |
 | FileType='image' | FileType 联合类型成员,用于浏览器可显示的图片格式 | detectFileType 对 `.png .jpg .jpeg .gif .webp .bmp .ico .svg .avif .apng` 返回此类型;SVG 从 `code` 改为 `image` 路由 |
+| useIdleAutoPush | 空闲自动推送 hook:监听 `file-saved` 事件,防抖等待后推送 | 复用 `commitAndPushRepo`(commit+pull+push 全流程);设置项 `idleAutoPush` 默认开启、`idleAutoPushDelay` 默认 60s |
+| idleAutoPush | 「保存后空闲自动推送」设置开关,默认 true(开箱即用) | 保存文件后经 `idleAutoPushDelay` 无新保存,即对涉及仓库自动 commit+push;关闭时已排期计时器一并取消 |
+| idleAutoPushDelay | 空闲推送等待间隔(秒),默认 60,可选 30/60/120/300 | 每次保存重置计时;间隔修改对下一次保存生效 |
+| file-saved | 文件保存完成事件:`{ detail: { path } }` | 手动保存(Ctrl+S)与 saveTab 均派发;useIdleAutoPush/CategoryView/HistoryView/FileTreeView 消费 |
 

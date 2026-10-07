@@ -446,6 +446,10 @@ export interface UIState {
   pluginCommandShortcuts: Record<string, string>
   syncInterval: number
   autoSyncPush: boolean
+  /** 保存后空闲自动推送开关 */
+  idleAutoPush: boolean
+  /** 空闲自动推送的等待间隔（秒），保存后该时间内无新保存则触发推送 */
+  idleAutoPushDelay: number
   uploadPath: string
   showConflictBadge: boolean
   aiProvider: string
@@ -491,6 +495,8 @@ export interface UIState {
   setMarkdownOnly: (value: boolean) => void
   setSyncInterval: (interval: number) => void
   setAutoSyncPush: (value: boolean) => void
+  setIdleAutoPush: (value: boolean) => void
+  setIdleAutoPushDelay: (seconds: number) => void
   setUploadPath: (path: string) => void
   setShowConflictBadge: (value: boolean) => void
   setAiProvider: (provider: string) => void
@@ -558,6 +564,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   pluginCommandShortcuts: {},
   syncInterval: 10,
   autoSyncPush: false,
+  idleAutoPush: true,
+  idleAutoPushDelay: 60,
   uploadPath: '',
   showConflictBadge: true,
   aiProvider: '',
@@ -693,6 +701,16 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ autoSyncPush: value })
     saveAppSettings({ autoSyncPush: String(value) })
     queueMicrotask(() => emitSettingChanged('autoSyncPush', value))
+  },
+  setIdleAutoPush: (value: boolean) => {
+    set({ idleAutoPush: value })
+    saveAppSettings({ idleAutoPush: String(value) })
+    queueMicrotask(() => emitSettingChanged('idleAutoPush', value))
+  },
+  setIdleAutoPushDelay: (seconds: number) => {
+    set({ idleAutoPushDelay: seconds })
+    saveAppSettings({ idleAutoPushDelay: String(seconds) })
+    queueMicrotask(() => emitSettingChanged('idleAutoPushDelay', seconds))
   },
   setUploadPath: (path: string) => {
     set({ uploadPath: path })
@@ -1094,6 +1112,8 @@ export const useUIStore = create<UIState>((set, get) => ({
         pluginCommandShortcuts,
         syncInterval: s.syncInterval ? Number(s.syncInterval) : 10,
         autoSyncPush: s.autoSyncPush === 'true',
+        idleAutoPush: s.idleAutoPush !== 'false', // default true
+        idleAutoPushDelay: s.idleAutoPushDelay ? Number(s.idleAutoPushDelay) : 60,
         uploadPath: s.uploadPath || '',
         showConflictBadge: s.showConflictBadge !== 'false', // default true
         aiProvider: s.aiProvider || '',

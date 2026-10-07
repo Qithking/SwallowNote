@@ -45,7 +45,7 @@ describe('useFileWatcher', () => {
     useEditorStore.getState().tabs = []
     useEditorStore.setState({ activeTabId: null })
     useFileTreeStore.getState().clearAll()
-    useGitStore.setState({ isPulling: false, syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 } })
+    useGitStore.setState({ isPulling: false, syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 } })
     useWorkspaceStore.getState().setRootPath('/tmp')
     vi.clearAllMocks()
   })
@@ -108,7 +108,7 @@ describe('useFileWatcher', () => {
   it('skips events during git sync (syncStatus.isSyncing)', () => {
     renderHook(() => useFileWatcher())
 
-    useGitStore.setState({ syncStatus: { isSyncing: true, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 } })
+    useGitStore.setState({ syncStatus: { isSyncing: true, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 } })
     useEditorStore.getState().addTab(makeTab({ isDirty: false }))
     const spy = vi.spyOn(useEditorStore.getState(), 'loadTabContent')
 

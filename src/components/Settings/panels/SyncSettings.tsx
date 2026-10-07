@@ -19,11 +19,22 @@ const syncIntervalOptions = [
   { value: 60, label: '60' },
 ]
 
+const idleAutoPushDelayOptions = [
+  { value: 30, label: '30' },
+  { value: 60, label: '60' },
+  { value: 120, label: '120' },
+  { value: 300, label: '300' },
+]
+
 export function SyncSettings({
   syncInterval,
   setSyncInterval,
   autoSyncPush,
   setAutoSyncPush,
+  idleAutoPush,
+  setIdleAutoPush,
+  idleAutoPushDelay,
+  setIdleAutoPushDelay,
   uploadPath,
   setUploadPath,
   showConflictBadge,
@@ -33,6 +44,10 @@ export function SyncSettings({
   setSyncInterval: (v: number) => void
   autoSyncPush: boolean
   setAutoSyncPush: (v: boolean) => void
+  idleAutoPush: boolean
+  setIdleAutoPush: (v: boolean) => void
+  idleAutoPushDelay: number
+  setIdleAutoPushDelay: (v: number) => void
   uploadPath: string
   setUploadPath: (v: string) => void
   showConflictBadge: boolean
@@ -64,6 +79,33 @@ export function SyncSettings({
           <div className="px-4">
             <SettingRow label={t('settings.sync.autoSyncPush')} desc={t('settings.sync.autoSyncPush.desc')}>
               <Switch checked={autoSyncPush} onCheckedChange={setAutoSyncPush} />
+            </SettingRow>
+          </div>
+          <div className="px-4">
+            <SettingRow label={t('settings.sync.idleAutoPush')} desc={t('settings.sync.idleAutoPush.desc')}>
+              <Switch checked={idleAutoPush} onCheckedChange={setIdleAutoPush} />
+            </SettingRow>
+          </div>
+          <div className="px-4">
+            <SettingRow label={t('settings.sync.idleAutoPushDelay')} desc={t('settings.sync.idleAutoPushDelay.desc')}>
+              <Select
+                value={String(idleAutoPushDelay)}
+                onValueChange={(v) => setIdleAutoPushDelay(Number(v))}
+                disabled={!idleAutoPush}
+              >
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {idleAutoPushDelayOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={String(opt.value)}>
+                      {opt.value >= 60
+                        ? `${Math.floor(opt.value / 60)} ${t('settings.sync.interval.minute')}`
+                        : `${opt.label} ${t('settings.sync.interval.second')}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </SettingRow>
           </div>
           <div className="px-4">

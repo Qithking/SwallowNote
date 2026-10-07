@@ -52,3 +52,13 @@ export function parseGitError(error: unknown): GitError {
   }
   return { code: GitErrorCode.Unknown, message: raw, raw }
 }
+
+/** 判断 commit+push 结果是否为冲突（需用户介入解决）：按错误码或错误信息分流 */
+export function isPushConflict(code: GitErrorCode, error: string): boolean {
+  return (
+    code === GitErrorCode.RebaseConflict ||
+    code === GitErrorCode.RebaseContinueFailed ||
+    code === GitErrorCode.MergeCommitFailed ||
+    error.includes('rebase/merge is in progress')
+  )
+}

@@ -79,6 +79,8 @@ export interface AppSettings {
   markdownOnly: string
   syncInterval: string
   autoSyncPush: string
+  idleAutoPush: string
+  idleAutoPushDelay: string
   customShortcuts: string
   pluginCommandShortcuts: string
   customThemes: string
@@ -111,6 +113,8 @@ export async function getAppSettings(): Promise<AppSettings> {
     markdownOnly: get('markdownOnly', 'false'),
     syncInterval: get('syncInterval', '10'),
     autoSyncPush: get('autoSyncPush', 'false'),
+    idleAutoPush: get('idleAutoPush', 'true'),
+    idleAutoPushDelay: get('idleAutoPushDelay', '60'),
     customShortcuts: get('customShortcuts', '{}'),
     pluginCommandShortcuts: get('pluginCommandShortcuts', '{}'),
     customThemes: get('customThemes', '[]'),

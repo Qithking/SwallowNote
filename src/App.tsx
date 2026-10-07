@@ -19,6 +19,7 @@ import { useUIStore, useWorkspaceStore, useEditorStore, usePluginStore } from '@
 import type { UIState } from '@/stores'
 import { useTheme, useKeyboardShortcuts } from '@/hooks'
 import { useAutoSync } from '@/hooks/useAutoSync'
+import { useIdleAutoPush } from '@/hooks/useIdleAutoPush'
 import { usePanelResize } from '@/hooks/usePanelResize'
 import { useSessionPersistence } from '@/hooks/useSessionPersistence'
 import { useSessionAutoSave } from '@/hooks/useSessionAutoSave'
@@ -26,7 +27,7 @@ import { useFileWatcher } from '@/hooks/useFileWatcher'
 import { TooltipProvider } from '@/components'
 import { Toaster } from 'sonner'
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { enableModernWindowStyle } from '@cloudworxx/tauri-plugin-mac-rounded-corners'
+import { applyWindowStyle } from '@/lib/window-style'
 import { setAppLocale } from '@/lib/tauri'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen } from '@tauri-apps/api/event'
@@ -114,21 +115,11 @@ function App() {
         logger.warn('app', 'Failed to show window:', e)
       }
 
-      // 显示窗口后立即应用 macOS 圆角窗口样式
+      // 显示窗口后立即按平台应用窗口样式（圆角等）
       // （从独立 useEffect 迁移至此，避免与 init 的 IPC 调用竞争后端主线程）
       try {
         const platform = await import('@tauri-apps/plugin-os').then(m => m.platform())
-        if (platform === 'linux') {
-          document.documentElement.style.borderRadius = '12px'
-          document.body.style.borderRadius = '12px'
-        } else if (platform === 'macos') {
-          await enableModernWindowStyle({ cornerRadius: 12 })
-        } else if (platform === 'windows') {
-          // Windows: html/body 圆角匹配 DWM 窗口圆角裁剪，应用边框由外层容器 inset-[2px] + background 间隙绘制
-          document.documentElement.style.borderRadius = '12px'
-          document.body.style.borderRadius = '12px'
-        }
-        logTime('app_init_window_style', appInitT0)
+        await applyWindowStyle(platform)
       } catch (e) {
         logger.warn('app', 'Failed to set window style:', e)
       }
@@ -359,6 +350,8 @@ function App() {
   useSessionAutoSave(saveSessionStateNow)
 
   useAutoSync(startupReadyRef, tRef)
+
+  useIdleAutoPush(tRef)
 
   const handleSaveAndClose = async () => {
     // 标记已采取行动，阻止 onOpenChange 调用 handleCancelClose

@@ -58,6 +58,7 @@ export interface PullResult {
 
 export interface SyncStatus {
   isSyncing: boolean
+  isAutoPushing: boolean  // 空闲自动推送进行中（与间隔/手动同步区分）
   lastSyncTime: number | null  // timestamp
   succeeded: number
   failed: number
@@ -103,7 +104,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   isGitLoading: false,
   isPulling: false,
   scanProgress: null,
-  syncStatus: { isSyncing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 },
+  syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 },
   setRepositories: (repos) => set({ repositories: repos }),
   setCachedRepositories: (repos) => set({ cachedRepositories: repos }),
   setActiveRepository: (path) => set({ activeRepository: path }),
