@@ -737,6 +737,11 @@
       "selectAll": "全选",
       "selectNone": "全不选",
       "noPermissionWarning": "未授权任何权限，插件可能无法正常工作",
+      "gate": {
+        "title": "{{name}} 需要授权",
+        "description": "以下权限尚未授予，授权后插件才能正常运行：",
+        "grant": "去授权"
+      },
       "items": {
         "editor": {
           "name": "编辑器",

@@ -9,7 +9,17 @@
  * is intentionally null because plugin panels are responsible for
  * their own loading state.
  *
- * Hook dispatching:
+ * Permission gate: before mounting the panel we check the in-memory
+ * permission guard. A plugin whose declared permissions are not all
+ * granted gets a guidance card instead of its panel — mounting the
+ * panel would make it call events/storage APIs that hard-throw
+ * PluginPermissionDeniedError and crash into the error boundary.
+ * The gate subscribes to permission changes so the panel mounts
+ * immediately after the user grants in the dialog. Gated plugins
+ * also skip the lifecycle hooks below (they live in the inner
+ * component which only mounts once permissions are complete).
+ *
+ * Hook dispatching (inner component):
  *  - onMount / onUnmount fire when the host component mounts or
  *    unmounts, keyed by `plugin.id`. This means React's
  *    mount → unmount → remount cycle (driven by `key` changes on the
@@ -27,13 +37,19 @@
  *  - Wrapped in PluginErrorBoundary to catch render errors
  *  - Connected to health monitor for crash tracking and auto-disable
  */
-import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useSyncExternalStore, useRef, useState, type ReactNode } from 'react'
 import type { PluginDefinition, PluginPanelProps, PluginPermissionStatus } from '@/types/plugin'
 import { buildPluginContext } from '@/lib/plugin-host'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
+import {
+  hasPermission,
+  subscribePermissionChanges,
+  getPermissionsVersion,
+} from '@/lib/plugin-permission-guard'
 import { PluginErrorBoundary } from './PluginErrorBoundary'
 import { recordPluginCrash, resetPluginCrashCount } from '@/lib/plugin-health'
 import { getPluginPermissions } from '@/lib/plugin-permissions'
+import { PluginPermissionGateCard } from './PluginPermissionGateCard'
 import { PluginPermissionDialog } from './PluginPermissionDialog'
 
 export interface PluginPanelHostProps {
@@ -43,7 +59,26 @@ export interface PluginPanelHostProps {
   panelProps: PluginPanelProps
 }
 
-export function PluginPanelHost({
+export function PluginPanelHost(props: PluginPanelHostProps): ReactNode {
+  const { plugin } = props
+  // 订阅授权集变化：授权/撤销后立即重算门控结果
+  useSyncExternalStore(subscribePermissionChanges, getPermissionsVersion)
+  const declared = plugin.permissions ?? []
+  const missing = declared.filter((p) => !hasPermission(plugin.id, p))
+  if (missing.length > 0) {
+    return (
+      <PluginPermissionGateCard
+        pluginId={plugin.id}
+        pluginName={plugin.name}
+        missing={missing}
+        requested={declared}
+      />
+    )
+  }
+  return <GrantedPluginPanelHost {...props} />
+}
+
+function GrantedPluginPanelHost({
   plugin,
   panel,
   isActive,
@@ -100,12 +135,9 @@ export function PluginPanelHost({
     resetPluginCrashCount(pluginId)
   }
 
-  // ── Permission dialog state ───────────────────────────────
-  // When the error boundary catches a PluginPermissionDeniedError,
-  // the user can click "Authorize" to open the permission dialog
-  // without leaving the panel. After granting, the boundary's
-  // resetKey bump triggers a remount so the plugin retries with
-  // the new permissions.
+  // ── 反应式权限弹窗（用户 c1d651a 逻辑） ──
+  // 当 error boundary 捕获到 PluginPermissionDeniedError 时，
+  // 用户可点击"授权"打开权限对话框，授权后 resetKey bump 触发面板重挂
   const [showPermDialog, setShowPermDialog] = useState(false)
   const [permStatus, setPermStatus] = useState<PluginPermissionStatus[]>([])
   const [permNonce, setPermNonce] = useState(0)
@@ -119,8 +151,7 @@ export function PluginPanelHost({
 
   const handlePermDialogClose = () => {
     setShowPermDialog(false)
-    // Bump resetKey so the error boundary resets and the panel
-    // remounts with the freshly granted permissions.
+    // bump resetKey 使 error boundary 重置，面板以新权限重挂
     setPermNonce((n) => n + 1)
   }
 

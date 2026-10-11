@@ -737,6 +737,11 @@
       "selectAll": "Select all",
       "selectNone": "Select none",
       "noPermissionWarning": "No permissions granted. The plugin may not work correctly.",
+      "gate": {
+        "title": "{{name}} needs permission",
+        "description": "The following permissions are not yet granted. Grant them so the plugin can work properly:",
+        "grant": "Grant Permissions"
+      },
       "items": {
         "editor": {
           "name": "Editor",
