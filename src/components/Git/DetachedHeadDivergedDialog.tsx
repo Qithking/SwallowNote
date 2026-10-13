@@ -11,14 +11,9 @@ import {
 import { Button } from '@/components/ui/button'
 
 /**
- * detached HEAD 分叉决策对话框。
- *
- * 触发场景：仓库 HEAD 处于游离状态，且本地分支与 HEAD 已双向分叉
- * （本地分支有 N 个提交、当前 HEAD 有 M 个提交，互不包含）。
- * 此时任何自动切换都可能丢数据，由用户在两个明确选项中决策。
- *
- * 注意：这里不使用 AlertDialogAction/Cancel，避免 Radix 点击即关闭导致
- * 异步操作未完成就卸载对话框；关闭动作统一由父组件控制 open。
+ * detached HEAD 分叉决策对话框：本地分支与 HEAD 双向分叉时，
+ * 自动切换会丢数据，由用户选择处理方式。
+ * 不用 AlertDialogAction/Cancel：Radix 点击即关会在异步完成前卸载对话框。
  */
 interface DetachedHeadDivergedDialogProps {
   open: boolean
