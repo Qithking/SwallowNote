@@ -1,8 +1,9 @@
 use super::runner::{run_git, run_git_with_env};
-use super::branch::{should_use_rebase, is_detached_head, fix_detached_head, get_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state};
+use super::branch::{should_use_rebase, is_detached_head, fix_detached_head, get_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::get_remote_url;
 use super::askpass::{create_askpass_script, build_askpass_env};
 use super::errors::{is_conflict_error, is_auth_error};
+use log::warn;
 
 /// Pull changes from remote with rebase by default
 #[tauri::command]
@@ -30,7 +31,14 @@ pub async fn git_pull(path: String) -> Result<(), String> {
     // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
     // 必须在 cleanup_stale_rebase_state 之后检查，否则 stale state 文件导致检测失效。
     if is_detached_head(&path) {
-        fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
+        if let Err(e) = fix_detached_head(&path) {
+            // 分叉需用户决策，上抛前端弹框
+            if is_diverged_error(&e) {
+                return Err(e);
+            }
+            warn!("[WARN] git_pull: fix_detached_head failed ({}), skipping pull", e);
+            return Ok(());
+        }
     }
 
     // G-13 修复：尊重用户 git 配置 pull.rebase，决定使用 rebase 还是 merge
@@ -86,7 +94,14 @@ pub async fn git_pull_with_credentials(path: String, username: String, password:
     // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
     // 必须在 cleanup_stale_rebase_state 之后检查。
     if is_detached_head(&path) {
-        fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
+        if let Err(e) = fix_detached_head(&path) {
+            // 分叉需用户决策，上抛前端弹框
+            if is_diverged_error(&e) {
+                return Err(e);
+            }
+            warn!("[WARN] git_pull_with_credentials: fix_detached_head failed ({}), skipping pull", e);
+            return Ok(());
+        }
     }
 
     // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
@@ -137,7 +152,14 @@ pub async fn git_force_pull(path: String) -> Result<(), String> {
 
     // Fix detached HEAD before proceeding
     // 如果修复失败，后续 get_branch 可能返回 "HEAD" 导致 reset --hard origin/HEAD 失败
-    fix_detached_head(&path).map_err(|e| format!("Failed to fix detached HEAD before force pull: {}", e))?;
+    if let Err(e) = fix_detached_head(&path) {
+        // 分叉需用户决策，上抛前端弹框
+        if is_diverged_error(&e) {
+            return Err(e);
+        }
+        warn!("[WARN] git_force_pull: fix_detached_head failed ({}), skipping force pull", e);
+        return Ok(());
+    }
 
     // Get current branch
     let branch = get_branch(&path)?;
@@ -177,7 +199,14 @@ pub async fn git_force_pull_with_credentials(
 
     // Fix detached HEAD before proceeding
     // 如果修复失败，后续 get_branch 可能返回 "HEAD" 导致 reset --hard origin/HEAD 失败
-    fix_detached_head(&path).map_err(|e| format!("Failed to fix detached HEAD before force pull: {}", e))?;
+    if let Err(e) = fix_detached_head(&path) {
+        // 分叉需用户决策，上抛前端弹框
+        if is_diverged_error(&e) {
+            return Err(e);
+        }
+        warn!("[WARN] git_force_pull_with_credentials: fix_detached_head failed ({}), skipping force pull", e);
+        return Ok(());
+    }
 
     // Get current branch
     let branch = get_branch(&path)?;

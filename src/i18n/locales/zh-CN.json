@@ -273,7 +273,13 @@
     "confirmDeleteDir": "（包含所有内容）",
     "confirmDeleteMulti": "确定要删除选中的 {{count}} 个项目吗？",
     "confirmClearHistory": "确定要清空所有历史记录吗？（当前打开的记录将保留）",
-    "confirmClearHistoryTitle": "确认清空历史"
+    "confirmClearHistoryTitle": "确认清空历史",
+    "detachedHeadDivergedTitle": "分支分叉，需要你决定",
+    "detachedHeadDivergedDesc": "仓库「{{repo}}」的本地分支 {{branch}} 与当前进度已双向分叉：本地分支有 {{local}} 个独有提交，当前进度有 {{remote}} 个独有提交。为避免数据丢失，请选择处理方式。",
+    "detachedHeadDivergedAttachHint": "「以当前进度为准」：重建 {{branch}} 指向当前进度，会丢弃本地分支独有的 {{local}} 个提交。",
+    "detachedHeadDivergedKeepLocalHint": "「保留本地提交」：切回 {{branch}}，本地提交保留，之后可正常拉取并合并。",
+    "detachedHeadDivergedAttach": "以当前进度为准",
+    "detachedHeadDivergedKeepLocal": "保留本地提交"
   },
   "tabBar": {
     "pathCopied": "路径已复制",
@@ -511,6 +517,7 @@
     "pullConflict": "仓库 {{repos}} 存在合并冲突，请手动解决冲突后再同步",
     "pullDetachedHead": "{{repos}}: 仓库处于 detached HEAD 状态，请先切换到分支再拉取",
     "detachedHead": "仓库处于 detached HEAD 状态，请先切换到分支再提交",
+    "detachedHeadDiverged": "分支已分叉，请在弹出的对话框中选择处理方式",
     "forcePush": "强制推送",
     "forcePushDesc": "强制推送本地提交到远程仓库，覆盖远程历史",
     "forcePull": "强制拉取",

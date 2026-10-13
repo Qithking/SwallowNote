@@ -175,6 +175,8 @@ pub fn run() {
             commands::git::git_credential_get,
             commands::git::git_credential_delete,
             commands::git::git_commit_and_push,
+            commands::git::git_attach_branch_to_head,
+            commands::git::git_switch_to_local_branch,
             commands::git::git_auto_commit,
             commands::git::git_log,
             commands::git::git_file_log,

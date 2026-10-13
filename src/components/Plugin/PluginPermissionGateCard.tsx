@@ -14,8 +14,13 @@ import { usePluginPermissionPromptStore } from '@/stores/pluginPermissionPrompt'
 /** 按 locale 格式化权限名称列表，避免硬编码分隔符 */
 function formatPermissionList(permissions: PluginPermission[], t: (key: string, opts?: Record<string, unknown>) => string, locale: string): string {
   const names = permissions.map((p) => t(`plugin.permission.items.${p}.name`, { defaultValue: p }))
+  // 部分 TS lib 未声明 Intl.ListFormat，这里做类型收窄；运行时不支持则回退逗号连接
+  const ListFormatCtor = (Intl as unknown as {
+    ListFormat?: new (locales: string, options: { style: string; type: string }) => { format: (items: string[]) => string }
+  }).ListFormat
+  if (!ListFormatCtor) return names.join(', ')
   try {
-    return new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(names)
+    return new ListFormatCtor(locale, { style: 'long', type: 'conjunction' }).format(names)
   } catch {
     // locale 不被支持时回退到英文逗号
     return names.join(', ')

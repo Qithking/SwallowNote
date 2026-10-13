@@ -65,6 +65,16 @@ export async function gitForcePullWithCredentials(path: string, username: string
   await invoke('git_force_pull_with_credentials', { path, username, password })
 }
 
+// 以当前 HEAD 重置本地分支（丢弃分支独有提交）
+export async function gitAttachBranchToHead(path: string, branch: string): Promise<void> {
+  await invoke('git_attach_branch_to_head', { path, branch })
+}
+
+// 保留本地提交，切回本地分支，交给正常同步流程
+export async function gitSwitchToLocalBranch(path: string, branch: string): Promise<void> {
+  await invoke('git_switch_to_local_branch', { path, branch })
+}
+
 // Git 凭据 Keyring API
 export interface GitCredential {
   username: string

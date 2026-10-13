@@ -273,7 +273,13 @@
     "confirmDeleteDir": "(including all contents)",
     "confirmDeleteMulti": "Are you sure you want to delete {{count}} selected items?",
     "confirmClearHistory": "Are you sure you want to clear all history? (Currently open records will be kept)",
-    "confirmClearHistoryTitle": "Confirm Clear History"
+    "confirmClearHistoryTitle": "Confirm Clear History",
+    "detachedHeadDivergedTitle": "Branch Diverged — Decision Needed",
+    "detachedHeadDivergedDesc": "The local branch {{branch}} of repository \"{{repo}}\" has diverged from the current HEAD: {{local}} commit(s) unique to the local branch and {{remote}} commit(s) unique to the current HEAD. Please choose how to proceed to avoid data loss.",
+    "detachedHeadDivergedAttachHint": "\"Use current progress\": rebuild {{branch}} to point at the current HEAD, discarding the {{local}} local-only commit(s).",
+    "detachedHeadDivergedKeepLocalHint": "\"Keep local commits\": switch back to {{branch}}, keeping local commits; you can then pull and merge normally.",
+    "detachedHeadDivergedAttach": "Use current progress",
+    "detachedHeadDivergedKeepLocal": "Keep local commits"
   },
   "tabBar": {
     "pathCopied": "Path copied",
@@ -511,6 +517,7 @@
     "pullConflict": "Repos {{repos}} have merge conflicts. Please resolve conflicts manually before syncing",
     "pullDetachedHead": "{{repos}}: repository is in detached HEAD state, please checkout a branch first",
     "detachedHead": "Repository is in detached HEAD state, please switch to a branch before committing",
+    "detachedHeadDiverged": "Branch has diverged; choose how to proceed in the dialog",
     "forcePush": "Force Push",
     "forcePushDesc": "Force push local commits to remote, overwriting remote history",
     "forcePull": "Force Pull",
