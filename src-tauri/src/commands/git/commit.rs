@@ -29,6 +29,12 @@ pub async fn git_commit(path: String, message: String) -> Result<bool, String> {
         return Err("DETACHED_HEAD:Repository is in detached HEAD state. Please checkout a branch first.".to_string());
     }
 
+    // stash pop 冲突等场景不产生 rebase/merge 状态目录，但 index 存在 unmerged 条目；
+    // add -A 会把含冲突标记的文件入库，必须拦截并让用户经冲突面板解决
+    if has_real_conflicts(&path) {
+        return Err("REBASE_CONFLICT:Unresolved conflict files exist in the repository".to_string());
+    }
+
     // Stage all changes
     // G-10 风险评估：git add -A 包含 untracked 文件，可能意外提交敏感文件。
     // 用户决策保留此行为，依赖 .gitignore 排除文件。建议用户在 .gitignore 中配置
@@ -78,6 +84,11 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<Commit
     }
 
     // Stage all changes including submodules
+    // stash pop 冲突等场景不产生 rebase/merge 状态目录，但 index 存在 unmerged 条目；
+    // add -A 会把含冲突标记的文件入库，必须拦截并让用户经冲突面板解决
+    if has_real_conflicts(&path) {
+        return Err("REBASE_CONFLICT:Unresolved conflict files exist in the repository".to_string());
+    }
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
 
     // 使用 --porcelain 输出避免依赖本地化文本（如 "modified content"），保证跨语言环境稳定。
@@ -374,6 +385,13 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
     if rebase_merge.exists() || rebase_apply.exists() || merge_head.exists() {
         debug!("[INFO] git_auto_commit: repo is in conflict state, skipping");
         return Ok(()); // Skip silently during conflict resolution
+    }
+
+    // stash pop 冲突等场景不产生上述状态目录，但 index 存在 unmerged 条目；
+    // add 会把含冲突标记的文件入库，同样静默跳过，等用户经冲突面板解决
+    if has_real_conflicts(repo_path) {
+        debug!("[INFO] git_auto_commit: unmerged files exist (e.g. stash pop conflict), skipping");
+        return Ok(());
     }
 
     // Auto-fix detached HEAD by switching back to the correct branch（修复失败不阻塞文件保存）

@@ -382,7 +382,11 @@ fn checkout_with_stash(repo_path: &str, branch: &str) -> Result<(), String> {
         Ok(_) => {
             if stashed {
                 if let Err(e) = run_git(repo_path, &["stash", "pop", "--quiet"]) {
+                    // stash pop 冲突：git 已在工作区写入冲突标记且 index 处于 unmerged，
+                    // 但不产生 MERGE_HEAD——复用 REBASE_CONFLICT 码让调用方中断、前端进入冲突面板。
+                    // stash 条目保留，用户解决冲突后可自行 drop。
                     warn!("[WARN] fix_detached_head: stash pop failed: {}. Stash retained.", e);
+                    return Err(format!("REBASE_CONFLICT:Stash pop conflict. Stash retained for recovery: {}", e));
                 }
             }
             Ok(())
