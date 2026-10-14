@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-12T00:00:00Z",
+  "updated_at": "2026-10-14T07:32:08Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -82,7 +82,7 @@
     {
       "id": "com.swallownote.secret-disk",
       "name": "密盘",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "description": "加密的私有笔记空间，所有数据以 markdown 存储于严格加密的 SQLite 数据库（.swl）。",
       "author": "SwallowNote",
       "tags": [
@@ -93,9 +93,9 @@
         "markdown"
       ],
       "download_url": "./secret-disk/com.swallownote.secret-disk.zip",
-      "sha256": "d7f3b3ced181f9070c7d20d8ce69f679d43ee25965b31646d80c477266abe91c",
+      "sha256": "cba0f25e43ef622512b69dd379791e02bc6cb0c0d18f2ed9b8cb164702e7dd3e",
       "changelog": "初版发布：加密的私有笔记空间，支持 SQLite 加密存储、密码管理、主编辑器打开密盘笔记、文件树右键操作及安全增强",
-      "published_at": "2026-07-06T07:55:40Z",
+      "published_at": "2026-10-14T07:27:29Z",
       "dependencies": []
     }
   ]

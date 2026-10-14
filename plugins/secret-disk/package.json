@@ -1,6 +1,6 @@
 {
   "name": "swallownote-plugin-secret-disk",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Encrypted private notes plugin for SwallowNote (SQLCipher-backed .swl database)",
   "type": "module",
   "scripts": {
