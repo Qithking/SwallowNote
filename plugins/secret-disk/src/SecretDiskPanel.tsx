@@ -33,6 +33,13 @@ const DISK_TOOLBAR_CONFIG: EditorToolbarConfig = {
 
 export function SecretDiskPanel(props: PluginPanelProps) {
   const { invokeBackend, getSetting, setSetting, pluginId, events } = props
+  // 宿主每次重渲染都会通过 createPluginPanelProps 内联重建 props 中的函数引用，
+  // 用 ref 持有最新引用，让 mount/unmount effect 不因依赖变化而误执行
+  //（否则面板内打开文件、输入内容都会触发 lock，导致误锁定）
+  const invokeBackendRef = useRef(invokeBackend)
+  invokeBackendRef.current = invokeBackend
+  const getSettingRef = useRef(getSetting)
+  getSettingRef.current = getSetting
 
   const [diskState, setDiskState] = useState<DiskState>('locked')
   const [loading, setLoading] = useState(true)
@@ -55,21 +62,21 @@ export function SecretDiskPanel(props: PluginPanelProps) {
   const [importPassword, setImportPassword] = useState('')
   const [showSettings, setShowSettings] = useState(false)
 
-  /** 初始化：检查数据库状态。 */
+  /** 初始化：检查数据库状态（仅在面板挂载时执行一次）。 */
   const checkState = useCallback(async () => {
     try {
-      const initialized = (await invokeBackend('is_initialized')) as boolean
+      const initialized = (await invokeBackendRef.current('is_initialized')) as boolean
       if (!initialized) {
         setDiskState('uninitialized')
         setLoading(false)
         return
       }
-      const unlocked = (await invokeBackend('is_unlocked')) as boolean
+      const unlocked = (await invokeBackendRef.current('is_unlocked')) as boolean
       setDiskState(unlocked ? 'unlocked' : 'locked')
       setLoading(false)
       // 已解锁则加载根级子项
       if (unlocked) {
-        const items = (await invokeBackend('list_children', { parentId: null })) as NoteListItem[]
+        const items = (await invokeBackendRef.current('list_children', { parentId: null })) as NoteListItem[]
         for (const item of items) {
           parentMapRef.current.set(item.id, null)
         }
@@ -80,15 +87,15 @@ export function SecretDiskPanel(props: PluginPanelProps) {
       console.error('[secret-disk] 检查状态失败:', err)
       setLoading(false)
     }
-  }, [invokeBackend])
+  }, [])
 
-  /** 加载 requirePasswordEveryTime 设置。 */
+  /** 加载 requirePasswordEveryTime 设置（仅在面板挂载时执行一次）。 */
   useEffect(() => {
-    void getSetting<boolean>('requirePasswordEveryTime').then((val) => {
+    void getSettingRef.current<boolean>('requirePasswordEveryTime').then((val) => {
       requirePasswordRef.current = val === true
       setRequirePassword(val === true)
     })
-  }, [getSetting])
+  }, [])
 
   /** 启动时检查状态。 */
   useEffect(() => {
@@ -137,14 +144,14 @@ export function SecretDiskPanel(props: PluginPanelProps) {
         clearTimeout(debounceTimerRef.current)
         void currentFlushRef.current?.()
       }
-      // 自动锁定
+      // 自动锁定（invokeBackend 取 ref 最新引用；effect 无依赖，仅真实卸载时执行）
       if (requirePasswordRef.current) {
-        void invokeBackend('lock').catch(() => {
+        void invokeBackendRef.current('lock').catch(() => {
           // fire-and-forget，忽略错误
         })
       }
     }
-  }, [invokeBackend])
+  }, [])
 
   /** 解锁/初始化成功：加载根级子项并切换到文件树视图。 */
   const handleAuthSuccess = useCallback(async () => {
