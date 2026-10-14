@@ -440,20 +440,13 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     }
   }
 
-  // Accept Remote — use remote content to resolve conflict
+  // Accept Remote — 由后端从 git 取远端权威内容写入；
+  // modify/delete 冲突中远端已删除该文件时，后端会移除工作区文件并 stage 该删除
   const handleAcceptRemote = async () => {
     if (!selectedFile) return
     setIsResolving(true)
     try {
-      // G-09 保证：必须先 save 成功后才调用 resolve，避免 stage 旧文件
-      await gitSaveConflictFileContent(
-        selectedFile.repoPath,
-        selectedFile.file.abs_path,
-        remoteContent
-      )
-
-      // Mark as resolved — content already saved, just stage it
-      await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, 'current')
+      await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, 'remote')
       showToast(t('git.conflictResolved'), 'success')
 
       setResolvedFiles(prev => new Set(prev).add(selectedFile.file.abs_path))
@@ -466,21 +459,26 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     }
   }
 
-  // Accept Local — use local content to resolve conflict
+  // Accept Local — 用户编辑过则保存编辑内容（编辑版本优先，G-09 顺序保证）；
+  // 未编辑则由后端从 git 取本地权威内容，modify/delete 冲突中本地已删除该文件时，
+  // 后端会移除工作区文件并 stage 该删除
   const handleAcceptLocal = async () => {
     if (!selectedFile) return
     setIsResolving(true)
     try {
-      // G-09 保证：必须先 save 成功后才调用 resolve，避免 stage 旧文件
-      const contentToSave = hasUnsavedChanges ? editedLocalContent : localContent
-      await gitSaveConflictFileContent(
-        selectedFile.repoPath,
-        selectedFile.file.abs_path,
-        contentToSave
-      )
+      if (hasUnsavedChanges) {
+        // G-09 保证：必须先 save 成功后才调用 resolve，避免 stage 旧文件
+        await gitSaveConflictFileContent(
+          selectedFile.repoPath,
+          selectedFile.file.abs_path,
+          editedLocalContent
+        )
 
-      // Mark as resolved — content already saved, just stage it
-      await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, 'current')
+        // Mark as resolved — content already saved, just stage it
+        await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, 'current')
+      } else {
+        await gitResolveConflictFile(selectedFile.repoPath, selectedFile.file.abs_path, 'local')
+      }
       showToast(t('git.conflictResolved'), 'success')
 
       setResolvedFiles(prev => new Set(prev).add(selectedFile.file.abs_path))

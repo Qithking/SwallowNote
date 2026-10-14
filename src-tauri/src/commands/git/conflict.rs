@@ -229,13 +229,25 @@ pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, sid
     // If side is "current", the user has already edited and saved the file via
     // git_save_conflict_file_content, so we just need to stage it.
     // If side is "local" or "remote", we overwrite with the chosen side's content.
+    // get_conflict_content 返回 Ok(None) 表示该侧文件不存在（modify/delete 冲突），
+    // "接受该侧"的语义即删除文件：移除工作区文件后由 git add stage 该删除。
     if side != "current" {
-        let content = get_conflict_content(&repo_path, &git_path, &side)?;
-        // 写入目标必须基于 repo_path + 相对路径，避免前端传入的 file_path
-        // 指向仓库外（路径穿越）。
         let target_path = Path::new(&repo_path).join(&rel_path);
-        std::fs::write(&target_path, &content)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+        match get_conflict_content(&repo_path, &git_path, &side)? {
+            Some(content) => {
+                // 写入目标必须基于 repo_path + 相对路径，避免前端传入的 file_path
+                // 指向仓库外（路径穿越）。
+                std::fs::write(&target_path, &content)
+                    .map_err(|e| format!("Failed to write file: {}", e))?;
+            }
+            None => {
+                // 该侧已删除：确保工作区文件被移除（若本来就不存在则无需处理）
+                if target_path.exists() {
+                    std::fs::remove_file(&target_path)
+                        .map_err(|e| format!("Failed to remove file: {}", e))?;
+                }
+            }
+        }
     }
 
     // Stage the resolved file
