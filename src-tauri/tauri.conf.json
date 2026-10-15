@@ -53,7 +53,7 @@
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "languages": ["SimpChinese", "English"],
-        "installerLanguage": "SimpChinese"
+        "displayLanguageSelector": true
       },
       "wix": {
         "language": ["zh-CN", "en-US"]

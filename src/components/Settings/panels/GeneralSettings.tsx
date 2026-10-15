@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select'
 import { setAppLocale } from '@/lib/tauri'
 import { emitLocaleChanged } from '@/lib/plugin-host'
-import type { NoteWidth } from '@/stores'
+import type { NoteWidth, UpdateChannel } from '@/stores'
 import { SettingRow } from '../SettingRow'
 
 const languages = [
@@ -24,11 +24,18 @@ const noteWidthOptions: { value: NoteWidth; labelKey: string }[] = [
   { value: 'wide', labelKey: 'settings.general.noteWidth.wide' },
 ]
 
+const updateChannelOptions: { value: UpdateChannel; labelKey: string }[] = [
+  { value: 'github', labelKey: 'settings.general.updateChannel.github' },
+  { value: 'ghproxy', labelKey: 'settings.general.updateChannel.ghproxy' },
+]
+
 export function GeneralSettings({
   autoStart,
   setAutoStart,
   autoCheckUpdate,
   setAutoCheckUpdate,
+  updateChannel,
+  setUpdateChannel,
   closeWithoutExit,
   setCloseWithoutExit,
   noteWidth,
@@ -42,6 +49,8 @@ export function GeneralSettings({
   setAutoStart: (v: boolean) => void
   autoCheckUpdate: boolean
   setAutoCheckUpdate: (v: boolean) => void
+  updateChannel: UpdateChannel
+  setUpdateChannel: (channel: UpdateChannel) => void
   closeWithoutExit: boolean
   setCloseWithoutExit: (v: boolean) => void
   noteWidth: NoteWidth
@@ -52,6 +61,7 @@ export function GeneralSettings({
   setMarkdownOnly: (v: boolean) => void
 }) {
   const { t, i18n } = useTranslation()
+
   return (
     <section id="section-general" className="space-y-4">
       <h2 className="text-base font-semibold">{t('settings.general')}</h2>
@@ -66,6 +76,23 @@ export function GeneralSettings({
           <div className="px-4">
             <SettingRow label={t('settings.general.autoCheckUpdate')} desc={t('settings.general.autoCheckUpdate.desc')}>
               <Switch checked={autoCheckUpdate} onCheckedChange={setAutoCheckUpdate} />
+            </SettingRow>
+          </div>
+          {/* 更新下载渠道：位于「自动检查更新」下方（spec AC-8），切换立即生效 */}
+          <div className="px-4">
+            <SettingRow label={t('settings.general.updateChannel')} desc={t('settings.general.updateChannel.desc')}>
+              <Select value={updateChannel} onValueChange={(v) => setUpdateChannel(v as UpdateChannel)}>
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {updateChannelOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {t(opt.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </SettingRow>
           </div>
           <div className="px-4">

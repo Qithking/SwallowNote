@@ -26,6 +26,7 @@ export interface DownloadComplete {
 }
 
 export function downloadLatestRelease(
+  channel: 'github' | 'ghproxy',
   onProgress: (progress: DownloadProgress) => void,
   onComplete: (path: string) => void,
   onError: (error: string) => void
@@ -58,8 +59,8 @@ export function downloadLatestRelease(
       if (cleanedUp) { fnComplete(); return }
       unlistenComplete = fnComplete
 
-      // 两个监听器均已注册，安全地触发后端下载
-      await invoke('download_latest_release')
+      // 两个监听器均已注册，安全地触发后端下载（渠道决定下载 URL 是否走 gh-proxy）
+      await invoke('download_latest_release', { channel })
     } catch (e) {
       onError(String(e))
       cleanup()
