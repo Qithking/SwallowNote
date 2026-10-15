@@ -45,6 +45,7 @@ function formatLastSyncTime(ts: number): string {
 function StatusBar() {
   const showToast = useUIStore((s) => s.showToast)
   const autoCheckUpdate = useUIStore((s) => s.autoCheckUpdate)
+  const updateChannel = useUIStore((s) => s.updateChannel)
   const developerMode = useUIStore((s) => s.developerMode)
   const toggleLogViewer = useUIStore((s) => s.toggleLogViewer)
   const customShortcuts = useUIStore((s) => s.customShortcuts)
@@ -270,6 +271,7 @@ function StatusBar() {
       lastProgressRef.current = -1
 
       const cancel = downloadLatestRelease(
+        updateChannel,
         (progress: DownloadProgress) => {
           // Only accept progress if we are still in downloading state
           if (versionStatusRef.current !== 'downloading') return
@@ -302,7 +304,7 @@ function StatusBar() {
     if (status === 'download-ready') {
       setShowUpgradeDialog(true)
     }
-  }, [showToast])
+  }, [showToast, updateChannel])
 
   const handleUpgradeConfirm = useCallback(async () => {
     setShowUpgradeDialog(false)

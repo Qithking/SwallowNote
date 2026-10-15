@@ -25,28 +25,53 @@ import { convertFileSrc } from '@tauri-apps/api/core'
  * - Already-qualified URLs (http, https, data, asset, mailto, #) are
  *   returned unchanged.
  */
-function resolveRelativePath(url: string, notePath: string): string {
-  if (
+/**
+ * Already-qualified URLs that must be returned as-is.
+ * Includes both native `asset://` and the http(s)-form asset URL
+ * produced by convertFileSrc on some platforms.
+ */
+function isQualifiedUrl(url: string): boolean {
+  return (
     url.startsWith('http://') ||
     url.startsWith('https://') ||
     url.startsWith('data:') ||
     url.startsWith('asset://') ||
+    url.startsWith('http://asset.localhost') ||
+    url.startsWith('https://asset.localhost') ||
     url.startsWith('mailto:') ||
     url.startsWith('#') ||
     url.startsWith('ftp://')
-  ) {
+  )
+}
+
+function resolveRelativePath(url: string, notePath: string): string {
+  if (isQualifiedUrl(url)) {
     return url
+  }
+
+  // Upstream sources (e.g. Notion exports) percent-encode file paths
+  // (`85%283%2Fimages%2Fx.png`). Decode once so the path segments match
+  // the real on-disk names; decode is a no-op for plain paths.
+  let decoded = url
+  try {
+    decoded = decodeURIComponent(url)
+  } catch {
+    // Malformed % sequence: fall back to the original string.
+  }
+  // Decoding may reveal a full URL (`http%3A//...`) — bail out in that case.
+  if (isQualifiedUrl(decoded)) {
+    return decoded
   }
 
   let absolutePath: string
 
-  if (url.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(url)) {
-    absolutePath = url
+  if (decoded.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(decoded)) {
+    absolutePath = decoded
   } else {
     const fileDir = notePath.split(/[\\/]/).slice(0, -1).join('/') || ''
     if (!fileDir) return url
 
-    const normalizedUrl = url.replace(/^\.\//, '').replace(/\\/g, '/')
+    const normalizedUrl = decoded.replace(/^\.\//, '').replace(/\\/g, '/')
     const urlParts = normalizedUrl.split('/')
     const dirParts = fileDir.split('/')
 

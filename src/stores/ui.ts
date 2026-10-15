@@ -41,6 +41,8 @@ export interface AiContextMenuRequest {
 }
 export type WorkspaceMode = 'folder' | 'workspace'
 export type NoteWidth = 'normal' | 'wide'
+/** 更新下载渠道：github=官方直连，ghproxy=gh-proxy 加速 */
+export type UpdateChannel = 'github' | 'ghproxy'
 
 export interface CustomThemeColors {
   themeColor: string
@@ -431,6 +433,10 @@ export interface UIState {
   workspaceMode: WorkspaceMode
   autoStart: boolean
   autoCheckUpdate: boolean
+  /** 日志单文件占用上限（MB），重启生效 */
+  logMaxFileSize: number
+  /** 更新下载渠道 */
+  updateChannel: UpdateChannel
   closeWithoutExit: boolean
   noteWidth: NoteWidth
   showAllFiles: boolean
@@ -489,6 +495,8 @@ export interface UIState {
   initWorkspaceMode: () => Promise<void>
   setAutoStart: (value: boolean) => void
   setAutoCheckUpdate: (value: boolean) => void
+  setLogMaxFileSize: (mb: number) => void
+  setUpdateChannel: (channel: UpdateChannel) => void
   setCloseWithoutExit: (value: boolean) => void
   setNoteWidth: (width: NoteWidth) => void
   setShowAllFiles: (value: boolean) => void
@@ -556,6 +564,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   workspaceMode: 'folder',
   autoStart: false,
   autoCheckUpdate: true,
+  logMaxFileSize: 10,
+  updateChannel: 'github',
   closeWithoutExit: false,
   noteWidth: 'normal',
   showAllFiles: false,
@@ -659,6 +669,16 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ autoCheckUpdate: value })
     saveAppSettings({ autoCheckUpdate: String(value) })
     queueMicrotask(() => emitSettingChanged('autoCheckUpdate', value))
+  },
+  setLogMaxFileSize: (mb) => {
+    set({ logMaxFileSize: mb })
+    saveAppSettings({ logMaxFileSize: String(mb) })
+    queueMicrotask(() => emitSettingChanged('logMaxFileSize', mb))
+  },
+  setUpdateChannel: (channel) => {
+    set({ updateChannel: channel })
+    saveAppSettings({ updateChannel: channel })
+    queueMicrotask(() => emitSettingChanged('updateChannel', channel))
   },
   setCloseWithoutExit: (value) => {
     set({ closeWithoutExit: value })
@@ -1104,6 +1124,12 @@ export const useUIStore = create<UIState>((set, get) => ({
         themeColor: s.themeColor,
         autoStart: actualAutoStart,
         autoCheckUpdate: s.autoCheckUpdate !== 'false', // default true
+        // 日志上限：非法数值回退默认 10MB
+        logMaxFileSize: Number.isFinite(Number(s.logMaxFileSize)) && Number(s.logMaxFileSize) > 0
+          ? Number(s.logMaxFileSize)
+          : 10,
+        // 更新渠道：仅接受已知值，未知回退 github
+        updateChannel: s.updateChannel === 'ghproxy' ? 'ghproxy' : 'github',
         closeWithoutExit: s.closeWithoutExit === 'true',
         noteWidth: s.noteWidth as NoteWidth,
         showAllFiles: s.showAllFiles === 'true',

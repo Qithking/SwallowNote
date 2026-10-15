@@ -107,7 +107,8 @@ pub fn run() {
                     }
                 })
                 .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
-                .max_file_size(5 * 1024 * 1024)
+                // 日志单文件上限：启动时读设置（MB→字节），读取失败回退默认 10MB。Source: spec AC-1/AC-2
+                .max_file_size(read_log_max_file_size_at_startup())
                 .targets({
                     // 日志目录：SWALLOWNOTE_LOG_DIR 环境变量 > exe 父目录/logs > ./logs
                     let log_dir = resolve_log_dir(
@@ -209,7 +210,9 @@ pub fn run() {
             commands::session_state::save_session_state,
             commands::session_state::get_session_state,
             commands::upgrade::check_latest_version,
-commands::upgrade::download_latest_release,
+            commands::upgrade::download_latest_release,
+            commands::logs::export_logs,
+            commands::logs::open_log_dir,
             commands::upgrade::open_installer,
             commands::upgrade::install_and_restart,
             commands::upgrade::get_platform_extension,
@@ -529,9 +532,53 @@ fn resolve_log_dir(exe_path: Option<&std::path::Path>, env_override: Option<&str
     std::path::PathBuf::from("logs")
 }
 
+/// 解析日志单文件上限（字节）：输入设置原始字符串（MB 数值），非法/缺失回退默认 10MB。
+/// 返回 u128 与 tauri_plugin_log 的 max_file_size 参数类型一致。
+/// Source: spec/settings-log-export-update-channel AC-1/AC-2
+fn parse_log_max_file_size(raw: Option<&str>) -> u128 {
+    const DEFAULT_LOG_MAX_FILE_SIZE_MB: u128 = 10;
+    raw.and_then(|s| s.trim().parse::<u128>().ok())
+        .filter(|mb| *mb > 0)
+        .unwrap_or(DEFAULT_LOG_MAX_FILE_SIZE_MB)
+        * 1024
+        * 1024
+}
+
+/// log 插件注册早于 setup 的 DB 初始化，故在 run() 开头用独立只读连接读取日志上限设置。
+/// 数据目录推导与 tauri app_data_dir 完全一致（tauri 2 desktop.rs: dirs::data_dir() + identifier）；
+/// 任何一步失败均回退默认值（spec 允许：读取失败回退默认），不影响启动。
+fn read_log_max_file_size_at_startup() -> u128 {
+    // 数据目录：SWALLOWNOTE_DATA_DIR 覆盖（与 setup 内测量模式一致）> 平台标准路径
+    let app_data_dir = match std::env::var("SWALLOWNOTE_DATA_DIR") {
+        Ok(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+        _ => match dirs::data_dir() {
+            // identifier 须与 tauri.conf.json 保持同步
+            Some(base) => base.join("com.swallownote.app"),
+            None => return parse_log_max_file_size(None),
+        },
+    };
+    let db_path = app_data_dir.join("swallownote.db");
+    // 只读打开：不创建文件；DB 不存在（首次启动）或锁定失败时回退默认
+    let conn = match rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+        Ok(conn) => conn,
+        Err(_) => return parse_log_max_file_size(None),
+    };
+    let raw = conn
+        .query_row(
+            "SELECT value FROM session_state WHERE key = 'settings.logMaxFileSize'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+    parse_log_max_file_size(raw.as_deref())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::resolve_log_dir;
+    use super::{parse_log_max_file_size, resolve_log_dir};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -558,5 +605,34 @@ mod tests {
     fn resolve_log_dir_env_override_without_exe() {
         let dir = resolve_log_dir(None, Some("/var/log/swallownote"));
         assert_eq!(dir, PathBuf::from("/var/log/swallownote"));
+    }
+
+    const MB: u128 = 1024 * 1024;
+
+    // Source: spec/settings-log-export-update-channel AC-2（默认 10MB）
+    #[test]
+    fn parse_log_max_file_size_defaults_when_missing() {
+        assert_eq!(parse_log_max_file_size(None), 10 * MB);
+    }
+
+    // Source: spec AC-2（档位值按 MB 解析为字节）
+    #[test]
+    fn parse_log_max_file_size_parses_mb_value() {
+        assert_eq!(parse_log_max_file_size(Some("20")), 20 * MB);
+        assert_eq!(parse_log_max_file_size(Some(" 5 ")), 5 * MB); // 容忍空白
+    }
+
+    // Source: spec AC-2（非法值回退默认，不 panic）
+    #[test]
+    fn parse_log_max_file_size_defaults_on_invalid() {
+        assert_eq!(parse_log_max_file_size(Some("abc")), 10 * MB);
+        assert_eq!(parse_log_max_file_size(Some("")), 10 * MB);
+    }
+
+    // Source: spec AC-2（0 与负数视为非法，回退默认）
+    #[test]
+    fn parse_log_max_file_size_defaults_on_zero_or_negative() {
+        assert_eq!(parse_log_max_file_size(Some("0")), 10 * MB);
+        assert_eq!(parse_log_max_file_size(Some("-5")), 10 * MB);
     }
 }

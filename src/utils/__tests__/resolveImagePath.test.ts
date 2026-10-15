@@ -63,6 +63,24 @@ describe('resolveMarkdownImagePath', () => {
       )
     })
 
+    it('percent-encoded 相对路径先解码再解析（Notion 导出场景）', () => {
+      expect(
+        resolveMarkdownImagePath('85%283%29%2Fimages%2Fabc.png', '/Users/u/notion/note.md', rootPath),
+      ).toBe('/Users/u/notion/85(3)/images/abc.png')
+    })
+
+    it('percent-encoded 绝对路径解码后按绝对路径返回', () => {
+      expect(
+        resolveMarkdownImagePath('%2FUsers%2Fu%2Fimg%20name.png', '/a/b.md', rootPath),
+      ).toBe('/Users/u/img name.png')
+    })
+
+    it('含非法 % 序列的路径按原文解析', () => {
+      expect(resolveMarkdownImagePath('images/100%.png', '/a/b.md', rootPath)).toBe(
+        '/a/images/100%.png',
+      )
+    })
+
     it('images/foo.png (无 ./ 前缀)', () => {
       expect(resolveMarkdownImagePath('images/foo.png', 'D:/notes/sub/note.md', rootPath)).toBe(
         'D:/notes/sub/images/foo.png',

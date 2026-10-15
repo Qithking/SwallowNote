@@ -34,6 +34,8 @@ function SettingsView() {
     theme, setTheme,
     autoStart, setAutoStart,
     autoCheckUpdate, setAutoCheckUpdate,
+    logMaxFileSize, setLogMaxFileSize,
+    updateChannel, setUpdateChannel,
     closeWithoutExit, setCloseWithoutExit,
     noteWidth, setNoteWidth,
     showAllFiles, setShowAllFiles,
@@ -55,6 +57,8 @@ function SettingsView() {
       theme: s.theme, setTheme: s.setTheme,
       autoStart: s.autoStart, setAutoStart: s.setAutoStart,
       autoCheckUpdate: s.autoCheckUpdate, setAutoCheckUpdate: s.setAutoCheckUpdate,
+      logMaxFileSize: s.logMaxFileSize, setLogMaxFileSize: s.setLogMaxFileSize,
+      updateChannel: s.updateChannel, setUpdateChannel: s.setUpdateChannel,
       closeWithoutExit: s.closeWithoutExit, setCloseWithoutExit: s.setCloseWithoutExit,
       noteWidth: s.noteWidth, setNoteWidth: s.setNoteWidth,
       showAllFiles: s.showAllFiles, setShowAllFiles: s.setShowAllFiles,
@@ -136,6 +140,8 @@ function SettingsView() {
               setAutoStart={setAutoStart}
               autoCheckUpdate={autoCheckUpdate}
               setAutoCheckUpdate={setAutoCheckUpdate}
+              updateChannel={updateChannel}
+              setUpdateChannel={setUpdateChannel}
               closeWithoutExit={closeWithoutExit}
               setCloseWithoutExit={setCloseWithoutExit}
               noteWidth={noteWidth}
@@ -188,6 +194,8 @@ function SettingsView() {
             <DevelopmentSettings
               developerMode={developerMode}
               setDeveloperMode={setDeveloperMode}
+              logMaxFileSize={logMaxFileSize}
+              setLogMaxFileSize={setLogMaxFileSize}
             />
           </div>
         </ScrollArea>

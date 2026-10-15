@@ -119,8 +119,19 @@ pub async fn check_latest_version(current_version: String) -> Result<(String, bo
     Ok((latest, has_update))
 }
 
+/// 更新渠道下载 URL 改写：gh-proxy 渠道给 github.com 下载链接加加速前缀，其余渠道/URL 原样返回。
+/// 仅作用于下载 URL，GitHub API 请求不走代理。
+/// Source: spec/settings-log-export-update-channel AC-4/AC-5
+fn apply_update_channel(download_url: &str, channel: &str) -> String {
+    if channel == "ghproxy" && download_url.starts_with("https://github.com/") {
+        format!("https://gh-proxy.com/{}", download_url)
+    } else {
+        download_url.to_string()
+    }
+}
+
 #[tauri::command]
-pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
+pub async fn download_latest_release(app: AppHandle, channel: String) -> Result<(), String> {
     // Acquire the download lock – reject if a download is already in progress
     if IS_DOWNLOADING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return Err("A download is already in progress".to_string());
@@ -129,7 +140,7 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
     // 重置取消标志，确保本次下载不受上次 cancel 调用影响
     DOWNLOAD_CANCELLED.store(false, Ordering::SeqCst);
 
-    let result = download_latest_release_inner(&app).await;
+    let result = download_latest_release_inner(&app, &channel).await;
 
     // Always release the lock when done (success or failure)
     IS_DOWNLOADING.store(false, Ordering::SeqCst);
@@ -137,7 +148,7 @@ pub async fn download_latest_release(app: AppHandle) -> Result<(), String> {
 }
 
 /// Inner implementation that performs the actual download.
-async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
+async fn download_latest_release_inner(app: &AppHandle, channel: &str) -> Result<(), String> {
     let client = Client::builder()
         .user_agent("SwallowNote/0.1.0")
         .timeout(Duration::from_secs(30))
@@ -177,7 +188,7 @@ async fn download_latest_release_inner(app: &AppHandle) -> Result<(), String> {
     let file_path = download_dir.join(&asset.name);
 
     let response = client
-        .get(&asset.browser_download_url)
+        .get(apply_update_channel(&asset.browser_download_url, channel))
         .send()
         .await
         .map_err(|e| format!("Download failed: {}", e))?;
@@ -705,4 +716,38 @@ rm -f "$0"
 #[allow(dead_code)]
 fn build_restart_script(_pid: u32, _app_path: &str, _app_name: &str) -> String {
     String::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GITHUB_ASSET_URL: &str =
+        "https://github.com/Qithking/SwallowNote/releases/download/v0.2.0/SwallowNote_0.2.0_x64-setup.exe";
+
+    // Source: spec/settings-log-export-update-channel AC-5（ghproxy 渠道仅前缀化下载 URL）
+    #[test]
+    fn apply_update_channel_ghproxy_prefixes_github_url() {
+        let url = apply_update_channel(GITHUB_ASSET_URL, "ghproxy");
+        assert_eq!(url, format!("https://gh-proxy.com/{}", GITHUB_ASSET_URL));
+    }
+
+    // Source: spec AC-5（github 渠道走原始下载链接）
+    #[test]
+    fn apply_update_channel_github_keeps_url() {
+        assert_eq!(apply_update_channel(GITHUB_ASSET_URL, "github"), GITHUB_ASSET_URL);
+    }
+
+    // Source: spec AC-5（未知渠道回退原样，不抛错）
+    #[test]
+    fn apply_update_channel_unknown_channel_keeps_url() {
+        assert_eq!(apply_update_channel(GITHUB_ASSET_URL, "mirror-x"), GITHUB_ASSET_URL);
+    }
+
+    // Source: spec AC-5（非 github.com 域的 URL 不重复加前缀，如已是加速地址）
+    #[test]
+    fn apply_update_channel_non_github_url_keeps_url() {
+        let url = "https://gh-proxy.com/https://github.com/Qithking/SwallowNote/releases/download/v0.2.0/a.dmg";
+        assert_eq!(apply_update_channel(url, "ghproxy"), url);
+    }
 }

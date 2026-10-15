@@ -97,6 +97,10 @@ export interface AppSettings {
   defaultAiModelId: string
   showConflictBadge: string
   developerMode: string
+  /** 日志单文件占用上限（MB），重启生效 */
+  logMaxFileSize: string
+  /** 更新下载渠道：github=官方直连，ghproxy=gh-proxy 加速 */
+  updateChannel: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -131,6 +135,8 @@ export async function getAppSettings(): Promise<AppSettings> {
     defaultAiModelId: get('defaultAiModelId', ''),
     showConflictBadge: get('showConflictBadge', 'true'),
     developerMode: get('developerMode', 'false'),
+    logMaxFileSize: get('logMaxFileSize', '10'),
+    updateChannel: get('updateChannel', 'github'),
   }
 }
 
