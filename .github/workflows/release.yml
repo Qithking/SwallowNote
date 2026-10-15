@@ -110,19 +110,7 @@ jobs:
           npm run build
           npx tauri build --target x86_64-pc-windows-msvc
 
-      - name: Rename MSI to remove locale (Windows)
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          $msiFiles = Get-ChildItem -Path "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi" -Filter "*.msi" -Recurse
-          foreach ($file in $msiFiles) {
-            # 去掉 MSI 文件名中的语言后缀（en-US 兼容旧构建，zh-CN 为当前配置）
-            $newName = $file.Name -replace '_(en-US|zh-CN)\.msi$', '.msi'
-            if ($file.Name -ne $newName) {
-              Rename-Item -Path $file.FullName -NewName $newName
-              Write-Host "Renamed: $($file.Name) -> $newName"
-            }
-          }
+      # WiX 双语言（en-US + zh-CN）会产出两个 MSI，各带语言后缀，直接上传（去后缀重命名会因目标重名冲突）
 
       - name: Build (Linux)
         if: matrix.platform == 'ubuntu-22.04'
