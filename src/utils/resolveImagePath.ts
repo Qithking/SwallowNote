@@ -27,6 +27,20 @@ function isLocalAbsolutePath(url: string): boolean {
 }
 
 /**
+ * 还原上游来源（如 Notion 导出）percent-encode 过的路径：
+ * `85%283%2Fimages%2Fx.png` -> `85(3)/images/x.png`。
+ * 对未编码路径 decode 无副作用；含非法 % 序列时按原文返回。
+ */
+function decodeIfNeeded(url: string): string {
+  if (!url.includes('%')) return url
+  try {
+    return decodeURIComponent(url)
+  } catch {
+    return url
+  }
+}
+
+/**
  * 解析 Markdown 图片相对路径为本地绝对路径。
  *
  * @param url - Markdown 中图片 src 原始值
@@ -49,9 +63,12 @@ export function resolveMarkdownImagePath(
     return url
   }
 
+  // 还原编码路径后再判断绝对路径（`%2FUsers/...` 解码后以 `/` 开头）
+  const decoded = decodeIfNeeded(url)
+
   // 已是本地绝对路径
-  if (isLocalAbsolutePath(url)) {
-    return url
+  if (isLocalAbsolutePath(decoded)) {
+    return decoded
   }
 
   // 相对路径：基于当前文件所在目录解析
@@ -63,7 +80,7 @@ export function resolveMarkdownImagePath(
   }
 
   // 归一化：去掉前导 ./，反斜杠转正斜杠（与 resolveFilePath 行为一致）
-  const normalizedUrl = url.replace(/^\.\//, '').replace(/\\/g, '/')
+  const normalizedUrl = decoded.replace(/^\.\//, '').replace(/\\/g, '/')
 
   const urlParts = normalizedUrl.split('/')
   const dirParts = fileDir.split('/')
