@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand'
 import { logger } from '@/lib/logger'
-import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory } from '@/lib/tauri'
+import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory, getSessionState } from '@/lib/tauri'
 import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
@@ -14,6 +14,8 @@ export interface WorkspaceState {
   rootPath: string | null
   workspaceFolders: string[]
   currentWorkspacePath: string | null
+  /** 上次会话持久化的目录路径（与 workspaceMode 配对），initMode 时从 session 读取 */
+  sessionContextPath: string | null
   isLoading: boolean
   error: string | null
   setRootPath: (path: string | null) => void
@@ -35,6 +37,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   rootPath: null,
   workspaceFolders: [],
   currentWorkspacePath: null,
+  sessionContextPath: null,
   isLoading: false,
   error: null,
   setRootPath: (path) => set({ rootPath: path }),
@@ -80,18 +83,38 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const { workspaceMode } = useUIStore.getState()
       const fileTreeStore = useFileTreeStore.getState()
 
+      // 优先使用上次会话持久化的目录路径（与 workspaceMode 配对），history 仅作回退
+      const { sessionContextPath } = get()
       if (workspaceMode === 'workspace') {
-        const workspacePath = history.find(p => p.endsWith('.swallow-workspace'))
+        const workspacePath = sessionContextPath || history.find(p => p.endsWith('.swallow-workspace'))
         if (workspacePath) {
           await get().loadWorkspaceFile(workspacePath)
+          // sessionContextPath 指向的 workspace 文件可能已被删除：
+          // 加载失败（currentWorkspacePath 置 null）时降级回 history 中其他条目
+          if (get().currentWorkspacePath === null) {
+            const fallback = history.find(p => p.endsWith('.swallow-workspace') && p !== workspacePath)
+            if (fallback) {
+              logger.warn('workspace-store', `Session workspace file unavailable, falling back to history: ${workspacePath}`)
+              await get().loadWorkspaceFile(fallback)
+            }
+          }
         } else {
           set({ workspaceFolders: [], currentWorkspacePath: null })
           fileTreeStore.clearAll()
         }
       } else {
-        const folderPath = history.find(p => !p.endsWith('.swallow-workspace'))
+        const folderPath = sessionContextPath || history.find(p => !p.endsWith('.swallow-workspace'))
         if (folderPath) {
           await get().openFolder(folderPath)
+          // sessionContextPath 指向的目录可能已不存在：
+          // openFolder 失败（rootPath 置 null）时降级回 history 中其他条目
+          if (get().rootPath === null) {
+            const fallback = history.find(p => !p.endsWith('.swallow-workspace') && p !== folderPath)
+            if (fallback) {
+              logger.warn('workspace-store', `Session folder unavailable, falling back to history: ${folderPath}`)
+              await get().openFolder(fallback)
+            }
+          }
         } else {
           set({ rootPath: null })
           fileTreeStore.clearAll()
@@ -245,7 +268,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
   initMode: async () => {
+    // 优先使用上次会话持久化的目录上下文（mode 与 path 配对保存），
+    // 避免 folder_history 顶部被普通文件夹污染后模式误判导致 tab 恢复全灭；
+    // 旧数据无该记录时回退 folder_history 推断（兼容行为）
+    try {
+      const states = await getSessionState()
+      if (states.sessionDirContext) {
+        const ctx = JSON.parse(states.sessionDirContext) as { mode: string; path: string }
+        if ((ctx.mode === 'folder' || ctx.mode === 'workspace') && ctx.path) {
+          useUIStore.getState().setWorkspaceMode(ctx.mode)
+          set({ sessionContextPath: ctx.path })
+          return
+        }
+      }
+    } catch (e) {
+      // 解析失败回退历史推断
+      logger.debug('workspace-store', 'sessionDirContext parse failed, fallback to history', e)
+    }
     await useUIStore.getState().initWorkspaceMode()
+    set({ sessionContextPath: null })
   },
   // 启动后台服务：文件监听、frontmatter 扫描、历史保存
   // 必须在编辑器就绪后调用，避免占用后端资源阻塞关键路径

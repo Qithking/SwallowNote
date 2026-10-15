@@ -18,9 +18,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, PullResult } from '@/stores/git'
-import { gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete } from '@/lib/tauri'
+import { gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitAttachBranchToHead, gitSwitchToLocalBranch } from '@/lib/tauri'
 import { withCredentialFallback, commitAndPushRepo } from '@/lib/git/service'
-import { GitErrorCode } from '@/lib/git/errors'
+import { GitErrorCode, parseDivergedInfo } from '@/lib/git/errors'
+import { DetachedHeadDivergedDialog } from '@/components/Git/DetachedHeadDivergedDialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -205,6 +206,15 @@ function CommitSection({
     repoName: string
   }>({ open: false, repoPath: '', repoName: '' })
   const [isPushingWithCredentials, setIsPushingWithCredentials] = useState(false)
+  const [divergedDialog, setDivergedDialog] = useState<{
+    open: boolean
+    repoPath: string
+    repoName: string
+    branch: string
+    localCommits: number
+    remoteCommits: number
+  }>({ open: false, repoPath: '', repoName: '', branch: '', localCommits: 0, remoteCommits: 0 })
+  const [isResolvingDiverged, setIsResolvingDiverged] = useState(false)
   const showToast = useUIStore((s) => s.showToast)
   const { t } = useTranslation()
 
@@ -269,7 +279,23 @@ function CommitSection({
       const code = r.errorCode ?? GitErrorCode.Unknown
       const errorMessage = r.error || ''
       // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
-      if (code === GitErrorCode.DetachedHead) {
+      if (code === GitErrorCode.DetachedHeadDiverged) {
+        // 分叉需用户决策，弹对话框让用户选择
+        const info = parseDivergedInfo(errorMessage)
+        failCount++
+        errorDetails.push(`${repo.name}: ${t('git.detachedHeadDiverged')}`)
+        errorPaths.push(repo.path)
+        if (info) {
+          setDivergedDialog({
+            open: true,
+            repoPath: repo.path,
+            repoName: repo.name,
+            branch: info.branch,
+            localCommits: info.localCommits,
+            remoteCommits: info.remoteCommits,
+          })
+        }
+      } else if (code === GitErrorCode.DetachedHead) {
         failCount++
         errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
         errorPaths.push(repo.path)
@@ -332,6 +358,27 @@ function CommitSection({
       showToast(shown + suffix, 'error')
     }
   }
+
+  // 分叉处理：attach=以当前进度为准，keep=保留本地分支；成功后自动重新同步
+  const handleResolveDiverged = async (mode: 'attach' | 'keep') => {
+    const { repoPath, repoName, branch } = divergedDialog
+    setIsResolvingDiverged(true)
+    try {
+      if (mode === 'attach') {
+        await gitAttachBranchToHead(repoPath, branch)
+      } else {
+        await gitSwitchToLocalBranch(repoPath, branch)
+      }
+      setDivergedDialog((d) => ({ ...d, open: false }))
+      await onRefresh()
+      await handleCommit()
+    } catch (e) {
+      const msg = String(e).trim()
+      showToast(`${repoName}: ${msg || t('git.unknownError')}`, 'error')
+    } finally {
+      setIsResolvingDiverged(false)
+    }
+  }
   
   return (
     <>
@@ -361,6 +408,17 @@ function CommitSection({
         repoName={credentialDialog.repoName}
         repoPath={credentialDialog.repoPath}
         isLoading={isPushingWithCredentials}
+      />
+      <DetachedHeadDivergedDialog
+        open={divergedDialog.open}
+        repoName={divergedDialog.repoName}
+        branch={divergedDialog.branch}
+        localCommits={divergedDialog.localCommits}
+        remoteCommits={divergedDialog.remoteCommits}
+        isLoading={isResolvingDiverged}
+        onAttachToHead={() => handleResolveDiverged('attach')}
+        onKeepLocal={() => handleResolveDiverged('keep')}
+        onCancel={() => setDivergedDialog((d) => ({ ...d, open: false }))}
       />
     </>
   )

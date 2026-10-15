@@ -12,6 +12,7 @@ import { flushAllEditors } from '@/lib/editor-flush'
 import { readActiveEditorScrollTop } from '@/stores/editor'
 import { attachLogger, logger } from '@/lib/logger'
 import { PluginManagerView, PluginManagerLoading, preloadPluginManager } from '@/components/PluginManagerLoading'
+import { PluginPermissionPromptHost } from '@/components/Plugin/PluginPermissionPromptHost'
 const LogViewer = lazy(() => import('@/components/LogViewer').then(m => ({ default: m.LogViewer })))
 import { StatusBar } from '@/components/StatusBar'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -187,8 +188,21 @@ function App() {
             }
 
             try {
-              const { hydratePermissionGuard } = await import('@/lib/plugin-permissions')
-              void hydratePermissionGuard(defs.map((d) => d.id))
+              const { hydratePermissionGuard, getPluginPermissions } = await import('@/lib/plugin-permissions')
+              await hydratePermissionGuard(defs.map((d) => d.id))
+              // 启动扫描：仅对"完全无授权记录"的插件自动入队授权弹窗。
+              // 有部分授权记录但权限不全的插件，在面板挂载时由门控卡片
+              // 引导用户按需授权，避免首次启动弹出过多对话框。
+              const { usePluginPermissionPromptStore } = await import('@/stores/pluginPermissionPrompt')
+              const enqueue = usePluginPermissionPromptStore.getState().enqueuePrompt
+              for (const def of defs) {
+                const declared = def.permissions ?? []
+                if (declared.length === 0) continue
+                const existing = await getPluginPermissions(def.id)
+                if (existing.length === 0) {
+                  enqueue({ pluginId: def.id, pluginName: def.name, requested: declared })
+                }
+              }
             } catch (err) {
               logger.warn('app', 'failed to hydrate permission guard:', err)
             }
@@ -585,6 +599,9 @@ function App() {
         <Suspense fallback={null}>
           <LogViewer open={logViewerVisible} onOpenChange={(o) => { if (!o) toggleLogViewer() }} />
         </Suspense>
+
+        {/* 全局插件授权对话框宿主（启动扫描 + 门控卡片共用） */}
+        <PluginPermissionPromptHost />
         </div>
       </div>
     </TooltipProvider>

@@ -35,7 +35,9 @@ pub fn fetch_stage_content(repo_path: &str, rel_path: &str, stage: u8) -> Option
 /// Helper function to get conflict content for a specific side.
 /// Handles the rebase ours/theirs swap correctly.
 /// G-14 修复：使用 is_rebase_scenario 和 fetch_stage_content 公共函数，减少重复逻辑。
-pub fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<String, String> {
+/// 返回值语义：Ok(Some(content)) = 该侧内容；Ok(None) = 该侧文件不存在
+/// （modify/delete 冲突，例如远端已删除该文件）；Err = git 命令失败或 side 非法。
+pub fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Result<Option<String>, String> {
     let is_rebasing = is_rebase_scenario(repo_path);
 
     if side == "local" {
@@ -43,43 +45,44 @@ pub fn get_conflict_content(repo_path: &str, rel_path: &str, side: &str) -> Resu
             // During rebase: REBASE_HEAD = our local commit, :3: = theirs = our local
             // G-16 修复：使用 run_git_no_trim 保留文件原始末尾换行
             if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!("REBASE_HEAD:{}", rel_path)]) {
-                if !output.is_empty() { return Ok(output); }
+                if !output.is_empty() { return Ok(Some(output)); }
             }
             if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!(":3:{}", rel_path)]) {
-                if !output.is_empty() { return Ok(output); }
+                if !output.is_empty() { return Ok(Some(output)); }
             }
         } else {
             // During merge: HEAD = our local branch, :2: = ours = our local
             if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
-                if !output.is_empty() { return Ok(output); }
+                if !output.is_empty() { return Ok(Some(output)); }
             }
             if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!(":2:{}", rel_path)]) {
-                if !output.is_empty() { return Ok(output); }
+                if !output.is_empty() { return Ok(Some(output)); }
             }
         }
-        Err(format!("Failed to get local content for {}", rel_path))
+        // 所有来源均无内容 → 该侧文件不存在（modify/delete 冲突），这是合法状态而非错误
+        Ok(None)
     } else if side == "remote" {
         if is_rebasing {
             // During rebase: HEAD = upstream/remote, :2: = ours = upstream/remote
             if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!("HEAD:{}", rel_path)]) {
-                if !output.is_empty() { return Ok(output); }
+                if !output.is_empty() { return Ok(Some(output)); }
             }
             if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!(":2:{}", rel_path)]) {
-                if !output.is_empty() { return Ok(output); }
+                if !output.is_empty() { return Ok(Some(output)); }
             }
         } else {
             // During merge: :3: = theirs = remote, MERGE_HEAD = remote
             if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!(":3:{}", rel_path)]) {
-                if !output.is_empty() { return Ok(output); }
+                if !output.is_empty() { return Ok(Some(output)); }
             }
             let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
             if merge_head.exists() {
                 if let Ok(output) = run_git_no_trim(repo_path, &["show", &format!("MERGE_HEAD:{}", rel_path)]) {
-                    if !output.is_empty() { return Ok(output); }
+                    if !output.is_empty() { return Ok(Some(output)); }
                 }
             }
         }
-        Err(format!("Failed to get remote content for {}", rel_path))
+        Ok(None)
     } else {
         Err(format!("Invalid side: {}", side))
     }

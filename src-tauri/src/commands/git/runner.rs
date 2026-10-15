@@ -1,4 +1,7 @@
-use log::error;
+use log::{error, warn};
+use std::io::Read;
+use std::process::{Child, Output, Stdio};
+use std::sync::{Arc, Mutex};
 
 /// G-08 修复：git 命令超时时间（秒）。
 /// 本地操作（status/diff/add/commit）通常秒级完成；网络操作（clone/pull/push）在弱网下可能较慢。
@@ -34,12 +37,55 @@ pub fn run_git_raw(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Resu
     }
 
     // G-08 修复：通过子线程 + channel 超时机制，防止网络操作（clone/pull/push）永久阻塞。
-    // 主线程在超时后能返回错误，子线程中已启动的 git 子进程会被 kill 释放资源。
-    let (tx, rx) = std::sync::mpsc::channel();
+    // 手动拆解 output() 内部行为：spawn 后由两个后台线程持续读取 stdout/stderr
+    // （避免管道缓冲区填满导致 git 写入阻塞），随后轮询 try_wait 等待退出。
+    // Child 以 Arc<Mutex> 共享给主线程：超时后主线程主动 kill 卡死的 git 进程释放资源。
+    let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<Output>>();
+    let (child_tx, child_rx) = std::sync::mpsc::channel::<Arc<Mutex<Child>>>();
     let mut cmd_for_thread = cmd;
     let child_handle = std::thread::spawn(move || {
-        let result = cmd_for_thread.output();
-        let _ = tx.send(result);
+        // 与 output() 内部行为对齐：stdin 关闭、stdout/stderr 用管道捕获。
+        // spawn() 默认 stdio 是 inherit，不显式设置会导致 stdout.take() 为 None、输出恒为空。
+        cmd_for_thread
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = match cmd_for_thread.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx.send(Err(e));
+                return;
+            }
+        };
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+        let stdout_reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = stdout_pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            buf
+        });
+        let stderr_reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = stderr_pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            buf
+        });
+        let shared = Arc::new(Mutex::new(child));
+        let _ = child_tx.send(Arc::clone(&shared));
+        // 轮询 try_wait 而非持锁 wait()：锁只被瞬间持有，超时分支的 kill 不会被阻塞
+        let status_result = loop {
+            match shared.lock().unwrap().try_wait() {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(e) => break Err(e),
+            }
+        };
+        let stdout = stdout_reader.join().unwrap_or_default();
+        let stderr = stderr_reader.join().unwrap_or_default();
+        let _ = tx.send(status_result.map(|status| Output { status, stdout, stderr }));
     });
 
     match rx.recv_timeout(std::time::Duration::from_secs(GIT_COMMAND_TIMEOUT_SECS)) {
@@ -47,17 +93,19 @@ pub fn run_git_raw(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Resu
             if output.status.success() {
                 Ok(output.stdout)
             } else {
+                // 附加 exit code 方便诊断（如 [exit 128]），上层匹配均为 contains，前缀不影响
+                let exit_code = output.status.code().unwrap_or(-1);
                 let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
                 if stderr.is_empty() {
                     // 如果 stderr 为空，尝试从 stdout 获取错误信息
                     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if !stdout.is_empty() {
-                        Err(stdout)
+                        Err(format!("[exit {}] {}", exit_code, stdout))
                     } else {
-                        Err("Git command failed with no output".to_string())
+                        Err(format!("[exit {}] Git command failed with no output", exit_code))
                     }
                 } else {
-                    Err(stderr)
+                    Err(format!("[exit {}] {}", exit_code, stderr))
                 }
             }
         }
@@ -66,14 +114,34 @@ pub fn run_git_raw(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Resu
             Err(format!("Failed to execute git: {}", e))
         }
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            // 超时：子线程仍在等待 git 进程,但 Tauri 命令线程已返回错误,不再等待子线程结束。
-            // 子线程中的 cmd.output() 会随 git 进程自然结束而返回,我们通过 forget 让它在后台自然退出,
-            // 避免 drop child_handle 导致 JoinHandle 析构时 panic(子线程仍持有 cmd_for_thread)。
-            // 注意:不主动 kill git 进程,按 AC-15 保持与原 git.rs 完全等价的行为。
+            // 超时：主动 kill git 子进程释放资源（子线程读管道收到 EOF、try_wait 返回后自然结束）。
+            // child_rx 中没有共享句柄有两种情况：
+            // - 尚未 spawn 成功（进程不存在），无需 kill；
+            // - 极小概率已 spawn 成功但尚未 send（亚毫秒窗口恰好撞上超时），此时不 kill，
+            //   子线程会持有 Child 轮询直到进程自然退出，warn 记录供排查。
             error!(
                 "[ERROR] run_git_raw: git command timed out after {}s (path={}, args={:?})",
                 GIT_COMMAND_TIMEOUT_SECS, path, args
             );
+            match child_rx.try_recv() {
+                Ok(child) => {
+                    if let Ok(mut c) = child.lock() {
+                        let _ = c.kill();
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    warn!(
+                        "run_git_raw: timeout hit before child handle was shared; \
+                         git process may keep running until it exits on its own \
+                         (path={}, args={:?})",
+                        path, args
+                    );
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // 子线程已结束（spawn 失败或 panic），无进程可 kill
+                }
+            }
+            // 不等待子线程结束，JoinHandle 通过 forget 丢弃
             std::mem::forget(child_handle);
             Err(format!(
                 "Git command timed out after {} seconds. Please check your network connection and try again.",

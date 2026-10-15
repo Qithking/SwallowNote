@@ -2,11 +2,11 @@ use std::path::Path;
 use super::models::{CommitPushResult, GitFileLogEntry};
 use super::runner::{run_git, run_git_no_trim};
 use super::paths::to_git_path;
-use super::branch::{is_detached_head, fix_detached_head, should_use_rebase, resolve_push_target_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state};
+use super::branch::{is_detached_head, fix_detached_head, should_use_rebase, resolve_push_target_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::{get_remote_url, parse_gitmodules};
 use super::errors::{is_conflict_error, is_auth_error};
 use crate::i18n;
-use log::{debug, error};
+use log::{debug, error, warn};
 
 /// Stage all changes and commit
 /// G-02 修复：返回 bool 表示是否有实际提交（true=已提交，false=无改动），
@@ -27,6 +27,12 @@ pub async fn git_commit(path: String, message: String) -> Result<bool, String> {
     // G-06 修复：检测 detached HEAD，不自动切换分支，返回错误码让前端提示用户
     if is_detached_head(&path) {
         return Err("DETACHED_HEAD:Repository is in detached HEAD state. Please checkout a branch first.".to_string());
+    }
+
+    // stash pop 冲突等场景不产生 rebase/merge 状态目录，但 index 存在 unmerged 条目；
+    // add -A 会把含冲突标记的文件入库，必须拦截并让用户经冲突面板解决
+    if has_real_conflicts(&path) {
+        return Err("REBASE_CONFLICT:Unresolved conflict files exist in the repository".to_string());
     }
 
     // Stage all changes
@@ -66,12 +72,23 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<Commit
         cleanup_stale_rebase_state(&path);
     }
 
-    // G-06 修复：检测到 detached HEAD 时自动修复，必须在 cleanup 之后检查才有效。
+    // G-06 修复：必须在 cleanup 之后检测；修复失败不阻塞（reflog 可恢复，下次同步重试）。
     if is_detached_head(&path) {
-        fix_detached_head(&path).map_err(|e| format!("Failed to prepare commit: {}", e))?;
+        if let Err(e) = fix_detached_head(&path) {
+            // 分叉需用户决策，上抛前端弹框
+            if is_diverged_error(&e) {
+                return Err(e);
+            }
+            warn!("[WARN] git_commit_and_push: fix_detached_head failed ({}), continuing with commit", e);
+        }
     }
 
     // Stage all changes including submodules
+    // stash pop 冲突等场景不产生 rebase/merge 状态目录，但 index 存在 unmerged 条目；
+    // add -A 会把含冲突标记的文件入库，必须拦截并让用户经冲突面板解决
+    if has_real_conflicts(&path) {
+        return Err("REBASE_CONFLICT:Unresolved conflict files exist in the repository".to_string());
+    }
     run_git(&path, &["add", "-A"]).map_err(|e| format!("Failed to stage: {}", e))?;
 
     // 使用 --porcelain 输出避免依赖本地化文本（如 "modified content"），保证跨语言环境稳定。
@@ -154,7 +171,13 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<Commit
         // 防御性检查：pull 前再次确认 HEAD 未 detached。
         // 上方 line 53-63 已处理 stale state 场景，此处为安全冗余。
         if is_detached_head(&path) {
-            fix_detached_head(&path).map_err(|e| format!("Failed to prepare pull: {}", e))?;
+            if let Err(e) = fix_detached_head(&path) {
+                // 分叉需用户决策，上抛前端弹框
+                if is_diverged_error(&e) {
+                    return Err(e);
+                }
+                warn!("[WARN] git_commit_and_push: fix_detached_head before pull failed ({}), continuing", e);
+            }
         }
 
         // Pull first to integrate remote changes before pushing
@@ -177,14 +200,20 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<Commit
                 return Err(format!("AUTH_REQUIRED:{}", e));
             }
             // Non-conflict, non-auth error (network, zlib, etc.):
-            // Clean up stale rebase state that pull --rebase may have left
-            // and report error without triggering conflict UI
+            // Clean up stale rebase state that pull --rebase may have left.
+            // commit 已成功，pull 失败不阻塞，继续 push。
+            warn!("[WARN] git_commit_and_push: pull failed ({}), attempting direct push", e);
             cleanup_stale_rebase_state(&path);
-            return Err(format!("Pull failed: {}", e));
         }
 
         // Fix detached HEAD that rebase may have caused（rebase 后修复 detached HEAD 是合理场景，保留）
-        fix_detached_head(&path)?;
+        if let Err(e) = fix_detached_head(&path) {
+            // 分叉需用户决策，上抛前端弹框
+            if is_diverged_error(&e) {
+                return Err(e);
+            }
+            warn!("[WARN] git_commit_and_push: fix_detached_head after pull failed ({}), continuing", e);
+        }
 
         // Check again after pull - if we're now in a conflict state, don't push
         if is_rebase_or_merge_in_progress(&path) {
@@ -210,25 +239,32 @@ pub async fn git_commit_and_push(path: String, message: String) -> Result<Commit
                         if let Err(retry_err) = retry {
                             let retry_lower = retry_err.to_lowercase();
                             if retry_lower.contains("not currently on a branch") || retry_lower.contains("detached head") {
-                                // Still detached after retry — return original error
-                                return Err(format!("Failed to push: {}", e));
+                                // Still detached after retry — commit succeeded, push deferred
+                                warn!("[WARN] git_commit_and_push: push failed after detached HEAD retry ({}), commit succeeded. Will retry on next sync.", retry_err);
+                                return Ok(CommitPushResult { committed, pushed: false });
                             }
                             if is_auth_error(&retry_err) {
                                 return Err(format!("AUTH_REQUIRED:{}", retry_err));
                             }
-                            return Err(format!("Failed to push: {}", retry_err));
+                            // Non-auth push retry failure: commit succeeded, push deferred
+                            warn!("[WARN] git_commit_and_push: push retry failed ({}), commit succeeded. Will retry on next sync.", retry_err);
+                            return Ok(CommitPushResult { committed, pushed: false });
                         }
                         pushed = true;
                     } else {
                         if is_auth_error(&e) {
                             return Err(format!("AUTH_REQUIRED:{}", e));
                         }
-                        return Err(format!("Failed to push: {}", e));
+                        // detached HEAD but no branch resolved: commit succeeded, push deferred
+                        warn!("[WARN] git_commit_and_push: detached HEAD but no branch resolved ({}), commit succeeded. Will retry on next sync.", e);
+                        return Ok(CommitPushResult { committed, pushed: false });
                     }
                 } else if is_auth_error(&e) {
                     return Err(format!("AUTH_REQUIRED:{}", e));
                 } else {
-                    return Err(format!("Failed to push: {}", e));
+                    // push 失败但 commit 已成功：返回 pushed:false，下次同步重试。
+                    warn!("[WARN] git_commit_and_push: push failed ({}), commit succeeded. Will retry on next sync.", e);
+                    return Ok(CommitPushResult { committed, pushed: false });
                 }
             }
         }
@@ -292,6 +328,40 @@ fn find_git_root(path: &str) -> Option<String> {
     }
 }
 
+/// auto-save 是否 amend 合并进上一个同文件 Auto-save 提交（避免提交爆炸导致 rebase 连续冲突）。
+/// 需同时满足：非 detached HEAD、最新提交为同文件 Auto-save、暂存区仅该文件、最新提交未推送。
+fn should_amend_last_auto_save(repo_path: &str, file_name: &str, git_path: &str) -> bool {
+    match run_git(repo_path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        Ok(branch) if branch.trim() != "HEAD" => {}
+        _ => return false,
+    }
+
+    let expected_msg = format!("Auto-save: {}", file_name);
+    match run_git(repo_path, &["log", "-1", "--pretty=%s"]) {
+        Ok(msg) if msg.trim() == expected_msg => {}
+        _ => return false,
+    }
+
+    // 关闭 quotepath：run_git 强制 LC_ALL=C，git 默认会把中文路径输出为八进制转义，无法与 UTF-8 比较
+    let staged = match run_git(
+        repo_path,
+        &["-c", "core.quotepath=false", "diff", "--cached", "--name-only"],
+    ) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let staged_files: Vec<&str> = staged.lines().filter(|l| !l.trim().is_empty()).collect();
+    if staged_files.len() != 1 || staged_files[0].trim() != git_path {
+        return false;
+    }
+
+    // 计数 >0 表示已领先 upstream；无 upstream（从未推送）视为可 amend
+    match run_git(repo_path, &["rev-list", "--count", "@{upstream}..HEAD"]) {
+        Ok(count) => count.trim().parse::<u64>().unwrap_or(0) > 0,
+        Err(_) => true,
+    }
+}
+
 /// Auto commit a single file (local only, no push)
 #[tauri::command]
 pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
@@ -317,10 +387,17 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
         return Ok(()); // Skip silently during conflict resolution
     }
 
-    // Auto-fix detached HEAD by switching back to the correct branch
+    // stash pop 冲突等场景不产生上述状态目录，但 index 存在 unmerged 条目；
+    // add 会把含冲突标记的文件入库，同样静默跳过，等用户经冲突面板解决
+    if has_real_conflicts(repo_path) {
+        debug!("[INFO] git_auto_commit: unmerged files exist (e.g. stash pop conflict), skipping");
+        return Ok(());
+    }
+
+    // Auto-fix detached HEAD by switching back to the correct branch（修复失败不阻塞文件保存）
     if let Err(e) = fix_detached_head(repo_path) {
-        error!("[ERROR] git_auto_commit: fix_detached_head failed: {}", e);
-        return Err(e);
+        error!("[ERROR] git_auto_commit: fix_detached_head failed: {}, skipping auto-commit", e);
+        return Ok(());
     }
 
     let relative_path = Path::new(&file_path)
@@ -348,7 +425,12 @@ pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
     }
 
     // Commit
-    match run_git(repo_path, &["commit", "-m", &commit_message]) {
+    let commit_result = if should_amend_last_auto_save(repo_path, &file_name, &git_path) {
+        run_git(repo_path, &["commit", "--amend", "--no-edit"])
+    } else {
+        run_git(repo_path, &["commit", "-m", &commit_message])
+    };
+    match commit_result {
         Ok(_) => {
             debug!("[INFO] git_auto_commit: git commit succeeded");
             Ok(())
@@ -674,5 +756,207 @@ pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
                 Err(format!("Failed to force push: {}", e))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::test_utils::{git_cmd, setup_conflict_repo};
+
+    /// 取指定 rev 的完整 hash（测试辅助）
+    fn rev_parse(repo: &std::path::Path, rev: &str) -> String {
+        let out = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["rev-parse", rev])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// 构造双向分叉仓库：bare origin + 本地 main 领先一个提交 + detached HEAD 上再做一个提交。
+    /// 用于端到端验证 fix_detached_head → DETACHED_HEAD_DIVERGED → 前端弹框链路。
+    fn setup_diverged_repo() -> (tempfile::TempDir, tempfile::TempDir, std::path::PathBuf) {
+        let remote_tmp = tempfile::tempdir().unwrap();
+        git_cmd(remote_tmp.path(), &["init", "--bare", "-q", "-b", "main"]);
+        let work_tmp = setup_conflict_repo();
+        let repo = work_tmp.path().to_path_buf();
+        git_cmd(&repo, &["remote", "add", "origin", remote_tmp.path().to_str().unwrap()]);
+        git_cmd(&repo, &["push", "-q", "origin", "main"]);
+        // origin/HEAD 必须是符号引用，应用侧通过 symbolic-ref 读取
+        git_cmd(&repo, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+
+        // main 前进一个提交
+        std::fs::write(repo.join("m.txt"), "m\n").unwrap();
+        git_cmd(&repo, &["add", "m.txt"]);
+        git_cmd(&repo, &["commit", "-q", "-m", "main-only"]);
+
+        // 回到最初提交，在 detached HEAD 上再做一个提交 → 与 main 双向分叉
+        let base_hash = rev_parse(&repo, "HEAD~1");
+        git_cmd(&repo, &["checkout", "-q", &base_hash]);
+        std::fs::write(repo.join("h.txt"), "h\n").unwrap();
+        git_cmd(&repo, &["add", "h.txt"]);
+        git_cmd(&repo, &["commit", "-q", "-m", "head-only"]);
+
+        (remote_tmp, work_tmp, repo)
+    }
+
+    /// 端到端：分叉场景 git_commit_and_push 必须上抛 DETACHED_HEAD_DIVERGED（前端弹框的唯一触发路径）。
+    #[tokio::test]
+    async fn test_git_commit_and_push_surfaces_diverged_error() {
+        let (_remote, _work, repo) = setup_diverged_repo();
+        assert!(is_detached_head(repo.to_str().unwrap()), "precondition: HEAD should be detached");
+
+        let res = git_commit_and_push(repo.to_str().unwrap().to_string(), "test".to_string()).await;
+
+        let err = match res {
+            Err(e) => e,
+            Ok(_) => panic!("must return diverged error instead of warn-swallow"),
+        };
+        assert!(is_diverged_error(&err), "expected DETACHED_HEAD_DIVERGED prefix, got: {}", err);
+        assert!(err.starts_with("DETACHED_HEAD_DIVERGED:main:1:1"), "unexpected payload: {}", err);
+    }
+
+    /// 回归：detached HEAD 仅落后于本地分支（非分叉）时必须自动修复成功。
+    #[tokio::test]
+    async fn test_git_commit_and_push_succeeds_when_only_behind() {
+        let remote_tmp = tempfile::tempdir().unwrap();
+        git_cmd(remote_tmp.path(), &["init", "--bare", "-q", "-b", "main"]);
+        let work_tmp = setup_conflict_repo();
+        let repo = work_tmp.path().to_path_buf();
+        git_cmd(&repo, &["remote", "add", "origin", remote_tmp.path().to_str().unwrap()]);
+        git_cmd(&repo, &["push", "-q", "origin", "main"]);
+        git_cmd(&repo, &["branch", "--set-upstream-to=origin/main", "main"]);
+        git_cmd(&repo, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+
+        let base_hash = rev_parse(&repo, "HEAD");
+        std::fs::write(repo.join("next.txt"), "next\n").unwrap();
+        git_cmd(&repo, &["add", "next.txt"]);
+        git_cmd(&repo, &["commit", "-q", "-m", "ahead"]);
+        // detach 到旧提交（HEAD 仅落后，无独有提交 → 非分叉）
+        git_cmd(&repo, &["checkout", "-q", &base_hash]);
+
+        // 制造一个未提交改动，验证 stash → checkout → pop 全链路不丢数据
+        std::fs::write(repo.join("dirty.txt"), "keep\n").unwrap();
+
+        let res = git_commit_and_push(repo.to_str().unwrap().to_string(), "msg".to_string()).await;
+        let (committed, pushed) = match res {
+            Ok(r) => (r.committed, r.pushed),
+            Err(e) => panic!("should succeed for non-diverged case, got error: {}", e),
+        };
+        assert!(committed, "should produce a real commit");
+        assert!(pushed, "should push successfully after auto fix");
+
+        // 分支应已切回 main（不再 detached）
+        assert!(!is_detached_head(repo.to_str().unwrap()), "HEAD should be reattached to main");
+    }
+
+    /// 统计当前 HEAD 的提交总数（测试辅助）
+    fn commit_count(repo: &std::path::Path) -> u64 {
+        let out = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["rev-list", "--count", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
+    }
+
+    /// A1：同一文件连续 auto-save（仓库从未推送）应 amend 合并为一个提交。
+    #[tokio::test]
+    async fn test_git_auto_commit_amends_consecutive_save_of_same_file() {
+        let work_tmp = setup_conflict_repo();
+        let repo = work_tmp.path();
+        let file = repo.join("todo.md");
+        std::fs::write(&file, "v1\n").unwrap();
+
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        assert_eq!(commit_count(repo), 2, "first auto-save creates a commit (base + 1)");
+
+        std::fs::write(&file, "v2\n").unwrap();
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        assert_eq!(
+            commit_count(repo), 2,
+            "consecutive auto-save of the same unpushed file must be amended into one commit"
+        );
+    }
+
+    /// A1-回归：非 ASCII（中文）文件名同样必须 amend 合并（quotepath 未关闭时路径比较会失效）。
+    #[tokio::test]
+    async fn test_git_auto_commit_amends_consecutive_save_with_non_ascii_filename() {
+        let work_tmp = setup_conflict_repo();
+        let repo = work_tmp.path();
+        let file = repo.join("我的笔记.md");
+        std::fs::write(&file, "v1\n").unwrap();
+
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        assert_eq!(commit_count(repo), 2, "first auto-save creates a commit (base + 1)");
+
+        std::fs::write(&file, "v2\n").unwrap();
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        assert_eq!(
+            commit_count(repo), 2,
+            "consecutive auto-save of a non-ASCII file must also be amended"
+        );
+    }
+
+    /// A2：上一个 Auto-save 提交已推送后禁止 amend（改写已推送历史会制造分叉），必须新建提交。
+    #[tokio::test]
+    async fn test_git_auto_commit_does_not_amend_pushed_commit() {
+        let remote_tmp = tempfile::tempdir().unwrap();
+        git_cmd(remote_tmp.path(), &["init", "--bare", "-q", "-b", "main"]);
+        let work_tmp = setup_conflict_repo();
+        let repo = work_tmp.path();
+        git_cmd(repo, &["remote", "add", "origin", remote_tmp.path().to_str().unwrap()]);
+        git_cmd(repo, &["push", "-q", "origin", "main"]);
+        git_cmd(repo, &["branch", "--set-upstream-to=origin/main", "main"]);
+
+        let file = repo.join("todo.md");
+        std::fs::write(&file, "v1\n").unwrap();
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        git_cmd(repo, &["push", "-q"]); // 该 Auto-save 已推送
+
+        std::fs::write(&file, "v2\n").unwrap();
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        assert_eq!(
+            commit_count(repo), 3,
+            "auto-save after the previous one was pushed must create a new commit"
+        );
+    }
+
+    /// A3：最新提交不是同文件 Auto-save（用户手动提交）时必须新建提交，不能 amend 进手动提交。
+    #[tokio::test]
+    async fn test_git_auto_commit_does_not_amend_manual_commit() {
+        let work_tmp = setup_conflict_repo();
+        let repo = work_tmp.path();
+        std::fs::write(repo.join("manual.txt"), "m\n").unwrap();
+        git_cmd(repo, &["add", "manual.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "manual work"]);
+
+        let file = repo.join("todo.md");
+        std::fs::write(&file, "v1\n").unwrap();
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        assert_eq!(commit_count(repo), 3, "must not amend a non-auto-save commit");
+    }
+
+    /// A4：暂存区含其他文件时禁止 amend，防止把用户在别处 git add 的内容静默卷进被改写的提交。
+    #[tokio::test]
+    async fn test_git_auto_commit_does_not_amend_when_other_file_staged() {
+        let work_tmp = setup_conflict_repo();
+        let repo = work_tmp.path();
+        let file = repo.join("todo.md");
+        std::fs::write(&file, "v1\n").unwrap();
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        assert_eq!(commit_count(repo), 2);
+
+        // 用户在终端手动 add 了另一个文件，同时 todo.md 又有新改动
+        std::fs::write(repo.join("other.md"), "o\n").unwrap();
+        git_cmd(repo, &["add", "other.md"]);
+        std::fs::write(&file, "v2\n").unwrap();
+
+        git_auto_commit(file.to_str().unwrap().to_string()).await.unwrap();
+        assert_eq!(
+            commit_count(repo), 3,
+            "must create a new commit instead of amending unrelated staged changes"
+        );
     }
 }

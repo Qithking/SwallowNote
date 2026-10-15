@@ -11,6 +11,8 @@ export enum GitErrorCode {
   AuthRequired = 'AUTH_REQUIRED',
   RebaseConflict = 'REBASE_CONFLICT',
   DetachedHead = 'DETACHED_HEAD',
+  /** 本地分支与当前 HEAD 已分叉，自动修复会丢数据，需用户弹框决策 */
+  DetachedHeadDiverged = 'DETACHED_HEAD_DIVERGED',
   SubmoduleUncommitted = 'SUBMODULE_UNCOMMITTED',
   SubmoduleRefNeedsUpdate = 'SUBMODULE_REF_NEEDS_UPDATE',
   RebaseContinueFailed = 'REBASE_CONTINUE_FAILED',
@@ -32,6 +34,7 @@ export interface GitError {
 const PREFIX_TO_CODE: Array<[string, GitErrorCode]> = [
   ['AUTH_REQUIRED:', GitErrorCode.AuthRequired],
   ['REBASE_CONFLICT:', GitErrorCode.RebaseConflict],
+  ['DETACHED_HEAD_DIVERGED:', GitErrorCode.DetachedHeadDiverged],
   ['DETACHED_HEAD:', GitErrorCode.DetachedHead],
   ['SUBMODULE_UNCOMMITTED:', GitErrorCode.SubmoduleUncommitted],
   ['SUBMODULE_REF_NEEDS_UPDATE:', GitErrorCode.SubmoduleRefNeedsUpdate],
@@ -51,6 +54,24 @@ export function parseGitError(error: unknown): GitError {
     }
   }
   return { code: GitErrorCode.Unknown, message: raw, raw }
+}
+
+/** DETACHED_HEAD_DIVERGED 的附加负载：分支名 + 双方独有提交数 */
+export interface DetachedHeadDivergedInfo {
+  branch: string
+  localCommits: number
+  remoteCommits: number
+}
+
+/** 解析分叉错误负载 "branch:local:remote"，兼容带/不带错误码前缀，格式不符返回 null */
+export function parseDivergedInfo(message: string): DetachedHeadDivergedInfo | null {
+  const prefix = 'DETACHED_HEAD_DIVERGED:'
+  const body = message.startsWith(prefix) ? message.slice(prefix.length) : message
+  const parts = body.split(':')
+  if (parts.length !== 3) return null
+  const [branch, localStr, remoteStr] = parts
+  if (!branch) return null
+  return { branch, localCommits: Number(localStr) || 0, remoteCommits: Number(remoteStr) || 0 }
 }
 
 /** 判断 commit+push 结果是否为冲突（需用户介入解决）：按错误码或错误信息分流 */

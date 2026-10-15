@@ -32,10 +32,12 @@ fi
 # 创建目标目录
 mkdir -p "$PLUGIN_DIR/backend"
 
-# 复制前端产物
+# 复制前端产物（settings.json 可选，与 package.sh 语义一致）
 cp "$SOURCE_DIR/dist/index.js" "$PLUGIN_DIR/"
 cp "$SOURCE_DIR/manifest.json" "$PLUGIN_DIR/"
-cp "$SOURCE_DIR/settings.json" "$PLUGIN_DIR/"
+if [ -f "$SOURCE_DIR/settings.json" ]; then
+  cp "$SOURCE_DIR/settings.json" "$PLUGIN_DIR/"
+fi
 
 # 复制后端二进制并设置可执行权限
 cp "$SOURCE_DIR/backend/plugin_com.swallownote.secret-disk" "$PLUGIN_DIR/backend/"

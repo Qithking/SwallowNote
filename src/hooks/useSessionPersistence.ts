@@ -79,9 +79,20 @@ export function useSessionPersistence() {
         logger.error('session', 'Failed to save window size:', e)
       }
 
+      // 持久化目录上下文（mode 与 path 配对）：启动恢复时优先还原上次会话的
+      // 目录，避免 folder_history 顶部被普通文件夹污染后模式误判导致 tab 全灭
+      const workspaceState = useWorkspaceStore.getState()
+      const contextPath = uiState.workspaceMode === 'workspace'
+        ? workspaceState.currentWorkspacePath
+        : workspaceState.rootPath
+      const sessionDirContext = contextPath
+        ? JSON.stringify({ mode: uiState.workspaceMode, path: contextPath })
+        : ''
+
       const updates: Record<string, string> = {
         tabs: JSON.stringify(tabsData),
         activeTabId,
+        sessionDirContext,
         expanded: JSON.stringify(Array.from(fileTreeState.expanded)),
         selectedPath: fileTreeState.selectedPath || '',
         sidebarWidth: String(uiState.sidebarWidth),
@@ -266,6 +277,13 @@ export function useSessionPersistence() {
           } catch (e) {
             logger.error('session', 'Failed to validate conflict tabs during restore:', e)
           }
+        } else if (tabsData.length > 0) {
+          // 全部 tab 被目录过滤时不应无声失败（曾导致"重启后 tab 概率性全灭"难排查）
+          logger.warn(
+            'session',
+            `All ${tabsData.length} persisted tabs filtered out by directory context ` +
+            `(mode=${workspaceMode}, root=${rootPath}, workspaceFolders=${JSON.stringify(workspaceFolders)})`,
+          )
         }
       }
 

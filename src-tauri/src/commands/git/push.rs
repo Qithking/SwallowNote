@@ -1,8 +1,8 @@
 use super::runner::{run_git, run_git_with_env};
-use super::branch::{is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, fix_detached_head, resolve_push_target_branch};
+use super::branch::{is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, fix_detached_head, resolve_push_target_branch, is_diverged_error};
 use super::askpass::{create_askpass_script, build_askpass_env};
 use super::errors::is_auth_error;
-use log::debug;
+use log::{debug, warn};
 
 /// Push commits to remote
 /// Handles detached HEAD state by using HEAD:<branch> format
@@ -105,7 +105,14 @@ pub async fn git_push_with_credentials(path: String, username: String, password:
 #[tauri::command]
 pub async fn git_force_push(path: String) -> Result<(), String> {
     // 修复 detached HEAD（必须在 commit 之前，否则 commit 可能失败）
-    fix_detached_head(&path)?;
+    if let Err(e) = fix_detached_head(&path) {
+        // 分叉需用户决策，上抛前端弹框
+        if is_diverged_error(&e) {
+            return Err(e);
+        }
+        warn!("[WARN] git_force_push: fix_detached_head failed ({}), skipping", e);
+        return Ok(());
+    }
 
     // 检查是否有未提交的改动，有则先 commit
     let status_output = run_git(&path, &["status", "--porcelain"])?;
@@ -169,7 +176,14 @@ pub async fn git_force_push(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn git_force_push_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
     // 修复 detached HEAD（必须在 commit 之前）
-    fix_detached_head(&path)?;
+    if let Err(e) = fix_detached_head(&path) {
+        // 分叉需用户决策，上抛前端弹框
+        if is_diverged_error(&e) {
+            return Err(e);
+        }
+        warn!("[WARN] git_force_push_with_credentials: fix_detached_head failed ({}), skipping", e);
+        return Ok(());
+    }
 
     // 检查是否有未提交的改动，有则先 commit
     let status_output = run_git(&path, &["status", "--porcelain"])?;

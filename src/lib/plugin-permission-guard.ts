@@ -26,6 +26,27 @@ export class PluginPermissionDeniedError extends Error {
 /** 按插件 id 缓存授权集 */
 const grants = new Map<string, Set<PluginPermission>>()
 
+// ── 订阅机制：授权集变化时通知 React 组件重新渲染 ──
+let permissionVersion = 0
+const permissionListeners = new Set<() => void>()
+
+/** 授权集变化时通知所有订阅者（版本号自增） */
+function notifyPermissionChange(): void {
+  permissionVersion++
+  for (const listener of permissionListeners) listener()
+}
+
+/** 订阅授权集变化，返回取消订阅函数（供 useSyncExternalStore 使用） */
+export function subscribePermissionChanges(listener: () => void): () => void {
+  permissionListeners.add(listener)
+  return () => { permissionListeners.delete(listener) }
+}
+
+/** 获取当前授权集版本号（useSyncExternalStore 的快照函数） */
+export function getPermissionsVersion(): number {
+  return permissionVersion
+}
+
 // 硬编码前缀避免循环依赖
 const PERMISSIONS_KEY_PREFIX = 'plugin_permissions_'
 
@@ -78,16 +99,19 @@ eagerHydrateFromLocalStorage()
 /** 替换插件授权集 */
 export function setGranted(pluginId: string, perms: PluginPermission[]): void {
   grants.set(pluginId, new Set(perms))
+  notifyPermissionChange()
 }
 
 /** 卸载时移除插件缓存 */
 export function clearGranted(pluginId: string): void {
   grants.delete(pluginId)
+  notifyPermissionChange()
 }
 
 /** 清空全部缓存（测试用） */
 export function clearAll(): void {
   grants.clear()
+  notifyPermissionChange()
 }
 
 /** 同步热路径检查，拒绝时抛错 */
