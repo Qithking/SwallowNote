@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
-use log::error;
+use log::{debug, error};
 
 #[derive(Serialize)]
 pub struct FileMetadata {
@@ -125,7 +125,13 @@ fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) 
     {
         let entry = match entry_result {
             Ok(e) => e,
-            Err(_) => continue,
+            // 该 entry 被跳过（可能是权限不足或符号链接失效），debug 级别记录方便排查。
+            // 显式输出失败 entry 的路径；jwalk 部分错误（read_dir 迭代错误）不带路径，回退为根目录
+            Err(e) => {
+                debug!("list_directory: skipping unreadable entry {:?} under {}: {}",
+                    e.path().unwrap_or(path), path.display(), e);
+                continue;
+            }
         };
 
         // Skip the root directory itself (jwalk yields the root as the first entry)
