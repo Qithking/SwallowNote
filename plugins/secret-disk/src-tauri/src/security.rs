@@ -19,9 +19,14 @@ pub const PASSWORD_MIN_LEN: usize = 8;
 /// 密码包装类型：作用域结束后自动清零内存。
 pub type SecretString = Zeroizing<String>;
 
-/// 校验密码长度范围 [PASSWORD_MIN_LEN, PASSWORD_MAX_LEN]。
+/// 校验密码长度范围 [PASSWORD_MIN_LEN, PASSWORD_MAX_LEN]，并拒绝控制字符。
 /// 返回 `Err(String)` 时字符串为面向用户的中文提示，不含敏感信息。
 pub fn validate_password_length(password: &str) -> Result<(), String> {
+    // 控制字符（含 NUL）优先拒绝：SQLite C 字符串遇 NUL 截断会让
+    // PRAGMA key 的有效密码只剩前缀，与用户输入不一致
+    if password.chars().any(char::is_control) {
+        return Err("密码不能包含控制字符".to_string());
+    }
     let len = password.chars().count();
     if len < PASSWORD_MIN_LEN {
         return Err(format!("密码长度不能少于 {} 个字符", PASSWORD_MIN_LEN));
@@ -138,3 +143,38 @@ pub fn ensure_swl_extension<P: AsRef<Path>>(path: P) -> Result<(), String> {
 /// `File` 的便捷别名，避免在调用处导入 `std::fs::File`。
 #[allow(dead_code)]
 pub type FileHandle = File;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_normal_password() {
+        assert!(validate_password_length("abcd1234").is_ok());
+        assert!(validate_password_length("带中文的密码123").is_ok());
+    }
+
+    #[test]
+    fn rejects_nul_character() {
+        // JSON 可注入 \u0000：SQLite C 字符串遇 NUL 截断，PRAGMA key
+        // 的有效密码只剩前缀，与用户输入不一致
+        assert!(validate_password_length("abcd1234\0xyz").is_err());
+        assert!(validate_password_length("\0abcd1234").is_err());
+    }
+
+    #[test]
+    fn rejects_other_control_characters() {
+        assert!(validate_password_length("abcd1234\u{1b}").is_err()); // ESC
+        assert!(validate_password_length("abcd1234\t").is_err()); // 制表符
+        assert!(validate_password_length("abcd1234\n").is_err()); // 换行
+    }
+
+    #[test]
+    fn length_boundaries_unchanged() {
+        let min = "a1".repeat(4); // 恰好 8 字符
+        assert!(validate_password_length(&min).is_ok());
+        assert!(validate_password_length("a1b2c3").is_err()); // 6 字符过短
+        let max = "a1".repeat(128); // 恰好 256 字符
+        assert!(validate_password_length(&max).is_ok());
+    }
+}

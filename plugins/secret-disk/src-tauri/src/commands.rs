@@ -33,9 +33,16 @@ pub fn cmd_init(state: &State, params: &Value) -> Result<Value, String> {
 }
 
 /// `unlock`：用密码解锁数据库。
+///
+/// 解锁不做密码规则校验（规则提示仅用于创建/改密）：输入与已设密码
+/// 不匹配时统一返回「密码错误」，避免在解锁场景泄露密码规则细节。
+/// 仅保留长度上限防护（防 JSON-RPC 反序列化与 mlock 内存炸弹），
+/// 超长输入不可能与已设密码匹配，同样按「密码错误」处理。
 pub fn cmd_unlock(state: &State, params: &Value) -> Result<Value, String> {
     let password = extract_password(params)?;
-    validate_password_length(&password)?;
+    if password.chars().count() > security::PASSWORD_MAX_LEN {
+        return Err("密码错误".to_string());
+    }
     if state.is_unlocked() {
         return Ok(json!(true)); // 已解锁，幂等返回
     }
@@ -350,7 +357,12 @@ pub fn cmd_change_password(state: &State, params: &Value) -> Result<Value, Strin
 // 辅助函数
 // ──────────────────────────────────────────────────────────────────
 
-/// 从 params 中提取 password 字段。
+/// 从参数中提取密码。
+///
+/// 已知残留点（威胁模型已接受，2026-10-16 用户确认）：密码经 stdin JSON 传入，
+/// serde_json 反序列化产生的 `String`/`Value` 在堆上残留明文副本，无法零化
+/// （serde_json 无 zeroize 支持）。`protect_password` 仅保护后续使用中的副本。
+/// 攻击者若能读取本进程内存，系统已被攻破，全库加密无法防御该层级攻击。
 fn extract_password(params: &Value) -> Result<String, String> {
     params.get("password").and_then(|v| v.as_str())
         .map(|s| s.to_string())
@@ -368,4 +380,48 @@ fn map_list_item(row: &rusqlite::Row) -> rusqlite::Result<NoteListItem> {
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// 在系统临时目录中构造测试 State（uuid 目录名避免并行冲突）。
+    fn test_state() -> (State, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("secret-disk-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("创建测试目录失败");
+        (State::new_for_test(dir.join("secret.swl")), dir)
+    }
+
+    #[test]
+    fn unlock_with_short_password_reports_password_error() {
+        let (state, dir) = test_state();
+        cmd_init(&state, &json!({ "password": "abcd1234" })).expect("初始化失败");
+        cmd_lock(&state, &json!({})).expect("锁定失败");
+        // 短密码解锁：统一报「密码错误」，不应出现「密码长度不能少于」类规则提示
+        let err = cmd_unlock(&state, &json!({ "password": "abc" })).unwrap_err();
+        assert_eq!(err, "密码错误");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unlock_with_overlong_password_reports_password_error() {
+        let (state, dir) = test_state();
+        cmd_init(&state, &json!({ "password": "abcd1234" })).expect("初始化失败");
+        cmd_lock(&state, &json!({})).expect("锁定失败");
+        // 超长密码（不可能与已设密码匹配）：同样按密码错误处理，保留长度上限防护
+        let err = cmd_unlock(&state, &json!({ "password": "a".repeat(257) })).unwrap_err();
+        assert_eq!(err, "密码错误");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn unlock_with_correct_password_succeeds() {
+        let (state, dir) = test_state();
+        cmd_init(&state, &json!({ "password": "abcd1234" })).expect("初始化失败");
+        cmd_lock(&state, &json!({})).expect("锁定失败");
+        assert!(cmd_unlock(&state, &json!({ "password": "abcd1234" })).is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
