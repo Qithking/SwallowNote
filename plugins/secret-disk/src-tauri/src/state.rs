@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::db::Database;
+use crate::security;
 
 /// 数据库文件名。
 const DB_FILENAME: &str = "secret.swl";
@@ -38,8 +39,15 @@ impl State {
                 if old_path.exists() {
                     std::fs::copy(&old_path, &db_path)
                         .map_err(|e| format!("迁移数据库失败: {}", e))?;
+                    // 迁移副本保持与新建数据库同等安全权限（0600），失败仅告警不阻塞启动
+                    if let Err(e) = security::set_secure_permissions(&db_path) {
+                        eprintln!("[secret-disk] 警告: 迁移副本权限设置失败: {}", e);
+                    }
                     eprintln!("[secret-disk] 数据库已自动迁移到: {}", db_path.display());
-                    // 保留旧文件作为备份，暂不删除
+                    // 迁移成功后删除旧文件，缩小敏感数据攻击面；失败仅告警不阻塞启动
+                    if let Err(e) = std::fs::remove_file(&old_path) {
+                        eprintln!("[secret-disk] 警告: 删除旧数据库文件失败: {}", e);
+                    }
                 }
             }
         }
@@ -53,6 +61,15 @@ impl State {
     /// 数据库文件路径。
     pub fn db_path(&self) -> &PathBuf {
         &self.db_path
+    }
+
+    /// 仅测试使用：以指定数据库路径构造 State，绕过 env/argv 解析。
+    #[cfg(test)]
+    pub(crate) fn new_for_test(path: PathBuf) -> Self {
+        Self {
+            db: Mutex::new(None),
+            db_path: path,
+        }
     }
 
     /// 检查数据库是否已初始化（.swl 文件存在）。

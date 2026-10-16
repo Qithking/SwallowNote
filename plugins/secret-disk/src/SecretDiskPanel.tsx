@@ -21,6 +21,15 @@ const SAVE_DEBOUNCE_MS = 500
 /** 展开状态持久化 storage key */
 const EXPANDED_STORAGE_KEY = 'tree-expanded-ids'
 
+/** 空闲自动锁定档位（分钟），0 表示永不锁定 */
+const AUTO_LOCK_OPTIONS: number[] = [1, 5, 15, 30, 0]
+
+/** 空闲自动锁定默认时长（分钟） */
+const DEFAULT_AUTO_LOCK_MINUTES = 15
+
+/** 空闲检查间隔（毫秒） */
+const IDLE_CHECK_INTERVAL_MS = 15_000
+
 /** 密盘 tab 工具栏配置：隐藏路径相关项 */
 const DISK_TOOLBAR_CONFIG: EditorToolbarConfig = {
   copyPath: false,
@@ -42,6 +51,9 @@ export function SecretDiskPanel(props: PluginPanelProps) {
   getSettingRef.current = getSetting
 
   const [diskState, setDiskState] = useState<DiskState>('locked')
+  // 空闲锁定 interval 在空依赖 effect 中运行，通过 ref 读取最新状态
+  const diskStateRef = useRef(diskState)
+  diskStateRef.current = diskState
   const [loading, setLoading] = useState(true)
   const [rootItems, setRootItems] = useState<NoteListItem[]>([])
   const treeCacheRef = useRef<TreeCache>(new Map())
@@ -61,6 +73,10 @@ export function SecretDiskPanel(props: PluginPanelProps) {
   const [importSourcePath, setImportSourcePath] = useState<string | null>(null)
   const [importPassword, setImportPassword] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  // 空闲自动锁定：设置档位（分钟，0=永不）与最近活动时间戳
+  const [autoLockMinutes, setAutoLockMinutes] = useState(DEFAULT_AUTO_LOCK_MINUTES)
+  const autoLockMinutesRef = useRef(DEFAULT_AUTO_LOCK_MINUTES)
+  const lastActivityRef = useRef(Date.now())
 
   /** 初始化：检查数据库状态（仅在面板挂载时执行一次）。 */
   const checkState = useCallback(async () => {
@@ -89,11 +105,17 @@ export function SecretDiskPanel(props: PluginPanelProps) {
     }
   }, [])
 
-  /** 加载 requirePasswordEveryTime 设置（仅在面板挂载时执行一次）。 */
+  /** 加载 requirePasswordEveryTime / autoLockMinutes 设置（仅在面板挂载时执行一次）。 */
   useEffect(() => {
     void getSettingRef.current<boolean>('requirePasswordEveryTime').then((val) => {
       requirePasswordRef.current = val === true
       setRequirePassword(val === true)
+    })
+    void getSettingRef.current<number>('autoLockMinutes').then((val) => {
+      // 无设置或非法值回退默认档位
+      const minutes = typeof val === 'number' && AUTO_LOCK_OPTIONS.includes(val) ? val : DEFAULT_AUTO_LOCK_MINUTES
+      autoLockMinutesRef.current = minutes
+      setAutoLockMinutes(minutes)
     })
   }, [])
 
@@ -146,9 +168,14 @@ export function SecretDiskPanel(props: PluginPanelProps) {
       }
       // 自动锁定（invokeBackend 取 ref 最新引用；effect 无依赖，仅真实卸载时执行）
       if (requirePasswordRef.current) {
-        void invokeBackendRef.current('lock').catch(() => {
-          // fire-and-forget，忽略错误
-        })
+        void invokeBackendRef.current('lock')
+          .catch(() => {
+            // fire-and-forget，忽略错误
+          })
+          .finally(() => {
+            // 锁定即关闭所有密盘 tab，明文内容不留存在主编辑区
+            closePluginTabs(pluginId)
+          })
       }
     }
   }, [])
@@ -249,12 +276,55 @@ export function SecretDiskPanel(props: PluginPanelProps) {
     }
   }, [invokeBackend, flushPending, pluginId])
 
+  // 空闲锁定 effect 同样通过 ref 取最新 handleLock
+  const handleLockRef = useRef(handleLock)
+  handleLockRef.current = handleLock
+
+  /** 空闲自动锁定：监听本 webview 活动事件刷新时间戳，超时后复用 handleLock 完整锁定流程。
+   *  pointerdown/keydown/wheel 覆盖鼠标、键盘、滚动交互（与主编辑区同一 webview）；
+   *  切走窗口或最小化时无活动事件，计时自然继续，超时即锁（安全优先）。 */
+  useEffect(() => {
+    const markActivity = () => {
+      lastActivityRef.current = Date.now()
+    }
+    const activityTypes = ['pointerdown', 'keydown', 'wheel'] as const
+    for (const type of activityTypes) {
+      window.addEventListener(type, markActivity, { passive: true })
+    }
+    const timer = setInterval(() => {
+      if (diskStateRef.current !== 'unlocked') return
+      const minutes = autoLockMinutesRef.current
+      if (minutes <= 0) return // 永不锁定
+      if (Date.now() - lastActivityRef.current >= minutes * 60_000) {
+        void handleLockRef.current()
+      }
+    }, IDLE_CHECK_INTERVAL_MS)
+    return () => {
+      for (const type of activityTypes) {
+        window.removeEventListener(type, markActivity)
+      }
+      clearInterval(timer)
+    }
+  }, [])
+
   /** 切换"每次打开需要密码"。 */
   const handleToggleRequirePassword = useCallback(
     async (checked: boolean) => {
       setRequirePassword(checked)
       requirePasswordRef.current = checked
       await setSetting('requirePasswordEveryTime', checked)
+    },
+    [setSetting],
+  )
+
+  /** 切换空闲自动锁定档位。 */
+  const handleAutoLockChange = useCallback(
+    async (minutes: number) => {
+      setAutoLockMinutes(minutes)
+      autoLockMinutesRef.current = minutes
+      // 重置活动时间，避免切换设置后立即触发锁定
+      lastActivityRef.current = Date.now()
+      await setSetting('autoLockMinutes', minutes)
     },
     [setSetting],
   )
@@ -360,6 +430,8 @@ export function SecretDiskPanel(props: PluginPanelProps) {
         onSettingsOpenChange={setShowSettings}
         requirePassword={requirePassword}
         onToggleRequirePassword={handleToggleRequirePassword}
+        autoLockMinutes={autoLockMinutes}
+        onAutoLockChange={handleAutoLockChange}
         showChangePassword={showChangePassword}
         onShowChangePassword={setShowChangePassword}
         onBackup={handleBackup}
@@ -531,6 +603,8 @@ interface DiskFileTreeProps {
   onSettingsOpenChange: (open: boolean) => void
   requirePassword: boolean
   onToggleRequirePassword: (checked: boolean) => void
+  autoLockMinutes: number
+  onAutoLockChange: (minutes: number) => void
   showChangePassword: boolean
   onShowChangePassword: (show: boolean) => void
   onBackup: () => void
@@ -561,6 +635,8 @@ function DiskFileTree({
   onSettingsOpenChange,
   requirePassword,
   onToggleRequirePassword,
+  autoLockMinutes,
+  onAutoLockChange,
   showChangePassword,
   onShowChangePassword,
   onBackup,
@@ -1004,6 +1080,23 @@ function DiskFileTree({
                 <span>每次打开需要密码</span>
               </label>
               <p style={settingsHintStyle}>勾选后，每次打开密盘面板都需要输入密码。关闭面板时自动锁定数据库。</p>
+
+              {/* 空闲自动锁定 */}
+              <label style={settingsLabelRowStyle}>
+                <span>空闲自动锁定</span>
+                <select
+                  value={autoLockMinutes}
+                  onChange={(e) => void onAutoLockChange(Number(e.target.value))}
+                  style={settingsSelectStyle}
+                >
+                  {AUTO_LOCK_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m === 0 ? '永不' : `${m} 分钟`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p style={settingsHintStyle}>无操作达到设定时长后自动锁定密盘。</p>
             </div>
 
             <div style={settingsDividerStyle} />
@@ -1658,6 +1751,17 @@ const settingsLabelRowStyle: React.CSSProperties = {
 
 const settingsCheckboxStyle: React.CSSProperties = {
   cursor: 'pointer',
+}
+
+const settingsSelectStyle: React.CSSProperties = {
+  padding: '4px 8px',
+  border: '1px solid var(--border-color, #e5e5e5)',
+  borderRadius: 6,
+  fontSize: 12,
+  backgroundColor: 'var(--bg-secondary, #ffffff)',
+  color: 'var(--text-primary, #1f1f1f)',
+  cursor: 'pointer',
+  outline: 'none',
 }
 
 const settingsHintStyle: React.CSSProperties = {
