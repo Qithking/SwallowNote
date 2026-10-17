@@ -647,51 +647,42 @@ merge_beta_to_main() {
         return
     fi
 
-    # 首选：直接把本地 beta 推送为远程 main（远程 main 是 beta 祖先时 fast-forward 成功，纯 git 完成）
+    # 首选：GitHub API 服务端合并（无需本地检出 main）
+    gh_ok=0
+    if command -v gh &> /dev/null && gh auth status &> /dev/null && [[ "$REPO_NAME" == */* ]]; then
+        gh_ok=1
+        # 先同步远程 beta，保证服务端合并包含本地最新内容
+        echo_info "同步本地 beta 到远程 beta..."
+        if ! git push "$remote_name" beta; then
+            echo_error "推送 beta 失败（远程 beta 可能包含本地没有的提交），请先执行 git pull 同步 beta 分支"
+            return
+        fi
+        echo_info "调用 GitHub API 远程合并 beta -> main..."
+        if merge_output=$(gh api -X POST "repos/$REPO_NAME/merges" -f base=main -f head=beta 2>&1); then
+            echo_success "远程合并完成: beta 已合并到 main!"
+            return
+        fi
+        # 冲突无法自动处理；远程 main 与 beta 有分叉时 git 推送也必然被拒，直接终止
+        if echo "$merge_output" | grep -qi "conflict"; then
+            echo_error "远程合并存在冲突，无法自动完成，请在本地手动处理"
+            return
+        fi
+        echo_warning "GitHub API 合并失败: $merge_output"
+        echo_warning "回退为 git 直接推送..."
+    fi
+
+    # 回退：直接把本地 beta 推送为远程 main（远程 main 是 beta 祖先时 fast-forward 成功）
     echo_info "推送本地 beta 到远程 main..."
     if git push "$remote_name" beta:main; then
         echo_success "beta 内容已成功推送到远程 main!"
         return
     fi
 
-    # 远程 main 包含 beta 没有的提交，无法 fast-forward，改用 GitHub API 服务端合并
-    echo_warning "远程 main 包含 beta 没有的提交，无法直接推送，改用 GitHub API 远程合并..."
-
-    if ! command -v gh &> /dev/null; then
-        echo_error "需要安装 GitHub CLI"
-        echo "安装命令: brew install gh"
-        return
-    fi
-    if ! gh auth status &> /dev/null; then
-        echo_error "未登录 GitHub"
-        echo "请运行: gh auth login"
-        return
-    fi
-
-    # 校验仓库名为 owner/repo 格式（GitHub API 需要）
-    if [[ ! "$REPO_NAME" == */* ]]; then
-        echo_error "无法从远程地址解析仓库名 (owner/repo): $REPO_NAME"
-        return
-    fi
-
-    # 先同步远程 beta，保证服务端合并包含本地最新内容
-    echo_info "同步本地 beta 到远程 beta..."
-    if ! git push "$remote_name" beta; then
-        echo_error "推送 beta 失败（远程 beta 可能包含本地没有的提交），请先执行 git pull 同步 beta 分支"
-        return
-    fi
-
-    # 调用 GitHub merges API 在服务端将 beta 合并到 main
-    echo_info "调用 GitHub API 远程合并 beta -> main..."
-    if merge_output=$(gh api -X POST "repos/$REPO_NAME/merges" -f base=main -f head=beta 2>&1); then
-        echo_success "远程合并完成: beta 已合并到 main!"
+    if [ "$gh_ok" -eq 1 ]; then
+        echo_error "回退推送也失败，请手动处理（远程 main 包含 beta 没有的提交且 API 合并未成功）"
     else
-        if echo "$merge_output" | grep -qi "conflict"; then
-            echo_error "远程合并存在冲突，无法自动完成，请在本地手动处理"
-        else
-            echo_error "GitHub API 合并失败: $merge_output"
-        fi
-        return
+        echo_error "推送失败：远程 main 包含 beta 没有的提交，无法 fast-forward"
+        echo_info "安装并登录 GitHub CLI 后可使用 API 远程合并: brew install gh && gh auth login"
     fi
 }
 
