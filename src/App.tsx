@@ -148,18 +148,23 @@ function App() {
         emitAppReady()
       }).catch(() => { /* ignore */ })
 
-      // 延迟 1500ms 后启动插件加载和后台服务
-      // 确保编辑器完全挂载、用户可操作之后才执行非关键任务
+      // 窗口显示后立即启动插件加载和后台服务（macrotask 让出当前 init 渲染帧）
+      // 实测插件加载自身仅 ~0.5s 且不阻塞编辑器渲染，1500ms 固定延迟只会
+      // 拖慢 .smm 等插件编辑器的恢复可用时间（.work 执行文档 2026-10-17）。
       setTimeout(() => {
         // 1. 启动后台服务（文件监听、frontmatter 扫描、历史保存）
         useWorkspaceStore.getState().startBackgroundServices()
 
         // 2. 加载插件（动态导入、注册、初始化）
         ;(async () => {
+          const pluginT0 = performance.now()
           try {
             const { scanPlugins } = await import('@/lib/tauri')
             const { loadAllPlugins } = await import('@/lib/plugin-loader')
             const result = await scanPlugins().then(loadAllPlugins)
+            // 诊断埋点：插件链路自启动起的总耗时与扫描+加载自身耗时
+            logTime('plugins_loaded', 0)
+            logger.info('app', `[STARTUP-TIME] plugins_load_self_ms=${Math.round(performance.now() - pluginT0)}`)
             const { plugins: defs, failures } = result
             usePluginStore.getState().setPlugins(defs)
             usePluginStore.getState().setLoadFailures(failures)

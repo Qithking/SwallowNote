@@ -4,6 +4,7 @@
  * 注册到统一 EditorRegistry,通过 adapter 适配到统一的 EditorProps 契约
  */
 import { lazy, useMemo, type ComponentType } from 'react'
+import { logTime } from '@/lib/app-startup'
 import {
   createEditorRegistry,
   type EditorAdapterContext,
@@ -16,8 +17,17 @@ import { serializeFrontmatter, parseFrontmatter } from '@/lib/utils/frontmatter'
 import { pluginEditorRegistry, usePluginEditors } from '@/stores/pluginEditor'
 
 // lazy 加载各编辑器
+// 诊断埋点：记录 vendor-blocknote 重 chunk（动态 import）加载+求值完成时间，
+// 用于定位「启动恢复 tab 后内容区延迟可用」的耗时分布（只记首次，后续加载静默）。
+let mdChunkLogged = false
 const MarkdownEditor = lazy(() =>
-  import('./MarkdownEditor').then((m) => ({ default: m.MarkdownEditor })),
+  import('./MarkdownEditor').then((m) => {
+    if (!mdChunkLogged) {
+      mdChunkLogged = true
+      logTime('editor_md_chunk_loaded', 0)
+    }
+    return { default: m.MarkdownEditor }
+  }),
 )
 const CodeEditor = lazy(() =>
   import('./CodeEditor').then((m) => ({ default: m.CodeEditor })),

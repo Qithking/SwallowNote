@@ -36,6 +36,11 @@ import { KatexBlockSpec } from './katexBlockSpec'
 import { MarkmapBlockSpec } from './markmapBlockSpec'
 import '@blocknote/mantine/style.css'
 import { logger } from '@/lib/logger'
+import { logTime } from '@/lib/app-startup'
+
+// 诊断埋点：首个 BlockNote 内容区挂载完成（内容可交互）时间。
+// 只记首次，配合 editor_md_chunk_loaded 区分「chunk 求值」与「编辑器创建+解析」耗时。
+let mdContentReadyLogged = false
 
 interface MarkdownEditorProps {
   content: string
@@ -70,6 +75,13 @@ function BlockNoteInner({
   const noteWidth = useUIStore((state) => state.noteWidth)
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!mdContentReadyLogged) {
+      mdContentReadyLogged = true
+      logTime('editor_md_content_ready', 0)
+    }
+  }, [])
 
   useEffect(() => {
     const apply = () => {

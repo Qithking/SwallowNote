@@ -70,8 +70,27 @@ export default defineConfig({
       output: {
         // 拆分大依赖为独立 chunk，降低内存并改善缓存
         manualChunks(id) {
+          // 构建运行时小工具必须独立成小 chunk：若被并入 vendor-blocknote 等
+          // 重 chunk，入口会被迫静态加载 14MB+ JS（启动慢的根因，见 .work 执行文档 2026-10-17）
+          if (id.includes('vite/preload-helper')) return 'runtime-shared'
           if (id.includes('node_modules')) {
-            // 合并 shiki/mantine 到 blocknote（循环依赖）
+            // [\\/] 平台安全写法：Rollup 在 Windows 下 id 为反斜杠路径，
+            // '/clsx/' 这类正斜杠 pattern 不命中 'node_modules\clsx\index.js'，
+            // clsx 会被迫并入重 vendor chunk，拖垮 Windows 入口启动（.work 执行文档 2026-10-17）。
+            if (/[\\/]clsx[\\/]/.test(id)) return 'runtime-shared'
+            // shiki 语法/主题数据包必须保持逐语言动态加载：@blocknote/code-block
+            // 与 AI MarkdownRenderer(import 'shiki') 均为逐语言动态 import 设计，
+            // 若并入 vendor-blocknote 会双份叠出 10MB+ 数据，恢复 .md tab 需等
+            // ~3.5s 求值后才可交互（.work 执行文档 2026-10-17）。
+            // 返回 undefined 让 Rollup 按动态 import 自动拆成独立小 chunk。
+            if (
+              id.includes('langs-precompiled') ||
+              /@shikijs[\\/]langs[\\/]/.test(id) ||
+              id.includes('@shikijs/themes') ||
+              /[\\/]shiki[\\/]dist[\\/]langs[\\/]/.test(id) ||
+              /[\\/]shiki[\\/]dist[\\/]themes[\\/]/.test(id)
+            ) return undefined
+            // 合并 shiki 核心(体积小)/mantine 到 blocknote（循环依赖）
             if (id.includes('blocknote') || id.includes('shiki') || id.includes('@shikijs') || id.includes('@mantine')) return 'vendor-blocknote'
             // 合并 mermaid 到 markmap（共享 d3-zoom）
             if (id.includes('markmap') || id.includes('d3-zoom') || id.includes('mermaid')) return 'vendor-markmap'
