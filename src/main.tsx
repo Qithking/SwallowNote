@@ -14,7 +14,8 @@ function logTime(stage: string, t0: number) {
   logger.info('main', `[STARTUP-TIME] ${stage} t=${elapsed}`)
   const tauri = (window as any).__TAURI__
   if (tauri?.invoke) {
-    tauri.invoke('log_startup_time', { stage, elapsed_ms: elapsed }).catch((e: any) => {
+    // Tauri v2 参数按 camelCase 匹配 Rust 的 elapsed_ms
+    tauri.invoke('log_startup_time', { stage, elapsedMs: elapsed }).catch((e: any) => {
       logger.error('main', '[STARTUP-TIME] invoke failed:', e)
     })
   } else {
