@@ -217,7 +217,9 @@ export function syncPluginEditors(): void {
  * 复用 usePluginEditors 的 revision 信号,避免重复订阅 pluginEventBus。
  * sync 在 render 阶段(useMemo)执行,确保本次 render 的 resolve 用到最新插件 descriptor;
  * sync 幂等(清除再重注册),render 中调用安全。
- * 返回 revision 供 EditorView 用作 key 后缀,插件 enable/disable 时强制 remount。
+ * 每次同步都会用全新闭包重注册插件 descriptor:shim ↔ plugin 切换时元素
+ * 类型变化,React 自然 remount,消费方无需再把 revision 叠进组件 key
+ * (叠加会导致无关编辑器被连带重建,曾重置已恢复的滚动位置)。
  */
 export function usePluginEditorBridge(): { revision: number } {
   const { revision } = usePluginEditors()

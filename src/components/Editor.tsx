@@ -338,13 +338,13 @@ export function EditorView() {
   // see an empty registry and fall through to the compatibility
   // shim. We delegate the bus subscription to a centralised
   // `usePluginEditors` hook so the host-side permission grant and
-  // handler tagging are guaranteed consistent — the `revision`
-  // counter increments on every mutation, which we fold into the
-  // editor's `key` to force a clean remount of the dispatcher
-  // output (so a user who disables → re-enables the mind-map
-  // plugin sees the open tab swap from the shim to the live
-  // editor without a manual reload).
-  const { revision: editorRegistryRev } = usePluginEditorBridge()
+  // handler tagging are guaranteed consistent. `syncPluginEditors`
+  // re-registers plugin descriptors with fresh component closures on
+  // every mutation, so a shim ↔ plugin swap changes the element type
+  // and React remounts it naturally (a user who disables → re-enables
+  // the mind-map plugin sees the open tab swap without a manual
+  // reload) — no global revision in `editorKey` needed.
+  usePluginEditorBridge()
 
   // Listen for scroll-to-line events
   useEffect(() => {
@@ -453,8 +453,12 @@ export function EditorView() {
 
   // 渲染组件:统一走 descriptor(内置 + 插件均已通过 registry 注册)
   const EditorComponent = descriptor.component
-  // 插件 enable/disable 时 revision 变化,强制 remount 以切换组件实现
-  const editorKey = `${activeTab.id}:${descriptor.id}:${editorRegistryRev}`
+  // key 只含 tab 身份 + descriptor 身份:插件加载/禁用导致 shim ↔ plugin
+  // 切换时 descriptor 与组件类型变化,React 自然 remount。
+  // 不叠加全局插件 registry revision:启动后插件异步加载会 bump revision,
+  // 若纳入 key 会把所有已打开编辑器连带 remount,重置已恢复的滚动位置
+  // (表现为"重启恢复 tab 先定位到上次位置,随后马上跳回顶部")。
+  const editorKey = `${activeTab.id}:${descriptor.id}`
 
   return (
     <div ref={setContainerRef} className="flex-1 flex flex-col overflow-hidden relative">
