@@ -37,10 +37,11 @@ echo   3. 下载最新版本
 echo   4. 清除 Actions
 echo   5. 删除 Tag
 echo   6. 重新触发最新版本 GitHub Actions
+echo   7. 推送 beta 内容到远程 main 分支
 echo   0. 退出
 echo.
 set "choice="
-set /p "choice=请选择操作 (0-6): "
+set /p "choice=请选择操作 (0-7): "
 
 if "!choice!"=="1" goto push_to_github
 if "!choice!"=="2" goto create_release
@@ -48,8 +49,9 @@ if "!choice!"=="3" goto download_latest
 if "!choice!"=="4" goto clean_actions
 if "!choice!"=="5" goto delete_tag
 if "!choice!"=="6" goto rerun_latest
+if "!choice!"=="7" goto merge_beta_to_main
 if "!choice!"=="0" exit /b 0
-echo %ERR% 无效选择，请输入 0-6
+echo %ERR% 无效选择，请输入 0-7
 timeout /t 1 >nul
 goto MENU
 
@@ -807,6 +809,104 @@ if !errorlevel! equ 0 (
     echo %INFO% 查看构建进度: https://github.com/!REPO!/actions
 ) else (
     echo %ERR% 推送失败
+)
+
+echo.
+pause
+goto MENU
+
+
+REM ============================================================
+REM  7. 推送 beta 内容到远程 main 分支
+REM  逻辑与 release.sh 一致: 首选 GitHub API 远程合并, 回退 git 推送
+REM  全程不检出 main, 本地只保留 beta 分支
+REM ============================================================
+:merge_beta_to_main
+cls
+echo.
+echo === 推送 beta 内容到远程 main 分支 ===
+echo.
+
+call :get_remote
+if "!remote_name!"=="" (
+    echo %ERR% 未找到远程仓库
+    pause
+    goto MENU
+)
+
+REM 校验本地 beta 分支存在
+git show-ref --verify --quiet refs/heads/beta
+if !errorlevel! neq 0 (
+    echo %ERR% 本地未找到 beta 分支
+    pause
+    goto MENU
+)
+
+REM 工作区必须干净, 确保推送内容与本地提交状态一致
+git status --porcelain 2>nul | findstr /r "." >nul
+if !errorlevel! equ 0 (
+    echo %ERR% 工作区有未提交的更改, 请先提交或暂存 ^(git stash^)
+    git status --short
+    pause
+    goto MENU
+)
+
+REM 拉取远程最新引用
+echo %INFO% 拉取远程最新代码...
+git fetch "!remote_name!" --prune
+if !errorlevel! neq 0 (
+    echo %ERR% git fetch 失败
+    pause
+    goto MENU
+)
+
+REM 首选: GitHub API 服务端合并, 无需本地检出 main
+call :check_gh
+if !gh_ok! equ 1 (
+    REM 先同步远程 beta, 保证服务端合并包含本地最新内容
+    echo %INFO% 同步本地 beta 到远程 beta...
+    git push "!remote_name!" beta
+    if !errorlevel! neq 0 (
+        echo %ERR% 推送 beta 失败, 远程 beta 可能包含本地没有的提交, 请先执行 git pull 同步 beta 分支
+        pause
+        goto MENU
+    )
+    echo %INFO% 调用 GitHub API 远程合并 beta -^> main...
+    gh api -X POST repos/!REPO!/merges -f base=main -f head=beta > "%TEMP%\swallownote_merge_out.tmp" 2>&1
+    if !errorlevel! equ 0 (
+        echo %OK% 远程合并完成: beta 已合并到 main!
+        del "%TEMP%\swallownote_merge_out.tmp" 2>nul
+        echo.
+        pause
+        goto MENU
+    )
+    findstr /i "conflict" "%TEMP%\swallownote_merge_out.tmp" >nul
+    if !errorlevel! equ 0 (
+        echo %ERR% 远程合并存在冲突, 无法自动完成, 请在本地手动处理
+        del "%TEMP%\swallownote_merge_out.tmp" 2>nul
+        pause
+        goto MENU
+    )
+    echo %WARN% GitHub API 合并失败:
+    type "%TEMP%\swallownote_merge_out.tmp"
+    del "%TEMP%\swallownote_merge_out.tmp" 2>nul
+    echo %WARN% 回退为 git 直接推送...
+)
+
+REM 回退: 直接把本地 beta 推送为远程 main, 远程 main 是 beta 祖先时 fast-forward 成功
+echo %INFO% 推送本地 beta 到远程 main...
+git push "!remote_name!" beta:main
+if !errorlevel! equ 0 (
+    echo %OK% beta 内容已成功推送到远程 main!
+    echo.
+    pause
+    goto MENU
+)
+if !gh_ok! equ 1 (
+    echo %ERR% 回退推送也失败, 请手动处理
+) else (
+    echo %ERR% 推送失败: 远程 main 包含 beta 没有的提交, 无法 fast-forward
+    echo %INFO% 安装并登录 GitHub CLI 后可使用 API 远程合并: https://cli.github.com
 )
 
 echo.
