@@ -614,6 +614,78 @@ rerun_latest_action() {
     echo_info "查看构建进度: https://github.com/Qithking/SwallowNote/actions"
 }
 
+# 将本地 beta 分支远程推送到 main（全程不检出 main，本地只保留 beta 分支）
+merge_beta_to_main() {
+    echo ""
+    echo "=== 推送 beta 内容到远程 main 分支 ==="
+    echo ""
+
+    # 检查远程仓库
+    remote_name=$(git remote 2>/dev/null | head -1)
+    if [ -z "$remote_name" ]; then
+        echo_error "未找到远程仓库"
+        return
+    fi
+
+    # 校验本地 beta 分支存在
+    if ! git show-ref --verify --quiet refs/heads/beta; then
+        echo_error "本地未找到 beta 分支"
+        return
+    fi
+
+    # 工作区必须干净，确保推送内容与本地提交状态一致
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        echo_error "工作区有未提交的更改，请先提交或暂存 (git stash)"
+        git status --short
+        return
+    fi
+
+    # 拉取远程最新引用
+    echo_info "拉取远程最新代码..."
+    if ! git fetch "$remote_name" --prune; then
+        echo_error "git fetch 失败"
+        return
+    fi
+
+    # 首选：GitHub API 服务端合并（无需本地检出 main）
+    gh_ok=0
+    if command -v gh &> /dev/null && gh auth status &> /dev/null && [[ "$REPO_NAME" == */* ]]; then
+        gh_ok=1
+        # 先同步远程 beta，保证服务端合并包含本地最新内容
+        echo_info "同步本地 beta 到远程 beta..."
+        if ! git push "$remote_name" beta; then
+            echo_error "推送 beta 失败（远程 beta 可能包含本地没有的提交），请先执行 git pull 同步 beta 分支"
+            return
+        fi
+        echo_info "调用 GitHub API 远程合并 beta -> main..."
+        if merge_output=$(gh api -X POST "repos/$REPO_NAME/merges" -f base=main -f head=beta 2>&1); then
+            echo_success "远程合并完成: beta 已合并到 main!"
+            return
+        fi
+        # 冲突无法自动处理；远程 main 与 beta 有分叉时 git 推送也必然被拒，直接终止
+        if echo "$merge_output" | grep -qi "conflict"; then
+            echo_error "远程合并存在冲突，无法自动完成，请在本地手动处理"
+            return
+        fi
+        echo_warning "GitHub API 合并失败: $merge_output"
+        echo_warning "回退为 git 直接推送..."
+    fi
+
+    # 回退：直接把本地 beta 推送为远程 main（远程 main 是 beta 祖先时 fast-forward 成功）
+    echo_info "推送本地 beta 到远程 main..."
+    if git push "$remote_name" beta:main; then
+        echo_success "beta 内容已成功推送到远程 main!"
+        return
+    fi
+
+    if [ "$gh_ok" -eq 1 ]; then
+        echo_error "回退推送也失败，请手动处理（远程 main 包含 beta 没有的提交且 API 合并未成功）"
+    else
+        echo_error "推送失败：远程 main 包含 beta 没有的提交，无法 fast-forward"
+        echo_info "安装并登录 GitHub CLI 后可使用 API 远程合并: brew install gh && gh auth login"
+    fi
+}
+
 # 主菜单
 show_menu() {
     echo ""
@@ -626,6 +698,7 @@ show_menu() {
     echo "║  4. 清除 Actions                               ║"
     echo "║  5. 删除 Tag                                   ║"
     echo "║  6. 重新触发最新版本 GitHub Actions            ║"
+    echo "║  7. 推送 beta 内容到远程 main 分支               ║"
     echo "║  0. 退出                                         ║"
     echo "╚══════════════════════════════════════════════════╝"
     echo ""
@@ -637,7 +710,7 @@ main() {
     
     while true; do
         show_menu
-        read -p "请选择操作 (0-6): " choice
+        read -p "请选择操作 (0-7): " choice
         
         case $choice in
             1)
@@ -658,12 +731,15 @@ main() {
             6)
                 rerun_latest_action
                 ;;
+            7)
+                merge_beta_to_main
+                ;;
             0)
                 echo_info "再见!"
                 exit 0
                 ;;
             *)
-                echo_error "无效选择，请输入 0-6"
+                echo_error "无效选择，请输入 0-7"
                 ;;
         esac
         
