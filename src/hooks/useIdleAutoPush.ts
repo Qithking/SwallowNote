@@ -142,8 +142,11 @@ export function useIdleAutoPush(tRef: React.MutableRefObject<TFunc>) {
               results.push({ path: repo.path, name: repo.name, success: true, isConflict: false })
               continue
             }
-            // 凭证缺失：静默跳过，等用户手动同步时处理
-            if (r.needsCredential) continue
+            // 凭证缺失不打扰用户（等用户手动同步时处理），但必须留日志（此前完全静默）
+            if (r.needsCredential) {
+              logger.error('idle-auto-push', 'Idle auto push skipped (credential required):', repo.path, r.error || '')
+              continue
+            }
             const code = r.errorCode ?? GitErrorCode.Unknown
             const isConflict = isPushConflict(code, r.error || '')
             if (isConflict) {
@@ -151,7 +154,11 @@ export function useIdleAutoPush(tRef: React.MutableRefObject<TFunc>) {
               conflictNames.push(repo.name)
               continue
             }
-            if (code === GitErrorCode.DetachedHead) continue
+            if (code === GitErrorCode.DetachedHead) {
+              // detached HEAD 无法自动推送，留日志供排查（此前完全静默）
+              logger.error('idle-auto-push', 'Idle auto push skipped (detached HEAD):', repo.path, r.error || '')
+              continue
+            }
             results.push({ path: repo.path, name: repo.name, success: false, isConflict: false })
             logger.error('idle-auto-push', 'Idle auto push failed:', repo.path, r.error)
           } catch (e) {
@@ -183,6 +190,13 @@ export function useIdleAutoPush(tRef: React.MutableRefObject<TFunc>) {
             await store.syncConflictReposFromPullResults(results)
           } catch (e) {
             logger.error('idle-auto-push', 'conflict repo sync failed:', e)
+          }
+        } else {
+          // 非冲突推送失败：对齐定时同步/手动同步提示（冲突优先，互斥分支），修复完全静默
+          const failedPushes = results.filter((r) => !r.success && !r.isConflict).length
+          if (failedPushes > 0) {
+            const ok = results.filter((r) => r.success).length
+            toast.error(tRef.current('git.pullResult', { success: ok, fail: failedPushes }))
           }
         }
       }

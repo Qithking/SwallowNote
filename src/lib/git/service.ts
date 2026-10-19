@@ -15,6 +15,7 @@ import {
   gitCommitAndPush, gitPushWithCredentials,
 } from '@/lib/tauri'
 import { parseGitError, GitErrorCode } from '@/lib/git/errors'
+import { logger } from '@/lib/logger'
 
 /** service 只依赖 repo.path, 避免循环依赖 stores/git */
 interface RepoPath {
@@ -93,8 +94,9 @@ export async function withCredentialFallback(
             }
           }
         }
-      } catch {
-        // keyring 读取失败, fall through to needsCredential
+      } catch (e) {
+        // keyring 读取失败: fall through to needsCredential（留日志便于排查凭证 fallback 失效）
+        logger.warn('git-service', 'Failed to read credential from keyring:', repo.path, e)
       }
       return { success: false, error: errorMessage, needsCredential: true }
     }
@@ -140,8 +142,9 @@ export async function commitAndPushRepo(
             }
           }
         }
-      } catch {
-        // keyring 读取失败
+      } catch (e) {
+        // keyring 读取失败: fall through to needsCredential（留日志便于排查凭证 fallback 失效）
+        logger.warn('git-service', 'Failed to read credential from keyring:', repo.path, e)
       }
       return { success: false, error: errorMessage, needsCredential: true }
     }

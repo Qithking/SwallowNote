@@ -74,6 +74,8 @@ export function useAutoSync(
                 continue
               }
               if (r.needsCredential) {
+                // 凭证缺失不打扰用户，但必须留日志（此前完全静默）
+                logger.error('app', 'Auto sync push skipped (credential required):', repo.path, r.error || '')
                 continue
               }
               const code = r.errorCode ?? GitErrorCode.Unknown
@@ -82,6 +84,8 @@ export function useAutoSync(
                 continue
               }
               if (code === GitErrorCode.DetachedHead) {
+                // detached HEAD 无法自动推送，留日志供排查（此前完全静默）
+                logger.error('app', 'Auto sync push skipped (detached HEAD):', repo.path, r.error || '')
                 continue
               }
               pushFailed++
@@ -124,8 +128,9 @@ export function useAutoSync(
             })
             gitStore.setRepositories(mergedRepos)
             gitStore.setCachedRepositories(mergedRepos)
-          } catch {
-            // Ignore scan errors after sync
+          } catch (e) {
+            // 同步后的仓库扫描失败不影响同步本身，但需留日志便于排查列表不刷新问题
+            logger.warn('app', 'Git repo scan after auto sync failed:', e)
           }
         }
 
@@ -144,6 +149,18 @@ export function useAutoSync(
           const repoNames = results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.name).join(', ')
           toast.warning(tRef.current('git.pullConflict', { repos: repoNames }))
           await gitStore.syncConflictReposFromPullResults(allResults)
+        } else if (failed > 0 || pushFailed > 0) {
+          // 对齐手动同步提示（GitView handlePull）：pull/push 失败（非冲突）时 toast + logger，
+          // 修复定时同步失败完全静默的问题；计数为 pull+push 合并值（与 syncStatus 写入一致）
+          const detachedNames = results.filter((r: PullResult) => r.isDetachedHead).map((r: PullResult) => r.name).join(', ')
+          if (detachedNames) {
+            logger.error('app', 'Auto sync pull failed (detached HEAD):', detachedNames)
+            toast.error(tRef.current('git.pullDetachedHead', { repos: detachedNames }))
+          } else {
+            const failedRepos = results.filter((r: PullResult) => !r.success && !r.isConflict)
+            logger.error('app', 'Auto sync failed:', failedRepos.map(r => `${r.name}: ${r.error || 'unknown'}`).join('; '), pushErrorPaths.join('; '))
+            toast.error(tRef.current('git.pullResult', { success: succeeded + pushSucceeded, fail: failed + pushFailed }))
+          }
         }
       } catch (e) {
         logger.error('app', 'Auto sync failed:', e)

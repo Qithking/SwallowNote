@@ -9,6 +9,16 @@ import { useIdleAutoPush } from '../useIdleAutoPush'
 import { useGitStore, useUIStore } from '@/stores'
 import type { GitRepository } from '@/stores/git'
 
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() },
+}))
+
+// logger 保留真实实现，仅替换 error 为 spy：断言推送失败信息落日志
+vi.mock('@/lib/logger', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/logger')>()
+  return { ...actual, logger: { ...actual.logger, error: vi.fn() } }
+})
+
 vi.mock('@/lib/git/service', () => ({
   commitAndPushRepo: vi.fn(async () => ({ success: true, committed: false, pushed: true })),
 }))
@@ -26,6 +36,8 @@ vi.mock('@/lib/tauri', async (importOriginal) => {
 import { commitAndPushRepo } from '@/lib/git/service'
 import { GitErrorCode } from '@/lib/git/errors'
 import { gitGetConflictFiles, gitGetConflictLocalContent, gitSaveConflictFileContent } from '@/lib/tauri'
+import { toast } from 'sonner'
+import { logger } from '@/lib/logger'
 
 const REPO_A = 'D:/notes/workdoc'
 const REPO_NESTED = 'D:/notes/workdoc/submodule'
@@ -60,6 +72,10 @@ describe('useIdleAutoPush', () => {
     vi.mocked(gitGetConflictFiles).mockClear()
     vi.mocked(gitGetConflictLocalContent).mockClear()
     vi.mocked(gitSaveConflictFileContent).mockClear()
+    // toast 与 logger.error spy 跨用例清理，避免调用计数累积造成误判
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(toast.warning).mockClear()
+    vi.mocked(logger.error).mockClear()
     // 重置默认实现，防止用例间 mockImplementation/mockResolvedValue 泄漏
     vi.mocked(commitAndPushRepo).mockImplementation(async () => ({ success: true, committed: false, pushed: true }))
     vi.mocked(gitGetConflictFiles).mockImplementation(async () => [])
@@ -465,5 +481,51 @@ describe('useIdleAutoPush', () => {
     expect(commitAndPushRepo).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(commitAndPushRepo).toHaveBeenCalledTimes(1)
+  })
+
+  // ---- 推送失败的用户反馈（对齐定时同步/手动同步的提示分支）----
+
+  it('非冲突推送失败时以 git.pullResult 提示计数 (当前缺陷: 完全静默)', async () => {
+    vi.mocked(commitAndPushRepo).mockResolvedValue({
+      success: false,
+      error: 'push failed: network',
+      errorCode: GitErrorCode.Unknown,
+    })
+    // 局部 spy tRef：断言文案键与计数参数
+    const tFn = vi.fn((key: string) => key)
+    renderHook(() => useIdleAutoPush({ current: tFn } as React.MutableRefObject<(k: string, o?: unknown) => string>))
+    fireSave('D:\\notes\\workdoc\\a.md')
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(tFn).toHaveBeenCalledWith('git.pullResult', { success: 0, fail: 1 })
+    expect(toast.error).toHaveBeenCalledTimes(1)
+  })
+
+  it('推送凭证缺失时落 logger.error (当前缺陷: 静默跳过)', async () => {
+    vi.mocked(commitAndPushRepo).mockResolvedValue({
+      success: false,
+      error: 'authentication required',
+      needsCredential: true,
+    })
+    renderHook(() => useIdleAutoPush(tRef))
+    fireSave('D:\\notes\\workdoc\\a.md')
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    // 凭证缺失不打扰用户（无 toast），但必须留日志
+    expect(logger.error).toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('推送 detached HEAD 时落 logger.error (当前缺陷: 静默跳过)', async () => {
+    vi.mocked(commitAndPushRepo).mockResolvedValue({
+      success: false,
+      error: 'detached HEAD',
+      errorCode: GitErrorCode.DetachedHead,
+    })
+    renderHook(() => useIdleAutoPush(tRef))
+    fireSave('D:\\notes\\workdoc\\a.md')
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(logger.error).toHaveBeenCalled()
   })
 })

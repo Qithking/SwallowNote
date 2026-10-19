@@ -89,7 +89,9 @@ function CredentialDialog({
           setUsername('')
           setPassword('')
         }
-      }).catch(() => {
+      }).catch((e) => {
+        // keyring 读取失败：回退为空表单，但留日志便于排查凭证预填失效
+        logger.warn('git-view', 'Failed to load saved credential:', repoPath, e)
         setUsername('')
         setPassword('')
       })

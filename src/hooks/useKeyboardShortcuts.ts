@@ -222,7 +222,8 @@ export async function handleSaveFile() {
     try {
       await gitAutoCommit(activeTab.path)
     } catch (e) {
-      logger.debug('keyboard', 'Git auto-commit skipped:', e)
+      // 保存时自动提交失败此前只有 debug 级别，提升为 warn 保证可见
+      logger.warn('keyboard', 'Git auto-commit skipped:', e)
     }
   } catch (e) {
     logger.error('keyboard', 'Failed to save file:', e)

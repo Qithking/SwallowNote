@@ -305,7 +305,9 @@ export const useGitStore = create<GitState>((set, get) => ({
         try {
           const files = await gitGetConflictFiles(record.repo_path)
           newConflictFilesMap[record.repo_path] = files.map((f) => f.abs_path)
-        } catch {
+        } catch (e) {
+          // 单仓库冲突文件获取失败置空不影响整体，但留日志便于排查冲突文件列表为空
+          logger.warn('git-store', 'Failed to fetch conflict files for', record.repo_path, e)
           newConflictFilesMap[record.repo_path] = []
         }
       }))

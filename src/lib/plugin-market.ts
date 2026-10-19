@@ -430,6 +430,35 @@ export async function checkPluginUpdates(repoUrl: string): Promise<PluginUpdateI
   return Array.isArray(raw) ? raw.map(normaliseUpdate) : []
 }
 
+/**
+ * 判断插件是否有可用更新（管理页「更新」按钮与角标的共用判定）。
+ *
+ * 注意：Rust 端 check_plugin_updates 会跳过 upload 安装的插件
+ * （目录版本为 upload 哨兵时直接 continue），因此 marketUpdates
+ * 对这类插件永远为空；但市场安装流程（install_plugin_from_bytes）
+ * 并不依赖旧安装路径，仍可正常更新它们。
+ */
+export function pluginHasUpdateAvailable(args: {
+  pluginId: string
+  localVersion: string
+  marketUpdates: ReadonlyArray<PluginUpdateInfo>
+  marketIndex: PluginIndex | null
+}): boolean {
+  // 主判定：Rust check_plugin_updates 结果（semver 比较）。
+  if (
+    args.marketUpdates.some(
+      (u) => u.id === args.pluginId && u.localVersion !== u.remoteVersion,
+    )
+  ) {
+    return true
+  }
+  // 回退：市场索引版本比较（与角标 updateIdSet / 市场卡片同源）。
+  // 覆盖 upload 安装的插件 —— Rust 端会跳过它们，但市场安装流程
+  // （install_plugin_from_bytes）仍可正常更新这类插件。
+  const entry = args.marketIndex?.plugins.find((e) => e.id === args.pluginId)
+  return !!entry && entry.version !== args.localVersion
+}
+
 /** 切换已安装插件的活跃版本。 */
 export async function rollbackPlugin(pluginId: string, version: string): Promise<PluginMetadataRust> {
   return invoke<PluginMetadataRust>('rollback_plugin', { pluginId, version })
