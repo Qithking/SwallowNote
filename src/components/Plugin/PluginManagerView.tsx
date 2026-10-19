@@ -14,6 +14,7 @@ import { usePluginStore, useUIStore, usePluginMarketStore } from '@/stores'
 import { DEFAULT_SHORTCUTS, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { useShallow } from 'zustand/react/shallow'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
+import { pluginHasUpdateAvailable } from '@/lib/plugin-market'
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { createPluginPanelProps } from '@/lib/plugin-utils'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -547,9 +548,15 @@ function PluginManagerView() {
 
   // Handle plugin update from marketplace
   const handleUpdatePlugin = useCallback(async (plugin: PluginDefinition) => {
-    // Find update info from market updates
-    const updateInfo = marketUpdates.find((u) => u.id === plugin.id && u.localVersion !== u.remoteVersion)
-    if (!updateInfo) {
+    // 判定与角标 updateIdSet 同源（详见 pluginHasUpdateAvailable）：
+    // Rust marketUpdates 优先，另含市场索引版本比较的回退。
+    const hasUpdate = pluginHasUpdateAvailable({
+      pluginId: plugin.id,
+      localVersion: plugin.version,
+      marketUpdates,
+      marketIndex,
+    })
+    if (!hasUpdate) {
       toast.error(t('plugin.noUpdateAvailable'))
       return
     }
@@ -557,7 +564,7 @@ function PluginManagerView() {
     // the detail dialog for this plugin, then switch to the market tab.
     usePluginMarketStore.getState().setPendingDetailId(plugin.id)
     setActiveTab('market')
-  }, [marketUpdates, t])
+  }, [marketUpdates, marketIndex, t])
 
   // "Rescan" button in the meta row — refreshes the plugin
   // list (and indirectly the update list via the effect
