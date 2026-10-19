@@ -149,8 +149,9 @@ function App() {
       }).catch(() => { /* ignore */ })
 
       // 窗口显示后立即启动插件加载和后台服务（macrotask 让出当前 init 渲染帧）
-      // 实测插件加载自身仅 ~0.5s 且不阻塞编辑器渲染，1500ms 固定延迟只会
-      // 拖慢 .smm 等插件编辑器的恢复可用时间（.work 执行文档 2026-10-17）。
+      // 实测插件加载自身仅 ~0.5s 且不阻塞编辑器渲染，固定延迟只会
+      // 拖慢 .smm 等插件编辑器的恢复可用时间（.work 执行文档 2026-10-17/19），
+      // 故延迟 0ms：仅保留 macrotask 语义。
       setTimeout(() => {
         // 1. 启动后台服务（文件监听、frontmatter 扫描、历史保存）
         useWorkspaceStore.getState().startBackgroundServices()
@@ -236,7 +237,7 @@ function App() {
             usePluginStore.getState().setLoaded(true)
           }
         })()
-      }, 1500)
+      }, 0)
 
       // 空闲时段预加载 PluginManagerView chunk
       try {

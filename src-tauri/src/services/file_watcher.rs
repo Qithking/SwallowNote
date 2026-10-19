@@ -1,6 +1,6 @@
 use notify::event::{EventKind, ModifyKind};
 use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, RecommendedCache};
+use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, NoCache};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -11,7 +11,11 @@ use log::error;
 const MAX_WATCHED_PATHS: usize = 32;
 
 struct FileWatcherState {
-    debouncer: Option<notify_debouncer_full::Debouncer<notify::RecommendedWatcher, RecommendedCache>>,
+    // NoCache：不用 file_id 缓存。RecommendedCache 会在 watch 递归目录时为全树每文件
+    // 建 ~384B 的 file_id 映射（watch 28 万文件的开发仓库即占 95MB+），而本模块的
+    // rename 判定只用 ModifyKind::Name(_) 通配、插件 storage 监听纯按路径匹配，
+    // 均不依赖 file_id（.work 执行文档 2026-10-19 内存归因实验）。
+    debouncer: Option<notify_debouncer_full::Debouncer<notify::RecommendedWatcher, NoCache>>,
     watched_paths: Vec<PathBuf>,
 }
 
@@ -39,7 +43,7 @@ pub fn init_watcher(app_handle: AppHandle) {
 
     let app_handle_clone = app_handle.clone();
 
-    let debouncer = match new_debouncer(
+    let debouncer = match new_debouncer_opt(
         Duration::from_millis(500),
         None,
         move |res: DebounceEventResult| {
@@ -86,6 +90,8 @@ pub fn init_watcher(app_handle: AppHandle) {
                 }
             }
         },
+        NoCache::new(),
+        notify::Config::default(),
     ) {
         Ok(d) => d,
         Err(e) => {
@@ -227,7 +233,7 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
     drop(guard); // 构造第二个 watcher 前释放单例锁
 
     let app_handle_for_storage = app_handle.clone();
-    let storage_debouncer = match new_debouncer(
+    let storage_debouncer = match new_debouncer_opt(
         Duration::from_millis(500),
         None,
         move |res: DebounceEventResult| {
@@ -261,6 +267,8 @@ pub fn watch_plugin_storage(app_handle: AppHandle) {
                 }
             }
         },
+        NoCache::new(),
+        notify::Config::default(),
     ) {
         Ok(d) => d,
         Err(e) => {
@@ -295,5 +303,5 @@ fn extract_plugin_storage_id(path: &Path) -> Option<String> {
 
 use once_cell::sync::OnceCell;
 static PLUGIN_STORAGE_DEBOUNCER: OnceCell<
-    notify_debouncer_full::Debouncer<notify::RecommendedWatcher, RecommendedCache>,
+    notify_debouncer_full::Debouncer<notify::RecommendedWatcher, NoCache>,
 > = OnceCell::new();
