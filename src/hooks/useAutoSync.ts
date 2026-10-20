@@ -6,7 +6,29 @@ import { GitErrorCode, isPushConflict } from '@/lib/git/errors'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 
-type TFunc = (key: string, options?: any) => string
+type TFunc = (key: string, options?: Record<string, unknown>) => string
+
+/** 错误码 → 用户可执行的处理建议（日志用，面向排障用户） */
+const GIT_ERROR_HINTS: Partial<Record<GitErrorCode, string>> = {
+  [GitErrorCode.AuthRequired]: '凭证缺失或已失效，请在 Git 面板手动同步以输入凭证',
+  [GitErrorCode.RebaseConflict]: '存在合并冲突，请在冲突解决器中处理后重试',
+  [GitErrorCode.DetachedHead]: '仓库处于 detached HEAD，请在 Git 面板切换或恢复分支',
+  [GitErrorCode.DetachedHeadDiverged]: '本地与远程已分叉，请在 Git 面板处理分叉',
+  [GitErrorCode.SubmoduleUncommitted]: '子模块存在未提交变更，请先在 Git 面板处理子模块',
+  [GitErrorCode.SubmoduleRefNeedsUpdate]: '子模块引用待更新，请先在 Git 面板处理子模块',
+  [GitErrorCode.RebaseContinueFailed]: 'rebase 未完成，请在 Git 面板查看并继续操作',
+  [GitErrorCode.MergeCommitFailed]: '合并提交失败，请在 Git 面板查看详情',
+  [GitErrorCode.AlreadyUpToDate]: '远程无新提交，无需处理',
+  [GitErrorCode.NoRemote]: '未配置远程仓库，请在 Git 面板为该仓库添加 origin',
+  [GitErrorCode.NotInGitRepo]: '目录不是有效的 git 仓库，请检查仓库配置',
+}
+
+/** 拼接单个仓库失败详情：名称 [错误码] 错误信息（处理建议）；错误码可 grep，建议可执行 */
+function describeFailure(name: string, code: GitErrorCode | undefined, error: string | undefined): string {
+  const base = `${name} [${code ?? GitErrorCode.Unknown}] ${error || 'unknown error'}`
+  const hint = code ? GIT_ERROR_HINTS[code] : undefined
+  return hint ? `${base}（${hint}）` : base
+}
 
 export function useAutoSync(
   startupReadyRef: React.MutableRefObject<boolean>,
@@ -75,7 +97,7 @@ export function useAutoSync(
               }
               if (r.needsCredential) {
                 // 凭证缺失不打扰用户，但必须留日志（此前完全静默）
-                logger.error('app', 'Auto sync push skipped (credential required):', repo.path, r.error || '')
+                logger.error('app', 'Auto sync push skipped (credential required):', repo.path, r.errorCode ?? GitErrorCode.AuthRequired, r.error || '')
                 continue
               }
               const code = r.errorCode ?? GitErrorCode.Unknown
@@ -85,12 +107,12 @@ export function useAutoSync(
               }
               if (code === GitErrorCode.DetachedHead) {
                 // detached HEAD 无法自动推送，留日志供排查（此前完全静默）
-                logger.error('app', 'Auto sync push skipped (detached HEAD):', repo.path, r.error || '')
+                logger.error('app', 'Auto sync push skipped (detached HEAD):', repo.path, code, r.error || '')
                 continue
               }
               pushFailed++
               pushErrorPaths.push(repo.path)
-              logger.error('app', 'Auto sync push failed:', repo.path, r.error || '')
+              logger.error('app', 'Auto sync push failed:', repo.path, code, r.error || '')
             }
           }
         }
@@ -158,7 +180,8 @@ export function useAutoSync(
             toast.error(tRef.current('git.pullDetachedHead', { repos: detachedNames }))
           } else {
             const failedRepos = results.filter((r: PullResult) => !r.success && !r.isConflict)
-            logger.error('app', 'Auto sync failed:', failedRepos.map(r => `${r.name}: ${r.error || 'unknown'}`).join('; '), pushErrorPaths.join('; '))
+            // 失败详情含错误码 + git 原始错误 + 处理建议，日志可诊断（此前只有 name: error）
+            logger.error('app', 'Auto sync failed:', failedRepos.map(r => describeFailure(r.name, r.errorCode, r.error)).join('; '), pushErrorPaths.join('; '))
             toast.error(tRef.current('git.pullResult', { success: succeeded + pushSucceeded, fail: failed + pushFailed }))
           }
         }
@@ -243,5 +266,6 @@ export function useAutoSync(
       if (intervalId) clearInterval(intervalId)
       unsubscribe()
     }
-  }, [])
+    // startupReadyRef/tRef 为调用方传入的稳定 ref，加入依赖以满足 exhaustive-deps
+  }, [startupReadyRef, tRef])
 }

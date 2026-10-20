@@ -52,6 +52,8 @@ export interface PullResult {
   name: string
   success: boolean
   error?: string
+  /** 结构化错误码（parseGitError 解析），供日志/提示判断错误类型与处理方式 */
+  errorCode?: GitErrorCode
   isConflict?: boolean
   isDetachedHead?: boolean
 }
@@ -210,6 +212,8 @@ export const useGitStore = create<GitState>((set, get) => ({
               success: r.success,
             }
             if (r.error) result.error = r.error
+            // 透传结构化错误码：定时同步日志需要据此给出错误类型与处理建议
+            if (r.errorCode) result.errorCode = r.errorCode
             if (r.errorCode === GitErrorCode.RebaseConflict) result.isConflict = true
             if (r.errorCode === GitErrorCode.DetachedHead) result.isDetachedHead = true
             return result

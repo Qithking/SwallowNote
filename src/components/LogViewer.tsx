@@ -13,8 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { Search, Copy, Download, Trash2 } from 'lucide-react'
 import { save } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
-
-export type { LogEntry, LogLevel }
+import { filterLogEntries, formatLogTimestamp } from './logViewerUtils'
 
 /** 所有日志级别，按严重程度递增 */
 const ALL_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error']
@@ -28,41 +27,6 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
   error: 'var(--text-error, #dc2626)',
 }
 
-/** 过滤条件 */
-export interface FilterOptions {
-  levels: Set<LogLevel>
-  source: string
-  search: string
-}
-
-/**
- * 过滤日志条目（纯函数，便于测试）
- *
- * 按级别集合 + 来源 + 搜索文本过滤。搜索大小写不敏感，匹配 message 或 source。
- */
-export function filterLogEntries(entries: LogEntry[], opts: FilterOptions): LogEntry[] {
-  const { levels, source, search } = opts
-  const lowerSearch = search.toLowerCase()
-  const lowerSource = source.toLowerCase()
-  return entries.filter((e) => {
-    if (!levels.has(e.level)) return false
-    if (lowerSource && !e.source.toLowerCase().includes(lowerSource)) return false
-    if (lowerSearch) {
-      const inMsg = e.message.toLowerCase().includes(lowerSearch)
-      const inSrc = e.source.toLowerCase().includes(lowerSearch)
-      if (!inMsg && !inSrc) return false
-    }
-    return true
-  })
-}
-
-/** 格式化时间戳为 HH:MM:SS.mmm */
-function formatTime(ts: number): string {
-  const d = new Date(ts)
-  const pad = (n: number, w = 2) => String(n).padStart(w, '0')
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`
-}
-
 export interface LogViewerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -71,7 +35,8 @@ export interface LogViewerProps {
 export function LogViewer({ open, onOpenChange }: LogViewerProps) {
   const { t } = useTranslation()
   const [entries, setEntries] = useState<LogEntry[]>(() => logStore.getAll())
-  const [levels, setLevels] = useState<Set<LogLevel>>(() => new Set(ALL_LEVELS))
+  // 级别筛选：空集 = 「全部」（默认，显示所有日志），非空 = 只看选中级别（多选）
+  const [levels, setLevels] = useState<Set<LogLevel>>(() => new Set())
   const [source, setSource] = useState('')
   const [search, setSearch] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -115,7 +80,7 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
   }, [])
 
   const handleCopy = useCallback(async () => {
-    const text = filtered.map((e) => `[${formatTime(e.timestamp)}] [${e.level}] [${e.source}] ${e.message}`).join('\n')
+    const text = filtered.map((e) => `[${formatLogTimestamp(e.timestamp)}] [${e.level}] [${e.source}] ${e.message}`).join('\n')
     try {
       await navigator.clipboard.writeText(text)
     } catch {
@@ -134,7 +99,6 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
     try {
       await invoke('write_file', { path: filePath, content: jsonl })
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error('[LogViewer] export failed', e)
     }
   }, [filtered])
@@ -153,12 +117,28 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
 
         {/* 过滤工具栏 */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* 级别过滤 */}
+          {/* 级别过滤：空集=「全部」默认态（显示所有日志），级别多选 toggle 后只看选中类型 */}
           <div className="flex items-center gap-1">
+            <button
+              onClick={() => setLevels(new Set())}
+              data-active={levels.size === 0 ? 'true' : 'false'}
+              style={{
+                padding: '2px 8px',
+                fontSize: '11px',
+                borderRadius: '4px',
+                border: '1px solid var(--border-color)',
+                background: levels.size === 0 ? 'var(--text-primary)' : 'transparent',
+                color: levels.size === 0 ? 'var(--bg-primary)' : 'var(--text-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              {t('logViewer.allLevels')}
+            </button>
             {ALL_LEVELS.map((lvl) => (
               <button
                 key={lvl}
                 onClick={() => toggleLevel(lvl)}
+                data-active={levels.has(lvl) ? 'true' : 'false'}
                 style={{
                   padding: '2px 8px',
                   fontSize: '11px',
@@ -231,11 +211,11 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
             </div>
           ) : (
             filtered.map((e, i) => (
-              <div key={i} style={{ display: 'flex', gap: '8px', padding: '1px 0' }}>
-                <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{formatTime(e.timestamp)}</span>
+              // 四段顺序：日期时间 → 日志类型 → 详情（[source] message，与文件日志格式一致）
+              <div key={i} data-log-row style={{ display: 'flex', gap: '8px', padding: '1px 0' }}>
+                <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{formatLogTimestamp(e.timestamp)}</span>
                 <span style={{ color: LEVEL_COLORS[e.level], flexShrink: 0, width: '48px' }}>{e.level}</span>
-                <span style={{ color: 'var(--text-secondary)', flexShrink: 0, maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.source}</span>
-                <span style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>{e.message}</span>
+                <span style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>[{e.source}] {e.message}</span>
               </div>
             ))
           )}

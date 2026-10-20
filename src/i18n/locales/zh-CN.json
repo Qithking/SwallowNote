@@ -246,7 +246,8 @@
     "export": "导出 JSONL",
     "clear": "清空",
     "entries": "条",
-    "empty": "暂无日志"
+    "empty": "暂无日志",
+    "allLevels": "全部"
   },
   "common": {
     "ok": "确定",

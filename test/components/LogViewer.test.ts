@@ -6,7 +6,8 @@
  * Source: spec/unified-logging AC-9
  */
 import { describe, it, expect } from 'vitest'
-import { filterLogEntries, type LogEntry } from '@/components/LogViewer'
+import { filterLogEntries } from '@/components/logViewerUtils'
+import type { LogEntry } from '@/lib/logger'
 
 function makeEntry(
   source: string,
@@ -104,13 +105,14 @@ describe('filterLogEntries (AC-9)', () => {
     expect(result[0].message).toBe('startup complete')
   })
 
-  it('空级别集合返回空数组', () => {
+  it('空级别集合表示「全部」态，返回全部条目', () => {
     const result = filterLogEntries(entries, {
       levels: new Set(),
       source: '',
       search: '',
     })
-    expect(result).toHaveLength(0)
+    // 空集 = 「全部」（默认不过滤级别），返回 entries 全量
+    expect(result).toHaveLength(entries.length)
   })
 
   it('搜索文本也匹配 source', () => {

@@ -13,7 +13,7 @@ import { GitErrorCode, isPushConflict } from '@/lib/git/errors'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 
-type TFunc = (key: string, options?: any) => string
+type TFunc = (key: string, options?: Record<string, unknown>) => string
 
 /** 保存后空闲判定时长兜底值（设置项 idleAutoPushDelay 缺失时使用，单位秒） */
 const DEFAULT_IDLE_PUSH_DELAY_S = 60
