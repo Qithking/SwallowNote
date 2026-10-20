@@ -246,7 +246,8 @@
     "export": "Export JSONL",
     "clear": "Clear",
     "entries": "entries",
-    "empty": "No logs"
+    "empty": "No logs",
+    "allLevels": "All"
   },
   "common": {
     "ok": "OK",

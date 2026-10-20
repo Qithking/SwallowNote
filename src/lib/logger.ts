@@ -114,7 +114,15 @@ export async function attachLogger(): Promise<void> {
     }
     await pluginLog.attachLogger(({ message, level }) => {
       const mappedLevel = numToLevel[level] ?? 'info'
-      // 后端日志 message 可能带 [source] 前缀（如 "[git] push failed"）
+      // Rust 原生日志（log::*! 经 tauri-plugin-log 格式化）形如：
+      //   [2026-10-20] [16:45:17][DEBUG][swallownote_lib::commands::git::scan] [DIAG] xxx
+      // 剥离日期/时间/级别前缀（避免与前端时间戳重复显示），target 作为 source
+      const rustMatch = /^\[\d{4}-\d{2}-\d{2}\]\s*\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\]\[(?:TRACE|DEBUG|INFO|WARN|ERROR)\]\[([^\]]+)\]\s*(.*)$/.exec(message)
+      if (rustMatch) {
+        logStore.push({ timestamp: Date.now(), level: mappedLevel, source: rustMatch[1], message: rustMatch[2] })
+        return
+      }
+      // 前端回流日志 message 带 [source] 前缀（如 "[app] push failed"）
       // 解析前缀作为 source，与前端 logger 的 source 格式统一
       const match = /^\[([^\]]+)\]\s*(.*)$/.exec(message)
       const source = match ? match[1] : 'backend'
@@ -128,7 +136,6 @@ export async function attachLogger(): Promise<void> {
     })
   } catch (e) {
     // @tauri-apps/plugin-log 不可用（测试环境/非 Tauri 上下文）
-    // eslint-disable-next-line no-console
     console.warn('[logger] @tauri-apps/plugin-log unavailable, file logging disabled', e)
   }
 }
@@ -164,6 +171,25 @@ export const logger: {
   error: (source, message, ...args) => writeLog('error', source, message, args),
 }
 
+/**
+ * 序列化单个日志参数为可读文本（文件日志用）。
+ * Error 保留 name/message/stack；对象 JSON 化（循环引用降级 String）；其余 String()。
+ */
+function formatArg(a: unknown): string {
+  if (a instanceof Error) {
+    return a.stack ? `${a.name}: ${a.message}\n${a.stack}` : `${a.name}: ${a.message}`
+  }
+  if (typeof a === 'object' && a !== null) {
+    try {
+      return JSON.stringify(a)
+    } catch {
+      // 循环引用等 JSON 失败场景降级，保证日志不崩
+      return String(a)
+    }
+  }
+  return String(a)
+}
+
 /** 内部：写入一条日志到 LogStore + console + 文件 */
 function writeLog(level: LogLevel, source: string, message: string, args: unknown[]): void {
   const entry: LogEntry = {
@@ -173,9 +199,11 @@ function writeLog(level: LogLevel, source: string, message: string, args: unknow
     message,
     ...(args.length > 0 ? { args } : {}),
   }
-  const formatted = `[${source}] ${message}`
+  // 文件日志必须包含 args 详情：此前 formatted 只拼 message，详情全部丢失
+  // （如 "[app] Auto sync failed:" 后为空），排查时无任何错误内容
+  const argsText = args.length > 0 ? ` ${args.map(formatArg).join(' ')}` : ''
+  const formatted = `[${source}] ${message}${argsText}`
   // 转发到浏览器 console（保留 dev 可见性）
-  // eslint-disable-next-line no-console
   console[consoleMethods[level]](formatted, ...args)
   // 转发到文件写入器（生产环境经 @tauri-apps/plugin-log 写入后端文件）
   if (fileWriter) {
@@ -186,7 +214,6 @@ function writeLog(level: LogLevel, source: string, message: string, args: unknow
     } catch (e) {
       // fileWriter 抛错时降级为直接写 logStore + console
       logStore.push(entry)
-      // eslint-disable-next-line no-console
       console.error('[logger] fileWriter failed', e)
     }
   } else {

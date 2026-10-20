@@ -186,4 +186,50 @@ describe('useAutoSync', () => {
 
     expect(logger.error).toHaveBeenCalled()
   })
+
+  // ---- 失败日志的可诊断性：必须包含错误码与处理建议 ----
+
+  it('pull 失败日志包含 errorCode 与处理建议 (当前缺陷: 日志只有仓库名+error)', async () => {
+    pullMock.mockResolvedValue([
+      pullResult(REPO_A, {
+        success: false,
+        error: 'Failed to pull: fatal: could not read from remote repository',
+        errorCode: GitErrorCode.NoRemote,
+      }),
+      pullResult(REPO_B),
+    ])
+    await mountAndRunStartupSync()
+
+    // 第三参数为失败详情：必须含错误码（可 grep）与中文处理建议（可执行）
+    expect(logger.error).toHaveBeenCalledWith(
+      'app',
+      'Auto sync failed:',
+      expect.stringContaining('NO_REMOTE'),
+      expect.any(String),
+    )
+    expect(logger.error).toHaveBeenCalledWith(
+      'app',
+      'Auto sync failed:',
+      expect.stringContaining('远程'),
+      expect.any(String),
+    )
+  })
+
+  it('push 失败日志包含 errorCode (当前缺陷: 日志无错误码)', async () => {
+    seedPushEnabled()
+    vi.mocked(commitAndPushRepo).mockResolvedValue({
+      success: false,
+      error: 'push failed: connection refused',
+      errorCode: GitErrorCode.Unknown,
+    })
+    await mountAndRunStartupSync()
+
+    expect(logger.error).toHaveBeenCalledWith(
+      'app',
+      'Auto sync push failed:',
+      REPO_A,
+      GitErrorCode.Unknown,
+      expect.any(String),
+    )
+  })
 })

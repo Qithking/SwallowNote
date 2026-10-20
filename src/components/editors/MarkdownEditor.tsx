@@ -23,6 +23,7 @@ import { useEditorPasteUpload } from './useEditorPasteUpload'
 import { useEditorLinkHandling } from './useEditorLinkHandling'
 import { useCustomSlashMenu } from './useCustomSlashMenu'
 import { useEditorSerialization } from './useEditorSerialization'
+import { attachPlainTextCopyHandling } from './editorClipboard'
 import {
   useEditorScrollEvents,
   useEditorAIEvents,
@@ -109,9 +110,8 @@ function BlockNoteInner({
 
   // codeBlock from @blocknote/code-block provides syntax highlighting via Shiki
   // In newer versions, we need to create the code block spec using createCodeBlockSpec
-  // Using type assertion to resolve shiki types conflict
   // Memoized via useMemo to avoid recreating on every render
-  const codeBlock = useMemo(() => createCodeBlockSpec(codeBlockOptions as any), [])
+  const codeBlock = useMemo(() => createCodeBlockSpec(codeBlockOptions as unknown as Parameters<typeof createCodeBlockSpec>[0]), [])
 
   // Create a custom schema that includes the default blocks plus the mermaid block
   // Memoized via useMemo to avoid recreating on every render
@@ -121,7 +121,7 @@ function BlockNoteInner({
       mermaidBlock: MermaidBlockSpec(),
       katexBlock: KatexBlockSpec(),
       markmapBlock: MarkmapBlockSpec(),
-    } as any,
+    },
   }), [])
 
   const { uploadFile, resolveFileUrl, pasteHandler, resolveUploadDir } = useEditorPasteUpload()
@@ -130,6 +130,7 @@ function BlockNoteInner({
   // editor 依赖 handleLinkClick（links.onClick）才能创建，存在创建顺序循环，
   // 故以 ref 延迟传递，editor 创建后回填，capture listener 在事件触发时读取。
   // 泛型用 any：editor 携带自定义 schema 类型，默认泛型与其不兼容。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 自定义 schema 类型与 BlockNoteEditor 默认泛型不兼容，见上注释
   const editorRef = useRef<BlockNoteEditor<any, any, any> | null>(null)
   const { handleLinkClick, customLinkToolbar } = useEditorLinkHandling(editorRef, editorContainerRef)
 
@@ -156,6 +157,12 @@ function BlockNoteInner({
   // 挂载查找/替换事件桥接 hook
   const bnSearch = useBlockNoteSearch({ editor })
   useEditorSearchIntegration(adaptBlockNoteSearch(bnSearch))
+
+  // 剪贴板纯文本修正：BlockNote 复制时向 text/plain 写入 markdown 源码，
+  // 粘贴到纯文本目标会带 **、[]() 等符号；此处在其后重写为选区纯文本。
+  useEffect(() => {
+    return attachPlainTextCopyHandling(editor, () => editorContainerRef.current)
+  }, [editor])
 
   // window 事件桥接：滚动定位、AI 插入/替换/全选、远程图片下载
   useEditorScrollEvents(editor)
@@ -189,11 +196,19 @@ function BlockNoteInner({
   const blocknoteTheme = isAppDark ? 'dark' as const : 'light' as const
 
 
+  /** BlockNote 未公开的内部 tiptap 编辑器（仅声明用到的 selection/doc 能力） */
+  interface TiptapEditorLike {
+    state: {
+      selection: { from: number; to: number; empty: boolean }
+      doc: { textBetween(from: number, to: number, blockSeparator?: string): string }
+    }
+  }
+
   // Methods for the context menu
   const getSelectedText = useCallback(() => {
     if (!editor) return ''
     try {
-      const tiptapEditor = (editor as any)._tiptapEditor
+      const tiptapEditor = (editor as unknown as { _tiptapEditor?: TiptapEditorLike })._tiptapEditor
       if (!tiptapEditor) return ''
       const { from, to, empty } = tiptapEditor.state.selection
       if (empty) return ''
@@ -206,7 +221,7 @@ function BlockNoteInner({
   const getSelectionLineRange = useCallback((): [number, number] | null => {
     if (!editor) return null
     try {
-      const tiptapEditor = (editor as any)._tiptapEditor
+      const tiptapEditor = (editor as unknown as { _tiptapEditor?: TiptapEditorLike })._tiptapEditor
       if (!tiptapEditor) return null
       const { from, to, empty } = tiptapEditor.state.selection
       if (empty) return null
@@ -312,7 +327,7 @@ export function MarkdownEditor({ content, onChange }: MarkdownEditorProps) {
 
         const tempEditor = getSharedParseEditor()
         // 解析 Markdown 并应用特殊 block 转换（失败时降级为纯文本段落）
-        let blocks = await parseMarkdownToBlocks(tempEditor, body)
+        const blocks = await parseMarkdownToBlocks(tempEditor, body)
 
         if (cancelled) return
         
