@@ -48,6 +48,9 @@ target/
 # 插件构建产物
 plugins/*/*.zip
 
+# 插件签名私钥（发布凭证，绝不入库）
+plugins/.signing-key
+
 # 测试覆盖率
 coverage/
 
@@ -58,3 +61,5 @@ vite.config.ts.timestamp-*
 vite.config.js.timestamp-*
 scripts/
 .claude/
+docs/
+GLOSSARY.md

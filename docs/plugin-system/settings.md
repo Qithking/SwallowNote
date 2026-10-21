@@ -173,7 +173,7 @@ function SettingsPanel(panel: PluginPanelProps) {
 }
 ```
 
-> **模块级 API**：SDK 还导出 `getSetting(pluginId, key)` / `setSetting(pluginId, key, value)` / `getAllSettings(pluginId)` / `onSettingsChange(pluginId, handler)` / `emitPluginSettingsChanged(pluginId, values)`，适合在生命周期钩子等非组件场景使用。host 模式下转发到 SQLite，独立模式回退到 stub。
+> **模块级 API**：SDK 还导出 `getSetting(key)` / `setSetting(key, value)` / `getAllSettings()` / `onSettingsChange(handler)`，pluginId 已隐式绑定到当前插件（类型层面不存在跨插件读写入口），适合在生命周期钩子等非组件场景使用。host 模式下转发到 SQLite，独立模式回退到 stub。
 
 ## Frontmatter API
 

@@ -1,7 +1,6 @@
 //! 插件管理后端命令。插件位于 `<app_data>/plugins/<id>/`，采用 `.versions/<semver>/` 版本化布局，`current` 符号链接指向活动版本。
 
 use crate::commands::error::PluginError;
-#[cfg(test)]
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -1106,8 +1105,7 @@ pub struct PluginVersionInfo {
     pub installed_at: String,
 }
 
-// ed25519 签名验证。注意 base64 v0.22 STANDARD 引擎对大小写敏感。
-#[cfg(test)]
+// ed25519 签名验证（市场安装准入防线）。注意 base64 v0.22 STANDARD 引擎对大小写敏感。
 fn verify_ed25519(message: &[u8], pubkey_b64: &str, signature_b64: &str) -> Result<(), PluginError> {
     use base64::Engine;
 
@@ -1204,13 +1202,6 @@ pub async fn install_plugin_from_bytes(
     validate_plugin_id(&plugin_id)?;
     validate_plugin_version(&version)?;
 
-    // ed25519 signature verification was retired from the
-    // install path; the pubkey/signature params are retained
-    // on the IPC surface for backwards compatibility with
-    // existing front-end callers (plugin-market.ts still
-    // forwards them) but are intentionally unused here.
-    let _ = (&pubkey_b64, &signature_b64);
-
     // 1) SHA-256 must match.
     let actual = sha256_hex(&bytes);
     if !actual.eq_ignore_ascii_case(sha256.trim()) {
@@ -1220,7 +1211,12 @@ pub async fn install_plugin_from_bytes(
         )));
     }
 
-    // 2) Lay out the version directory. We rewrite the zip into a
+    // 2) Ed25519 signature must verify. 空签名同样拒绝：否则手改的
+    //    repo.json 可以让未签名 zip 绕过准入；签名绑定原始 zip 字节，
+    //    攻击者即使伪造 sha256 配上恶意 zip 也无法通过验证。
+    verify_ed25519(&bytes, &pubkey_b64, &signature_b64)?;
+
+    // 3) Lay out the version directory. We rewrite the zip into a
     //    `Cursor<Vec<u8>>` so the same bytes we just hashed / signed
     //    are the ones we extract.
     let app_data_dir = app_handle

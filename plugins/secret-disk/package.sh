@@ -271,6 +271,12 @@ echo ""
 echo "  version:       $NEW_VERSION"
 echo "  published_at:  $PUBLISHED_AT"
 
+# ─── ed25519 签名（市场安装准入校验） ───────────────────────────────────────
+# 市场安装/自动更新路径会校验 zip 的 ed25519 签名；
+# 无签名 zip 仍可通过本地拖拽安装，但无法通过市场校验。
+source "$SCRIPT_DIR/../sign-common.sh"
+plugin_sign_zip "$SCRIPT_DIR/$ZIP_NAME"
+
 # ─── 同步 plugins/repo.json（市场索引） ──────────────────────────────────────
 if [ "$SKIP_REPO" = "1" ]; then
   echo ""
@@ -283,12 +289,12 @@ else
   echo ""
   echo "==> Syncing plugins/repo.json..."
   SHA256=$(shasum -a 256 "$SCRIPT_DIR/$ZIP_NAME" | awk '{print $1}')
-  python3 - "$REPO_JSON" "$PLUGIN_ID" "$SHA256" "$NEW_VERSION" "$PUBLISHED_AT" <<'PY'
+  python3 - "$REPO_JSON" "$PLUGIN_ID" "$SHA256" "$NEW_VERSION" "$PUBLISHED_AT" "$SIGNATURE_B64" "$PUBKEY_B64" <<'PY'
 import json
 import sys
 import datetime as _dt
 
-repo_path, plugin_id, sha256, version, published_at = sys.argv[1:6]
+repo_path, plugin_id, sha256, version, published_at, signature_b64, pubkey_b64 = sys.argv[1:8]
 
 with open(repo_path, 'r', encoding='utf-8') as f:
     repo = json.load(f)
@@ -303,6 +309,12 @@ for plugin in repo.get('plugins', []):
         plugin['download_url'] = plugin['download_url']
     plugin.pop('versions', None)
     plugin['published_at'] = published_at
+    # 签名绑定 zip 原始字节：重打包后旧签名必然失效，无新签名时必须
+    # 清除残留，否则市场安装校验会因旧签名不匹配而失败。
+    if signature_b64:
+        plugin['signature_b64'] = signature_b64
+    else:
+        plugin.pop('signature_b64', None)
     if not plugin.get('changelog'):
         prior = plugin.get('versions')
         if isinstance(prior, list) and prior:
@@ -317,6 +329,9 @@ if not updated:
     sys.exit(0)
 
 repo['updated_at'] = _dt.datetime.now(_dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+# 公钥随索引分发：市场安装/自动更新用它验证 zip 签名。
+if pubkey_b64:
+    repo['pubkey_b64'] = pubkey_b64
 
 with open(repo_path, 'w', encoding='utf-8') as f:
     json.dump(repo, f, ensure_ascii=False, indent=2)

@@ -9,10 +9,7 @@ import { getPluginStorage, createPluginEventBus } from './plugin-host'
 import { assertPermission } from './plugin-permission-guard'
 import { loadSettings, readSetting } from './plugin-settings'
 import { writePluginSettings } from './tauri'
-import {
-  emitPluginSettingsChanged,
-  onSettingsChange as sdkOnSettingsChange,
-} from '@swallow-note/plugin-sdk'
+import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
 import { useEditorStore } from '@/stores/editor'
 
 /**
@@ -228,7 +225,13 @@ export function createPluginPanelProps(
       const view = await loadSettings(pluginId, true)
       return { ...view.values }
     },
-    onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
+    // 宿主实例上 SDK stub 订阅表无通知来源（setHost 层只装在插件 bundle 副本），
+    // 直接订阅宿主事件总线并按 pluginId 过滤，语义与 SDK override 分支一致。
+    onSettingsChange: (handler) =>
+      createPluginEventBus(pluginId).on('plugin-settings:change', (payload) => {
+        if (payload.pluginId !== pluginId) return
+        handler(payload.values)
+      }),
     // Frontmatter API – reads from / writes to the editor store.
     getActiveNoteFrontmatter: (): Record<string, unknown> | null => {
       const tab = useEditorStore.getState().getActiveTab()
@@ -357,7 +360,13 @@ export function createToolbarButtonProps(
       const view = await loadSettings(pluginId, true)
       return { ...view.values }
     },
-    onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
+    // 宿主实例上 SDK stub 订阅表无通知来源（setHost 层只装在插件 bundle 副本），
+    // 直接订阅宿主事件总线并按 pluginId 过滤，语义与 SDK override 分支一致。
+    onSettingsChange: (handler) =>
+      createPluginEventBus(pluginId).on('plugin-settings:change', (payload) => {
+        if (payload.pluginId !== pluginId) return
+        handler(payload.values)
+      }),
     // Frontmatter API – same implementation as the panel version.
     getActiveNoteFrontmatter: (): Record<string, unknown> | null => {
       const tab = useEditorStore.getState().getActiveTab()

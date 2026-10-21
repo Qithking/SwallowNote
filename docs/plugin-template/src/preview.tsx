@@ -381,10 +381,11 @@ export function Preview() {
     events: pluginEventBus,
     activeNoteContent: '',
     activeNotePath: notePath,
-    getSetting: (key: string) => getSetting(manifest.id, key),
-    setSetting: (key: string, value: unknown) => setSetting(manifest.id, key, value),
-    getAllSettings: () => getAllSettings(manifest.id),
-    onSettingsChange: (handler) => onSettingsChange(manifest.id, handler),
+    // 模块级 settings API 已隐式绑定当前插件（standalone 预览用 stub 缓存兜底）
+    getSetting: (key: string) => getSetting(key),
+    setSetting: (key: string, value: unknown) => setSetting(key, value),
+    getAllSettings: () => getAllSettings(),
+    onSettingsChange: (handler) => onSettingsChange(handler),
     // 预览模式用 mockFrontmatterRef 模拟活动笔记的 frontmatter
     getActiveNoteFrontmatter: () => mockFrontmatterRef.current,
     setActiveNoteFrontmatter: (data) => {

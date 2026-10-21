@@ -67,6 +67,10 @@ PEM 需要 ASN.1 DER 解析 `SubjectPublicKeyInfo` 结构，这要么引入新�
 
 ### 生成一个签过名的 zip
 
+**推荐：自动流程**。官方插件目录（`plugins/<name>/`）的 `package.sh` 会在打包末尾调用 `plugins/sign-common.sh` 自动签名，并把 `sha256` / `signature_b64` / 仓库级 `pubkey_b64` 一并写入 `repo.json`——除非要接入**非官方**插件，否则不需要手动执行下面的步骤。签名绑定 zip 字节：每次重打包都必须重跑 package.sh 刷新签名与索引，否则市场安装会因旧签名不匹配被拒。
+
+手动流程（外部仓库 / 一次性示例）：
+
 ```bash
 # 1. 构建插件（例如 hello-world）
 cd docs/plugin-samples/hello-world

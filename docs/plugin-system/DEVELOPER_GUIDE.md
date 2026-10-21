@@ -759,11 +759,17 @@ function MyPanel(panel: PluginPanelProps) {
 ```typescript
 import { getSetting, setSetting, getAllSettings, onSettingsChange } from '@swallow-note/plugin-sdk'
 
-await getSetting('com.example.my-plugin', 'apiKey')
-await setSetting('com.example.my-plugin', 'apiKey', 'xxx')
-await getAllSettings('com.example.my-plugin')
-const off = onSettingsChange('com.example.my-plugin', (values) => { /* ... */ })
+// pluginId 由 SDK 隐式绑定到当前插件（宿主在生命周期钩子执行前通过
+// setHost(overrides, pluginId) 完成），调用方无法（也不需要）指定插件 ID：
+await getSetting('apiKey')
+await setSetting('apiKey', 'xxx')
+await getAllSettings()
+const off = onSettingsChange((values) => { /* ... */ })
 ```
+
+> **安全模型（设置读写）**：模块级 settings API **隐式绑定当前插件**——SDK 从宿主安装的 override 层解析 pluginId，调用方在类型层面没有跨插件读写的入口；在无绑定的上下文（如宿主进程直接调用）会抛错而不是静默读写错误的插件。面板 / 工具栏内的同名方法（`PluginPanelProps`）由宿主注入，同样只作用于本插件。
+>
+> **威胁模型**：所有插件 UI 共享同一个 webview 上下文，插件之间的信任边界**不在**运行时内存隔离层——settings API 的 pluginId 收紧目标是"防误用 + 收缩攻击面"，而非强隔离。恶意插件的准入防线是**市场安装路径的 ed25519 签名校验**（见下文"签名验证"）加上用户安装时的权限确认；对设置数据，插件只能读写自己的存储，跨插件访问需用户显式导出。
 
 > **权限**：设置 API 复用 `storage` 权限。`setSetting` 写入后会广播 `plugin-settings:change` 事件，所有同插件 id 的 panel / toolbar 实例都会收到通知。
 
@@ -1543,12 +1549,22 @@ host 自 Phase 9.2 起**对每个插件做版本管理**：
 
 ### 签名验证（市场安装）
 
-从市场安装时 host 会做 ed25519 签名验证：
+从市场安装 / 自动更新时 host 会做 ed25519 签名验证：
 
 ```typescript
 // src/lib/plugin-market.ts: 预校验 SHA-256
-// src-tauri/src/commands/plugin.rs: 完整 ed25519 验证
+// src-tauri/src/commands/plugin.rs: 完整 ed25519 验证（verify_ed25519）
 ```
+
+**准入规则（三态）**：
+
+- 有效签名 → 通过（签名绑定 zip 原始字节）
+- `signature_b64` 缺失 / 为空 → 拒绝安装
+- 签名与 zip 字节不匹配 → 拒绝安装
+
+任一拒绝路径都会抛 `PluginError::Security(...)` 且**无文件落盘**。本地上传（拖拽 zip）不走签名校验，仍可安装——签名是**市场分发路径**的准入防线，不是本机开发门槛。
+
+**发布插件必须走签名流程**：`plugins/<name>/package.sh` 在打包末尾自动用 `plugins/sign-common.sh` 完成签名，并把 `sha256` / `signature_b64` / 仓库级 `pubkey_b64` 写入 [docs/plugin-marketplace/repo.json](../plugin-marketplace/repo.json)。**注意**：签名绑定 zip 字节，任何一次重打包都会使旧签名失效——重新打包后必须再次运行 package.sh 更新 repo.json，否则市场安装会因旧签名不匹配被拒。
 
 如果你的插件要走市场分发，需要发布到 [docs/plugin-marketplace/repo.json](../plugin-marketplace/repo.json) 索引（见 [marketplace/README.md](../plugin-marketplace/README.md)）。
 

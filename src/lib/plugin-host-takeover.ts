@@ -43,8 +43,10 @@ export const DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS = 5000
 
 /** 动态导入的插件模块引用；inline 插件为 undefined。 */
 export interface PluginWithModule extends PluginDefinition {
-  /** 动态导入结果，仅磁盘插件有 */
-  __pluginModule?: { setHost?: (overrides: HostOverrides) => () => void }
+  /** 动态导入结果，仅磁盘插件有；setHost 第二参用于把当前插件 ID 绑定到 SDK override 层 */
+  __pluginModule?: {
+    setHost?: (overrides: HostOverrides, pluginId?: string) => () => void
+  }
 }
 
 /** 插件持久化的 setHost restore 函数映射。 */
@@ -56,7 +58,8 @@ export function installHostTakeover(plugin: PluginDefinition): void {
   if (!mod?.setHost) return
   // 避免重复安装
   if (hostTakeoverRestoreMap.has(plugin.id)) return
-  const restore = mod.setHost(buildOverridesForPlugin(plugin))
+  // 第二参绑定插件 ID：模块级 settings API 靠它隐式解析目标插件
+  const restore = mod.setHost(buildOverridesForPlugin(plugin), plugin.id)
   hostTakeoverRestoreMap.set(plugin.id, restore)
 }
 
@@ -226,7 +229,8 @@ export async function runPluginLifecycleHook(
   const mod = (plugin as PluginWithModule).__pluginModule
   let restoreHost: (() => void) | undefined
   if (mod?.setHost) {
-    restoreHost = mod.setHost(buildOverridesForPlugin(plugin))
+    // 第二参绑定插件 ID，hook 执行期间模块级 settings API 才能解析当前插件
+    restoreHost = mod.setHost(buildOverridesForPlugin(plugin), plugin.id)
   }
   // 不在每轮钩子前清熔断标志，避免旧 hookPromise 绕过检查
   const timeoutMs = options.timeoutMs ?? DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS

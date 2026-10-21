@@ -598,31 +598,33 @@ async function stubSetSetting(
 }
 
 /**
- * Read a single setting key. The host installs `__pluginSettings_get`
- * to route to SQLite; the standalone stub reads from the in-process
- * cache (hydrated from `__settings__` in storage).
+ * Read a single setting key for **the current plugin**. The plugin ID
+ * is resolved implicitly from the active host-override layer (installed
+ * by the host before lifecycle hooks run), so callers cannot target
+ * another plugin. The host installs `__pluginSettings_get` to route to
+ * SQLite; the standalone stub reads from the in-process cache
+ * (hydrated from `__settings__` in storage).
  */
-export async function getSetting<T = unknown>(
-  pluginId: string,
-  key: string
-): Promise<T | null> {
+export async function getSetting<T = unknown>(key: string): Promise<T | null> {
+  const pluginId = currentPluginId()
   const override = currentHostOverrides().__pluginSettings_get
   if (override) return (await override(pluginId, key)) as T | null
   return stubGetSetting<T>(pluginId, key)
 }
 
 /**
- * Persist a single setting key. The host installs `__pluginSettings_set`
- * to route to SQLite; the standalone stub writes to the cache and
- * notifies local subscribers. The event is also dispatched on the
- * shared `pluginEventBus` so subscribers using the host bus can pick
- * it up.
+ * Persist a single setting key for **the current plugin** (the ID is
+ * resolved implicitly — see `getSetting`). The host installs
+ * `__pluginSettings_set` to route to SQLite; the standalone stub writes
+ * to the cache and notifies local subscribers. The event is also
+ * dispatched on the shared `pluginEventBus` so subscribers using the
+ * host bus can pick it up.
  */
 export async function setSetting<T = unknown>(
-  pluginId: string,
   key: string,
   value: T
 ): Promise<void> {
+  const pluginId = currentPluginId()
   const override = currentHostOverrides().__pluginSettings_set
   if (override) {
     await override(pluginId, key, value)
@@ -632,25 +634,28 @@ export async function setSetting<T = unknown>(
 }
 
 /**
- * Read every stored setting for `pluginId`. Host overrides route to
+ * Read every stored setting for **the current plugin** (the ID is
+ * resolved implicitly — see `getSetting`). Host overrides route to
  * SQLite; the stub returns the full in-process cache.
  */
-export async function getAllSettings(pluginId: string): Promise<Record<string, unknown>> {
+export async function getAllSettings(): Promise<Record<string, unknown>> {
+  const pluginId = currentPluginId()
   const override = currentHostOverrides().__pluginSettings_all
   if (override) return override(pluginId)
   return stubGetAllSettings(pluginId)
 }
 
 /**
- * Subscribe to settings changes for `pluginId`. The host installs
+ * Subscribe to settings changes for **the current plugin** (the ID is
+ * resolved implicitly — see `getSetting`). The host installs
  * `__pluginSettings_subscribe` to bridge to the global event bus
- * filtered by `pluginId`; the stub notifies a per-plugin listener
- * set. Returns an unsubscribe function.
+ * filtered by plugin ID; the stub notifies a per-plugin listener set.
+ * Returns an unsubscribe function.
  */
 export function onSettingsChange(
-  pluginId: string,
   handler: (values: Record<string, unknown>) => void
 ): () => void {
+  const pluginId = currentPluginId()
   const override = currentHostOverrides().__pluginSettings_subscribe
   if (override) {
     return override((payload) => {
@@ -1461,6 +1466,12 @@ export interface HostOverrides {
 interface HostOverrideLayer {
   overrides: HostOverrides
   token: number
+  /**
+   * 绑定到该层的插件 ID（宿主通过 `setHost(overrides, pluginId)` 传入）。
+   * 模块级 settings API 用它隐式解析目标插件，从而在类型层面
+   * 移除跨插件读写参数——插件代码无法指定别的 pluginId。
+   */
+  pluginId?: string
 }
 const hostOverridesStack: HostOverrideLayer[] = []
 let nextHostToken = 0
@@ -1472,6 +1483,27 @@ function currentHostOverrides(): HostOverrides {
 }
 
 const EMPTY_HOST_OVERRIDES: HostOverrides = Object.freeze({}) as HostOverrides
+
+/**
+ * 解析当前生效的插件 ID：自栈顶向下找第一个绑定了 pluginId 的层。
+ *
+ * 宿主在 installHostTakeover / runLifecycleHook 时通过 `setHost` 的
+ * 第二参完成绑定，生命周期 hook 执行期间栈顶一定带 pluginId，因此
+ * 模块级 settings API 能安全地隐式解析目标插件——调用方不再（也无法）
+ * 显式传入 pluginId，跨插件读写入口在类型层面被移除。
+ */
+function currentPluginId(): string {
+  for (let i = hostOverridesStack.length - 1; i >= 0; i--) {
+    const id = hostOverridesStack[i].pluginId
+    if (id) return id
+  }
+  // 无绑定时显式报错并给出指引，而不是静默读写错误的插件
+  throw new Error(
+    '[plugin-sdk] 当前没有可解析的 pluginId：settings API 已隐式绑定当前插件，' +
+      '只能在宿主生命周期 hook 执行期间调用（面板/命令场景请改用 ' +
+      'PluginPanelProps 上的同名方法）。测试中请先 setHost(overrides, pluginId) 绑定。',
+  )
+}
 
 /**
  * Internal helper: dispatch an event through the host if a
@@ -1535,6 +1567,11 @@ function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPaylo
  * firing a lifecycle hook), then calls the returned `restore` to
  * pop the layer (typically in a `finally`).
  *
+ * 第二参 `pluginId` 由宿主传入，用于把当前生命周期上下文绑定到该层：
+ * 模块级 `getSetting/setSetting/getAllSettings/onSettingsChange` 依赖
+ * 它隐式解析目标插件。宿主必须在每次 setHost 时传 pluginId，否则
+ * 插件在 hook 内调用 settings API 会抛「没有可解析的 pluginId」。
+ *
  * The SDK supports **arbitrary-order restore** because each
  * `setHost` call gets a unique token and `restore` matches by
  * that token rather than relying on a `previous` snapshot. This
@@ -1547,11 +1584,11 @@ function dispatchEmit<E extends PluginEvent>(event: E, payload: PluginEventPaylo
  * `export { setHost } from '@swallow-note/plugin-sdk'` from their
  * entry file.
  */
-export function setHost(overrides: HostOverrides): () => void {
+export function setHost(overrides: HostOverrides, pluginId?: string): () => void {
   const token = nextHostToken++
   // 合并 overrides 到新对象，pop 不影响下层
   const merged: HostOverrides = { ...currentHostOverrides(), ...overrides }
-  hostOverridesStack.push({ overrides: merged, token })
+  hostOverridesStack.push({ overrides: merged, token, pluginId })
   return () => {
     // 自顶向下查找 token，O(n) 终止
     for (let i = hostOverridesStack.length - 1; i >= 0; i--) {

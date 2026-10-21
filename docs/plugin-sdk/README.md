@@ -278,17 +278,20 @@ import {
   onSettingsChange,
 } from '@swallow-note/plugin-sdk'
 
+// pluginId 无需（也无法）显式传入：SDK 把当前插件 ID 绑定在宿主安装的
+// override 层上，模块级 API 自动解析目标插件——类型层面不存在跨插件读写入口。
+
 // 读取单个设置（类型安全）
-const theme = await getSetting<string>(pluginId, 'theme')
+const theme = await getSetting<string>('theme')
 
 // 持久化单个设置（写穿 SQLite / 缓存）
-await setSetting(pluginId, 'theme', 'dark')
+await setSetting('theme', 'dark')
 
 // 读取所有设置为扁平 key/value map
-const all = await getAllSettings(pluginId)
+const all = await getAllSettings()
 
 // 订阅设置变更，handler 收到完整 values map
-const unsub = onSettingsChange(pluginId, (values) => {
+const unsub = onSettingsChange((values) => {
   console.log('settings changed:', values)
 })
 // 卸载时调用 unsub() 取消订阅
