@@ -8,15 +8,22 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
+use tauri::ipc::Channel;
 use log::{info, warn, error};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 
 /// Default per-call timeout for a plugin backend invocation.
 const INVOKE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 流式调用默认首块超时（推理模型首 token 常超 30s；可经 firstChunkTimeoutSecs 覆盖）。
+const STREAM_FIRST_CHUNK_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// 流式调用的块间空闲超时（任意事件到达即刷新；无总时长上限）。
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A single pending JSON-RPC request awaiting a response from the child.
 type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>;
@@ -63,6 +70,90 @@ impl JsonRpcResponse {
     }
 }
 
+/// 后端流式通知帧：`{"jsonrpc":"2.0","method":"swallow/stream",
+/// "params":{"requestId":<请求id>,"event":"chunk"|"done"|"error","data":...}}`。
+/// 与响应帧同管道交错，按 `requestId`（即该次请求的 JSON-RPC `id`）路由。
+#[derive(Debug)]
+struct StreamNotification {
+    /// 归属请求的 JSON-RPC `id`（宿主生成），据此路由到对应流。
+    request_id: u64,
+    event: StreamEventKind,
+    /// 增量载荷；done/error 事件可省略（默认 Null）。
+    data: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamEventKind {
+    Chunk,
+    Done,
+    Error,
+}
+
+impl StreamEventKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            StreamEventKind::Chunk => "chunk",
+            StreamEventKind::Done => "done",
+            StreamEventKind::Error => "error",
+        }
+    }
+}
+
+/// 经 Tauri Channel 推送到前端的流式事件载荷（requestId 由宿主路由消化，不下发）。
+/// Deserialize 供 Tauri command 参数机制满足 `Channel<T>: CommandArg` 的 bound。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct StreamEvent {
+    event: String,
+    data: Value,
+}
+
+/// 读循环帧分类：响应帧（有 `id`+`result`/`error`）终止一次 invoke；
+/// 通知帧（有 `method`）为流式增量，按 requestId 路由到对应 Channel。
+#[derive(Debug)]
+enum JsonRpcFrame {
+    Response(JsonRpcResponse),
+    Notification(StreamNotification),
+}
+
+impl JsonRpcFrame {
+    /// 流式通知帧保留的 method 名；未知 method 一律丢弃。
+    const STREAM_METHOD: &'static str = "swallow/stream";
+
+    fn parse(line: &str) -> Option<Self> {
+        let v: Value = serde_json::from_str(line).ok()?;
+        // 通知帧优先判定：响应帧永远没有 method 字段。
+        if let Some(method) = v.get("method").and_then(|m| m.as_str()) {
+            if method != Self::STREAM_METHOD {
+                return None;
+            }
+            let params = v.get("params")?;
+            let request_id = params.get("requestId")?.as_u64()?;
+            let kind = match params.get("event")?.as_str()? {
+                "chunk" => StreamEventKind::Chunk,
+                "done" => StreamEventKind::Done,
+                "error" => StreamEventKind::Error,
+                _ => return None,
+            };
+            return Some(Self::Notification(StreamNotification {
+                request_id,
+                event: kind,
+                data: params.get("data").cloned().unwrap_or(Value::Null),
+            }));
+        }
+        JsonRpcResponse::parse(line).map(Self::Response)
+    }
+}
+
+/// 一路进行中的流式调用：通知帧按 requestId 命中后经 channel 推送到前端；
+/// activity 计数器（watch）供 invoke 循环感知「有新块到达」以刷新空闲超时。
+struct StreamChannel {
+    channel: Channel<StreamEvent>,
+    activity: watch::Sender<u64>,
+}
+
+/// 并发流式路由表：requestId（JSON-RPC 请求 id）→ 流通道。
+type StreamsMap = Arc<Mutex<HashMap<u64, StreamChannel>>>;
+
 /// Long-lived handle to a single plugin's backend child process.
 ///
 /// Cloning is cheap: every field is an `Arc` (or atomic) so each
@@ -84,6 +175,8 @@ pub(crate) struct PluginProcess {
     timeout_count: AtomicU32,
     /// Pending requests keyed by id.
     pending: PendingMap,
+    /// 进行中的流式调用，按 requestId 路由通知帧。
+    streams: StreamsMap,
     /// Background reader task. Aborted on shutdown.
     _reader: JoinHandle<()>,
     /// Background stderr logger. Aborted on shutdown.
@@ -240,9 +333,12 @@ async fn spawn_plugin_process(
         .ok_or_else(|| PluginError::Process("plugin backend stderr unavailable".to_string()))?;
 
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+    let streams: StreamsMap = Arc::new(Mutex::new(HashMap::new()));
 
-    // Reader task: read line-delimited JSON, route to pending senders.
+    // Reader task: read line-delimited JSON, classify each frame, and
+    // route: response → pending oneshot; notification → stream channel.
     let pending_for_reader = Arc::clone(&pending);
+    let streams_for_reader = Arc::clone(&streams);
     let plugin_id_for_reader = plugin_id.clone();
     let reader = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
@@ -252,22 +348,43 @@ async fn spawn_plugin_process(
                     if line.is_empty() {
                         continue;
                     }
-                    let Some(resp) = JsonRpcResponse::parse(&line) else {
-                        error!(
-                            "[plugin-host] malformed response from '{}': {}",
-                            plugin_id_for_reader, line
-                        );
-                        continue;
-                    };
-                    let mut map = pending_for_reader.lock().await;
-                    if let Some(tx) = map.remove(&resp.id) {
-                        // receiver 可能已因超时 drop，send 静默失败。
-                        let _ = tx.send(resp);
-                    } else {
-                        warn!(
-                            "[plugin-host] response with no pending request from '{}': id={}",
-                            plugin_id_for_reader, resp.id
-                        );
+                    match JsonRpcFrame::parse(&line) {
+                        Some(JsonRpcFrame::Response(resp)) => {
+                            let mut map = pending_for_reader.lock().await;
+                            if let Some(tx) = map.remove(&resp.id) {
+                                // receiver 可能已因超时 drop，send 静默失败。
+                                let _ = tx.send(resp);
+                            } else {
+                                warn!(
+                                    "[plugin-host] response with no pending request from '{}': id={}",
+                                    plugin_id_for_reader, resp.id
+                                );
+                            }
+                        }
+                        Some(JsonRpcFrame::Notification(n)) => {
+                            let mut streams = streams_for_reader.lock().await;
+                            if let Some(sc) = streams.get(&n.request_id) {
+                                // 推送到前端 Tauri Channel；activity 计数唤醒
+                                // invoke 循环刷新空闲超时（send_modify 即通知）。
+                                let _ = sc.channel.send(StreamEvent {
+                                    event: n.event.as_str().to_string(),
+                                    data: n.data,
+                                });
+                                let _ = sc.activity.send_modify(|c| *c += 1);
+                            } else {
+                                warn!(
+                                    "[plugin-host] stream notification with no channel from '{}': requestId={}",
+                                    plugin_id_for_reader, n.request_id
+                                );
+                            }
+                        }
+                        None => {
+                            error!(
+                                "[plugin-host] malformed frame from '{}': {}",
+                                plugin_id_for_reader,
+                                &line[..line.len().min(256)]
+                            );
+                        }
                     }
                 }
                 Ok(None) => {
@@ -281,6 +398,17 @@ async fn spawn_plugin_process(
                                 "plugin backend exited unexpectedly (plugin_id={})",
                                 plugin_id_for_reader
                             ))),
+                        });
+                    }
+                    drop(map);
+                    // 未完成的流以 error 事件收尾（前端展示为流中断）。
+                    let mut streams = streams_for_reader.lock().await;
+                    for (_, sc) in streams.drain() {
+                        let _ = sc.channel.send(StreamEvent {
+                            event: "error".to_string(),
+                            data: serde_json::json!({
+                                "message": "plugin backend exited unexpectedly",
+                            }),
                         });
                     }
                     break;
@@ -313,6 +441,7 @@ async fn spawn_plugin_process(
         next_id: AtomicU64::new(1),
         timeout_count: AtomicU32::new(0),
         pending,
+        streams,
         _reader: reader,
         _stderr: stderr_task,
         last_used_at: std::sync::Mutex::new(Instant::now()),
@@ -356,15 +485,26 @@ async fn get_or_spawn(
     Ok(proc)
 }
 
-// Tauri 命令：在 plugin_id 后端调用 command。返回 Result<Value, PluginError>。
-#[tauri::command]
-pub async fn invoke_plugin(
-    app_handle: AppHandle,
-    state: State<'_, SharedPluginProcessState>,
-    plugin_id: String,
-    command: String,
+/// invoke 公共前置：校验 → 取/拉起进程 → 刷新 last_used → 分配 id →
+/// 注册 pending（流式时同时注册流路由表项）→ 写请求。
+/// 返回 (proc, id, rx, activity_rx)；activity_rx 仅流式调用为 Some，
+/// 供流式等待循环感知「有事件到达」以刷新空闲超时。
+async fn write_request(
+    state: &SharedPluginProcessState,
+    app_data_dir: &Path,
+    plugin_id: &str,
+    command: &str,
     args: Option<Value>,
-) -> Result<Value, PluginError> {
+    stream: Option<Channel<StreamEvent>>,
+) -> Result<
+    (
+        Arc<PluginProcess>,
+        u64,
+        oneshot::Receiver<JsonRpcResponse>,
+        Option<watch::Receiver<u64>>,
+    ),
+    PluginError,
+> {
     if plugin_id.is_empty() {
         return Err(PluginError::InvalidInput("plugin_id is required".to_string()));
     }
@@ -372,12 +512,7 @@ pub async fn invoke_plugin(
         return Err(PluginError::InvalidInput("command is required".to_string()));
     }
 
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| PluginError::Io(format!("Failed to resolve app data dir: {}", e)))?;
-
-    let proc = get_or_spawn(state.inner(), &plugin_id, &app_data_dir).await?;
+    let proc = get_or_spawn(state, plugin_id, app_data_dir).await?;
 
     // 更新最后使用时间，供空闲回收定时器判断（新 spawn 的进程已是 now，此处覆盖也无妨）
     // mutex 中毒时优雅降级，与 start_idle_reaper 保持一致
@@ -394,44 +529,79 @@ pub async fn invoke_plugin(
         .map_err(|e| PluginError::JsonRpc(format!("failed to encode JSON-RPC request: {}", e)))?;
     serialized.push('\n');
 
+    // 流式调用：创建 activity watch 并准备流路由表项。
+    let (stream_channel, activity_rx) = match stream {
+        Some(ch) => {
+            let (tx, rx) = watch::channel(0u64);
+            (Some(StreamChannel { channel: ch, activity: tx }), Some(rx))
+        }
+        None => (None, None),
+    };
+
     // Register the pending oneshot before writing so the reader task
     // is guaranteed to find a receiver when the response arrives.
+    // 流路由表项同样先注册，保证后端早期通知帧不丢失。
     let (tx, rx) = oneshot::channel::<JsonRpcResponse>();
     {
         let mut pending = proc.pending.lock().await;
         pending.insert(id, tx);
     }
+    if let Some(sc) = stream_channel {
+        proc.streams.lock().await.insert(id, sc);
+    }
 
     // Write the request. If the writer is missing (e.g. the child
     // died between spawn and now), we recover by evicting the entry
     // and returning a clear error.
-    {
+    let write_result = async {
         let mut stdin_guard = proc.stdin.lock().await;
-        match stdin_guard.as_mut() {
-            Some(s) => {
-                if let Err(e) = s.write_all(serialized.as_bytes()).await {
-                    // Drop the pending entry; reader EOF will sweep
-                    // anything else left behind.
-                    let mut pending = proc.pending.lock().await;
-                    pending.remove(&id);
-                    return Err(PluginError::Process(format!("failed to write to plugin stdin: {}", e)));
-                }
-                if let Err(e) = s.flush().await {
-                    let mut pending = proc.pending.lock().await;
-                    pending.remove(&id);
-                    return Err(PluginError::Process(format!("failed to flush plugin stdin: {}", e)));
-                }
-            }
+        let s = match stdin_guard.as_mut() {
+            Some(s) => s,
             None => {
-                let mut pending = proc.pending.lock().await;
-                pending.remove(&id);
                 return Err(PluginError::Process(format!(
                     "plugin backend stdin closed (plugin_id={})",
                     proc.plugin_id
                 )));
             }
-        }
+        };
+        s.write_all(serialized.as_bytes())
+            .await
+            .map_err(|e| PluginError::Process(format!("failed to write to plugin stdin: {}", e)))?;
+        s.flush()
+            .await
+            .map_err(|e| PluginError::Process(format!("failed to flush plugin stdin: {}", e)))?;
+        Ok(())
     }
+    .await;
+
+    if let Err(e) = write_result {
+        // 写失败：清理 pending + streams；reader EOF 会兜底扫尾。
+        proc.pending.lock().await.remove(&id);
+        if activity_rx.is_some() {
+            proc.streams.lock().await.remove(&id);
+        }
+        return Err(e);
+    }
+
+    Ok((proc, id, rx, activity_rx))
+}
+
+// Tauri 命令：在 plugin_id 后端调用 command（非流式：30s 总超时 + 连续超时熔断）。
+#[tauri::command]
+pub async fn invoke_plugin(
+    app_handle: AppHandle,
+    state: State<'_, SharedPluginProcessState>,
+    plugin_id: String,
+    command: String,
+    args: Option<Value>,
+) -> Result<Value, PluginError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| PluginError::Io(format!("Failed to resolve app data dir: {}", e)))?;
+
+    let (proc, id, rx, _activity_rx) =
+        write_request(state.inner(), &app_data_dir, &plugin_id, &command, args, None).await?;
 
     // Await the response, with timeout. We use tokio::select! so the
     // timeout fires even if the child is hung.
@@ -485,6 +655,110 @@ pub async fn invoke_plugin(
     response.body
 }
 
+/// 流式 invoke：与 invoke_plugin 共用后端管道，但携带 Tauri Channel 接收
+/// `swallow/stream` 通知帧；响应帧仍负责终结调用并返回最终结果。
+/// 超时三态：首块超时可配（默认 90s），此后任意事件到达刷新 60s 空闲
+/// deadline（无总时长上限）；流式超时不计入连续超时熔断。
+#[tauri::command]
+pub async fn invoke_plugin_stream(
+    app_handle: AppHandle,
+    state: State<'_, SharedPluginProcessState>,
+    plugin_id: String,
+    command: String,
+    args: Option<Value>,
+    stream: Channel<StreamEvent>,
+    first_chunk_timeout_secs: Option<u64>,
+) -> Result<Value, PluginError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| PluginError::Io(format!("Failed to resolve app data dir: {}", e)))?;
+
+    // 首块超时可经 first_chunk_timeout_secs 覆盖；最小 1s 防误配为 0。
+    let first_chunk = Duration::from_secs(
+        first_chunk_timeout_secs
+            .unwrap_or(STREAM_FIRST_CHUNK_TIMEOUT.as_secs())
+            .max(1),
+    );
+
+    let (proc, id, mut rx, activity_rx) =
+        write_request(state.inner(), &app_data_dir, &plugin_id, &command, args, Some(stream))
+            .await?;
+    let mut activity_rx = activity_rx.expect("streaming call must have an activity receiver");
+
+    // 首块阶段用 first_chunk；首个事件到达后进入空闲模式（60s 滚动续期）。
+    let mut current_timeout = first_chunk;
+    let mut deadline = tokio::time::Instant::now() + current_timeout;
+    let response = loop {
+        tokio::select! {
+            resp = &mut rx => {
+                match resp {
+                    Ok(resp) => {
+                        // 响应帧终结调用；正常返回同样重置连续超时计数。
+                        proc.timeout_count.store(0, Ordering::Relaxed);
+                        break resp;
+                    }
+                    Err(_canceled) => {
+                        // reader 持有的 tx 已消失：异常路径兜底。
+                        proc.streams.lock().await.remove(&id);
+                        return Err(PluginError::JsonRpc(
+                            "plugin response channel closed".to_string(),
+                        ));
+                    }
+                }
+            }
+            changed = activity_rx.changed() => {
+                if changed.is_ok() {
+                    // 任意流事件（chunk/done/error）到达：刷新空闲 deadline。
+                    current_timeout = STREAM_IDLE_TIMEOUT;
+                    deadline = tokio::time::Instant::now() + current_timeout;
+                }
+                // Err：发送端已随流表项清理（EOF/kill 收尾），继续等 rx 或超时兜底。
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                // 流式超时：清理 pending + streams。不计入连续超时熔断——
+                // 流式调用生命周期长（长推理模型），熔断会误杀正常插件。
+                proc.pending.lock().await.remove(&id);
+                proc.streams.lock().await.remove(&id);
+                warn!(
+                    "[plugin_invoke] plugin '{}' stream '{}' timed out (no stream event within {}s)",
+                    proc.plugin_id, command, current_timeout.as_secs()
+                );
+                return Err(PluginError::Timeout {
+                    secs: current_timeout.as_secs(),
+                    plugin_id: proc.plugin_id.clone(),
+                    command,
+                });
+            }
+        }
+    };
+
+    // 调用结束（无论成败）：移除流路由表项；迟到的通知帧将因查表失败
+    // 记录 warn（后端协议违规可观测），不再推给前端。
+    proc.streams.lock().await.remove(&id);
+
+    response.body
+}
+
+/// 预热插件后端进程（P1.4 面板请求管道）：仅 get_or_spawn 拉起进程并刷新
+/// last_used_at，不发送任何 JSON-RPC 请求。供前端打开插件面板时调用，
+/// 避免首次对话请求叠加进程冷启动延迟。失败不阻塞面板打开（前端静默兜底）。
+#[tauri::command]
+pub async fn prewarm_plugin(
+    app_handle: AppHandle,
+    state: State<'_, SharedPluginProcessState>,
+    plugin_id: String,
+) -> Result<(), PluginError> {
+    // 防路径遍历：与 kill_plugin_backend 同一校验入口
+    super::plugin::validate_plugin_id(&plugin_id)?;
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| PluginError::Io(format!("Failed to resolve app data dir: {}", e)))?;
+    get_or_spawn(state.inner(), &plugin_id, &app_data_dir).await?;
+    Ok(())
+}
+
 /// 对已从 state map 中 remove 出来的进程执行实际 kill + 唤醒 pending。
 /// 不再操作 state map，避免与 kill_plugin_backend / idle_reaper 的 map 锁嵌套。
 /// 抽出此函数是为了让 idle_reaper 能在锁内原子地「二次检查 last_used_at + remove」，
@@ -511,6 +785,15 @@ async fn kill_removed_proc(proc: &Arc<PluginProcess>, plugin_id: &str) {
                 "plugin backend killed (plugin_id={})",
                 plugin_id
             ))),
+        });
+    }
+    drop(pending);
+    // 未完成的流以 error 事件收尾（前端展示为流中断）。
+    let mut streams = proc.streams.lock().await;
+    for (_, sc) in streams.drain() {
+        let _ = sc.channel.send(StreamEvent {
+            event: "error".to_string(),
+            data: serde_json::json!({ "message": "plugin backend killed" }),
         });
     }
 }
@@ -581,6 +864,77 @@ mod tests {
         assert!(JsonRpcResponse::parse(r#"{"id":"not-a-number","result":null}"#).is_none());
     }
 
+    #[test]
+    fn frame_parse_notification() {
+        let line = r#"{"jsonrpc":"2.0","method":"swallow/stream","params":{"requestId":7,"event":"chunk","data":{"text":"你"}}}"#;
+        match JsonRpcFrame::parse(line).expect("parse") {
+            JsonRpcFrame::Notification(n) => {
+                assert_eq!(n.request_id, 7);
+                assert_eq!(n.event, StreamEventKind::Chunk);
+                assert_eq!(n.data, serde_json::json!({"text": "你"}));
+            }
+            _ => panic!("expected notification"),
+        }
+    }
+
+    #[test]
+    fn frame_parse_notification_done_without_data() {
+        let line = r#"{"jsonrpc":"2.0","method":"swallow/stream","params":{"requestId":3,"event":"done"}}"#;
+        match JsonRpcFrame::parse(line).expect("parse") {
+            JsonRpcFrame::Notification(n) => {
+                assert_eq!(n.request_id, 3);
+                assert_eq!(n.event, StreamEventKind::Done);
+                assert_eq!(n.data, Value::Null);
+            }
+            _ => panic!("expected notification"),
+        }
+    }
+
+    #[test]
+    fn frame_parse_unknown_method_or_event_dropped() {
+        // 未知 method / 未知 event / 缺 requestId / 缺 event：一律丢弃。
+        assert!(JsonRpcFrame::parse(r#"{"jsonrpc":"2.0","method":"other/method","params":{}}"#).is_none());
+        assert!(JsonRpcFrame::parse(
+            r#"{"jsonrpc":"2.0","method":"swallow/stream","params":{"requestId":1,"event":"bogus"}}"#
+        )
+        .is_none());
+        assert!(JsonRpcFrame::parse(
+            r#"{"jsonrpc":"2.0","method":"swallow/stream","params":{"event":"chunk"}}"#
+        )
+        .is_none());
+        assert!(JsonRpcFrame::parse(
+            r#"{"jsonrpc":"2.0","method":"swallow/stream","params":{"requestId":1}}"#
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn frame_parse_response_still_routes_as_response() {
+        let line = r#"{"jsonrpc":"2.0","id":42,"result":{"ok":true}}"#;
+        match JsonRpcFrame::parse(line).expect("parse") {
+            JsonRpcFrame::Response(r) => assert_eq!(r.id, 42),
+            _ => panic!("expected response"),
+        }
+    }
+
+    #[test]
+    fn frame_parse_1mb_chunk_line() {
+        // 超长单行（≥1MB chunk）必须完整解析，不得截断/丢弃。
+        let big_text = "x".repeat(1024 * 1024);
+        let line = format!(
+            r#"{{"jsonrpc":"2.0","method":"swallow/stream","params":{{"requestId":9,"event":"chunk","data":{{"text":"{}"}}}}}}"#,
+            big_text
+        );
+        assert!(line.len() > 1024 * 1024);
+        match JsonRpcFrame::parse(&line).expect("parse") {
+            JsonRpcFrame::Notification(n) => {
+                assert_eq!(n.request_id, 9);
+                assert_eq!(n.data["text"].as_str().unwrap().len(), 1024 * 1024);
+            }
+            _ => panic!("expected notification"),
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn resolve_backend_binary_picks_primary() {
@@ -627,5 +981,110 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    // 假后端（python3）：读两行 JSON-RPC 请求，按 id 升序标记 A/B 两路，
+    // 交错发 chunk 通知帧（A0 B0 A1 B1 A2 B2）再各回响应帧。
+    // 宿主端流路由必须按 requestId 严格分流——这正是被测行为。
+    const STREAM_ECHO_BACKEND: &str = r#"#!/usr/bin/env python3
+import sys, json
+
+def main():
+    reqs = []
+    while len(reqs) < 2:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        line = line.strip()
+        if line:
+            reqs.append(json.loads(line))
+    reqs.sort(key=lambda r: r["id"])
+    for i in range(3):
+        for idx, req in enumerate(reqs):
+            frame = {
+                "jsonrpc": "2.0",
+                "method": "swallow/stream",
+                "params": {
+                    "requestId": req["id"],
+                    "event": "chunk",
+                    "data": {"text": "%s%d" % ("AB"[idx], i)},
+                },
+            }
+            sys.stdout.write(json.dumps(frame) + "\n")
+            sys.stdout.flush()
+    for idx, req in enumerate(reqs):
+        sys.stdout.write(json.dumps({
+            "jsonrpc": "2.0",
+            "id": req["id"],
+            "result": {"echo": "AB"[idx], "method": req.get("method")},
+        }) + "\n")
+        sys.stdout.flush()
+
+main()
+"#;
+
+    // 并发两路流端到端（Phase 1 验收）：真实子进程 + 真实管道，
+    // 验证同插件两路流式调用的 chunk 帧按 requestId 路由、互不串扰。
+    // reader task 按行序同步调用 Channel 回调，故「收到响应帧」即保证
+    // 该次调用的全部 chunk 已入缓冲，断言无需 sleep/轮询。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn concurrent_streams_route_without_crosstalk() {
+        use tauri::ipc::InvokeResponseBody;
+        use std::os::unix::fs::PermissionsExt;
+
+        // 布局假插件：active_version_dir 无 symlink/marker 时扫 .versions/ 目录。
+        let root = tempdir();
+        let backend_dir = root.join("plugins/echo-test/.versions/1.0.0/backend");
+        std::fs::create_dir_all(&backend_dir).unwrap();
+        let backend = backend_dir.join("plugin_echo-test");
+        std::fs::write(&backend, STREAM_ECHO_BACKEND).unwrap();
+        std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let state = new_shared_plugin_process_state();
+
+        // 两路 Channel：回调同步解析 StreamEvent 并 push 到各自缓冲。
+        let collect = |buf: Arc<std::sync::Mutex<Vec<StreamEvent>>>| {
+            Channel::<StreamEvent>::new(move |body| {
+                if let InvokeResponseBody::Json(s) = body {
+                    let ev: StreamEvent = serde_json::from_str(&s).expect("decode StreamEvent");
+                    buf.lock().unwrap().push(ev);
+                }
+                Ok(())
+            })
+        };
+        let buf_a = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let buf_b = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let channel_a = collect(Arc::clone(&buf_a));
+        let channel_b = collect(Arc::clone(&buf_b));
+
+        // 并发两路流式调用：同插件共享同一后端进程，id 由 AtomicU64 分配。
+        let (ra, rb) = tokio::join!(
+            write_request(&state, &root, "echo-test", "streamChat",
+                          Some(serde_json::json!({"q": "A"})), Some(channel_a)),
+            write_request(&state, &root, "echo-test", "streamChat",
+                          Some(serde_json::json!({"q": "B"})), Some(channel_b)),
+        );
+        let (_, _, rx_a, _) = ra.expect("write_request A");
+        let (_, _, rx_b, _) = rb.expect("write_request B");
+
+        // 响应帧终结调用；30s 兜底防后端异常挂死测试。
+        let resp_a = tokio::time::timeout(Duration::from_secs(30), rx_a)
+            .await.expect("timeout waiting A").expect("rx A closed");
+        let resp_b = tokio::time::timeout(Duration::from_secs(30), rx_b)
+            .await.expect("timeout waiting B").expect("rx B closed");
+        let body_a = resp_a.body.expect("A response ok");
+        let body_b = resp_b.body.expect("B response ok");
+        assert_eq!(body_a["echo"].as_str(), Some("A"));
+        assert_eq!(body_b["echo"].as_str(), Some("B"));
+
+        // 断言：chunk 严格按路分流且顺序保持（A 不见 B 帧，反之亦然）。
+        let texts = |buf: &Arc<std::sync::Mutex<Vec<StreamEvent>>>| {
+            buf.lock().unwrap().iter()
+                .map(|e| e.data["text"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(texts(&buf_a), vec!["A0", "A1", "A2"]);
+        assert_eq!(texts(&buf_b), vec!["B0", "B1", "B2"]);
     }
 }

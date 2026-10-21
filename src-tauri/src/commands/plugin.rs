@@ -759,6 +759,17 @@ pub async fn uninstall_plugin(
                 warn!("[plugin] security: plugin data dir for '{}' is outside plugin-data root, skipping deletion", plugin_id);
             }
         }
+
+        // P1.5 / ADR-0003：secureStorage 默认保留，勾选 delete_data 时
+        // 连带删该插件全部密文。best-effort：DB 锁竞争等失败不阻断卸载。
+        if let Err(e) =
+            crate::commands::plugin_secure_storage::drop_secure_storage_for(&app_handle, &plugin_id)
+        {
+            error!(
+                "[plugin] drop_secure_storage_for '{}' on uninstall: {}",
+                plugin_id, e
+            );
+        }
     }
 
     // Drop the settings table for this plugin. Best-effort: if the

@@ -6,6 +6,7 @@ pub mod folder_history;
 pub mod market_sources;
 pub mod md_frontmatter;
 pub mod plugin_settings;
+pub mod secure_storage;
 pub mod session_state;
 
 use rusqlite::{Connection, OpenFlags, Result};
@@ -115,6 +116,19 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
             values_json TEXT NOT NULL DEFAULT '{}',
             schema_version INTEGER NOT NULL DEFAULT 0,
             updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+        )",
+        [],
+    )?;
+
+    // secure_storage 单表设计（P1.5 / ADR-0003）：每插件每键一行，密文
+    // base64(nonce‖ct) 存储，明文永不落库。加解密见 crate::crypto。
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS secure_storage (
+            plugin_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            ciphertext TEXT NOT NULL,
+            updated_at DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY (plugin_id, key)
         )",
         [],
     )?;

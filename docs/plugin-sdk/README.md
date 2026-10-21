@@ -118,8 +118,8 @@ export { setHost } from '@swallow-note/plugin-sdk'
 
 | 类别 | 名称 |
 | --- | --- |
-| **类型** | `PluginManifest`, `PluginDefinition`, `PluginDependency`, `PluginContext`, `PluginPanelProps`, `PluginStorage`, `PluginEventBus`, `PluginEvent`, `PluginEventPayloadMap`, `PluginEventHandler`, `PluginLifecycleHook`, `IconPosition`, `ContentPosition`, `ContextMenuItem`, `ContextMenuContext`, `ContextMenuLocation`, `ContextMenuRegistry`, `PluginCommand`, `PluginPermission`, `EditorToolbarConfig`, `OpenEditorTabProps`, `ToolbarButtonProps`, `HostOverrides`, `RunLifecycleHookOptions` |
-| **运行时** | `pluginEventBus`, `getPluginStorage`, `dropPluginStorage`, `SETTINGS_CACHE_KEY`, `getSetting`, `setSetting`, `getAllSettings`, `onSettingsChange`, `dropPluginSettings`, `registerContextMenu`, `unregisterContextMenu`, `clearPluginMenuItems`, `getContextMenuItems`, `getStubMenuRegistry`, `registerCommand`, `unregisterCommand`, `clearPluginCommands`, `listPluginCommands`, `subscribePluginCommands`, `getStubCommandRegistry`, `registerEditor`, `unregisterEditor`, `getEditorForExtension`, `getActivePluginExtensions`, `openEditorTab`, `closeEditorTab`, `closePluginTabs`, `buildPluginContext`, `runLifecycleHook`, `setHost`, `clearHost` |
+| **类型** | `PluginManifest`, `PluginDefinition`, `PluginDependency`, `PluginContext`, `PluginPanelProps`, `PluginPanelRequest`, `PluginStorage`, `PluginEventBus`, `PluginEvent`, `PluginEventPayloadMap`, `PluginEventHandler`, `PluginLifecycleHook`, `IconPosition`, `ContentPosition`, `ContextMenuItem`, `ContextMenuContext`, `ContextMenuLocation`, `ContextMenuRegistry`, `PluginCommand`, `PluginPermission`, `EditorToolbarConfig`, `OpenEditorTabProps`, `ToolbarButtonProps`, `PluginEditorApi`, `PluginEditorSelection`, `PluginFilesApi`, `HostOverrides`, `RunLifecycleHookOptions` |
+| **运行时** | `pluginEventBus`, `getPluginStorage`, `dropPluginStorage`, `SETTINGS_CACHE_KEY`, `getSetting`, `setSetting`, `getAllSettings`, `onSettingsChange`, `dropPluginSettings`, `registerContextMenu`, `unregisterContextMenu`, `clearPluginMenuItems`, `getContextMenuItems`, `getStubMenuRegistry`, `registerCommand`, `unregisterCommand`, `clearPluginCommands`, `listPluginCommands`, `subscribePluginCommands`, `getStubCommandRegistry`, `registerEditor`, `unregisterEditor`, `getEditorForExtension`, `getActivePluginExtensions`, `openEditorTab`, `closeEditorTab`, `closePluginTabs`, `getSecure`, `setSecure`, `deleteSecure`, `listSecureKeys`, `editor`, `files`, `buildPluginContext`, `runLifecycleHook`, `setHost`, `clearHost` |
 | **React hooks** | `usePluginStorage`, `usePluginServices`, `usePluginCommands`, `usePluginEvent`, `usePluginEvents` |
 | **Emit 助手** | `emitNoteOpened`, `emitNoteClosed`, `emitNoteSaved`, `emitNoteChanged`, `emitThemeChanged`, `emitLocaleChanged`, `emitSettingChanged`, `emitAppReady`, `emitAppExit`, `emitPluginSettingsChanged` |
 | **错误类** | `PluginPermissionDeniedError`, `PluginLifecycleTimeoutError` |
@@ -333,6 +333,93 @@ function Panel(panel: PluginPanelProps) {
 }
 ```
 
+## 面板一次性请求
+
+宿主调用 `openPluginPanel(pluginId, payload)` 打开插件右侧面板时，可携带一段**一次性 payload**（结构由插件自定义，宿主不解析）。面板组件通过 props 的 `pendingRequest` 字段读到它：
+
+```typescript
+function Panel(panel: PluginPanelProps) {
+  // 宿主 openPluginPanel('my-plugin', { selection: '...' }) 打开时收到 payload；
+  // 未携带 payload 打开、或本次触发非本插件时为 null。
+  if (panel.pendingRequest) {
+    // 一次性语义：面板挂载（props 送达）后宿主即清空，下次打开不再重复收到；
+    // 连续触发时以最新请求覆盖。
+  }
+}
+```
+
+> 携带 payload 的 `backend` 权限插件同时会预热后端进程（仅拉起子进程，无 JSON-RPC 请求），消除首请求冷启动延迟。
+
+## 编辑器写 API 与工作区文件 API
+
+插件可向当前编辑器写入内容、在工作区内创建/列出笔记。**两条通路**：面板/工具栏组件用 props 上注入的 `panel.editor` / `panel.files`（pluginId 显式绑定）；生命周期钩子内用模块级 `editor` / `files`（override 闭包自持 pluginId）。
+
+**权限要求**：manifest 必须声明 `'editor-write'`（editor API）与 `'files'`（files API），未授权时宿主桥接抛 `PluginPermissionDeniedError`。
+
+```typescript
+// 面板场景：把 AI 生成的 markdown 写回编辑器
+async function applyResult(panel: PluginPanelProps, markdown: string) {
+  // 查询当前选区（无选区/编辑器未挂载返回 null）
+  const selection = await panel.editor.getSelection()
+  // 替换当前选区；无选区时拒绝并返回 false（绝不整文替换，防数据破坏）
+  const ok = await panel.editor.replaceSelection(markdown)
+  if (!ok) {
+    // 退而求其次：在光标处插入
+    await panel.editor.insertAtCursor(markdown)
+  }
+}
+
+// 生命周期钩子场景：模块级命名空间
+onLoad: async () => {
+  const notes = await files.listWorkspace('meeting')   // 相对路径，大小写不敏感过滤
+  if (!notes.includes('meetings/2026-10-21.md')) {
+    await files.createNote('meetings/2026-10-21.md', '# Meeting\n')  // 已存在抛错；父目录自动创建
+  }
+}
+```
+
+| API | 签名 | 语义 |
+| --- | --- | --- |
+| `editor.insertAtCursor` | `(text: string) => Promise<boolean>` | 光标处插入 markdown；编辑器未挂载/解析失败返回 false |
+| `editor.replaceSelection` | `(text: string) => Promise<boolean>` | 替换当前选区；**无选区拒绝返回 false** |
+| `editor.replaceContent` | `(text: string) => Promise<void>` | 整文替换当前笔记 |
+| `editor.getSelection` | `() => Promise<PluginEditorSelection \| null>` | 查询当前选区 `{ text, lineRange }`（1-based 行号）；无选区/编辑器未挂载返回 null |
+| `files.createNote` | `(relPath: string, content: string) => Promise<void>` | 工作区内建笔记；`..` 逃逸与已存在路径抛错 |
+| `files.listWorkspace` | `(query?: string) => Promise<string[]>` | 递归列出 Markdown 文件（正斜杠相对路径），query 大小写不敏感过滤 |
+
+## 安全存储 API
+
+插件可持久化加密的敏感值（API 密钥、token 等）。值经 Rust 侧 **AES-256-GCM** 加密落盘，加密密钥按 machine_id + pluginId 派生——数据库文件被拷走也无法解出原文，插件之间互不可见。**两条通路**（与 editor / files 同构）：面板/工具栏组件用 props 上注入的 `panel.secureStorage`（pluginId 显式绑定）；生命周期钩子内用模块级 `getSecure` / `setSecure` / `deleteSecure` / `listSecureKeys`（override 层隐式绑定当前插件，调用方无法指定其他插件 ID）。
+
+**权限要求**：manifest 必须声明 `'secure-storage'`，未授权时宿主桥接抛 `PluginPermissionDeniedError`。
+
+```typescript
+// 面板场景：保存用户配置的模型 API 密钥
+async function saveKey(panel: PluginPanelProps, key: string) {
+  await panel.secureStorage.set('apiKey', key)
+}
+
+// 生命周期钩子场景：模块级命名空间（pluginId 隐式解析自当前 override 层）
+onLoad: async () => {
+  const apiKey = await getSecure('apiKey')
+  if (apiKey === null) {
+    // null = 该键从未存储过
+    await setSecure('apiKey', 'sk-...')
+  }
+  const keys = await listSecureKeys()   // 键名列表（不含值），字典序
+  await deleteSecure('oldKey')          // 幂等：键不存在也不报错
+}
+```
+
+| API | 签名 | 语义 |
+| --- | --- | --- |
+| `getSecure` | `(key: string) => Promise<string \| null>` | 读取本插件的加密值；**`null` = 从未存储**；密文无法解密（如数据库被恢复到另一台机器）时**抛错**，与「未存储」可区分 |
+| `setSecure` | `(key: string, value: string) => Promise<void>` | 加密并持久化；同键覆盖旧值 |
+| `deleteSecure` | `(key: string) => Promise<void>` | 删除一个键；幂等 |
+| `listSecureKeys` | `() => Promise<string[]>` | 列出本插件全部键名（不含值），字典序 |
+
+> **standalone 模式**：npm run dev 预览时无宿主 override 层，四函数退化为进程内 in-memory stub（不持久、不加密），`dropPluginSettings` 会联动清空 stub；真实加密语义仅在宿主内运行时生效。
+
 ## 错误类与清理 API
 
 ### 错误类
@@ -358,7 +445,7 @@ await runLifecycleHook(plugin.hooks?.onLoad, ctx, opts)
 ### 清理 API
 
 - **`dropPluginStorage(pluginId)`** — 释放指定插件的 storage 缓存，并联动清理设置缓存与监听器。插件卸载时调用，避免内存泄漏。
-- **`dropPluginSettings(pluginId)`** — 仅清理指定插件的设置缓存与本地监听器（`dropPluginStorage` 内部会调用它）。
+- **`dropPluginSettings(pluginId)`** — 仅清理指定插件的设置缓存、本地监听器与安全存储 standalone stub（`dropPluginStorage` 内部会调用它）。
 - **`clearHost()`** — 清空全部 host override 层（测试重置场景用，生产代码应使用 `setHost` 返回的 `restore` 回调）。
 
 ## 双模式

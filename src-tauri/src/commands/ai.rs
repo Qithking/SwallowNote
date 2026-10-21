@@ -1,4 +1,4 @@
-use crate::ai_proxy::crypto;
+use crate::crypto;
 use crate::ai_proxy::server::{start_ai_proxy, AiProxyServer};
 use crate::ai_proxy::AiSettings;
 use std::sync::{Arc, Mutex};

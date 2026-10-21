@@ -805,6 +805,18 @@
         "notifications": {
           "name": "Notifications",
           "description": "Show desktop notifications"
+        },
+        "editor-write": {
+          "name": "Editor Write",
+          "description": "Insert into or replace content in the current editor"
+        },
+        "files": {
+          "name": "Workspace Files",
+          "description": "Create notes and list files within the workspace"
+        },
+        "secure-storage": {
+          "name": "Secure Storage",
+          "description": "Store encrypted secrets (e.g. API keys); plain text never touches disk"
         }
       }
     },

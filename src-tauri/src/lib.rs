@@ -1,6 +1,7 @@
 #![allow(unexpected_cfgs)] // objc macro generates cfg(cargo-clippy) internally
 mod ai_proxy;
 mod commands;
+mod crypto;
 mod db;
 mod i18n;
 mod plugins;
@@ -258,9 +259,15 @@ pub fn run() {
             commands::plugin::export_plugin_configs,
             commands::plugin::import_plugin_configs,
             commands::plugin_invoke::invoke_plugin,
+            commands::plugin_invoke::invoke_plugin_stream,
+            commands::plugin_invoke::prewarm_plugin,
             commands::plugin_settings::read_plugin_settings,
             commands::plugin_settings::write_plugin_settings,
             commands::plugin_settings::delete_plugin_settings,
+            commands::plugin_secure_storage::secure_storage_set,
+            commands::plugin_secure_storage::secure_storage_get,
+            commands::plugin_secure_storage::secure_storage_delete,
+            commands::plugin_secure_storage::secure_storage_keys,
             commands::market_sources::list_market_sources,
             commands::market_sources::add_market_source,
             commands::market_sources::remove_market_source,

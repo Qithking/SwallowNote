@@ -67,6 +67,13 @@ export interface PluginContext {
   pluginId: string
   pluginPath: string
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 流式调用后端命令：onChunk 逐块回调增量，Promise 以最终响应帧结果终结 */
+  invokeBackendStream: <T = unknown, R = unknown>(
+    command: string,
+    args: Record<string, unknown> | undefined,
+    onChunk: (chunk: T) => void,
+    options?: { firstChunkTimeoutSecs?: number }
+  ) => Promise<R>
   /** 统一日志通道，自动带 plugin:<pluginId> source 前缀 */
   log: PluginLogger
 }
@@ -157,13 +164,86 @@ export type PluginPermission =
   | 'clipboard'
   | 'notifications'
   | 'editor'
+  | 'editor-write'
+  | 'files'
+  | 'secure-storage'
+
+/** 编辑器选区查询结果：text 为选中文本，lineRange 为 1-based 起止行号（含端点） */
+export interface PluginEditorSelection {
+  text: string
+  lineRange: [number, number]
+}
+
+/**
+ * 编辑器写 API（P1.2）：插件向当前编辑器写入内容的入口。
+ * 全部操作要求 manifest 声明 `editor-write` 权限（宿主桥接内聚校验）。
+ */
+export interface PluginEditorApi {
+  /** 在当前光标处插入 markdown 文本；返回是否写入成功（编辑器未挂载/解析失败为 false） */
+  insertAtCursor(text: string): Promise<boolean>
+  /** 替换当前选区；无选区时拒绝并返回 false（绝不整文替换，防数据破坏） */
+  replaceSelection(text: string): Promise<boolean>
+  /** 整文替换当前笔记内容（等价宿主内部 replace-content 语义） */
+  replaceContent(text: string): Promise<void>
+  /** 查询当前选区；无选区/编辑器未挂载返回 null（P1.3） */
+  getSelection(): Promise<PluginEditorSelection | null>
+}
+
+/**
+ * 工作区文件 API（P1.2）：插件对工作区文件系统的受限访问。
+ * 全部操作要求 manifest 声明 `files` 权限；路径严格限定在工作区根内。
+ */
+export interface PluginFilesApi {
+  /** 在工作区内创建笔记（相对路径）；已存在时抛错，缺失父目录自动创建 */
+  createNote(relPath: string, content: string): Promise<void>
+  /** 递归列出工作区内全部 Markdown 文件（正斜杠相对路径）；query 大小写不敏感子串过滤 */
+  listWorkspace(query?: string): Promise<string[]>
+}
+
+/**
+ * 安全存储 API（P1.5 / ADR-0003）：AES-256-GCM 加密落盘、按插件隔离的
+ * 键值存储，全部操作要求 manifest 声明 `secure-storage` 权限。
+ * 值为 string（API 密钥等敏感数据；结构化数据请自行 JSON.stringify）。
+ * 威胁模型：防磁盘明文泄露，不防同 webview 内插件互读；换机器后旧密文
+ * 不可解，get 会抛错（区别于「未存储」返回 null）。
+ */
+export interface PluginSecureStorage {
+  /** 读取并解密；未存储返回 null，密文不可解（换机/损坏）时抛错 */
+  get(key: string): Promise<string | null>
+  /** 加密写入，同 key 覆盖 */
+  set(key: string, value: string): Promise<void>
+  /** 删除单个键，幂等 */
+  delete(key: string): Promise<void>
+  /** 列出当前插件全部键名（不含值），按字典序 */
+  keys(): Promise<string[]>
+}
+
+/** 面板一次性请求：openPluginPanel 写入，面板挂载消费后清空 */
+export interface PluginPanelRequest {
+  /** 请求目标插件的 ID */
+  pluginId: string
+  /** 打开面板时携带的负载，结构由插件自定义 */
+  payload: unknown
+}
 
 /** 面板/设置组件的 props，字段顺序与宿主一致 */
 export interface PluginPanelProps {
   close: () => void
   isActive: boolean
   pluginId: string
+  /**
+   * 面板打开请求携带的一次性 payload（openPluginPanel 写入）。
+   * 仅当请求归属本插件时透出，否则为 null；面板挂载后宿主自动清空。
+   */
+  pendingRequest: unknown
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 流式调用后端命令：onChunk 逐块回调增量，Promise 以最终响应帧结果终结 */
+  invokeBackendStream: <T = unknown, R = unknown>(
+    command: string,
+    args: Record<string, unknown> | undefined,
+    onChunk: (chunk: T) => void,
+    options?: { firstChunkTimeoutSecs?: number }
+  ) => Promise<R>
   store: PluginStorage
   events: PluginEventBus
   /** 当前活动笔记内容，无笔记时为空串 */
@@ -184,6 +264,12 @@ export interface PluginPanelProps {
   setActiveNoteFrontmatter(data: Record<string, unknown>): void
   /** 订阅活动笔记 frontmatter 变更 */
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
+  /** 编辑器写 API（要求 editor-write 权限），参见 PluginEditorApi */
+  editor: PluginEditorApi
+  /** 工作区文件 API（要求 files 权限），参见 PluginFilesApi */
+  files: PluginFilesApi
+  /** 安全存储 API（要求 secure-storage 权限），参见 PluginSecureStorage */
+  secureStorage: PluginSecureStorage
 }
 
 /**
@@ -253,6 +339,13 @@ export interface ToolbarButtonProps {
   pluginId: string
   /** 调用插件后端命令 */
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 流式调用后端命令，参见 PluginPanelProps.invokeBackendStream */
+  invokeBackendStream: <T = unknown, R = unknown>(
+    command: string,
+    args: Record<string, unknown> | undefined,
+    onChunk: (chunk: T) => void,
+    options?: { firstChunkTimeoutSecs?: number }
+  ) => Promise<R>
   /** 插件作用域的持久化存储 */
   store: PluginStorage
   /** 宿主事件总线 */
@@ -285,6 +378,12 @@ export interface ToolbarButtonProps {
   setActiveNoteFrontmatter(data: Record<string, unknown>): void
   /** 订阅活动笔记 frontmatter 变更 */
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
+  /** 编辑器写 API（要求 editor-write 权限），详见 PluginPanelProps.editor */
+  editor: PluginEditorApi
+  /** 工作区文件 API（要求 files 权限），详见 PluginPanelProps.files */
+  files: PluginFilesApi
+  /** 安全存储 API（要求 secure-storage 权限），详见 PluginPanelProps.secureStorage */
+  secureStorage: PluginSecureStorage
 }
 
 /** 插件依赖声明 */
@@ -679,6 +778,107 @@ export function onSettingsChange(
 export function dropPluginSettings(pluginId: string): void {
   settingsCache.delete(pluginId)
   settingsListeners.delete(pluginId)
+  secureStorageStubs.delete(pluginId)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Secure storage (P1.5 / ADR-0003) – module-level API, settings pattern
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Standalone stub backing store: pluginId → (key → value), in-memory
+ * only. Used when no host override is installed (npm run dev); data
+ * does not persist across reloads, which mirrors the real API's
+ * "encrypted at rest" semantics closely enough for previews.
+ */
+const secureStorageStubs = new Map<string, Map<string, string>>()
+
+function stubSecureStorageMap(pluginId: string): Map<string, string> {
+  let m = secureStorageStubs.get(pluginId)
+  if (!m) {
+    m = new Map()
+    secureStorageStubs.set(pluginId, m)
+  }
+  return m
+}
+
+async function stubSecureStorageGet(pluginId: string, key: string): Promise<string | null> {
+  return stubSecureStorageMap(pluginId).get(key) ?? null
+}
+
+async function stubSecureStorageSet(
+  pluginId: string,
+  key: string,
+  value: string
+): Promise<void> {
+  stubSecureStorageMap(pluginId).set(key, value)
+}
+
+async function stubSecureStorageDelete(pluginId: string, key: string): Promise<void> {
+  stubSecureStorageMap(pluginId).delete(key)
+}
+
+async function stubSecureStorageKeys(pluginId: string): Promise<string[]> {
+  return [...stubSecureStorageMap(pluginId).keys()].sort()
+}
+
+/**
+ * Read an encrypted secret for **the current plugin**. The plugin ID
+ * is resolved implicitly from the active host-override layer (same
+ * pattern as `getSetting`), so callers cannot target another plugin.
+ * The host installs `__pluginSecureStorage_get` to route to the
+ * AES-256-GCM encrypted store (permission `secure-storage` is
+ * enforced there); the standalone stub reads from the in-memory map.
+ * Returns `null` when the key was never stored; throws when the
+ * stored ciphertext cannot be decrypted (e.g. restored on another
+ * machine) — distinct from "not stored".
+ */
+export async function getSecure(key: string): Promise<string | null> {
+  const pluginId = currentPluginId()
+  const override = currentHostOverrides().__pluginSecureStorage_get
+  if (override) return override(pluginId, key)
+  return stubSecureStorageGet(pluginId, key)
+}
+
+/**
+ * Encrypt-and-persist a secret for **the current plugin** (the ID is
+ * resolved implicitly — see `getSecure`). Overwrites any previous
+ * value under the same key.
+ */
+export async function setSecure(key: string, value: string): Promise<void> {
+  const pluginId = currentPluginId()
+  const override = currentHostOverrides().__pluginSecureStorage_set
+  if (override) {
+    await override(pluginId, key, value)
+    return
+  }
+  await stubSecureStorageSet(pluginId, key, value)
+}
+
+/**
+ * Delete one secret key for **the current plugin** (the ID is
+ * resolved implicitly — see `getSecure`). Idempotent.
+ */
+export async function deleteSecure(key: string): Promise<void> {
+  const pluginId = currentPluginId()
+  const override = currentHostOverrides().__pluginSecureStorage_delete
+  if (override) {
+    await override(pluginId, key)
+    return
+  }
+  await stubSecureStorageDelete(pluginId, key)
+}
+
+/**
+ * List every stored key name (not values) for **the current plugin**
+ * (the ID is resolved implicitly — see `getSecure`), sorted
+ * alphabetically.
+ */
+export async function listSecureKeys(): Promise<string[]> {
+  const pluginId = currentPluginId()
+  const override = currentHostOverrides().__pluginSecureStorage_keys
+  if (override) return override(pluginId)
+  return stubSecureStorageKeys(pluginId)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1219,6 +1419,71 @@ export function closePluginTabs(pluginId: string): void {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  Editor write + workspace files – module-level namespace (hook scope)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Standalone 模式的统一 stub 警告：操作被丢弃，帮助插件作者排查。
+ */
+function warnStandaloneWriteApi(op: string, outcome: string): void {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[plugin-sdk] ${op} called but no host override is installed — ${outcome}. ` +
+      `This is expected in standalone preview mode (npm run dev); in host mode ` +
+      `the host installs the override via setHost() and enforces permissions there.`,
+  )
+}
+
+/**
+ * 模块级编辑器写 API（hook 场景）：宿主 override 闭包自持 pluginId 与权限
+ * 检查，无需隐式解析；未安装 override 时回退 standalone stub（warn + 默认值）。
+ * 面板/工具栏场景请使用 props 上注入的 `editor`（pluginId 显式正确）。
+ */
+export const editor: PluginEditorApi = {
+  insertAtCursor: async (text) => {
+    const host = currentHostOverrides().__editor_insertAtCursor
+    if (host) return host(text)
+    warnStandaloneWriteApi('editor.insertAtCursor', 'the insert was dropped and returns false')
+    return false
+  },
+  replaceSelection: async (text) => {
+    const host = currentHostOverrides().__editor_replaceSelection
+    if (host) return host(text)
+    warnStandaloneWriteApi('editor.replaceSelection', 'the replace was dropped and returns false')
+    return false
+  },
+  replaceContent: async (text) => {
+    const host = currentHostOverrides().__editor_replaceContent
+    if (host) return host(text)
+    warnStandaloneWriteApi('editor.replaceContent', 'the content replacement was dropped')
+  },
+  getSelection: async () => {
+    const host = currentHostOverrides().__editor_getSelection
+    if (host) return host()
+    warnStandaloneWriteApi('editor.getSelection', 'returning null')
+    return null
+  },
+}
+
+/**
+ * 模块级工作区文件 API（hook 场景）：语义同 editor 命名空间。
+ * 面板/工具栏场景请使用 props 上注入的 `files`。
+ */
+export const files: PluginFilesApi = {
+  createNote: async (relPath, content) => {
+    const host = currentHostOverrides().__files_createNote
+    if (host) return host(relPath, content)
+    warnStandaloneWriteApi('files.createNote', `the note "${relPath}" was not created`)
+  },
+  listWorkspace: async (query) => {
+    const host = currentHostOverrides().__files_listWorkspace
+    if (host) return host(query)
+    warnStandaloneWriteApi('files.listWorkspace', 'returning an empty list')
+    return []
+  },
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  PluginContext + lifecycle helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1237,6 +1502,17 @@ export function buildPluginContext(plugin: Pick<PluginDefinition, 'id' | 'plugin
       if (hostInvoke) return hostInvoke(cmd, args)
       console.warn(`[plugin-sdk] invokeBackend(${cmd}) called in standalone mode; returning null`)
       return null
+    },
+    invokeBackendStream: async <T, R>(
+      cmd: string,
+      args: Record<string, unknown> | undefined,
+      onChunk: (chunk: T) => void,
+      options?: { firstChunkTimeoutSecs?: number }
+    ): Promise<R> => {
+      const hostStream = currentHostOverrides().invokeBackendStream
+      if (hostStream) return hostStream(cmd, args, onChunk as (chunk: unknown) => void, options) as R
+      console.warn(`[plugin-sdk] invokeBackendStream(${cmd}) called in standalone mode; returning null`)
+      return null as R
     },
     // 默认 console-based logger；host 会覆盖为统一日志通道
     log: {
@@ -1358,6 +1634,25 @@ export interface HostOverrides {
   listPluginCommands?: () => PluginCommand[]
   subscribePluginCommands?: (listener: () => void) => () => void
   invokeBackend?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 流式调用桥接：权限与遥测由宿主实现内聚处理；未安装时 SDK 回退 standalone stub */
+  invokeBackendStream?: (
+    cmd: string,
+    args: Record<string, unknown> | undefined,
+    onChunk: (chunk: unknown) => void,
+    options?: { firstChunkTimeoutSecs?: number }
+  ) => Promise<unknown>
+  /**
+   * 编辑器写 / 工作区文件 API 桥接（`__` 前缀同 settings overrides，SDK 内部桥梁）。
+   * 宿主通过 setHost 安装，实现内聚了权限检查（editor-write / files）与
+   * pluginId 绑定（闭包），因此这些函数不再接收 pluginId 参数；
+   * 未安装时模块级 editor / files 命名空间回退 standalone stub。
+   */
+  __editor_insertAtCursor?: (text: string) => Promise<boolean>
+  __editor_replaceSelection?: (text: string) => Promise<boolean>
+  __editor_replaceContent?: (text: string) => Promise<void>
+  __editor_getSelection?: () => Promise<PluginEditorSelection | null>
+  __files_createNote?: (relPath: string, content: string) => Promise<void>
+  __files_listWorkspace?: (query?: string) => Promise<string[]>
   /**
    * Optional full event-bus replacement. If the host provides only
    * `on`/`off` (no `emit`), the per-event emit helpers in this
@@ -1383,6 +1678,18 @@ export interface HostOverrides {
   __pluginSettings_set?: (pluginId: string, key: string, value: unknown) => Promise<void>
   __pluginSettings_all?: (pluginId: string) => Promise<Record<string, unknown>>
   __pluginSettings_subscribe?: (handler: (payload: PluginEventPayloadMap['plugin-settings:change']) => void) => () => void
+  /**
+   * Bridge to the host's encrypted secure-storage layer (P1.5 /
+   * ADR-0003): AES-256-GCM with a per-plugin derived key; plaintext
+   * never touches disk. The host enforces the `secure-storage`
+   * permission inside these overrides. When absent (standalone
+   * preview), the SDK falls back to an in-memory stub that does not
+   * persist.
+   */
+  __pluginSecureStorage_get?: (pluginId: string, key: string) => Promise<string | null>
+  __pluginSecureStorage_set?: (pluginId: string, key: string, value: string) => Promise<void>
+  __pluginSecureStorage_delete?: (pluginId: string, key: string) => Promise<void>
+  __pluginSecureStorage_keys?: (pluginId: string) => Promise<string[]>
   /**
    * Permission gate for the editor registry. The host installs
    * this so the SDK's `registerEditor` can throw the host's

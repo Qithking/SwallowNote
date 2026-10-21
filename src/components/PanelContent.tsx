@@ -65,8 +65,9 @@ export function RightPanelContent() {
 }
 
 /**
- * Plugin right panel.  Subscribes to `plugins` and the active tab's
- * content / path — re-renders only when those change.
+ * Plugin right panel.  Subscribes to `plugins`, the active tab's
+ * content / path and the pending one-shot panel request — re-renders
+ * when those change.
  */
 function PluginRightPanelContent({ rightPanelType }: { rightPanelType: string }) {
   const allPlugins = usePluginStore((s) => s.plugins)
@@ -78,6 +79,10 @@ function PluginRightPanelContent({ rightPanelType }: { rightPanelType: string })
   const activeTabPath = useEditorStore(
     (s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '',
   )
+
+  // 一次性面板请求（P1.4）：payload 到达时触发本组件重渲染，重建 panelProps
+  // 把最新 payload 传下去——面板已挂载时连续 openPluginPanel 也能送达。
+  const pendingPluginRequest = useUIStore((s) => s.pendingPluginRequest)
 
   const pluginId = extractPluginId(rightPanelType)
   const plugin = allPlugins.find((p) => p.id === pluginId)
@@ -95,6 +100,7 @@ function PluginRightPanelContent({ rightPanelType }: { rightPanelType: string })
     },
     activeTabContent,
     activeTabPath,
+    pendingPluginRequest,
   )
 
   return (

@@ -1,4 +1,4 @@
-use crate::ai_proxy::crypto;
+use crate::crypto;
 use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use once_cell::sync::OnceCell;

@@ -770,6 +770,8 @@ const off = onSettingsChange((values) => { /* ... */ })
 > **安全模型（设置读写）**：模块级 settings API **隐式绑定当前插件**——SDK 从宿主安装的 override 层解析 pluginId，调用方在类型层面没有跨插件读写的入口；在无绑定的上下文（如宿主进程直接调用）会抛错而不是静默读写错误的插件。面板 / 工具栏内的同名方法（`PluginPanelProps`）由宿主注入，同样只作用于本插件。
 >
 > **威胁模型**：所有插件 UI 共享同一个 webview 上下文，插件之间的信任边界**不在**运行时内存隔离层——settings API 的 pluginId 收紧目标是"防误用 + 收缩攻击面"，而非强隔离。恶意插件的准入防线是**市场安装路径的 ed25519 签名校验**（见下文"签名验证"）加上用户安装时的权限确认；对设置数据，插件只能读写自己的存储，跨插件访问需用户显式导出。
+>
+> **安全存储边界（secure-storage，ADR-0003）**：敏感值经 Rust 侧 AES-256-GCM 加密落盘，密钥按 machine_id + pluginId 派生——数据库文件被拷到其他机器也解不出原文，插件之间互不可见。明文仅存在于内存与 Tauri IPC 通道，这仍**不是**强隔离：同 webview 内的恶意插件拿不到别家插件的密文，但可滥用自身已授权的 secure-storage API 读写自己的数据；准入防线不变——市场 ed25519 签名校验 + 安装时权限确认，`'secure-storage'` 作为独立权限细目单独弹窗授权、可单独撤销。
 
 > **权限**：设置 API 复用 `storage` 权限。`setSetting` 写入后会广播 `plugin-settings:change` 事件，所有同插件 id 的 panel / toolbar 实例都会收到通知。
 
@@ -1078,7 +1080,7 @@ const manifest: PluginManifest = {
 
 ## 权限系统
 
-### 10 个权限
+### 权限清单
 
 | Permission | 触发的 API | 校验位置 |
 | --- | --- | --- |
@@ -1092,6 +1094,7 @@ const manifest: PluginManifest = {
 | `network` | 未来 net API | — |
 | `clipboard` | 未来 clipboard API | — |
 | `notifications` | 未来 notifications API | — |
+| `secure-storage` | `panel.secureStorage.get / set / delete / keys` 或模块级 `getSecure / setSecure / deleteSecure / listSecureKeys` | [plugin-utils.tsx:341-358](../../src/lib/plugin-utils.tsx#L341-L358)（props 通道）、[plugin-host-takeover.ts:182-199](../../src/lib/plugin-host-takeover.ts#L182-L199)（override 转发） |
 
 ### 运行时检查流程
 

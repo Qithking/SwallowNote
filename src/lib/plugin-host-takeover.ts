@@ -33,7 +33,22 @@ import {
 } from '@/stores/pluginEditor'
 import { useEditorStore, registerPluginTabRuntime } from '@/stores/editor'
 import { assertPermission } from './plugin-permission-guard'
-import { writePluginSettings } from './tauri'
+import { invokePluginBackendStream } from './plugin-stream'
+import {
+  writePluginSettings,
+  readSecureStorage,
+  writeSecureStorage,
+  deleteSecureStorage,
+  listSecureStorageKeys,
+} from './tauri'
+import {
+  pluginEditorInsertAtCursor,
+  pluginEditorGetSelection,
+  pluginEditorReplaceSelection,
+  pluginEditorReplaceContent,
+  pluginFilesCreateNote,
+  pluginFilesListWorkspace,
+} from './plugin-write-api'
 import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
 import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
 import { logger } from './logger'
@@ -119,6 +134,23 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
         })
       }
     },
+    // 流式调用 override：权限检查与遥测已内聚在共享桥接函数中，此处仅保留熔断拦截。
+    invokeBackendStream: (cmd, args, onChunk, options) => {
+      if (isPluginTripped(pluginId)) {
+        throw new Error(
+          `[plugin-host-takeover] invokeBackendStream refused: plugin "${pluginId}" is tripped (lifecycle hook timed out)`
+        )
+      }
+      return invokePluginBackendStream(pluginId, cmd, args, onChunk, options)
+    },
+    // 编辑器写 / 文件 API：权限检查与实现内聚在共享桥接，此处按插件 ID 转发。
+    __editor_insertAtCursor: (text: string) => pluginEditorInsertAtCursor(pluginId, text),
+    __editor_replaceSelection: (text: string) => pluginEditorReplaceSelection(pluginId, text),
+    __editor_replaceContent: (text: string) => pluginEditorReplaceContent(pluginId, text),
+    __editor_getSelection: () => pluginEditorGetSelection(pluginId),
+    __files_createNote: (relPath: string, content: string) =>
+      pluginFilesCreateNote(pluginId, relPath, content),
+    __files_listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
     /** 插件设置桥接（SQLite-backed），复用 storage 权限。 */
     __pluginSettings_get: async (id, key) => {
       // 设置复用 storage 权限。
@@ -146,6 +178,24 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       return pluginEvents.on('plugin-settings:change', (payload) => {
         handler(payload)
       })
+    },
+    // 安全存储桥接（P1.5 / ADR-0003）：独立 'secure-storage' 权限细目，
+    // 加解密内聚在 Rust 侧（密钥按插件派生），此处仅权限门控 + IPC 转发。
+    __pluginSecureStorage_get: async (id, key) => {
+      assertPermission(id, 'secure-storage', `read secure storage key "${key}"`)
+      return readSecureStorage(id, key)
+    },
+    __pluginSecureStorage_set: async (id, key, value) => {
+      assertPermission(id, 'secure-storage', `write secure storage key "${key}"`)
+      await writeSecureStorage(id, key, value)
+    },
+    __pluginSecureStorage_delete: async (id, key) => {
+      assertPermission(id, 'secure-storage', `delete secure storage key "${key}"`)
+      await deleteSecureStorage(id, key)
+    },
+    __pluginSecureStorage_keys: async (id) => {
+      assertPermission(id, 'secure-storage', `list secure storage keys`)
+      return listSecureStorageKeys(id)
     },
     /** 桥接到宿主 registerEditor，做权限校验与去重。 */
     registerEditor: (id, extension, component) => {

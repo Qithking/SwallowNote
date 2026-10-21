@@ -805,6 +805,18 @@
         "notifications": {
           "name": "通知",
           "description": "显示桌面通知"
+        },
+        "editor-write": {
+          "name": "编辑器写入",
+          "description": "向当前编辑器插入或替换内容"
+        },
+        "files": {
+          "name": "工作区文件",
+          "description": "在工作区内创建笔记与列出文件"
+        },
+        "secure-storage": {
+          "name": "安全存储",
+          "description": "加密保存敏感数据（如 API 密钥），明文永不落盘"
         }
       }
     },

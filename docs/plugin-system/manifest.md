@@ -104,6 +104,9 @@ const manifest: PluginManifest = {
 | `'clipboard'` | 剪贴板读写 | 未来 clipboard API 启用时 |
 | `'notifications'` | 系统通知 | 未来 notifications API 启用时 |
 | `'editor'` | 注册自定义文件编辑器 | `registerEditor(pluginId, extension, component)` 注册时 |
+| `'editor-write'` | 编辑器写操作与选区查询 | `editor.insertAtCursor / replaceSelection / replaceContent / getSelection` 调用时（面板 props 或模块级） |
+| `'files'` | 工作区文件访问 | `files.createNote / listWorkspace` 调用时（面板 props 或模块级） |
+| `'secure-storage'` | 加密安全存储（API 密钥等敏感值，密文落盘） | `secureStorage.get / set / delete / keys` 调用时（面板 props 或模块级） |
 
 ```typescript
 const manifest: PluginManifest = {

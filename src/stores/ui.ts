@@ -10,6 +10,7 @@ import { ShortcutKey } from '@/lib/shortcuts'
 import { AiModelConfig, generateModelId } from '@/lib/ai'
 import { useFileTreeStore } from './filetree'
 import { emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
+import type { PluginPanelRequest } from '@/types/plugin'
 
 export type Theme = 'light' | 'dark' | 'system'
 export type SidebarView = 'explorer' | 'search' | 'categories' | 'git' | 'ai' | 'settings' | `plugin:${string}`
@@ -469,6 +470,11 @@ export interface UIState {
   defaultAiModelId: string
   aiAttachedFiles: string[]
   aiContextMenuRequest: AiContextMenuRequest | null
+  /**
+   * 面板一次性请求（P1.4）：openPluginPanel 写入，插件面板挂载消费
+   * （props 送达）后清空；连续触发以最新请求覆盖。
+   */
+  pendingPluginRequest: PluginPanelRequest | null
   customThemes: CustomTheme[]
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
@@ -520,6 +526,7 @@ export interface UIState {
   removeAiAttachedFile: (index: number) => void
   clearAiAttachedFiles: () => void
   setAiContextMenuRequest: (request: AiContextMenuRequest | null) => void
+  setPendingPluginRequest: (request: PluginPanelRequest | null) => void
   updateAiModelApiKey: (id: string, key: string) => Promise<void>
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
@@ -589,6 +596,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   defaultAiModelId: '',
   aiAttachedFiles: [],
   aiContextMenuRequest: null,
+  pendingPluginRequest: null,
   customThemes: [...BUILT_IN_THEMES],
   activeLightCustomThemeId: 'builtin-light',
   activeDarkCustomThemeId: 'builtin-dark',
@@ -827,6 +835,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
   clearAiAttachedFiles: () => set({ aiAttachedFiles: [] }),
   setAiContextMenuRequest: (request) => set({ aiContextMenuRequest: request }),
+  setPendingPluginRequest: (request) => set({ pendingPluginRequest: request }),
   updateAiModelApiKey: async (id: string, key: string) => {
     try {
       const encrypted = key ? await encryptApiKey(key) : ''

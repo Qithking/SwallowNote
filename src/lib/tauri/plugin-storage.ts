@@ -76,6 +76,42 @@ export async function deletePluginSettings(pluginId: string): Promise<void> {
   await invoke('delete_plugin_settings', { pluginId })
 }
 
+// ── Secure storage（P1.5 / ADR-0003：加密落盘，密钥按插件派生）──
+// 权限门控（'secure-storage'）在宿主桥接层（takeover / props）执行，
+// 此层仅做纯 IPC 转发，与 settings 桥接同模式。
+
+/** 写入加密密文，同 key 覆盖；明文仅存在于内存与 IPC，落盘只有密文。 */
+export async function writeSecureStorage(
+  pluginId: string,
+  key: string,
+  value: string
+): Promise<void> {
+  await invoke('secure_storage_set', { pluginId, key, value })
+}
+
+/** 读取并解密；未存储返回 null，密文不可解（换机/损坏）时抛错。 */
+export async function readSecureStorage(
+  pluginId: string,
+  key: string
+): Promise<string | null> {
+  const value = await invoke<string | null>('secure_storage_get', { pluginId, key })
+  return value ?? null
+}
+
+/** 删除单个加密键，幂等。 */
+export async function deleteSecureStorage(
+  pluginId: string,
+  key: string
+): Promise<void> {
+  await invoke('secure_storage_delete', { pluginId, key })
+}
+
+/** 列出该插件全部加密键名（不含值），按字典序。 */
+export async function listSecureStorageKeys(pluginId: string): Promise<string[]> {
+  const keys = await invoke<string[] | null>('secure_storage_keys', { pluginId })
+  return keys ?? []
+}
+
 // 启动时 seed 存储大小计数器
 export async function getAllPluginStorageSizes(): Promise<Record<string, number>> {
   const raw = await invoke<Record<string, number>>('get_all_plugin_storage_sizes')

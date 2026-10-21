@@ -19,7 +19,8 @@
   `{"jsonrpc":"2.0","id":1,"method":"count_words","params":{"text":"hello world"}}`
 - **stdout**：子进程按行返回 JSON-RPC 响应，例如
   `{"jsonrpc":"2.0","id":1,"result":4}` 或
-  `{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"..."}}`
+  `{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"..."}}`。
+  流式场景下还会输出**通知帧**（无 `id`、带 `method`），参见[流式调用](#流式调用)。
 - **stderr**：子进程的日志输出，宿主会以 `[plugin:<id>] ...` 前缀 tee 到自己的日志。
 - **每行一个 JSON 对象**，不要把多个请求/响应塞进同一行。
 
@@ -27,8 +28,9 @@
 
 - 宿主在第一次调用时按需 spawn 子进程，之后**长驻**内存（同一插件的多次调用复用同一进程）。
 - 子进程空闲 **10 分钟**自动被 `idle_reaper` 回收（kill），下次调用时再重新拉起。
-- 单次调用超时 **30 秒**；连续超时 **3 次**会触发熔断，宿主主动 kill 后端进程，下次调用重新 spawn。
-- 子进程退出（stdout EOF）时，所有未完成的 pending 请求会被立即拒绝。
+- 非流式调用超时 **30 秒**；连续超时 **3 次**会触发熔断，宿主主动 kill 后端进程，下次调用重新 spawn。
+- **流式调用**采用独立超时模型：首块超时默认 **90 秒**（前端可用 `firstChunkTimeoutSecs` 覆盖，最小 1 秒），收到首个流事件后进入空闲模式——**块间空闲 60 秒**滚动续期，无总时长上限；流式超时**不计入**连续超时熔断。
+- 子进程退出（stdout EOF）时，所有未完成的 pending 请求会被立即拒绝，进行中的流以 `error` 事件收尾。
 
 ### 调用链路
 
@@ -161,6 +163,70 @@ eprintln!("[backend] starting up, plugin_id={}", std::env::args().nth(1).unwrap_
 - `argv[1]`：插件 id（子进程可做 sanity check，通常可忽略）。
 - 环境变量 `SWALLOWNOTE_APP_DATA_DIR`：应用数据目录，插件可在此存放持久化数据（区别于会被卸载删除的插件安装目录）。
 
+## 流式调用
+
+当后端命令需要长时间运行并持续产出中间结果（解析进度、逐行输出、生成 token 流）时，使用流式通道（参见 ADR-0002）。
+
+### 协议规则
+
+1. 宿主发起的请求与普通调用完全一致（带 `id`）。
+2. 后端在最终响应**之前**，可随时向 stdout 输出通知帧推送增量：
+
+   ```json
+   {"jsonrpc":"2.0","method":"swallow/stream","params":{"requestId":1,"event":"chunk","data":"部分结果..."}}
+   ```
+
+   - `requestId`：必须等于对应请求的 `id`，宿主据此把帧路由回发起方。
+   - `event`：`chunk`（增量数据）、`done`（后端语义的完成信号，可选）、`error`（后端语义的失败信号，可选）；未知 `event` 会被宿主丢弃。
+   - `data`：任意 JSON 值，`done` 事件可省略。
+3. 调用仍由**最终响应帧**终结：`{"jsonrpc":"2.0","id":1,"result":...}`。前端 Promise 以响应帧的 `result` 兑现，通知帧只负责逐块回调。
+4. 同一后端进程可并发处理多路流：不同 `id` 的请求各自路由，互不串扰。
+5. 请求已结束后到达的迟到通知帧会被宿主丢弃并记录 warn 日志（协议违规可观测）。
+
+### 超时模型
+
+| 阶段 | 超时 | 说明 |
+| ---- | ---- | ---- |
+| 等待首个流事件 | 90s（可配） | 前端用 `firstChunkTimeoutSecs` 覆盖，最小 1s |
+| 后续流事件之间 | 60s 滚动续期 | 每收到一个事件重置计时，无总时长上限 |
+
+流式超时**不计入**连续 3 次熔断；非流式调用维持 30s 总超时 + 熔断。
+
+### 后端示例
+
+```rust
+// 逐行输出大文件行数：先推 chunk，最后返回最终结果
+"my_plugin_stream_lines" => {
+    let path = params.get("path").and_then(|p| p.as_str()).unwrap_or("");
+    let content = std::fs::read_to_string(path)?;
+    let total = content.lines().count();
+    for (i, line) in content.lines().enumerate() {
+        // 通知帧：requestId 必须等于请求 id
+        let note = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "swallow/stream",
+            "params": {"requestId": id, "event": "chunk",
+                       "data": {"index": i, "line": line}}
+        });
+        writeln!(out, "{}", note).unwrap();
+    }
+    // 最终响应帧终结调用
+    serde_json::json!(total)
+}
+```
+
+### 前端调用
+
+```typescript
+const total = await panel.invokeBackendStream<{ index: number; line: string }, number>(
+  'my_plugin_stream_lines',
+  { path: '/path/to/big.txt' },
+  (chunk) => console.log('收到行', chunk.index, chunk.line),
+  // 可选：覆盖首块超时（秒），默认 90
+  { firstChunkTimeoutSecs: 120 },
+)
+```
+
 ## 前端调用
 
 ```typescript
@@ -271,6 +337,7 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 ## 源码引用
 
-- 调用入口与子进程管理：[src-tauri/src/commands/plugin_invoke.rs](../../src-tauri/src/commands/plugin_invoke.rs)（`invoke_plugin` 命令、`PluginProcess`、`idle_reaper`）
+- 调用入口与子进程管理：[src-tauri/src/commands/plugin_invoke.rs](../../src-tauri/src/commands/plugin_invoke.rs)（`invoke_plugin` / `invoke_plugin_stream` 命令、`PluginProcess`、`idle_reaper`、流路由表）
 - 前端上下文：[src/lib/plugin-host.ts](../../src/lib/plugin-host.ts) `buildPluginContext`（`invokeBackend` 最终调用 `@tauri-apps/api/core` 的 `invoke('invoke_plugin', ...)`）
+- 前端流式桥接：[src/lib/plugin-stream.ts](../../src/lib/plugin-stream.ts)（Tauri `Channel` 组装 + `invoke('invoke_plugin_stream', ...)`）
 - 后端二进制路径解析：`resolve_backend_binary`（同 `plugin_invoke.rs`）

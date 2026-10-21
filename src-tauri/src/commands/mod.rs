@@ -14,6 +14,7 @@ pub mod logs;
 pub mod market_sources;
 pub mod plugin;
 pub mod plugin_invoke;
+pub mod plugin_secure_storage;
 pub mod plugin_settings;
 pub mod session_state;
 pub mod upgrade;

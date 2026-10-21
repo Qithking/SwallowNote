@@ -25,6 +25,9 @@ export type PluginPermission =
   | 'clipboard'         // 访问剪贴板
   | 'notifications'     // 显示通知
   | 'editor'            // 注册自定义编辑器
+  | 'editor-write'      // 编辑器写操作（插入/替换内容）
+  | 'files'             // 工作区文件 API（createNote/listWorkspace）
+  | 'secure-storage'    // 加密安全存储（P1.5，API 密钥等敏感值）
 
 /** 权限元数据（UI 展示用） */
 export interface PermissionInfo {
@@ -51,6 +54,9 @@ export const PLUGIN_PERMISSIONS: PermissionInfo[] = [
   { permission: 'clipboard' },
   { permission: 'notifications' },
   { permission: 'editor' },
+  { permission: 'editor-write' },
+  { permission: 'files' },
+  { permission: 'secure-storage' },
 ]
 
 // 事件总线类型
@@ -376,6 +382,60 @@ export interface PluginVersionInfo {
 
 // 插件上下文
 
+/** 编辑器选区查询结果：text 为选中文本，lineRange 为 1-based 起止行号（含端点） */
+export interface PluginEditorSelection {
+  text: string
+  lineRange: [number, number]
+}
+
+/** 编辑器写 API（P1.2）：插件向当前编辑器写入内容，要求 editor-write 权限 */
+export interface PluginEditorApi {
+  /** 在当前光标处插入 markdown 文本；返回是否写入成功（编辑器未挂载/解析失败为 false） */
+  insertAtCursor(text: string): Promise<boolean>
+  /** 替换当前选区；无选区时拒绝并返回 false（绝不整文替换） */
+  replaceSelection(text: string): Promise<boolean>
+  /** 整文替换当前笔记内容 */
+  replaceContent(text: string): Promise<void>
+  /** 查询当前选区；无选区/编辑器未挂载返回 null（P1.3，要求 editor-write 权限） */
+  getSelection(): Promise<PluginEditorSelection | null>
+}
+
+/** 工作区文件 API（P1.2）：受限的文件系统访问，要求 files 权限，路径严格限定在工作区根内 */
+export interface PluginFilesApi {
+  /** 在工作区内创建笔记（相对路径）；已存在时抛错，缺失父目录自动创建 */
+  createNote(relPath: string, content: string): Promise<void>
+  /** 递归列出工作区内 Markdown 文件（正斜杠相对路径）；query 大小写不敏感子串过滤 */
+  listWorkspace(query?: string): Promise<string[]>
+}
+
+/**
+ * 安全存储 API（P1.5 / ADR-0003）：AES-256-GCM 加密落盘的按插件隔离键值存储，
+ * 要求 secure-storage 权限。值为 string（API 密钥语义，结构化数据请自行序列化）。
+ * 威胁模型：防磁盘明文泄露，不防同 webview 内插件互读；换机器后旧密文不可解，
+ * get 会抛错（区别于「未存储」返回 null）。
+ */
+export interface PluginSecureStorage {
+  /** 读取并解密；未存储返回 null，密文不可解（换机/损坏）时抛错 */
+  get(key: string): Promise<string | null>
+  /** 加密写入，同 key 覆盖 */
+  set(key: string, value: string): Promise<void>
+  /** 删除单个键，幂等 */
+  delete(key: string): Promise<void>
+  /** 列出该插件全部键名（不含值），按字典序 */
+  keys(): Promise<string[]>
+}
+
+/**
+ * 面板一次性请求（P1.4）：宿主 openPluginPanel 写入 UIStore，面板挂载
+ * 消费（props 送达）后由宿主清空；payload 类型由插件自定义（宿主不解析）。
+ */
+export interface PluginPanelRequest {
+  /** 请求目标插件的 ID */
+  pluginId: string
+  /** 打开面板时携带的负载，结构由插件自定义 */
+  payload: unknown
+}
+
 /** 插件面板组件的 Props */
 export interface PluginPanelProps {
   /** 关闭当前插件面板 */
@@ -384,8 +444,21 @@ export interface PluginPanelProps {
   isActive: boolean
   /** 插件 ID */
   pluginId: string
+  /**
+   * 面板打开请求携带的一次性 payload（P1.4 openPluginPanel 写入）。
+   * 仅当 pendingPluginRequest 归属本插件时透出，否则为 null；
+   * 面板挂载后宿主自动清空，下次打开不再重复收到。
+   */
+  pendingRequest: unknown
   /** 调用该插件的后端命令，命令名相对于插件后端命名空间 */
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 调用插件后端流式命令：onChunk 逐块回调增量，Promise 以最终响应帧结果终结 */
+  invokeBackendStream: <T = unknown, R = unknown>(
+    command: string,
+    args: Record<string, unknown> | undefined,
+    onChunk: (chunk: T) => void,
+    options?: { firstChunkTimeoutSecs?: number }
+  ) => Promise<R>
   /** 插件隔离的持久化键值存储 */
   store: PluginStorage
   /** 宿主事件总线，订阅主题/笔记/语言/设置变更 */
@@ -408,6 +481,12 @@ export interface PluginPanelProps {
   setActiveNoteFrontmatter(data: Partial<NoteFrontmatter>): void
   /** 监听 frontmatter 变更事件。返回取消订阅函数。 */
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
+  /** 编辑器写 API（要求 editor-write 权限），参见 {@link PluginEditorApi} */
+  editor: PluginEditorApi
+  /** 工作区文件 API（要求 files 权限），参见 {@link PluginFilesApi} */
+  files: PluginFilesApi
+  /** 安全存储 API（要求 secure-storage 权限），参见 {@link PluginSecureStorage} */
+  secureStorage: PluginSecureStorage
 }
 
 /** 自定义工具栏按钮 props。size 为推荐 icon 尺寸。 */
@@ -420,6 +499,13 @@ export interface ToolbarButtonProps {
   pluginId: string
   /** 调用插件后端命令 */
   invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 调用插件后端流式命令，参见 {@link PluginPanelProps.invokeBackendStream} */
+  invokeBackendStream: <T = unknown, R = unknown>(
+    command: string,
+    args: Record<string, unknown> | undefined,
+    onChunk: (chunk: T) => void,
+    options?: { firstChunkTimeoutSecs?: number }
+  ) => Promise<R>
   /** 插件隔离的持久化存储 */
   store: PluginStorage
   /** 宿主事件总线 */
@@ -452,6 +538,12 @@ export interface ToolbarButtonProps {
   setActiveNoteFrontmatter(data: Partial<NoteFrontmatter>): void
   /** 监听 frontmatter 变更事件。参见 {@link PluginPanelProps.onNoteFrontmatterChanged}。 */
   onNoteFrontmatterChanged(callback: (data: Record<string, unknown>) => void): () => void
+  /** 编辑器写 API（要求 editor-write 权限），参见 {@link PluginPanelProps.editor} */
+  editor: PluginEditorApi
+  /** 工作区文件 API（要求 files 权限），参见 {@link PluginPanelProps.files} */
+  files: PluginFilesApi
+  /** 安全存储 API（要求 secure-storage 权限），参见 {@link PluginSecureStorage} */
+  secureStorage: PluginSecureStorage
 }
 
 // 插件注册表
