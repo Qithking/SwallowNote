@@ -55,6 +55,9 @@ export default defineConfig(({ mode }) => {
                 order: manifest.order ?? 100,
                 enabled: manifest.enabled ?? true,
                 has_backend: manifest.hasBackend ?? false,
+                // 未声明时序列化为 undefined 并被 JSON.stringify 省略，
+                // 宿主侧 serde default 为 None（恒兼容）
+                min_host_version: manifest.minHostVersion || undefined,
               }
               const comment = `// @swallow-manifest ${JSON.stringify(meta)}\n`
               const content = readFileSync(indexPath, 'utf-8')

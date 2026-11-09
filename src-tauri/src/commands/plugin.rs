@@ -80,6 +80,39 @@ pub struct PluginMetadataRust {
     /// directory. Empty when installed from a local zip upload.
     #[serde(default)]
     pub source: String,
+    /// The minimum host version this plugin requires, declared in the
+    /// manifest as `minHostVersion`. `None` means no requirement (the
+    /// plugin loads on any host). Empty string is normalised to `None`.
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub min_host_version: Option<String>,
+    /// Computed by the host (never part of the manifest): whether the
+    /// running host satisfies `min_host_version`. Defaults to `true`
+    /// so manifests that don't declare the key stay loadable.
+    #[serde(default = "default_true")]
+    pub host_compatible: bool,
+}
+
+/// Helper: serde default for `bool` fields that must be `true` when
+/// the manifest key is absent (`host_compatible`).
+fn default_true() -> bool {
+    true
+}
+
+/// Whether the running host satisfies a plugin's `minHostVersion`
+/// requirement.
+/// - Missing / empty requirement → always compatible.
+/// - Unparseable requirement → conservatively incompatible (fail
+///   closed), so a malformed manifest can't force an unsafe load.
+/// - Otherwise: `host_version >= min` (semver 比较).
+fn is_host_compatible(host_version: &Version, min_host_version: Option<&str>) -> bool {
+    let min = match min_host_version.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(m) => m,
+        None => return true,
+    };
+    match Version::parse(min) {
+        Ok(min_v) => host_version >= &min_v,
+        Err(_) => false,
+    }
 }
 
 /// Helper: deserialise a `String` field into `Option<String>`,
@@ -404,6 +437,9 @@ pub async fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMeta
         .app_data_dir()
         .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
 
+    // 取宿主版本供闭包内计算 host_compatible（move 进闭包）。
+    let host_version = app_handle.package_info().version.clone();
+
     // 将同步文件 I/O 移到 blocking 线程池，避免阻塞 Tauri runtime
     let plugins = tokio::task::spawn_blocking(move || -> Result<Vec<PluginMetadataRust>, PluginError> {
         let plugins_root = plugins_dir(&app_data_dir);
@@ -480,6 +516,9 @@ pub async fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMeta
                 meta.has_backend = has_backend;
                 meta.has_settings_schema = has_settings_schema;
                 meta.source = source;
+                // host_compatible 由宿主计算，不信任 manifest 内的值。
+                meta.host_compatible =
+                    is_host_compatible(&host_version, meta.min_host_version.as_deref());
                 meta
             } else {
                 // Fallback: create minimal metadata from directory name
@@ -498,6 +537,9 @@ pub async fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMeta
                     has_backend,
                     has_settings_schema,
                     source,
+                    // 无 manifest 的目录视为无版本要求且兼容。
+                    min_host_version: None,
+                    host_compatible: true,
                 }
             };
             plugins.push(meta);
@@ -609,12 +651,28 @@ pub fn install_plugin(
 
     // Determine the real plugin id from the manifest. Fall back to
     // the zip filename if the manifest doesn't declare one.
-    let real_plugin_id = parse_manifest_from_index_js(&index_js)
+    let parsed_manifest = parse_manifest_from_index_js(&index_js);
+    let real_plugin_id = parsed_manifest
+        .as_ref()
         .map(|m| m.id.clone())
         .filter(|id| !id.is_empty())
         .unwrap_or_else(|| zip_filename.clone());
 
     validate_plugin_id(&real_plugin_id)?;
+
+    // minHostVersion 门禁：包要求比当前宿主更新的版本时拒绝安装，
+    // 并清理临时目录避免留下 .installing-* 残留。
+    let host_version = app_handle.package_info().version.clone();
+    if let Some(meta) = parsed_manifest.as_ref() {
+        if !is_host_compatible(&host_version, meta.min_host_version.as_deref()) {
+            let _ = fs::remove_dir_all(&temp_plugin_dir);
+            return Err(PluginError::InvalidInput(format!(
+                "Plugin requires host version {} or newer, but the running host is {}",
+                meta.min_host_version.as_deref().unwrap_or("(unparseable)"),
+                host_version
+            )));
+        }
+    }
 
     // Move the temp directory to the final location. If a plugin with
     // the same id already exists, replace it entirely.
@@ -669,8 +727,8 @@ pub fn install_plugin(
     let enabled = !final_plugin_dir.join(".disabled").exists();
     let source_value = source.clone().unwrap_or_default();
 
-    let final_index_js = final_version_dir.join("index.js");
-    let mut meta = parse_manifest_from_index_js(&final_index_js).unwrap_or(PluginMetadataRust {
+    // 复用解压后解析过的 manifest（内容与安装后一致），避免二次读盘。
+    let mut meta = parsed_manifest.unwrap_or(PluginMetadataRust {
         id: real_plugin_id.clone(),
         name: real_plugin_id.clone(),
         description: String::new(),
@@ -685,8 +743,12 @@ pub fn install_plugin(
         has_backend,
         has_settings_schema,
         source: source_value.clone(),
+        min_host_version: None,
+        host_compatible: true,
     });
     meta.source = source_value;
+    meta.host_compatible =
+        is_host_compatible(&host_version, meta.min_host_version.as_deref());
 
     Ok(meta)
 }
@@ -1264,6 +1326,21 @@ pub async fn install_plugin_from_bytes(
         ));
     }
 
+    // minHostVersion 门禁（市场安装 / 更新共由此路径进入）：包要求
+    // 比当前宿主更新的版本时拒绝，清理已解压的 version_dir。
+    let parsed_manifest = parse_manifest_from_index_js(&index_js);
+    if let Some(meta) = parsed_manifest.as_ref() {
+        let host_version = app_handle.package_info().version.clone();
+        if !is_host_compatible(&host_version, meta.min_host_version.as_deref()) {
+            let _ = fs::remove_dir_all(&version_dir);
+            return Err(PluginError::InvalidInput(format!(
+                "Plugin requires host version {} or newer, but the running host is {}",
+                meta.min_host_version.as_deref().unwrap_or("(unparseable)"),
+                host_version
+            )));
+        }
+    }
+
     set_current_version(&plugin_dir, &version)?;
 
     // Write the `.source` file if a source URL was provided.
@@ -1294,7 +1371,7 @@ pub async fn install_plugin_from_bytes(
     let enabled = !plugin_dir.join(".disabled").exists();
     let source_value = source.clone().unwrap_or_default();
 
-    let mut meta = parse_manifest_from_index_js(&index_js).unwrap_or(PluginMetadataRust {
+    let mut meta = parsed_manifest.unwrap_or(PluginMetadataRust {
         id: plugin_id.clone(),
         name: plugin_id.clone(),
         description: String::new(),
@@ -1309,8 +1386,15 @@ pub async fn install_plugin_from_bytes(
         has_backend,
         has_settings_schema,
         source: source_value.clone(),
+        min_host_version: None,
+        host_compatible: true,
     });
     meta.source = source_value;
+    // host_compatible 由宿主计算，不信任 manifest 内的值。
+    meta.host_compatible = is_host_compatible(
+        &app_handle.package_info().version,
+        meta.min_host_version.as_deref(),
+    );
 
     Ok(meta)
 }
@@ -1537,8 +1621,16 @@ pub fn rollback_plugin(
         has_backend,
         has_settings_schema,
         source: source.clone(),
+        min_host_version: None,
+        host_compatible: true,
     });
     meta.source = source;
+    // 回滚不做门禁拒绝，但返回的 host_compatible 需如实反映
+    // （前端加载时会据此跳过不兼容插件）。
+    meta.host_compatible = is_host_compatible(
+        &app_handle.package_info().version,
+        meta.min_host_version.as_deref(),
+    );
     Ok(meta)
 }
 
@@ -2005,6 +2097,61 @@ mod tests {
         let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
         assert!(meta.icon_position.is_none());
         assert!(meta.content_position.is_none());
+    }
+
+    /// is_host_compatible 判定矩阵：
+    /// - 无要求（None / 空串 / 纯空白）→ 恒兼容；
+    /// - 要求无法解析为 semver → 保守判为不兼容（fail closed）；
+    /// - 其余按 semver `host >= min` 比较。
+    #[test]
+    fn test_is_host_compatible_matrix() {
+        let host = Version::parse("0.1.0").unwrap();
+
+        // 无要求：None / 空串 / 空白 → 兼容
+        assert!(is_host_compatible(&host, None));
+        assert!(is_host_compatible(&host, Some("")));
+        assert!(is_host_compatible(&host, Some("   ")));
+
+        // 无法解析的版本号 → 保守不兼容
+        assert!(!is_host_compatible(&host, Some("not-a-version")));
+        assert!(!is_host_compatible(&host, Some("1.x")));
+
+        // host >= min → 兼容（含相等）
+        assert!(is_host_compatible(&host, Some("0.1.0")));
+        assert!(is_host_compatible(&host, Some("0.0.9")));
+
+        // host < min → 不兼容；semver 而非字典序（0.10 > 0.9）
+        assert!(!is_host_compatible(&host, Some("0.2.0")));
+        assert!(!is_host_compatible(&host, Some("1.0.0")));
+        assert!(is_host_compatible(
+            &Version::parse("0.10.0").unwrap(),
+            Some("0.9.0")
+        ));
+    }
+
+    /// manifest 中的 `min_host_version`：声明时保留原值；未声明时
+    /// serde default 为 None 且 host_compatible 默认 true；空串归一
+    /// 为 None。host_compatible 是宿主计算字段，manifest 中的该键
+    /// 会被 scan/install 覆写，此处只验证 serde default 行为。
+    #[test]
+    fn test_parse_manifest_min_host_version() {
+        // 声明了 minHostVersion
+        let json = r#"{"id":"com.example.ai","name":"AI","description":"","version":"0.1.0","author":"A","published_at":"","order":0,"enabled":true,"min_host_version":"0.1.0"}"#;
+        let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.min_host_version.as_deref(), Some("0.1.0"));
+        // serde default：manifest 不应携带 host_compatible，缺省为 true
+        assert!(meta.host_compatible);
+
+        // 未声明 → None
+        let json = r#"{"id":"com.example.plain","name":"P","description":"","version":"0.1.0","author":"A","published_at":"","order":0,"enabled":true}"#;
+        let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
+        assert!(meta.min_host_version.is_none());
+        assert!(meta.host_compatible);
+
+        // 空串 → 归一为 None
+        let json = r#"{"id":"com.example.blank","name":"B","description":"","version":"0.1.0","author":"A","published_at":"","order":0,"enabled":true,"min_host_version":""}"#;
+        let meta: PluginMetadataRust = serde_json::from_str(json).unwrap();
+        assert!(meta.min_host_version.is_none());
     }
 
     /// Build a fake "version directory" mirroring the layout that

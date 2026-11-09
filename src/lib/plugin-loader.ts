@@ -444,6 +444,24 @@ export async function loadAllPlugins(
     logger.info('plugin-loader', `loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
   }
   return loadWithConcurrency(rustMetas, async (meta) => {
+      // 宿主版本不满足 minHostVersion：跳过加载，仅推送 failure 说明原因
+      if (meta.host_compatible === false) {
+        const reason = `${i18n.t('pluginLoader.hostIncompatibleBase')}\n\n${i18n.t('pluginLoader.hostIncompatibleDetail', { min: meta.min_host_version ?? '?' })}`
+        logger.warn(
+          'plugin-loader',
+          `Skipping plugin ${meta.id}: requires host >= ${meta.min_host_version}`,
+        )
+        return {
+          definition: null,
+          failure: {
+            id: meta.id,
+            name: meta.name,
+            reason,
+            ts: Date.now(),
+            pluginPath: meta.plugin_path,
+          },
+        }
+      }
       // manifest 为 null 时按加载失败处理
       const { manifest, module, error } = await loadPluginModuleWithRef(meta.plugin_path)
 

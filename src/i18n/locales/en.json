@@ -1123,6 +1123,8 @@
     "manifestInvalidMiddle": " does not export a valid ",
     "manifestInvalidSuffix": " object. Please check whether the plugin package is complete, partially deleted, or contact the plugin author.",
     "manifestInvalidBase": "manifest missing or invalid: index.js did not export a valid `manifest` object. The plugin package may be incomplete or corrupted.",
+    "hostIncompatibleBase": "host version too old: this plugin requires a newer host and was skipped.",
+    "hostIncompatibleDetail": "Requires host version {{min}} or newer.",
     "underlyingError": "Underlying error: {{error}}"
   },
   "pluginCore": {

@@ -193,6 +193,8 @@ export interface PluginManifest {
   commandPalette?: string[]
   /** 用户 opt-in 的自动更新标志，持久化在 localStorage。 */
   autoUpdate?: boolean
+  /** 插件要求的最低宿主版本（semver），未声明则不校验。 */
+  minHostVersion?: string
   // 生命周期 hook（均可选）
   /** 插件模块加载后调用一次 */
   onLoad?: PluginLifecycleHook

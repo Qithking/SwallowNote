@@ -1123,6 +1123,8 @@
     "manifestInvalidMiddle": " 未导出有效的 ",
     "manifestInvalidSuffix": " 对象。请检查插件包是否完整、是否被部分删除，或联系插件作者。",
     "manifestInvalidBase": "清单缺失或无效：index.js 未导出有效的 `manifest` 对象。插件包可能不完整或已损坏。",
+    "hostIncompatibleBase": "宿主版本过旧：该插件要求更新的宿主版本，已跳过加载。",
+    "hostIncompatibleDetail": "要求宿主版本 {{min}} 或更高。",
     "underlyingError": "底层错误: {{error}}"
   },
   "pluginCore": {
