@@ -78,20 +78,25 @@ pub fn create_askpass_script(
     #[cfg(target_os = "windows")]
     let script_content = "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo %GIT_USERNAME%\n) else (\n  echo %GIT_PASSWORD%\n)".to_string();
 
-    std::fs::write(&askpass_script, &script_content)
-        .map_err(|e| format!("Failed to create askpass script: {}", e))?;
-    let guard = TempScriptGuard(askpass_script.clone());
-
     #[cfg(not(target_os = "windows"))]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&askpass_script)
-            .map_err(|e| format!("Failed to read askpass script metadata: {}", e))?
-            .permissions();
-        perms.set_mode(0o600);
-        std::fs::set_permissions(&askpass_script, perms)
-            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+        // 原子创建：以 0600 权限一次性创建，避免"先 0644 落盘再收紧"的可读窗口
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&askpass_script)
+            .and_then(|mut f| f.write_all(script_content.as_bytes()))
+            .map_err(|e| format!("Failed to create askpass script: {}", e))?;
     }
+
+    #[cfg(target_os = "windows")]
+    std::fs::write(&askpass_script, &script_content)
+        .map_err(|e| format!("Failed to create askpass script: {}", e))?;
+
+    let guard = TempScriptGuard(askpass_script.clone());
 
     Ok((askpass_script.to_string_lossy().to_string(), guard))
 }

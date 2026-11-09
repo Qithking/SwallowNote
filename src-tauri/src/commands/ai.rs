@@ -14,6 +14,13 @@ pub struct AiProxyStateHolder {
 
 pub type SharedAiProxyState = Arc<AiProxyStateHolder>;
 
+/// 代理启动结果：端口 + 访问令牌（前端请求需携带 token 请求头）
+#[derive(serde::Serialize)]
+pub struct AiProxyEndpoint {
+    pub port: u16,
+    pub token: String,
+}
+
 pub fn new_shared_ai_proxy_state() -> SharedAiProxyState {
     Arc::new(AiProxyStateHolder {
         server: Mutex::new(None),
@@ -40,7 +47,7 @@ pub async fn start_ai_proxy_cmd(
     base_url: String,
     model: String,
     port: u16,
-) -> Result<u16, String> {
+) -> Result<AiProxyEndpoint, String> {
     let settings = AiSettings {
         provider,
         api_key,
@@ -51,11 +58,14 @@ pub async fn start_ai_proxy_cmd(
 
     let server = start_ai_proxy(settings).await?;
 
-    let actual_port = server.port;
+    let endpoint = AiProxyEndpoint {
+        port: server.port,
+        token: server.token.clone(),
+    };
     let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(server);
 
-    Ok(actual_port)
+    Ok(endpoint)
 }
 
 #[tauri::command]
@@ -75,7 +85,7 @@ pub async fn restart_ai_proxy_cmd(
     base_url: String,
     model: String,
     port: u16,
-) -> Result<u16, String> {
+) -> Result<AiProxyEndpoint, String> {
     let old_server = {
         let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
         guard.take()
@@ -95,11 +105,14 @@ pub async fn restart_ai_proxy_cmd(
 
     let server = start_ai_proxy(settings).await?;
 
-    let actual_port = server.port;
+    let endpoint = AiProxyEndpoint {
+        port: server.port,
+        token: server.token.clone(),
+    };
     let mut guard = holder.server.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(server);
 
-    Ok(actual_port)
+    Ok(endpoint)
 }
 
 #[tauri::command]

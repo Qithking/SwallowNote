@@ -167,7 +167,8 @@ export function AiModelForm({
                 const activeModel = aiModels.find((m) => m.id === activeAiModelId)
                 if (!activeModel) return
                 const apiKey = activeModel._decryptedApiKey || ''
-                await restartAiProxy(activeModel.provider, apiKey, activeModel.baseUrl, activeModel.model, aiPort)
+                const ep = await restartAiProxy(activeModel.provider, apiKey, activeModel.baseUrl, activeModel.model, aiPort)
+                useUIStore.getState().setAiProxyToken(ep.token)
                 await testAiModel(activeModel.provider, apiKey, activeModel.baseUrl, activeModel.model, aiPort)
                 toast.success(t('settings.ai.testSuccess'))
               } catch (e) {

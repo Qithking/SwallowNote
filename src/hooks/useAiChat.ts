@@ -8,6 +8,7 @@ import { DefaultChatTransport } from 'ai'
 import { getAiProxyUrl } from '@/lib/ai'
 import { restartAiProxy } from '@/lib/tauri'
 import { logger } from '@/lib/logger'
+import { useUIStore } from '@/stores/ui'
 import type { AiModelConfig } from '@/lib/ai'
 
 export function useAiChat({
@@ -32,6 +33,10 @@ export function useAiChat({
   const chat = useChat({
     transport: new DefaultChatTransport({
       api: getAiProxyUrl(aiPort),
+      // 每次发请求时求值：始终携带最新代理访问令牌（重启代理后 token 会更新）
+      headers: async () => ({
+        'x-ai-proxy-token': useUIStore.getState().aiProxyToken,
+      }),
     }),
   })
 
@@ -59,7 +64,9 @@ export function useAiChat({
       const model = aiModels.find((m) => m.id === currentActiveAiModelId)
       if (model) {
         const apiKey = model._decryptedApiKey || ''
-        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, currentAiPort).catch((e) => logger.error('ai-view', 'Failed to restart AI proxy:', e))
+        restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, currentAiPort)
+          .then((ep) => useUIStore.getState().setAiProxyToken(ep.token))
+          .catch((e) => logger.error('ai-view', 'Failed to restart AI proxy:', e))
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -9,6 +9,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 
+mod chat;
+mod context;
+mod provider;
+mod retry;
+mod sse;
+
 /// JSON-RPC 2.0 请求。`id` 为 `Value` 以支持数字/字符串/null。
 #[derive(Deserialize)]
 struct JsonRpcRequest {
@@ -76,21 +82,31 @@ fn main() {
             }
         };
 
-        let response = dispatch(&req);
-        let _ = writeln!(stdout, "{}", serde_json::to_string(&response).unwrap());
-        let _ = stdout.flush();
+        // 流式命令返回 None：响应帧由 worker 线程异步写出
+        if let Some(response) = dispatch(&req) {
+            let _ = writeln!(stdout, "{}", serde_json::to_string(&response).unwrap());
+            let _ = stdout.flush();
+        }
     }
 }
 
-/// 命令分发：根据 `method` 路由到对应的命令处理函数。
-fn dispatch(req: &JsonRpcRequest) -> Value {
+/// 命令分发：同步命令返回响应帧；流式命令 spawn worker 线程后返回 None，
+/// 主循环继续读 stdin（支撑并发请求，为后续 stop 等命令留出通道）。
+fn dispatch(req: &JsonRpcRequest) -> Option<Value> {
     let result = match req.method.as_str() {
-        // 存活探测：骨架阶段唯一方法
+        // 存活探测
         "ping" => Ok(serde_json::json!({ "pong": true })),
-        _ => Err(format!("未知方法: {}", req.method)),
+        // 流式对话（P2.2）：通知帧 + 响应帧均由 worker 写出
+        "streamChat" => {
+            let params = req.params.clone();
+            let id = req.id.clone();
+            std::thread::spawn(move || run_stream(&params, &id));
+            return None;
+        }
+        m => Err(format!("未知方法: {}", m)),
     };
 
-    match result {
+    let response = match result {
         Ok(value) => serde_json::to_value(JsonRpcSuccess {
             jsonrpc: "2.0",
             id: req.id.clone(),
@@ -110,5 +126,59 @@ fn dispatch(req: &JsonRpcRequest) -> Value {
             })
             .unwrap()
         }
+    };
+    Some(response)
+}
+
+/// 通知帧发送器（P1.1 协议）：宿主按 requestId 路由到对应的流式 Channel。
+fn make_emit(id: &Value) -> impl FnMut(&str, Value) {
+    let id = id.clone();
+    move |event: &str, data: Value| {
+        let frame = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "swallow/stream",
+            "params": { "requestId": id, "event": event, "data": data },
+        });
+        let mut stdout = io::stdout();
+        let _ = writeln!(stdout, "{}", serde_json::to_string(&frame).unwrap());
+        let _ = stdout.flush();
     }
+}
+
+/// streamChat worker：截断 → 载荷 → 重试请求 → SSE 解析 → 通知帧，最后写终结响应帧。
+fn run_stream(params: &Value, id: &Value) {
+    let response = match serde_json::from_value::<chat::StreamParams>(params.clone()) {
+        Ok(p) => {
+            let mut emit = make_emit(id);
+            match chat::stream_chat(&p, &mut emit) {
+                Ok(result) => serde_json::to_value(JsonRpcSuccess {
+                    jsonrpc: "2.0",
+                    id: id.clone(),
+                    result,
+                })
+                .unwrap(),
+                Err(msg) => serde_json::to_value(JsonRpcError {
+                    jsonrpc: "2.0",
+                    id: id.clone(),
+                    error: JsonRpcErrorDetail {
+                        code: -32000,
+                        message: msg,
+                    },
+                })
+                .unwrap(),
+            }
+        }
+        Err(e) => serde_json::to_value(JsonRpcError {
+            jsonrpc: "2.0",
+            id: id.clone(),
+            error: JsonRpcErrorDetail {
+                code: -32602,
+                message: format!("参数错误: {}", e),
+            },
+        })
+        .unwrap(),
+    };
+    let mut stdout = io::stdout();
+    let _ = writeln!(stdout, "{}", serde_json::to_string(&response).unwrap());
+    let _ = stdout.flush();
 }

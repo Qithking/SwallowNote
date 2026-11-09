@@ -126,7 +126,8 @@ function AIView() {
     if (model) {
       const apiKey = model._decryptedApiKey || ''
       try {
-        await restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, aiPort)
+        const ep = await restartAiProxy(model.provider, apiKey, model.baseUrl, model.model, aiPort)
+        useUIStore.getState().setAiProxyToken(ep.token)
       } catch (e) {
         logger.error('ai-view', 'Failed to restart AI proxy:', e)
       }

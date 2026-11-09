@@ -9,13 +9,19 @@ export async function decryptApiKey(encrypted: string): Promise<string> {
   return await invoke('decrypt_api_key', { encrypted })
 }
 
+/** 本地 AI 代理启动结果：端口 + 访问令牌（请求需携带 x-ai-proxy-token 头） */
+export interface AiProxyEndpoint {
+  port: number
+  token: string
+}
+
 export async function startAiProxy(
   provider: string,
   apiKey: string,
   baseUrl: string,
   model: string,
   port: number,
-): Promise<number> {
+): Promise<AiProxyEndpoint> {
   return await invoke('start_ai_proxy_cmd', { provider, apiKey, baseUrl, model, port })
 }
 
@@ -29,7 +35,7 @@ export async function restartAiProxy(
   baseUrl: string,
   model: string,
   port: number,
-): Promise<number> {
+): Promise<AiProxyEndpoint> {
   return await invoke('restart_ai_proxy_cmd', { provider, apiKey, baseUrl, model, port })
 }
 

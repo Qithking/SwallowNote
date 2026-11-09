@@ -155,6 +155,8 @@ pub fn run() {
             commands::file::delete_file,
             commands::file::rename_file,
             commands::file::copy_file,
+            commands::file::export_text_file,
+            commands::file::register_asset_scope,
             commands::file::copy_file_to_clipboard,
             commands::file::read_clipboard_file_paths,
             commands::file::open_in_finder,

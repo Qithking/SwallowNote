@@ -465,6 +465,8 @@ export interface UIState {
   aiBaseUrl: string
   aiModel: string
   aiPort: number
+  /** 本地 AI 代理访问令牌（内存态，重启代理时更新，不持久化） */
+  aiProxyToken: string
   aiModels: AiModelConfig[]
   activeAiModelId: string
   defaultAiModelId: string
@@ -518,6 +520,7 @@ export interface UIState {
   setAiBaseUrl: (url: string) => void
   setAiModel: (model: string) => void
   setAiPort: (port: number) => void
+  setAiProxyToken: (token: string) => void
   addAiModel: (model: Omit<AiModelConfig, 'id'>) => void
   removeAiModel: (id: string) => void
   setActiveAiModel: (id: string) => void
@@ -591,6 +594,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   aiBaseUrl: '',
   aiModel: '',
   aiPort: 4017,
+  aiProxyToken: '',
   aiModels: [],
   activeAiModelId: '',
   defaultAiModelId: '',
@@ -762,7 +766,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       const { aiProvider, aiBaseUrl, aiModel, aiPort } = useUIStore.getState()
       if (aiProvider) {
         // 重启失败：新 key 已持久化但代理仍用旧配置，需提示
-        restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch((err) => {
+        restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort)
+          .then((ep) => set({ aiProxyToken: ep.token }))
+          .catch((err) => {
           logger.error('ui-store', 'restartAiProxy failed', err)
           toast.error(i18n.t('settings.ai.restartFailed'), { description: String(err) })
         })
@@ -783,6 +789,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   setAiPort: (port: number) => {
     set({ aiPort: port })
     saveAppSettings({ aiPort: String(port) })
+  },
+  setAiProxyToken: (token: string) => {
+    set({ aiProxyToken: token })
   },
   addAiModel: (model) => {
     const newModel: AiModelConfig = { ...model, id: generateModelId() }

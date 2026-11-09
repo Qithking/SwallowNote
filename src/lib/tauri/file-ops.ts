@@ -1,4 +1,13 @@
 import { invoke } from '@tauri-apps/api/core'
+import { useWorkspaceStore } from '@/stores/workspace'
+
+/**
+ * 获取当前工作区根路径（未打开时 null）。
+ * 文件命令后端据此做路径白名单校验（工作区根 + app 数据目录），防任意路径读写删。
+ */
+function workspaceRoot(): string | null {
+  return useWorkspaceStore.getState().rootPath || null
+}
 
 // Types matching Rust backend
 export interface FileNode {
@@ -87,15 +96,15 @@ export async function listDirectoriesBatch(
 }
 
 export async function readFile(path: string): Promise<string> {
-  return await invoke('read_file', { path })
+  return await invoke('read_file', { path, workspaceRoot: workspaceRoot() })
 }
 
 export async function writeFile(path: string, content: string): Promise<void> {
-  await invoke('write_file', { path, content })
+  await invoke('write_file', { path, content, workspaceRoot: workspaceRoot() })
 }
 
 export async function writeBinaryFile(path: string, data: string): Promise<void> {
-  await invoke('write_binary_file', { path, data })
+  await invoke('write_binary_file', { path, data, workspaceRoot: workspaceRoot() })
 }
 
 // 远程图片批量下载
@@ -151,21 +160,31 @@ export async function getHomeDir(): Promise<string> {
 
 export async function createFile(path: string, isDirectory: boolean): Promise<string> {
   const req: CreateFileRequest = { path, is_directory: isDirectory }
-  return await invoke('create_file', { req })
+  return await invoke('create_file', { req, workspaceRoot: workspaceRoot() })
 }
 
 export async function deleteFile(path: string): Promise<void> {
-  await invoke('delete_file', { path })
+  await invoke('delete_file', { path, workspaceRoot: workspaceRoot() })
 }
 
 export async function renameFile(oldPath: string, newPath: string): Promise<void> {
   const req: RenameFileRequest = { old_path: oldPath, new_path: newPath }
-  await invoke('rename_file', { req })
+  await invoke('rename_file', { req, workspaceRoot: workspaceRoot() })
 }
 
 export async function copyFile(srcPath: string, dstPath: string): Promise<void> {
   const req: RenameFileRequest = { old_path: srcPath, new_path: dstPath }
-  await invoke('copy_file', { req })
+  await invoke('copy_file', { req, workspaceRoot: workspaceRoot() })
+}
+
+/** 导出文本到用户经 save dialog 选择的路径（后端唯一放行工作区外写入的命令） */
+export async function exportTextFile(path: string, content: string): Promise<void> {
+  await invoke('export_text_file', { path, content })
+}
+
+/** 运行期把目录加入 asset protocol 允许列表（笔记本地图片显示，B4 收敛后必需） */
+export async function registerAssetScope(path: string): Promise<void> {
+  await invoke('register_asset_scope', { path })
 }
 
 export async function searchInFiles(req: SearchRequest): Promise<SearchResult[]> {

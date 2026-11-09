@@ -38,6 +38,7 @@ vi.mock('@/lib/tauri', () => ({
   saveFolderHistory: vi.fn().mockResolvedValue(undefined),
   watchDirectory: vi.fn().mockResolvedValue(undefined),
   unwatchDirectory: vi.fn().mockResolvedValue(undefined),
+  registerAssetScope: vi.fn().mockResolvedValue(undefined),
   readFile: vi.fn().mockResolvedValue('{"folders":["/ws/Workdoc"]}'),
   getConflictRepoRecords: vi.fn().mockResolvedValue([]),
   gitGetConflictFiles: vi.fn().mockResolvedValue([]),

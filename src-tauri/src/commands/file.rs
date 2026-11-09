@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tauri::Manager;
 use uuid::Uuid;
 use log::{debug, error};
 
@@ -48,6 +49,74 @@ pub struct CreateFileRequest {
 pub struct RenameFileRequest {
     pub old_path: String,
     pub new_path: String,
+}
+
+/// 校验目标路径位于允许的根目录内（工作区根或应用数据目录），
+/// 防止被注入脚本通过文件命令读写删任意路径（审计 B1）。
+/// - 已存在路径：canonicalize 穿透 symlink 后校验（拒绝 symlink 逃逸）；
+/// - 不存在路径（新建/重命名目标）：校验其存在的最近父目录后拼接剩余片段。
+fn ensure_path_allowed(
+    app: &tauri::AppHandle,
+    workspace_root: Option<&str>,
+    path: &Path,
+) -> Result<PathBuf, String> {
+    // 收集允许的根目录：工作区根（若已打开）+ 应用数据目录
+    let mut allowed_roots: Vec<PathBuf> = Vec::new();
+    if let Some(root) = workspace_root {
+        if !root.is_empty() {
+            if let Ok(canonical_root) = std::fs::canonicalize(root) {
+                allowed_roots.push(canonical_root);
+            }
+        }
+    }
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+    // app_data 根可能尚未创建，退回原始路径参与前缀比较
+    let canonical_app_data = std::fs::canonicalize(&app_data).unwrap_or(app_data);
+    allowed_roots.push(canonical_app_data);
+
+    // 找到存在且可 canonicalize 的最近祖先（含自身），其余部分原样拼接
+    let (existing, tail) = existing_ancestor(path);
+    let canonical_existing = std::fs::canonicalize(&existing)
+        .map_err(|e| format!("Failed to resolve path {}: {}", existing.display(), e))?;
+    let canonical = if tail.as_os_str().is_empty() {
+        canonical_existing
+    } else {
+        canonical_existing.join(tail)
+    };
+
+    if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
+        Ok(canonical)
+    } else {
+        Err(format!(
+            "Path is outside allowed directories: {}",
+            path.display()
+        ))
+    }
+}
+
+/// 从 target 向上找第一个存在的祖先，返回 (存在的祖先, 其下未存在部分的相对片段)
+fn existing_ancestor(target: &Path) -> (PathBuf, PathBuf) {
+    let mut cur = target.to_path_buf();
+    let mut parts: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        if cur.exists() || cur.symlink_metadata().is_ok() {
+            let mut tail = PathBuf::new();
+            for part in parts.into_iter().rev() {
+                tail = tail.join(part);
+            }
+            return (cur, tail);
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                parts.push(name.to_os_string());
+                cur = parent.to_path_buf();
+            }
+            _ => return (cur, PathBuf::new()),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -262,8 +331,39 @@ pub async fn list_directories_batch(
     Ok(results)
 }
 
+/// 运行期把工作区目录加入 asset protocol 允许列表（笔记内本地图片显示需要）。
+/// 配合 tauri.conf.json 中 assetProtocol 静态白名单收敛为 $APPDATA：
+/// 用户工作区路径运行期才确定，只能动态注册（审计 B4）。
 #[tauri::command]
-pub async fn read_file(path: String) -> Result<String, String> {
+pub fn register_asset_scope(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    app.asset_protocol_scope()
+        .allow_directory(&path, true)
+        .map_err(|e| format!("Failed to allow asset scope for {}: {}", path, e))
+}
+
+/// 导出文本（日志等）到用户经系统保存对话框选择的路径。
+/// 唯一不做工作区校验的写入命令：路径来自前端 save dialog，
+/// 供 LogViewer 导出日志等合法工作区外写场景使用（勿用于常规文件写）。
+#[tauri::command]
+pub async fn export_text_file(path: String, content: String) -> Result<(), String> {
+    let path = PathBuf::from(&path);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Failed to create parent directory: {}", e))?;
+    }
+    tokio::fs::write(&path, &content)
+        .await
+        .map_err(|e| format!("Failed to write file: {}", e))
+}
+
+#[tauri::command]
+pub async fn read_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    path: String,
+) -> Result<String, String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let path = PathBuf::from(&path);
 
     if !path.exists() {
@@ -293,7 +393,13 @@ pub async fn read_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn write_file(path: String, content: String) -> Result<(), String> {
+pub async fn write_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let path = PathBuf::from(&path);
 
     // Ensure parent directory exists
@@ -328,12 +434,18 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn write_binary_file(path: String, data: String) -> Result<(), String> {
+pub async fn write_binary_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    path: String,
+    data: String,
+) -> Result<(), String> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&data)
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let path = PathBuf::from(&path);
 
     if let Some(parent) = path.parent() {
@@ -350,7 +462,12 @@ pub async fn write_binary_file(path: String, data: String) -> Result<(), String>
 }
 
 #[tauri::command]
-pub async fn create_file(req: CreateFileRequest) -> Result<String, String> {
+pub async fn create_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    req: CreateFileRequest,
+) -> Result<String, String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&req.path))?;
     let path = PathBuf::from(&req.path);
 
     if path.exists() {
@@ -378,7 +495,12 @@ pub async fn create_file(req: CreateFileRequest) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn delete_file(path: String) -> Result<(), String> {
+pub async fn delete_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    path: String,
+) -> Result<(), String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let path = PathBuf::from(&path);
 
     if !path.exists() {
@@ -399,7 +521,13 @@ pub async fn delete_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn rename_file(req: RenameFileRequest) -> Result<(), String> {
+pub async fn rename_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    req: RenameFileRequest,
+) -> Result<(), String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&req.old_path))?;
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&req.new_path))?;
     let old_path = PathBuf::from(&req.old_path);
     let new_path = PathBuf::from(&req.new_path);
 
@@ -419,7 +547,13 @@ pub async fn rename_file(req: RenameFileRequest) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn copy_file(req: RenameFileRequest) -> Result<(), String> {
+pub async fn copy_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    req: RenameFileRequest,
+) -> Result<(), String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&req.old_path))?;
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&req.new_path))?;
     let old_path = PathBuf::from(&req.old_path);
     let new_path = PathBuf::from(&req.new_path);
 

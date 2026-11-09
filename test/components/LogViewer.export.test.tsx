@@ -5,7 +5,7 @@
  * Tauri v2 webview 不支持 <a download> 触发文件保存。
  *
  * Expected: 点击导出按钮应调用 @tauri-apps/plugin-dialog save() 获取路径，
- * 再调用后端 write_file 命令写入 JSONL 内容。
+ * 再调用后端 export_text_file 命令写入 JSONL 内容（B1 收敛后导出走专用命令）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -40,7 +40,7 @@ describe('Bug: LogViewer 导出按钮无效', () => {
     mockSave.mockResolvedValue(null)
   })
 
-  it('点击导出按钮应调用 save dialog + write_file', async () => {
+  it('点击导出按钮应调用 save dialog + export_text_file', async () => {
     logStore.push({ timestamp: 1, level: 'info', source: 'test', message: 'hello' })
 
     render(<LogViewer open={true} onOpenChange={() => {}} />)
@@ -52,11 +52,11 @@ describe('Bug: LogViewer 导出按钮无效', () => {
       expect(mockSave).toHaveBeenCalledOnce()
     })
 
-    // save() 返回 null（用户取消）时不调用 write_file
+    // save() 返回 null（用户取消）时不调用 export_text_file
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 
-  it('用户选择路径后应调用 write_file 写入 JSONL', async () => {
+  it('用户选择路径后应调用 export_text_file 写入 JSONL', async () => {
     logStore.push({ timestamp: 1, level: 'info', source: 'app', message: 'test log' })
 
     mockSave.mockResolvedValue('/tmp/export.jsonl')
@@ -67,7 +67,7 @@ describe('Bug: LogViewer 导出按钮无效', () => {
     fireEvent.click(exportBtn)
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('write_file', {
+      expect(mockInvoke).toHaveBeenCalledWith('export_text_file', {
         path: '/tmp/export.jsonl',
         content: expect.stringContaining('test log'),
       })

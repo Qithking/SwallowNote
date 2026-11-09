@@ -42,8 +42,11 @@ pub struct ModelInfo {
 }
 
 pub struct AiProxyState {
-pub settings: RwLock<AiSettings>,
-pub client: Client,
+    pub settings: RwLock<AiSettings>,
+    pub client: Client,
+    /// 本地代理访问令牌：启动时生成，仅经 Tauri IPC 下发给 webview，
+    /// 所有 /api/* 请求必须携带 x-ai-proxy-token 请求头（防止任意网页调用本地代理）。
+    pub token: String,
 }
 
 impl AiProxyState {
@@ -56,8 +59,17 @@ let client = Client::builder()
 Self {
 settings: RwLock::new(settings),
 client,
+token: generate_proxy_token(),
 }
 }
+}
+
+/// 生成 64 位 hex 随机令牌（256-bit 熵）
+fn generate_proxy_token() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 pub fn get_provider_base_url(provider: &str, custom_url: &str) -> String {
