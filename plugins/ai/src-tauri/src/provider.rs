@@ -140,6 +140,100 @@ pub fn build_request(cfg: &ProviderConfig, messages: &[Value]) -> BuiltRequest {
     }
 }
 
+// ---------- /v1/models 动态拉取（P2.3，D11：上游模型清单动态发现） ----------
+
+/// 构造模型清单请求（URL + 请求头）。三家认证方式与流式请求一致。
+pub fn build_list_models_request(
+    provider: &str,
+    custom_url: &str,
+    api_key: &str,
+) -> (String, Vec<(String, String)>) {
+    let base = resolve_base_url(provider, custom_url);
+    let url = format!("{}/models", base);
+    let headers = match provider {
+        "anthropic" => vec![
+            ("x-api-key".to_string(), api_key.to_string()),
+            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+        ],
+        "google" => vec![("x-goog-api-key".to_string(), api_key.to_string())],
+        _ => vec![("Authorization".to_string(), format!("Bearer {}", api_key))],
+    };
+    (url, headers)
+}
+
+/// 解析模型清单响应 → `[(id, name)]`。
+/// - OpenAI 兼容：`{"data":[{"id":...}]}`，name 取 id
+/// - Anthropic：`{"data":[{"id":...,"display_name":...}]}`
+/// - Google：`{"models":[{"name":"models/xxx","displayName":...,
+///   "supportedGenerationMethods":[...]}]}`，仅保留支持 generateContent 的条目
+pub fn parse_models_response(
+    provider: &str,
+    body: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let v: Value =
+        serde_json::from_str(body).map_err(|e| format!("模型清单响应解析失败: {}", e))?;
+    let items = match provider {
+        "google" => v["models"].as_array().cloned().unwrap_or_default(),
+        _ => v["data"].as_array().cloned().unwrap_or_default(),
+    };
+    let mut out = Vec::new();
+    for it in &items {
+        let raw_id = it["id"]
+            .as_str()
+            .or_else(|| it["name"].as_str())
+            .unwrap_or("");
+        if raw_id.is_empty() {
+            continue;
+        }
+        let id = match provider {
+            "google" => raw_id.strip_prefix("models/").unwrap_or(raw_id),
+            _ => raw_id,
+        };
+        let name = it["display_name"]
+            .as_str()
+            .or_else(|| it["displayName"].as_str())
+            .unwrap_or(id)
+            .to_string();
+        if provider == "google" {
+            let methods = it["supportedGenerationMethods"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if !methods.iter().any(|m| m.as_str() == Some("generateContent")) {
+                continue;
+            }
+        }
+        out.push((id.to_string(), name));
+    }
+    Ok(out)
+}
+
+/// 实际拉取（15s 总超时）。错误信息不含 api_key。
+pub fn fetch_upstream_models(
+    provider: &str,
+    custom_url: &str,
+    api_key: &str,
+) -> Result<Value, String> {
+    let (url, headers) = build_list_models_request(provider, custom_url, api_key);
+    let req = ureq::get(&url).timeout(std::time::Duration::from_secs(15));
+    let req = headers.iter().fold(req, |r, (k, v)| r.set(k, v));
+    let resp = req.call().map_err(|e| {
+        if let ureq::Error::Status(code, _) = e {
+            format!("拉取模型清单失败: HTTP {}", code)
+        } else {
+            format!("拉取模型清单失败: {}", e)
+        }
+    })?;
+    let body = resp
+        .into_string()
+        .map_err(|e| format!("读取模型清单响应失败: {}", e))?;
+    let models = parse_models_response(provider, &body)?;
+    Ok(json!({ "models": models
+        .into_iter()
+        .map(|(id, name)| json!({ "id": id, "name": name }))
+        .collect::<Vec<_>>() }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +376,57 @@ mod tests {
         assert_eq!(resolve_base_url("openai", "https://x.io/v1/"), "https://x.io/v1");
         // custom / 未知 provider：无默认地址，custom_url 原样（去尾斜杠）
         assert_eq!(resolve_base_url("custom", "https://y.io/v1/"), "https://y.io/v1");
+    }
+
+    // ---------- /v1/models 动态拉取（P2.3，D11：上游模型清单动态发现） ----------
+
+    #[test]
+    fn list_models_request_per_provider() {
+        let (url, h) = build_list_models_request("anthropic", "", "sk-a");
+        assert_eq!(url, "https://api.anthropic.com/v1/models");
+        assert!(h.contains(&("x-api-key".into(), "sk-a".into())));
+        let (url, h) = build_list_models_request("google", "", "sk-g");
+        assert_eq!(
+            url,
+            "https://generativelanguage.googleapis.com/v1beta/models"
+        );
+        assert!(h.contains(&("x-goog-api-key".into(), "sk-g".into())));
+        let (url, h) = build_list_models_request("deepseek", "", "sk-d");
+        assert_eq!(url, "https://api.deepseek.com/v1/models");
+        assert!(h.contains(&("Authorization".into(), "Bearer sk-d".into())));
+        let (url, _) = build_list_models_request("openai", "https://x.io/v1/", "sk");
+        assert_eq!(url, "https://x.io/v1/models");
+    }
+
+    #[test]
+    fn parse_models_openai_and_anthropic() {
+        let openai = r#"{"data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini"}]}"#;
+        let m = parse_models_response("openai", openai).unwrap();
+        assert_eq!(m[0], ("gpt-4o".into(), "gpt-4o".into()));
+        assert_eq!(m.len(), 2);
+
+        let anthropic =
+            r#"{"data":[{"id":"claude-3-5","display_name":"Claude 3.5"}]}"#;
+        let m = parse_models_response("anthropic", anthropic).unwrap();
+        assert_eq!(m[0], ("claude-3-5".into(), "Claude 3.5".into()));
+    }
+
+    #[test]
+    fn parse_models_google_filters_and_strips_prefix() {
+        let body = r#"{"models":[
+            {"name":"models/gemini-2.0-flash","displayName":"Gemini 2.0 Flash","supportedGenerationMethods":["generateContent","countTokens"]},
+            {"name":"models/text-embedding-004","displayName":"Embed","supportedGenerationMethods":["embedContent"]},
+            {"name":"models/other"}
+        ]}"#;
+        let m = parse_models_response("google", body).unwrap();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0], ("gemini-2.0-flash".into(), "Gemini 2.0 Flash".into()));
+    }
+
+    #[test]
+    fn parse_models_bad_json_and_empty() {
+        assert!(parse_models_response("openai", "not-json").is_err());
+        let m = parse_models_response("openai", "{}").unwrap();
+        assert!(m.is_empty());
     }
 }

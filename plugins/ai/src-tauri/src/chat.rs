@@ -9,6 +9,7 @@ use crate::retry::{self, Attempt};
 use crate::sse::{SseError, SseItem, SseParser};
 use serde_json::{json, Value};
 use std::io::{BufReader, Read};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 上游 HTTP 状态码 → 重试分类：2xx 成功；5xx / 429 可重试；其余（4xx 等）不可重试。
 pub fn classify_status(status: u16) -> Attempt<()> {
@@ -138,11 +139,19 @@ fn default_context_window() -> u64 {
     128_000
 }
 
+/// 停止语义：cancel 置位后统一转换为 stopped-done（不发 error 帧）。
+pub const STOPPED: &str = "已停止";
+
 /// 流式对话编排（§6.9 截断 + 重试 + SSE→通知帧）。
 ///
 /// `emit` 为通知帧发送器（event ∈ chunk|done|error）；
+/// `cancel` 为停止标志（B7：stopStream 置位后尽快收尾）；
 /// 返回值为 JSON-RPC 响应帧的 result（成功）或错误消息（失败）。
-pub fn stream_chat(params: &StreamParams, emit: &mut dyn FnMut(&str, Value)) -> Result<Value, String> {
+pub fn stream_chat(
+    params: &StreamParams,
+    emit: &mut dyn FnMut(&str, Value),
+    cancel: &AtomicBool,
+) -> Result<Value, String> {
     // §6.9：上下文估算与截断
     let trim = context::trim_messages(&params.messages, params.context_window);
     let msg_values: Vec<Value> = trim
@@ -160,11 +169,23 @@ pub fn stream_chat(params: &StreamParams, emit: &mut dyn FnMut(&str, Value)) -> 
 
     // 有限重试：连接错误/5xx/429 重试；读流中的错误归 Fatal（首块已到达，不重试）
     let result = retry::with_retry(
-        |_| attempt_stream(&built, &params.provider, emit),
+        |_| {
+            // 每次尝试前检查停止标志（含重试间隙后）
+            if cancel.load(Ordering::Relaxed) {
+                return Attempt::Fatal(STOPPED.to_string());
+            }
+            attempt_stream(&built, &params.provider, emit, cancel)
+        },
         retry::MAX_RETRIES,
         &retry::BACKOFFS,
         &mut std::thread::sleep,
     );
+
+    // B7：停止优先于错误/正常结束 —— 统一发 stopped-done，响应为成功停止
+    if cancel.load(Ordering::Relaxed) {
+        emit("done", json!({ "stopped": true }));
+        return Ok(json!({ "ok": true, "stopped": true }));
+    }
 
     match result {
         Ok(()) => {
@@ -180,10 +201,25 @@ pub fn stream_chat(params: &StreamParams, emit: &mut dyn FnMut(&str, Value)) -> 
     }
 }
 
+/// 读循环唤醒间隔（毫秒）：ureq 读超时到期后返回，用于周期性检查停止标志。
+const READ_WAKE_MS: u64 = 1000;
+
 /// 单次流式尝试：建连 → 响应分类 → 读循环（SSE 解析 + 通知帧输出）。
 /// 成功返回后由 with_retry 判定；读循环内任何错误都是 Fatal（不可重试）。
-fn attempt_stream(built: &BuiltRequest, provider_name: &str, emit: &mut dyn FnMut(&str, Value)) -> Attempt<()> {
-    let mut request = ureq::post(&built.url);
+fn attempt_stream(
+    built: &BuiltRequest,
+    provider_name: &str,
+    emit: &mut dyn FnMut(&str, Value),
+    cancel: &AtomicBool,
+) -> Attempt<()> {
+    if cancel.load(Ordering::Relaxed) {
+        return Attempt::Fatal(STOPPED.to_string());
+    }
+    // B7：读超时唤醒机制——每 READ_WAKE_MS 醒一次检查停止标志（AgentBuilder 才有 timeout_read）
+    let agent = ureq::AgentBuilder::new()
+        .timeout_read(std::time::Duration::from_millis(READ_WAKE_MS))
+        .build();
+    let mut request = agent.post(&built.url);
     for (k, v) in &built.headers {
         request = request.set(k, v);
     }
@@ -222,6 +258,16 @@ fn attempt_stream(built: &BuiltRequest, provider_name: &str, emit: &mut dyn FnMu
                     emit("error", json!({ "message": "上游单行响应超过 64KB 上限，已丢弃该行" }));
                 }
             },
+            // 读超时唤醒：检查停止标志后继续读（SSE 解析器状态保持，不丢数据）
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                if cancel.load(Ordering::Relaxed) {
+                    return Attempt::Fatal(STOPPED.to_string());
+                }
+                continue;
+            }
             Err(e) => return Attempt::Fatal(format!("读取上游响应失败: {}", e)),
         }
     }
