@@ -2,7 +2,7 @@
  * TC-C2-01: Plugin auto-update semver comparison (Phase 11.4 / C2)
  *
  * Regression for the fourth-round code-review C2 finding:
- * `isNewerVersion` in `src/lib/plugin-auto-update.ts` used to split
+ * `isNewerVersion` in `src/lib/plugin-market.ts` used to split
  * the version string on `[.\-+]` and lex-compare non-numeric
  * tokens, which mis-ordered pre-release builds.
  *
@@ -28,7 +28,7 @@
  *     when no sane ordering can be derived)
  */
 import { describe, it, expect } from 'vitest'
-import { isNewerVersion } from '@/lib/plugin-auto-update'
+import { isNewerVersion } from '@/lib/plugin-market'
 
 // ─── TC-C2-01a: equal / older / newer baseline ───────────────────────────────
 

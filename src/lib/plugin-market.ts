@@ -1,4 +1,5 @@
 /** 插件市场客户端：拉取索引、缓存 zip */
+import semver from 'semver'
 import type {
   PluginIndex,
   PluginIndexEntry,
@@ -127,6 +128,51 @@ async function writeZipToCache(
 }
 
 // 公共 API
+
+/** 比较 semver，remote 严格大于 local 时返回 true。解析失败回退字符串比较。 */
+export function isNewerVersion(remote: string, local: string): boolean {
+  if (!remote || !local) return false
+  const r = remote.trim()
+  const l = local.trim()
+  if (!r || !l) return false
+  if (semver.valid(r) !== null && semver.valid(l) !== null) {
+    try {
+      return semver.gt(r, l)
+    } catch {
+      // semver 异常时回退字符串比较
+    }
+  }
+  return r > l
+}
+
+/**
+ * 宿主版本是否满足条目的 minHostVersion。
+ * min 缺失/空 = 无要求；宿主版本未知（null）= 保守放行，
+ * 避免取版本失败的环境误隐藏全部条目。
+ */
+export function isHostVersionCompatible(
+  hostVersion: string | null | undefined,
+  minHostVersion?: string,
+): boolean {
+  const min = minHostVersion?.trim()
+  if (!min) return true
+  if (!hostVersion) return true
+  // host >= min ⟺ min 不严格大于 host
+  return !isNewerVersion(min, hostVersion)
+}
+
+/** 过滤索引中宿主版本不满足的条目（市场列表与更新展示共用）。 */
+export function filterHostCompatibleEntries(
+  index: PluginIndex,
+  hostVersion: string | null | undefined,
+): PluginIndex {
+  return {
+    ...index,
+    plugins: index.plugins.filter((p) =>
+      isHostVersionCompatible(hostVersion, p.minHostVersion),
+    ),
+  }
+}
 
 /** 拉取并解析 PluginIndex，snake_case 转 camelCase。 */
 export async function fetchPluginIndex(url: string, signal?: AbortSignal): Promise<PluginIndex> {
@@ -343,6 +389,7 @@ function normaliseEntry(raw: any): PluginIndexEntry {
     publishedAt: raw.published_at ?? raw.publishedAt,
     versions: Array.isArray(raw.versions) ? raw.versions.map(normaliseVersion) : undefined,
     dependencies: Array.isArray(raw.dependencies) ? raw.dependencies : [],
+    minHostVersion: raw.min_host_version ?? raw.minHostVersion,
   }
 }
 

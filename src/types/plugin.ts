@@ -345,6 +345,8 @@ export interface PluginIndexEntry {
   /** 可选历史版本记录。 */
   versions?: PluginIndexEntryVersion[]
   dependencies: string[]
+  /** 插件要求的最低宿主版本；缺失/空 = 无要求。 */
+  minHostVersion?: string
 }
 
 export interface PluginIndexEntryVersion {

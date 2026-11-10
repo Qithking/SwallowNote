@@ -36,7 +36,7 @@
 - 📑 **Multi-Tab Editing** - Open and edit multiple files simultaneously with tab management
 - 🔍 **Quick Search** - Find files instantly with `Ctrl+P` command palette
 - 🔎 **Global Search** - Search content across all files with `Ctrl+Shift+F`
-- 🤖 **AI Assistant** - Integrated AI-powered writing assistance
+- 🧩 **Plugin System** - Extend the app with marketplace plugins (signed & sandboxed); AI is available as an optional plugin
 - 🧠 **Mind Map** - Visual mind mapping support for brainstorming
 - 🌙 **Themes** - Light, Dark, and System theme support with CSS variables
 - 🌐 **Internationalization** - English and Chinese (Simplified) language support
@@ -159,7 +159,6 @@ swallownote/
 │   └── workflows/          # GitHub Actions CI/CD
 ├── src/                     # React Frontend Source
 │   ├── components/          # UI Components
-│   │   ├── AI/             # AI Assistant Components
 │   │   ├── DiffViewer/      # Diff Viewer Component
 │   │   ├── Directory/       # Directory Browser
 │   │   ├── EditorSettings/  # Editor Settings Panel
@@ -178,7 +177,6 @@ swallownote/
 │   └── utils/               # Utility Functions
 ├── src-tauri/               # Rust Backend Source
 │   ├── src/
-│   │   ├── ai_proxy/       # AI Proxy Service
 │   │   ├── commands/       # Tauri Command Handlers
 │   │   ├── db/             # Database Layer
 │   │   ├── plugins/        # Tauri Plugins

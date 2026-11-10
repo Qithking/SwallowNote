@@ -1,6 +1,5 @@
 /** 插件自动更新：启动时扫描 opted-in 插件下载新版本 */
 import { toast } from 'sonner'
-import semver from 'semver'
 import type { PluginDefinition, PluginIndex, PluginIndexEntry } from '@/types/plugin'
 import { usePluginStore, PLUGIN_AUTO_UPDATE_KEY_PREFIX } from '@/stores/plugin'
 import { usePluginMarketStore } from '@/stores/plugin-market'
@@ -9,6 +8,7 @@ import {
   installPluginFromBytes,
   rollbackPlugin,
   listPluginVersions,
+  isNewerVersion,
 } from '@/lib/plugin-market'
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { scanPlugins } from '@/lib/tauri'
@@ -208,25 +208,6 @@ export async function undoAutoUpdate(args: {
       },
     )
   }
-}
-
-/**
- * 比较 semver，remote 严格大于 local 时返回 true。解析失败回退字符串比较。
- */
-export function isNewerVersion(remote: string, local: string): boolean {
-  if (!remote || !local) return false
-  const r = remote.trim()
-  const l = local.trim()
-  if (!r || !l) return false
-  if (semver.valid(r) !== null && semver.valid(l) !== null) {
-    try {
-      return semver.gt(r, l)
-    } catch {
-      // semver 异常时回退字符串比较
-    }
-  }
-  // semver 解析失败时回退字符串比较。
-  return r > l
 }
 
 /** 重新扫描磁盘并刷新 store。 */

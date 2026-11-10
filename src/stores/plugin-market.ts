@@ -15,6 +15,7 @@
  * IndexedDB zip cache directly).
  */
 import { create } from 'zustand'
+import { getVersion } from '@tauri-apps/api/app'
 import type { PluginIndex, PluginIndexEntry, PluginUpdateInfo } from '@/types/plugin'
 import {
   fetchPluginIndexCached,
@@ -22,6 +23,7 @@ import {
   checkPluginUpdates,
   invalidateIndexCache,
   normaliseIndex,
+  filterHostCompatibleEntries,
 } from '@/lib/plugin-market'
 import {
   listMarketSources,
@@ -36,6 +38,25 @@ import { usePluginStore } from './plugin'
 // preventing slow responses from overwriting faster ones (R-M3).
 let indexFetchAbort: AbortController | null = null
 let indexProgressAbort: AbortController | null = null
+
+/** 宿主版本缓存：undefined = 未取过，null = 取失败（过滤保守放行）。 */
+let cachedHostVersion: string | null | undefined
+
+async function getHostVersionCached(): Promise<string | null> {
+  if (cachedHostVersion === undefined) {
+    try {
+      cachedHostVersion = await getVersion()
+    } catch {
+      cachedHostVersion = null
+    }
+  }
+  return cachedHostVersion
+}
+
+/** 索引入库前统一过滤宿主不满足 minHostVersion 的条目。 */
+async function applyHostCompatibility(index: PluginIndex): Promise<PluginIndex> {
+  return filterHostCompatibleEntries(index, await getHostVersionCached())
+}
 
 export const OFFICIAL_REPO_URL = 'https://raw.githubusercontent.com/Qithking/SwallowNote/refs/heads/main/plugins/repo.json'
 
@@ -178,7 +199,8 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
     try {
       const index = await fetchPluginIndexCached(url, abort.signal)
       if (abort.signal.aborted) return
-      set({ index, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
+      const compatible = await applyHostCompatibility(index)
+      set({ index: compatible, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
       if (e?.name === 'AbortError' || abort.signal.aborted) return
       set({
@@ -207,8 +229,8 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       }, abort.signal)
       if (abort.signal.aborted) return
       const raw = JSON.parse(text)
-      const index = normaliseIndex(raw)
-      set({ index, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
+      const compatible = await applyHostCompatibility(normaliseIndex(raw))
+      set({ index: compatible, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
       if (e?.name === 'AbortError' || abort.signal.aborted) return
       set({

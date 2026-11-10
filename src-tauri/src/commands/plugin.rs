@@ -1139,6 +1139,11 @@ pub struct PluginIndexEntry {
     pub versions: Vec<PluginIndexEntryVersion>,
     #[serde(default)]
     pub dependencies: Vec<String>,
+    /// 插件要求的最低宿主版本（manifest `minHostVersion` 的索引镜像）。
+    /// 缺失/空 = 无要求。更新检查用它跳过宿主不满足的条目，
+    /// 避免提示一个安装路径必然拒绝的更新。
+    #[serde(default)]
+    pub min_host_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1502,9 +1507,14 @@ pub async fn check_plugin_updates(
         }
     }
 
+    let host_version = app_handle.package_info().version.clone();
     let mut updates = Vec::new();
     for entry in index.plugins {
         if entry.version.is_empty() {
+            continue;
+        }
+        // minHostVersion 门禁：宿主不满足的条目不参与更新检查。
+        if !is_host_compatible(&host_version, entry.min_host_version.as_deref()) {
             continue;
         }
         let local = local_versions.get(&entry.id).cloned().unwrap_or_default();
@@ -2127,6 +2137,19 @@ mod tests {
             &Version::parse("0.10.0").unwrap(),
             Some("0.9.0")
         ));
+    }
+
+    /// 索引条目的 `min_host_version`：声明时透传；缺失时 serde
+    /// default 为 None（旧格式索引不含该键，必须兼容）。
+    #[test]
+    fn test_parse_index_entry_min_host_version() {
+        let with_min = r#"{"id":"com.example.ai","name":"AI","version":"0.1.0","description":"","author":"A","download_url":"./a.zip","sha256":"aa","min_host_version":"0.1.0"}"#;
+        let entry: PluginIndexEntry = serde_json::from_str(with_min).unwrap();
+        assert_eq!(entry.min_host_version.as_deref(), Some("0.1.0"));
+
+        let without_min = r#"{"id":"com.example.p","name":"P","version":"0.1.0","description":"","author":"A","download_url":"./p.zip","sha256":"bb"}"#;
+        let entry: PluginIndexEntry = serde_json::from_str(without_min).unwrap();
+        assert!(entry.min_host_version.is_none());
     }
 
     /// manifest 中的 `min_host_version`：声明时保留原值；未声明时

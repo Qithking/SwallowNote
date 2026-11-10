@@ -7,7 +7,12 @@
  * marketUpdates 为空 → 旧逻辑误报「暂无可用更新」。
  */
 import { describe, it, expect } from 'vitest'
-import { pluginHasUpdateAvailable } from '../plugin-market'
+import {
+  pluginHasUpdateAvailable,
+  isHostVersionCompatible,
+  filterHostCompatibleEntries,
+  normaliseIndex,
+} from '../plugin-market'
 import type { PluginIndex, PluginUpdateInfo } from '@/types/plugin'
 
 /** 构造最小市场索引（测试只依赖 plugins[].id / version 字段） */
@@ -95,5 +100,86 @@ describe('pluginHasUpdateAvailable：管理页「更新」按钮判定（与角�
       marketIndex: null,
     })
     expect(result).toBe(false)
+  })
+})
+
+describe('isHostVersionCompatible：宿主版本与 minHostVersion 比较', () => {
+  it('无要求（缺失/空/空白）→ 恒兼容', () => {
+    expect(isHostVersionCompatible('0.1.0', undefined)).toBe(true)
+    expect(isHostVersionCompatible('0.1.0', '')).toBe(true)
+    expect(isHostVersionCompatible('0.1.0', '   ')).toBe(true)
+  })
+
+  it('宿主版本未知 → 保守放行（避免取版本失败误隐藏全部条目）', () => {
+    expect(isHostVersionCompatible(null, '9.9.9')).toBe(true)
+    expect(isHostVersionCompatible(undefined, '0.1.0')).toBe(true)
+  })
+
+  it('host >= min → 兼容（含相等）；host < min → 不兼容', () => {
+    expect(isHostVersionCompatible('0.1.0', '0.1.0')).toBe(true)
+    expect(isHostVersionCompatible('0.2.0', '0.1.0')).toBe(true)
+    expect(isHostVersionCompatible('0.0.9', '0.1.0')).toBe(false)
+    expect(isHostVersionCompatible('1.0.0', '2.0.0')).toBe(false)
+  })
+
+  it('semver 比较而非字典序（0.10.0 > 0.9.0）', () => {
+    expect(isHostVersionCompatible('0.10.0', '0.9.0')).toBe(true)
+    expect(isHostVersionCompatible('0.9.0', '0.10.0')).toBe(false)
+  })
+})
+
+describe('filterHostCompatibleEntries：索引过滤', () => {
+  it('宿主不满足 minHostVersion 的条目被过滤，其余保留', () => {
+    const index = makeIndex([
+      { id: 'ok', version: '0.1.0' },
+      { id: 'too-new', version: '0.2.0' },
+    ])
+    // too-new 要求宿主 >= 9.9.9
+    ;(index.plugins[1] as { minHostVersion?: string }).minHostVersion = '9.9.9'
+    const filtered = filterHostCompatibleEntries(index, '0.1.0')
+    expect(filtered.plugins.map((p) => p.id)).toEqual(['ok'])
+  })
+
+  it('无 minHostVersion 的索引 → 全部保留（原索引不受影响）', () => {
+    const index = makeIndex([{ id: 'a', version: '0.1.0' }])
+    const filtered = filterHostCompatibleEntries(index, '0.1.0')
+    expect(filtered.plugins).toHaveLength(1)
+    expect(filtered.plugins).not.toBe(index.plugins)
+  })
+
+  it('宿主版本未知 → 全部保留', () => {
+    const index = makeIndex([{ id: 'a', version: '0.1.0' }])
+    ;(index.plugins[0] as { minHostVersion?: string }).minHostVersion = '9.9.9'
+    expect(filterHostCompatibleEntries(index, null).plugins).toHaveLength(1)
+  })
+})
+
+describe('normaliseIndex：min_host_version 字段转换', () => {
+  it('snake_case min_host_version 转 camelCase；缺失为 undefined', () => {
+    const raw = {
+      schema_version: 1,
+      updated_at: '2026-11-10T00:00:00Z',
+      pubkey_b64: '',
+      plugins: [
+        {
+          id: 'com.swallownote.ai',
+          name: 'AI 助手',
+          version: '0.1.0',
+          download_url: './ai/com.swallownote.ai.zip',
+          sha256: 'aa',
+          min_host_version: '0.1.0',
+        },
+        {
+          id: 'com.swallownote.mindmap',
+          name: '思维导图',
+          version: '0.2.2',
+          download_url: './mindmap/com.swallownote.mindmap.zip',
+          sha256: 'bb',
+        },
+      ],
+    }
+    const index = normaliseIndex(raw)
+    expect(index.plugins[0]?.minHostVersion).toBe('0.1.0')
+    expect(index.plugins[1]?.minHostVersion).toBeUndefined()
   })
 })
