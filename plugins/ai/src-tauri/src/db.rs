@@ -311,6 +311,29 @@ pub fn list_models(conn: &Connection) -> Result<Value, String> {
     Ok(json!({ "models": models }))
 }
 
+/// 按 id 取单个模型行（P2.4 streamChat 解析用）；不存在返回 Err。
+pub fn get_model(conn: &Connection, id: &str) -> Result<Value, String> {
+    conn.query_row(
+        "SELECT id, name, provider, model_id, base_url, context_window
+         FROM ai_models WHERE id = ?1",
+        rusqlite::params![id],
+        |r| {
+            Ok(json!({
+                "id": r.get::<_, String>(0)?,
+                "name": r.get::<_, Option<String>>(1)?,
+                "provider": r.get::<_, Option<String>>(2)?,
+                "modelId": r.get::<_, Option<String>>(3)?,
+                "baseUrl": r.get::<_, Option<String>>(4)?,
+                "contextWindow": r.get::<_, Option<i64>>(5)?,
+            }))
+        },
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => "模型不存在".to_string(),
+        other => other.to_string(),
+    })
+}
+
 /// 保存模型（upsert）；新模型时 id 缺省生成 uuid。首个模型自动设为默认。
 /// **注意：key 永不入库**——前端在调用 saveModel 前后经宿主 secureStorage 写 `model:<id>`。
 pub fn save_model(
@@ -551,6 +574,23 @@ mod tests {
 
         delete_model(&conn, m1["id"].as_str().unwrap()).unwrap();
         assert!(delete_model(&conn, m1["id"].as_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn get_model_by_id_roundtrip_and_missing() {
+        let dir = tmp_dir("get_model");
+        let conn = open_db(&dir).unwrap();
+        let m = save_model(&conn, None, "GPT", "openai", "gpt-4o", "https://x.io/v1", 128000)
+            .unwrap();
+        let id = m["id"].as_str().unwrap();
+        let got = get_model(&conn, id).unwrap();
+        assert_eq!(got["provider"], "openai");
+        assert_eq!(got["modelId"], "gpt-4o");
+        assert_eq!(got["baseUrl"], "https://x.io/v1");
+        assert_eq!(got["contextWindow"], 128000);
+        // 不存在的模型返回「模型不存在」
+        let err = get_model(&conn, "no-such-id").unwrap_err();
+        assert!(err.contains("模型不存在"));
     }
 
     #[test]

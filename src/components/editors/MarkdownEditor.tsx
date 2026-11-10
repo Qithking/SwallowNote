@@ -176,7 +176,7 @@ function BlockNoteInner({
   })
 
   // 序列化：blocks → markdown（防抖）、flush 注册、TOC 派发、内容缓存读取
-  const { debouncedHandleChange, getFullContent } = useEditorSerialization({
+  const { debouncedHandleChange } = useEditorSerialization({
     editor,
     onChange,
     activeTabName,
@@ -218,23 +218,6 @@ function BlockNoteInner({
     }
   }, [editor])
 
-  const getSelectionLineRange = useCallback((): [number, number] | null => {
-    if (!editor) return null
-    try {
-      const tiptapEditor = (editor as unknown as { _tiptapEditor?: TiptapEditorLike })._tiptapEditor
-      if (!tiptapEditor) return null
-      const { from, to, empty } = tiptapEditor.state.selection
-      if (empty) return null
-      const textBeforeFrom = tiptapEditor.state.doc.textBetween(0, from, '\n')
-      const textBeforeTo = tiptapEditor.state.doc.textBetween(0, to, '\n')
-      const startLineNumber = (textBeforeFrom.match(/\n/g) || []).length + 1
-      const endLineNumber = (textBeforeTo.match(/\n/g) || []).length + 1
-      return [startLineNumber, endLineNumber]
-    } catch {
-      return null
-    }
-  }, [editor])
-
 
   // Custom slash menu items: default items + Mermaid/KaTeX/Markmap templates
   const getCustomSlashMenuItems = useCustomSlashMenu(editor)
@@ -242,8 +225,6 @@ function BlockNoteInner({
   return (
     <EditorContextMenu
       getSelectedText={getSelectedText}
-      getSelectionLineRange={getSelectionLineRange}
-      getFullContent={getFullContent}
     >
       <div ref={editorContainerRef} className="blocknote-editor-container flex flex-col h-full">
         <ScrollArea className="flex-1 w-full">

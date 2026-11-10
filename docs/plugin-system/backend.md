@@ -227,6 +227,24 @@ const total = await panel.invokeBackendStream<{ index: number; line: string }, n
 )
 ```
 
+### 停止进行中的流（通用停止通道）
+
+通道建立后宿主先经 Channel 推送一条 `start` 事件（`data: { requestId }`，宿主生成的请求 id）。
+插件前端可据此调用**后端自身的取消命令**实现流式中断——前提是后端实现了对应的取消逻辑
+（如 AI 插件的 `stopStream`）：
+
+```typescript
+let requestId: number | undefined
+const result = await panel.invokeBackendStream<Chunk, Result>(
+  'my_plugin_stream',
+  args,
+  (chunk) => render(chunk),
+  { onStart: (info) => { requestId = info.requestId } },
+)
+// 用户点停止时：
+await panel.invokeBackend('stopStream', { requestId })
+```
+
 ## 前端调用
 
 ```typescript

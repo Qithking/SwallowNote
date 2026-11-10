@@ -349,6 +349,22 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
     return () => window.removeEventListener('query-selection', handler)
   }, [])
 
+  // 查询当前笔记全文（插件 editor.getActiveContent 专用，P2.5）：回执 markdown 源码，
+  // 无编辑器实例回执 null（CodeMirror doc 即源码，直接 toString）。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { __reply } = (e as CustomEvent).detail
+      const view = viewRef.current
+      if (!view) {
+        __reply?.(null)
+        return
+      }
+      __reply?.(view.state.doc.toString())
+    }
+    window.addEventListener('query-content', handler)
+    return () => window.removeEventListener('query-content', handler)
+  }, [])
+
   useEffect(() => {
     if (!editorRef.current) return
 
@@ -427,26 +443,8 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
     return view.state.sliceDoc(from, to)
   }, [])
 
-  const getSelectionLineRange = useCallback((): [number, number] | null => {
-    const view = viewRef.current
-    if (!view) return null
-    const { from, to } = view.state.selection.main
-    if (from === to) return null // No selection
-    const startLine = view.state.doc.lineAt(from).number
-    const endLine = view.state.doc.lineAt(to).number
-    return [startLine, endLine]
-  }, [])
-
-  const getFullContent = useCallback(() => {
-    return viewRef.current?.state.doc.toString() || ''
-  }, [])
-
   return (
-    <EditorContextMenu
-      getSelectedText={getSelectedText}
-      getSelectionLineRange={getSelectionLineRange}
-      getFullContent={getFullContent}
-    >
+    <EditorContextMenu getSelectedText={getSelectedText}>
       <ScrollArea className={`h-full ${className}`}>
         <div
           ref={editorRef}

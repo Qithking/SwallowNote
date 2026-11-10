@@ -29,12 +29,6 @@ describe('SettingsView split', () => {
     expect(typeof mod.AppearanceSettings).toBe('function')
   })
 
-  it('AiSettings panel exists', async () => {
-    const mod = await import('@/components/Settings/panels/AiSettings')
-    expect(mod.AiSettings).toBeDefined()
-    expect(typeof mod.AiSettings).toBe('function')
-  })
-
   it('ShortcutsSettings panel exists', async () => {
     const mod = await import('@/components/Settings/panels/ShortcutsSettings')
     expect(mod.ShortcutsSettings).toBeDefined()

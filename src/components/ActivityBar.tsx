@@ -24,7 +24,6 @@ const activityKeyMap: Record<string, string> = {
   search: 'activityBar.search',
   categories: 'activityBar.categories',
   git: 'activityBar.git',
-  ai: 'activityBar.ai',
   plugins: 'activityBar.plugins',
   settings: 'activityBar.settings',
 }

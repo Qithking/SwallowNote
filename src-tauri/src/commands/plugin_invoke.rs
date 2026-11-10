@@ -99,7 +99,8 @@ impl StreamEventKind {
     }
 }
 
-/// 经 Tauri Channel 推送到前端的流式事件载荷（requestId 由宿主路由消化，不下发）。
+/// 经 Tauri Channel 推送到前端的流式事件载荷（requestId 仅经 start 事件
+/// 下发一次，供插件前端实现停止；chunk/done/error 的路由 id 已被宿主消化）。
 /// Deserialize 供 Tauri command 参数机制满足 `Channel<T>: CommandArg` 的 bound。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StreamEvent {
@@ -547,6 +548,13 @@ async fn write_request(
         pending.insert(id, tx);
     }
     if let Some(sc) = stream_channel {
+        // 通用停止通道（P2.4）：start 事件把宿主生成的 requestId 下发给插件
+        // 前端，使其可调用后端自身的取消命令（如 AI 插件 stopStream）实现
+        // 流式中断。下发先于路由表注册；通道已关闭等失败可安全忽略。
+        let _ = sc.channel.send(StreamEvent {
+            event: "start".to_string(),
+            data: serde_json::json!({ "requestId": id }),
+        });
         proc.streams.lock().await.insert(id, sc);
     }
 
@@ -1065,8 +1073,8 @@ main()
             write_request(&state, &root, "echo-test", "streamChat",
                           Some(serde_json::json!({"q": "B"})), Some(channel_b)),
         );
-        let (_, _, rx_a, _) = ra.expect("write_request A");
-        let (_, _, rx_b, _) = rb.expect("write_request B");
+        let (_, id_a, rx_a, _) = ra.expect("write_request A");
+        let (_, id_b, rx_b, _) = rb.expect("write_request B");
 
         // 响应帧终结调用；30s 兜底防后端异常挂死测试。
         let resp_a = tokio::time::timeout(Duration::from_secs(30), rx_a)
@@ -1078,9 +1086,21 @@ main()
         assert_eq!(body_a["echo"].as_str(), Some("A"));
         assert_eq!(body_b["echo"].as_str(), Some("B"));
 
+        // start 事件：每路各一条，携带宿主分配的 requestId（通用停止通道，
+        // 插件前端据此调用后端自身的取消命令）。
+        let start_ids = |buf: &Arc<std::sync::Mutex<Vec<StreamEvent>>>| {
+            buf.lock().unwrap().iter()
+                .filter(|e| e.event == "start")
+                .map(|e| e.data["requestId"].as_u64().expect("requestId u64"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(start_ids(&buf_a), vec![id_a]);
+        assert_eq!(start_ids(&buf_b), vec![id_b]);
+
         // 断言：chunk 严格按路分流且顺序保持（A 不见 B 帧，反之亦然）。
         let texts = |buf: &Arc<std::sync::Mutex<Vec<StreamEvent>>>| {
             buf.lock().unwrap().iter()
+                .filter(|e| e.event == "chunk")
                 .map(|e| e.data["text"].as_str().unwrap().to_string())
                 .collect::<Vec<_>>()
         };

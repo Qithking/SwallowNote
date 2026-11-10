@@ -400,6 +400,8 @@ export interface PluginEditorApi {
   replaceContent(text: string): Promise<void>
   /** 查询当前选区；无选区/编辑器未挂载返回 null（P1.3，要求 editor-write 权限） */
   getSelection(): Promise<PluginEditorSelection | null>
+  /** 读取当前文件全文（P2.5，要求 editor-write 权限）；编辑器未挂载/超时返回 null */
+  getActiveContent(): Promise<string | null>
 }
 
 /** 工作区文件 API（P1.2）：受限的文件系统访问，要求 files 权限，路径严格限定在工作区根内 */

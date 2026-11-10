@@ -15,12 +15,15 @@ import { listDirectory, pathExists, createFile, writeFile } from './tauri/file-o
 
 /** 编辑器写事件回执的超时兜底：编辑器未挂载/无监听者场景 1s 后回执 false。 */
 const EDITOR_WRITE_REPLY_TIMEOUT_MS = 1000
+/** 全文序列化（blocksToMarkdownLossy）在大文档上可能超过 1s，单独放宽（P2.5）。 */
+const EDITOR_CONTENT_REPLY_TIMEOUT_MS = 5000
 
 /** 派发编辑器事件并等待回执；旧派发方（editorStore）不带 __reply 自动兼容，超时以 timeoutResult 兜底。 */
 function dispatchEditorEvent<T>(
   eventName: string,
   detail: Record<string, unknown>,
-  timeoutResult: T
+  timeoutResult: T,
+  timeoutMs: number = EDITOR_WRITE_REPLY_TIMEOUT_MS
 ): Promise<T> {
   return new Promise((resolve) => {
     let settled = false
@@ -30,7 +33,7 @@ function dispatchEditorEvent<T>(
       clearTimeout(timer)
       resolve(result)
     }
-    const timer = setTimeout(() => finish(timeoutResult), EDITOR_WRITE_REPLY_TIMEOUT_MS)
+    const timer = setTimeout(() => finish(timeoutResult), timeoutMs)
     window.dispatchEvent(
       new CustomEvent(eventName, {
         detail: { ...detail, __reply: (result: T) => finish(result) },
@@ -87,6 +90,12 @@ export async function pluginEditorReplaceContent(pluginId: string, text: string)
 export async function pluginEditorGetSelection(pluginId: string): Promise<PluginEditorSelection | null> {
   assertPermission(pluginId, 'editor-write', 'editor.getSelection')
   return dispatchEditorEvent('query-selection', {}, null)
+}
+
+/** 编辑器读 API：查询当前笔记全文（markdown 源码），无笔记/未挂载超时兜底 null（P2.5，用户确认新增）。 */
+export async function pluginEditorGetActiveContent(pluginId: string): Promise<string | null> {
+  assertPermission(pluginId, 'editor-write', 'editor.getActiveContent')
+  return dispatchEditorEvent('query-content', {}, null, EDITOR_CONTENT_REPLY_TIMEOUT_MS)
 }
 
 /** 文件 API：在工作区内创建笔记（已存在抛错；createFile 先建空文件防覆盖，writeFile 自动建父目录）。 */

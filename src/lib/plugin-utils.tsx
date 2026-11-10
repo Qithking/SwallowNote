@@ -26,6 +26,7 @@ import { logger } from './logger'
 import {
   pluginEditorInsertAtCursor,
   pluginEditorGetSelection,
+  pluginEditorGetActiveContent,
   pluginEditorReplaceSelection,
   pluginEditorReplaceContent,
   pluginFilesCreateNote,
@@ -339,6 +340,7 @@ export function createPluginPanelProps(
       replaceSelection: (text: string) => pluginEditorReplaceSelection(pluginId, text),
       replaceContent: (text: string) => pluginEditorReplaceContent(pluginId, text),
       getSelection: () => pluginEditorGetSelection(pluginId),
+      getActiveContent: () => pluginEditorGetActiveContent(pluginId),
     },
     files: {
       createNote: (relPath: string, content: string) => pluginFilesCreateNote(pluginId, relPath, content),
@@ -513,6 +515,7 @@ export function createToolbarButtonProps(
       replaceSelection: (text: string) => pluginEditorReplaceSelection(pluginId, text),
       replaceContent: (text: string) => pluginEditorReplaceContent(pluginId, text),
       getSelection: () => pluginEditorGetSelection(pluginId),
+      getActiveContent: () => pluginEditorGetActiveContent(pluginId),
     },
     files: {
       createNote: (relPath: string, content: string) => pluginFilesCreateNote(pluginId, relPath, content),

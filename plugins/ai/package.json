@@ -11,11 +11,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/react": "^3.0.193",
     "@swallow-note/plugin-sdk": "file:../../docs/plugin-sdk",
     "@tauri-apps/api": "^2.0.0",
+    "ai": "^6.0.191",
     "lucide-react": "^0.460.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/react": "^19.2.15",

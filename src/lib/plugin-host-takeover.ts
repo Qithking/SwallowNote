@@ -44,11 +44,13 @@ import {
 import {
   pluginEditorInsertAtCursor,
   pluginEditorGetSelection,
+  pluginEditorGetActiveContent,
   pluginEditorReplaceSelection,
   pluginEditorReplaceContent,
   pluginFilesCreateNote,
   pluginFilesListWorkspace,
 } from './plugin-write-api'
+import { openPluginPanel } from './plugin-utils'
 import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
 import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
 import { logger } from './logger'
@@ -148,9 +150,12 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
     __editor_replaceSelection: (text: string) => pluginEditorReplaceSelection(pluginId, text),
     __editor_replaceContent: (text: string) => pluginEditorReplaceContent(pluginId, text),
     __editor_getSelection: () => pluginEditorGetSelection(pluginId),
+    __editor_getActiveContent: () => pluginEditorGetActiveContent(pluginId),
     __files_createNote: (relPath: string, content: string) =>
       pluginFilesCreateNote(pluginId, relPath, content),
     __files_listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
+    /** 打开面板管道（P1.4/P2.5）：模块级 openPluginPanel 强制绑定当前插件，payload 结构宿主不解析。 */
+    __openPluginPanel: (payload: unknown) => openPluginPanel(pluginId, payload),
     /** 插件设置桥接（SQLite-backed），复用 storage 权限。 */
     __pluginSettings_get: async (id, key) => {
       // 设置复用 storage 权限。

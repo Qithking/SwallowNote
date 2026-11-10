@@ -2,7 +2,7 @@
  * TitleBar Component - Custom window title bar
  * Styled with CSS variables for proper dark/light theme
  */
-import { Minus, Square, X, Sun, Moon, Monitor, Bot, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { Minus, Square, X, Sun, Moon, Monitor, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useShallow } from 'zustand/react/shallow'
 import { useUIStore, usePluginStore, useEditorStore } from '@/stores'
@@ -208,21 +208,6 @@ function TitleBar() {
           )
         })}
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => setRightPanelType(rightPanelType === 'ai' ? null : 'ai')}
-              className="h-full px-2 flex items-center justify-center cursor-pointer"
-              style={{ color: rightPanelType === 'ai' ? 'var(--text-primary)' : 'var(--text-muted)' }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
-            >
-              <Bot size={14} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{t('ai.title')}</TooltipContent>
-        </Tooltip>
-
         <DropdownMenu>
           <Tooltip>
             <DropdownMenuTrigger asChild>
@@ -272,7 +257,7 @@ function TitleBar() {
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              onClick={() => setRightPanelType(rightPanelType ? null : 'ai')}
+              onClick={() => setRightPanelType(rightPanelType ? null : 'directory')}
               className="h-full px-2 flex items-center justify-center cursor-pointer"
               style={{ color: rightPanelType ? 'var(--text-primary)' : 'var(--text-muted)' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--bg-hover)' }}

@@ -2,7 +2,11 @@
 /* eslint-disable react-refresh/only-export-components */
 import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
 export { setHost } from '@swallow-note/plugin-sdk'
+import { useMemo } from 'react'
 import { Sparkles } from 'lucide-react'
+import { ChatPanel } from './chat/ChatPanel'
+import type { AiServices } from './chat/hooks'
+import { registerRoleActions } from './actions/registerActions'
 import manifestJson from '../manifest.json'
 
 /** 标题栏入口图标 */
@@ -10,28 +14,21 @@ function AiIcon({ size = 16 }: { size?: number }) {
   return <Sparkles size={size} />
 }
 
-/** 右侧对话面板（P2.1 骨架阶段为空面板，P2.3 起填充对话层） */
-function AiPanel(_props: PluginPanelProps) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        height: '100%',
-        padding: 24,
-        color: 'var(--text-secondary, #6e6e73)',
-        fontSize: 13,
-        textAlign: 'center',
-      }}
-    >
-      <Sparkles size={28} />
-      <strong style={{ fontSize: 15, color: 'var(--text-primary, #1d1d1f)' }}>AI 助手</strong>
-      <p style={{ margin: 0 }}>骨架已就绪，对话功能将在后续阶段实现。</p>
-    </div>
+/** 右侧对话面板：面板 props 注入服务（invokeBackend / invokeBackendStream / secureStorage） */
+function AiPanel(props: PluginPanelProps) {
+  // memo：宿主每次渲染会重建 props 函数，必须保持 services 引用稳定，
+  // 否则 ChatPanel 内依赖 services 的初始化 effect 会无限重跑
+  const services = useMemo<AiServices>(
+    () => ({
+      // SDK 的 invokeBackend 非泛型，这里转发为 hooks 需要的泛型签名
+      invokeBackend: <T,>(command: string, args?: Record<string, unknown>) =>
+        props.invokeBackend(command, args) as Promise<T>,
+      invokeBackendStream: props.invokeBackendStream,
+      secureStorage: props.secureStorage,
+    }),
+    [props.invokeBackend, props.invokeBackendStream, props.secureStorage],
   )
+  return <ChatPanel services={services} pendingRequest={props.pendingRequest} />
 }
 
 const manifest = {
@@ -41,7 +38,10 @@ const manifest = {
   // onLoad hook（flat 结构，不是嵌套在 hooks 里）：
   // 即使为空也触发 runPluginLifecycleHook 执行 setHost，
   // 使 SDK 的 openEditorTab 等 API 能转发到宿主实现
-  onLoad: () => { /* no-op, 仅用于触发 setHost 安装 host overrides */ },
+  onLoad: () => {
+    // 注册编辑器右键 9 角色动作（context-menu 权限；插件禁用/卸载时宿主自动清理）
+    registerRoleActions()
+  },
 } as PluginManifest
 
 export default manifest

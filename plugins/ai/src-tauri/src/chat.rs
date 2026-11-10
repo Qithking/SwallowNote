@@ -119,25 +119,23 @@ fn parse_openai(v: &Value) -> StreamTick {
     }
 }
 
-/// streamChat 请求参数（P2.2 阶段由前端直传；P2.3 数据层就绪后改为后端读取配置）。
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// streamChat 已解析参数（P2.4：provider/base_url/context_window 由 main.rs 按
+/// modelId 从 ai_models 表读取——配置单一权威源；api_key 由插件前端从宿主
+/// secureStorage 读出过境，后端进程无法访问 secureStorage）。
+#[derive(Debug)]
 pub struct StreamParams {
     pub provider: String,
     pub model_id: String,
-    #[serde(default)]
     pub base_url: String,
-    #[serde(default)]
     pub api_key: String,
-    #[serde(default = "default_context_window")]
     pub context_window: u64,
-    #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// 角色动作 roleKey（P2.5 通道就绪；P2.6 在此基础上由后端拼装双层提示词）
+    pub role_key: Option<String>,
 }
 
-fn default_context_window() -> u64 {
-    128_000
-}
+/// context_window 为 0/负值（用户未配置）时的缺省窗口。
+pub const DEFAULT_CONTEXT_WINDOW: u64 = 128_000;
 
 /// 停止语义：cancel 置位后统一转换为 stopped-done（不发 error 帧）。
 pub const STOPPED: &str = "已停止";

@@ -9,7 +9,8 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { downloadCoordinator } from '@/lib/download-coordinator'
 import { logger } from '@/lib/logger'
-import { walkBlocks, parseMarkdownToBlocks } from './editorBlockTransforms'
+import { walkBlocks, parseMarkdownToBlocks, serializeBlocksForMarkdown } from './editorBlockTransforms'
+import { compactMarkdown } from '@/utils/compact-markdown'
 
 /**
  * 滚动定位：监听 scroll-to-line / scroll-to-block-id 事件。
@@ -349,6 +350,36 @@ export function useEditorAIEvents(editor: BlockNoteEditor<any, any, any>) {
     return () => {
       cancelled = true
       window.removeEventListener('query-selection', handler)
+    }
+  }, [editor])
+
+  // 查询当前笔记全文（插件 editor.getActiveContent 专用，P2.5）：回执 markdown 源码，
+  // 序列化与 useEditorSerialization 的 onChange 路径一致（serializeBlocksForMarkdown →
+  // blocksToMarkdownLossy → compactMarkdown），无编辑器/序列化失败回执 null。
+  useEffect(() => {
+    let cancelled = false
+    const handler = (e: Event) => {
+      if (cancelled) return
+      const { __reply } = (e as CustomEvent).detail
+      if (!editor) {
+        __reply?.(null)
+        return
+      }
+      void (async () => {
+        try {
+          const serialized = serializeBlocksForMarkdown(editor.document as any[])
+          const rawMd = await editor.blocksToMarkdownLossy(serialized as typeof editor.document)
+          __reply?.(compactMarkdown(rawMd))
+        } catch (err) {
+          logger.error('markdown-editor', 'Failed to serialize document for plugin query-content:', err)
+          __reply?.(null)
+        }
+      })()
+    }
+    window.addEventListener('query-content', handler)
+    return () => {
+      cancelled = true
+      window.removeEventListener('query-content', handler)
     }
   }, [editor])
 

@@ -6,7 +6,6 @@ import {
   Palette,
   Keyboard,
   RefreshCw,
-  Bot,
   Puzzle,
   Code,
 } from 'lucide-react'
@@ -17,12 +16,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { GeneralSettings } from './panels/GeneralSettings'
 import { SyncSettings } from './panels/SyncSettings'
 import { AppearanceSettings } from './panels/AppearanceSettings'
-import { AiSettings } from './panels/AiSettings'
 import { ShortcutsSettings } from './panels/ShortcutsSettings'
 import { PluginSettings } from './panels/PluginSettings'
 import { DevelopmentSettings } from './panels/DevelopmentSettings'
 
-type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | 'development'
+type SettingsSection = 'general' | 'sync' | 'appearance' | 'shortcuts' | 'plugins' | 'development'
 
 function SettingsView() {
   const { t } = useTranslation()
@@ -46,9 +44,6 @@ function SettingsView() {
     idleAutoPushDelay, setIdleAutoPushDelay,
     uploadPath, setUploadPath,
     showConflictBadge, setShowConflictBadge,
-    aiPort, setAiPort,
-    aiModels, activeAiModelId, defaultAiModelId,
-    addAiModel, removeAiModel, setActiveAiModel, setDefaultAiModel, updateAiModelApiKey,
     customThemes, activeLightCustomThemeId, activeDarkCustomThemeId,
     setActiveCustomThemeId, addCustomTheme, deleteCustomTheme, renameCustomTheme, updateCustomThemeColor,
     developerMode, setDeveloperMode,
@@ -69,9 +64,6 @@ function SettingsView() {
       idleAutoPushDelay: s.idleAutoPushDelay, setIdleAutoPushDelay: s.setIdleAutoPushDelay,
       uploadPath: s.uploadPath, setUploadPath: s.setUploadPath,
       showConflictBadge: s.showConflictBadge, setShowConflictBadge: s.setShowConflictBadge,
-      aiPort: s.aiPort, setAiPort: s.setAiPort,
-      aiModels: s.aiModels, activeAiModelId: s.activeAiModelId, defaultAiModelId: s.defaultAiModelId,
-      addAiModel: s.addAiModel, removeAiModel: s.removeAiModel, setActiveAiModel: s.setActiveAiModel, setDefaultAiModel: s.setDefaultAiModel, updateAiModelApiKey: s.updateAiModelApiKey,
       customThemes: s.customThemes, activeLightCustomThemeId: s.activeLightCustomThemeId, activeDarkCustomThemeId: s.activeDarkCustomThemeId,
       setActiveCustomThemeId: s.setActiveCustomThemeId, addCustomTheme: s.addCustomTheme, deleteCustomTheme: s.deleteCustomTheme, renameCustomTheme: s.renameCustomTheme, updateCustomThemeColor: s.updateCustomThemeColor,
       developerMode: s.developerMode, setDeveloperMode: s.setDeveloperMode,
@@ -82,7 +74,6 @@ function SettingsView() {
     { id: 'general', icon: SettingsIcon, labelKey: 'settings.general' },
     { id: 'sync', icon: RefreshCw, labelKey: 'settings.sync' },
     { id: 'appearance', icon: Palette, labelKey: 'settings.appearance' },
-    { id: 'ai', icon: Bot, labelKey: 'settings.ai' },
     { id: 'shortcuts', icon: Keyboard, labelKey: 'settings.shortcuts' },
     { id: 'plugins', icon: Puzzle, labelKey: 'settings.plugins' },
     { id: 'development', icon: Code, labelKey: 'settings.development' },
@@ -176,18 +167,6 @@ function SettingsView() {
               deleteCustomTheme={deleteCustomTheme}
               renameCustomTheme={renameCustomTheme}
               updateCustomThemeColor={updateCustomThemeColor}
-            />
-            <AiSettings
-              aiPort={aiPort}
-              setAiPort={setAiPort}
-              aiModels={aiModels}
-              activeAiModelId={activeAiModelId}
-              defaultAiModelId={defaultAiModelId}
-              addAiModel={addAiModel}
-              removeAiModel={removeAiModel}
-              setActiveAiModel={setActiveAiModel}
-              setDefaultAiModel={setDefaultAiModel}
-              updateAiModelApiKey={updateAiModelApiKey}
             />
             <ShortcutsSettings />
             <PluginSettings />

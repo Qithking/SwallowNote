@@ -63,6 +63,15 @@ export type PluginEventHandler<E extends PluginEvent = PluginEvent> = (
   payload: PluginEventPayloadMap[E]
 ) => void
 
+/** `invokeBackendStream` 可选项（P2.4：onStart 下发宿主 requestId，通用停止通道）。 */
+export interface InvokeBackendStreamOptions {
+  /** 流式首块超时秒数（默认 90s，适配推理模型首 token 延迟）。 */
+  firstChunkTimeoutSecs?: number
+  /** 通道建立时回调，携带宿主生成的 requestId——插件可据此调用后端自身
+   *  的取消命令（如 AI 插件的 stopStream）实现流式中断。 */
+  onStart?: (info: { requestId: number }) => void
+}
+
 export interface PluginContext {
   pluginId: string
   pluginPath: string
@@ -72,7 +81,7 @@ export interface PluginContext {
     command: string,
     args: Record<string, unknown> | undefined,
     onChunk: (chunk: T) => void,
-    options?: { firstChunkTimeoutSecs?: number }
+    options?: InvokeBackendStreamOptions
   ) => Promise<R>
   /** 统一日志通道，自动带 plugin:<pluginId> source 前缀 */
   log: PluginLogger
@@ -187,6 +196,8 @@ export interface PluginEditorApi {
   replaceContent(text: string): Promise<void>
   /** 查询当前选区；无选区/编辑器未挂载返回 null（P1.3） */
   getSelection(): Promise<PluginEditorSelection | null>
+  /** 查询当前笔记全文（markdown 源码）；无笔记/编辑器未挂载返回 null（P2.5） */
+  getActiveContent(): Promise<string | null>
 }
 
 /**
@@ -242,7 +253,7 @@ export interface PluginPanelProps {
     command: string,
     args: Record<string, unknown> | undefined,
     onChunk: (chunk: T) => void,
-    options?: { firstChunkTimeoutSecs?: number }
+    options?: InvokeBackendStreamOptions
   ) => Promise<R>
   store: PluginStorage
   events: PluginEventBus
@@ -344,7 +355,7 @@ export interface ToolbarButtonProps {
     command: string,
     args: Record<string, unknown> | undefined,
     onChunk: (chunk: T) => void,
-    options?: { firstChunkTimeoutSecs?: number }
+    options?: InvokeBackendStreamOptions
   ) => Promise<R>
   /** 插件作用域的持久化存储 */
   store: PluginStorage
@@ -1049,6 +1060,15 @@ export function unregisterContextMenu(pluginId: string, itemId: string): void {
     stubMenuRegistry.unregister(pluginId, itemId)
 }
 
+/**
+ * 打开当前插件的面板并携带一次性 payload（P2.5）：插件主动打开面板的唯一入口
+ * （右键动作等场景）。宿主 override 强制绑定当前插件（无法指定其他 pluginId），
+ * payload 结构由插件自定义、宿主不解析；面板挂载后经 props.pendingRequest 一次性消费。
+ */
+export function openPluginPanel(payload?: unknown): void {
+  currentHostOverrides().__openPluginPanel?.(payload)
+}
+
 export function clearPluginMenuItems(pluginId: string): void {
   currentHostOverrides().clearPluginMenuItems?.(pluginId) ?? stubMenuRegistry.clearPlugin(pluginId)
 }
@@ -1463,6 +1483,12 @@ export const editor: PluginEditorApi = {
     warnStandaloneWriteApi('editor.getSelection', 'returning null')
     return null
   },
+  getActiveContent: async () => {
+    const host = currentHostOverrides().__editor_getActiveContent
+    if (host) return host()
+    warnStandaloneWriteApi('editor.getActiveContent', 'returning null')
+    return null
+  },
 }
 
 /**
@@ -1507,7 +1533,7 @@ export function buildPluginContext(plugin: Pick<PluginDefinition, 'id' | 'plugin
       cmd: string,
       args: Record<string, unknown> | undefined,
       onChunk: (chunk: T) => void,
-      options?: { firstChunkTimeoutSecs?: number }
+      options?: InvokeBackendStreamOptions
     ): Promise<R> => {
       const hostStream = currentHostOverrides().invokeBackendStream
       if (hostStream) return hostStream(cmd, args, onChunk as (chunk: unknown) => void, options) as R
@@ -1639,7 +1665,7 @@ export interface HostOverrides {
     cmd: string,
     args: Record<string, unknown> | undefined,
     onChunk: (chunk: unknown) => void,
-    options?: { firstChunkTimeoutSecs?: number }
+    options?: InvokeBackendStreamOptions
   ) => Promise<unknown>
   /**
    * 编辑器写 / 工作区文件 API 桥接（`__` 前缀同 settings overrides，SDK 内部桥梁）。
@@ -1651,6 +1677,13 @@ export interface HostOverrides {
   __editor_replaceSelection?: (text: string) => Promise<boolean>
   __editor_replaceContent?: (text: string) => Promise<void>
   __editor_getSelection?: () => Promise<PluginEditorSelection | null>
+  __editor_getActiveContent?: () => Promise<string | null>
+  /**
+   * 打开插件面板的一次性请求管道（P1.4 / P2.5）：宿主 override 强制绑定当前
+   * 插件（模块级 openPluginPanel 无 pluginId 参数），payload 结构宿主不解析。
+   * 未安装时（standalone 预览）回退空操作 stub。
+   */
+  __openPluginPanel?: (payload: unknown) => void
   __files_createNote?: (relPath: string, content: string) => Promise<void>
   __files_listWorkspace?: (query?: string) => Promise<string[]>
   /**

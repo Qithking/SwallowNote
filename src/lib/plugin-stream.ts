@@ -11,7 +11,7 @@ import { logger } from './logger'
 
 /** 经 Channel 推送到前端的事件载荷（与 Rust 侧 StreamEvent 对齐）。 */
 interface PluginStreamEvent {
-  event: 'chunk' | 'done' | 'error'
+  event: 'start' | 'chunk' | 'done' | 'error'
   data: unknown
 }
 
@@ -19,6 +19,9 @@ interface PluginStreamEvent {
 export interface InvokeBackendStreamOptions {
   /** 流式首块超时秒数（默认 90s，与宿主 STREAM_FIRST_CHUNK_TIMEOUT 一致）。 */
   firstChunkTimeoutSecs?: number
+  /** 通道建立时回调，携带宿主生成的 requestId——插件可据此调用后端自身
+   *  的取消命令（如 AI 插件的 stopStream）实现流式中断（通用停止通道）。 */
+  onStart?: (info: { requestId: number }) => void
 }
 
 /**
@@ -37,9 +40,13 @@ export async function invokePluginBackendStream<T = unknown, R = unknown>(
   const { invoke, Channel } = await import('@tauri-apps/api/core')
   const channel = new Channel<PluginStreamEvent>()
   channel.onmessage = (msg) => {
-    // 仅 chunk 需要逐块回调；done/error 的调用语义由响应帧终结。
+    // chunk 逐块回调；start 下发 requestId（通用停止通道）；
+    // done/error 的调用语义由响应帧终结，仅记日志。
     if (msg.event === 'chunk') {
       onChunk(msg.data as T)
+    } else if (msg.event === 'start') {
+      const requestId = (msg.data as { requestId?: unknown } | null)?.requestId
+      if (typeof requestId === 'number') options?.onStart?.({ requestId })
     } else {
       logger.debug(
         'plugin-stream',

@@ -109,7 +109,8 @@ fn dispatch(req: &JsonRpcRequest) -> Option<Value> {
     let result = match req.method.as_str() {
         // 存活探测
         "ping" => Ok(serde_json::json!({ "pong": true })),
-        // 流式对话（P2.2）：通知帧 + 响应帧均由 worker 写出
+        // 流式对话（P2.2/P2.4）：分发期解析参数（按 modelId 从 ai_models 读取
+        // 配置），通知帧 + 响应帧均由 worker 写出
         "streamChat" => {
             let id = req.id.clone();
             // B7：登记流并获取取消标志；并发满或 id 重复时拒绝
@@ -117,7 +118,14 @@ fn dispatch(req: &JsonRpcRequest) -> Option<Value> {
                 Ok(flag) => flag,
                 Err(msg) => return Some(error_response(&req.id, msg)),
             };
-            let params = req.params.clone();
+            // 模型不存在等配置错误在此即拒（不进 worker），并释放并发名额
+            let params = match resolve_stream_params(&req.params) {
+                Ok(p) => p,
+                Err(msg) => {
+                    streams().unregister(&id.to_string());
+                    return Some(error_response(&req.id, msg));
+                }
+            };
             std::thread::spawn(move || {
                 run_stream(&params, &id, &cancel);
                 // 无论成功/失败/停止都注销，释放并发名额
@@ -303,35 +311,23 @@ fn make_emit(id: &Value) -> impl FnMut(&str, Value) {
 }
 
 /// streamChat worker：截断 → 载荷 → 重试请求 → SSE 解析 → 通知帧，最后写终结响应帧。
-/// `cancel` 由注册表下发（B7）：stopStream 置位后流尽快收尾为 stopped-done。
-fn run_stream(params: &Value, id: &Value, cancel: &AtomicBool) {
-    let response = match serde_json::from_value::<chat::StreamParams>(params.clone()) {
-        Ok(p) => {
-            let mut emit = make_emit(id);
-            match chat::stream_chat(&p, &mut emit, cancel) {
-                Ok(result) => serde_json::to_value(JsonRpcSuccess {
-                    jsonrpc: "2.0",
-                    id: id.clone(),
-                    result,
-                })
-                .unwrap(),
-                Err(msg) => serde_json::to_value(JsonRpcError {
-                    jsonrpc: "2.0",
-                    id: id.clone(),
-                    error: JsonRpcErrorDetail {
-                        code: -32000,
-                        message: msg,
-                    },
-                })
-                .unwrap(),
-            }
-        }
-        Err(e) => serde_json::to_value(JsonRpcError {
+/// 参数已由 dispatch 期 `resolve_stream_params` 解析完成（模型不存在等错误在
+/// 分发期即拒绝）；`cancel` 由注册表下发（B7）：stopStream 置位后流尽快收尾。
+fn run_stream(params: &chat::StreamParams, id: &Value, cancel: &AtomicBool) {
+    let mut emit = make_emit(id);
+    let response = match chat::stream_chat(params, &mut emit, cancel) {
+        Ok(result) => serde_json::to_value(JsonRpcSuccess {
+            jsonrpc: "2.0",
+            id: id.clone(),
+            result,
+        })
+        .unwrap(),
+        Err(msg) => serde_json::to_value(JsonRpcError {
             jsonrpc: "2.0",
             id: id.clone(),
             error: JsonRpcErrorDetail {
-                code: -32602,
-                message: format!("参数错误: {}", e),
+                code: -32000,
+                message: msg,
             },
         })
         .unwrap(),
@@ -339,4 +335,149 @@ fn run_stream(params: &Value, id: &Value, cancel: &AtomicBool) {
     let mut stdout = io::stdout();
     let _ = writeln!(stdout, "{}", serde_json::to_string(&response).unwrap());
     let _ = stdout.flush();
+}
+
+/// P2.4：streamChat 参数解析（分发期、worker 启动前）。
+/// 前端只传 {modelId, apiKey, messages}；provider/baseUrl/contextWindow 按
+/// modelId 从 ai_models 表读取——配置单一权威源（方案 §6.10；apiKey 因
+/// secureStorage 仅插件前端可达而由前端过境）。
+fn resolve_stream_params(params: &Value) -> Result<chat::StreamParams, String> {
+    let dir = app_data_dir()?;
+    resolve_stream_params_in(&dir, params)
+}
+
+/// 同上，目录显式传入（便于测试）。
+fn resolve_stream_params_in(dir: &std::path::Path, params: &Value) -> Result<chat::StreamParams, String> {
+    let model_id = s_field(params, "modelId");
+    if model_id.is_empty() {
+        return Err("缺少 modelId".to_string());
+    }
+    let conn = db::open_db(dir)?;
+    let row = db::get_model(&conn, &model_id)?;
+    let messages: Vec<context::ChatMessage> = serde_json::from_value(
+        params.get("messages").cloned().unwrap_or(Value::Array(vec![])),
+    )
+    .map_err(|e| format!("messages 参数无效: {}", e))?;
+    let cw = row["contextWindow"].as_i64().unwrap_or(0);
+    Ok(chat::StreamParams {
+        provider: row["provider"].as_str().unwrap_or("").to_string(),
+        model_id: row["modelId"].as_str().unwrap_or("").to_string(),
+        base_url: row["baseUrl"].as_str().unwrap_or("").to_string(),
+        api_key: s_field(params, "apiKey"),
+        context_window: if cw <= 0 {
+            chat::DEFAULT_CONTEXT_WINDOW
+        } else {
+            cw as u64
+        },
+        messages,
+        // 角色动作 roleKey：可选，P2.5 通道就绪（P2.6 拼装双层提示词时使用）
+        role_key: params.get("roleKey").and_then(|v| v.as_str()).map(String::from),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ai-plugin-resolve-test-{}-{}",
+            tag,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn resolve_uses_model_row_from_db() {
+        let dir = tmp_dir("ok");
+        let conn = db::open_db(&dir).unwrap();
+        db::save_model(&conn, None, "GPT", "openai", "gpt-4o", "https://x.io/v1", 32000)
+            .unwrap();
+        let id = db::list_models(&conn).unwrap()["models"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let p = resolve_stream_params_in(
+            &dir,
+            &json!({
+                "modelId": id,
+                "apiKey": "sk-test",
+                "messages": [{"role": "user", "content": "你好"}]
+            }),
+        )
+        .unwrap();
+        assert_eq!(p.provider, "openai");
+        assert_eq!(p.model_id, "gpt-4o");
+        assert_eq!(p.base_url, "https://x.io/v1");
+        assert_eq!(p.api_key, "sk-test");
+        assert_eq!(p.context_window, 32000);
+        assert_eq!(p.messages.len(), 1);
+        assert_eq!(p.messages[0].content, "你好");
+    }
+
+    #[test]
+    fn resolve_missing_model_fails() {
+        let dir = tmp_dir("missing");
+        let err = resolve_stream_params_in(
+            &dir,
+            &json!({"modelId": "ghost", "apiKey": "k", "messages": []}),
+        )
+        .unwrap_err();
+        assert!(err.contains("模型不存在"), "实际: {}", err);
+    }
+
+    #[test]
+    fn resolve_requires_model_id() {
+        let dir = tmp_dir("no_id");
+        let err = resolve_stream_params_in(&dir, &json!({"apiKey": "k"})).unwrap_err();
+        assert!(err.contains("缺少 modelId"));
+    }
+
+    #[test]
+    fn resolve_zero_context_window_falls_back_to_default() {
+        let dir = tmp_dir("cw0");
+        let conn = db::open_db(&dir).unwrap();
+        db::save_model(&conn, None, "M", "openai", "m-1", "", 0).unwrap();
+        let id = db::list_models(&conn).unwrap()["models"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let p = resolve_stream_params_in(
+            &dir,
+            &json!({"modelId": id, "apiKey": "k", "messages": []}),
+        )
+        .unwrap();
+        assert_eq!(p.context_window, chat::DEFAULT_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn resolve_parses_optional_role_key() {
+        let dir = tmp_dir("rolekey");
+        let conn = db::open_db(&dir).unwrap();
+        db::save_model(&conn, None, "M", "openai", "m-2", "", 0).unwrap();
+        let id = db::list_models(&conn).unwrap()["models"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // 带 roleKey（角色动作，P2.5）
+        let with = resolve_stream_params_in(
+            &dir,
+            &json!({"modelId": id, "apiKey": "k", "messages": [], "roleKey": "polish"}),
+        )
+        .unwrap();
+        assert_eq!(with.role_key.as_deref(), Some("polish"));
+
+        // 不带 roleKey（普通对话）：None
+        let without = resolve_stream_params_in(
+            &dir,
+            &json!({"modelId": id, "apiKey": "k", "messages": []}),
+        )
+        .unwrap();
+        assert!(without.role_key.is_none());
+    }
 }

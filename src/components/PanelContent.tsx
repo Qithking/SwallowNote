@@ -13,7 +13,7 @@
  * re-renders during editing.
  *
  * Key optimisation: content / path subscriptions are split into child
- * components so that built-in panels (AI, Directory, History, EditorSettings)
+ * components so that built-in panels (Directory, History, EditorSettings)
  * don't re-render when the user types — only plugin panels and the note-
  * properties panel subscribe to the fields they actually need.
  */
@@ -29,7 +29,6 @@ import {
 } from '@/lib/plugin-utils'
 import type { PluginDefinition } from '@/types/plugin'
 
-const AIView = lazy(() => import('@/components/AI/AIView').then(m => ({ default: m.AIView })))
 const DirectoryView = lazy(() => import('@/components/Directory/DirectoryView').then(m => ({ default: m.DirectoryView })))
 const HistoryView = lazy(() => import('@/components/History/HistoryView').then(m => ({ default: m.HistoryView })))
 const EditorSettings = lazy(() => import('@/components/EditorSettings/EditorSettings').then(m => ({ default: m.EditorSettings })))
@@ -49,8 +48,6 @@ export function RightPanelContent() {
 
   // --- Built-in right panels ---
   switch (rightPanelType) {
-    case 'ai':
-      return <Suspense fallback={null}><AIView /></Suspense>
     case 'directory':
       return <Suspense fallback={null}><DirectoryView /></Suspense>
     case 'history':

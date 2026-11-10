@@ -47,6 +47,9 @@ const panelWrapStyle: CSSProperties = { flex: 1, overflow: 'auto' }
 
 // ───────────────────────── Preview 组件 ─────────────────────────────────────
 
+/** 内存 settings 表：standalone 验证「对话行为」开关等前端持久化 UI */
+const settingsMap = new Map<string, unknown>()
+
 export function Preview() {
   const [active, setActive] = useState(true)
 
@@ -75,7 +78,14 @@ export function Preview() {
     // standalone 无 openPluginPanel 请求
     pendingRequest: null,
     invokeBackend: async (cmd, args) => {
-      console.warn('[preview] invokeBackend 后端未接入，调用被丢弃', cmd, args)
+      console.warn('[preview] invokeBackend 内存 mock', cmd, args)
+      if (cmd === 'getSetting') return { value: (settingsMap.get(String(args?.key)) as string | null) ?? null }
+      if (cmd === 'setSetting') {
+        settingsMap.set(String(args?.key), args?.value)
+        return null
+      }
+      if (cmd === 'listModels') return { models: [] }
+      if (cmd === 'listSessions') return { sessions: [] }
       return null
     },
     invokeBackendStream: async <T, R>(_cmd: string, _args?: Record<string, unknown>, _onChunk?: (chunk: T) => void) => {

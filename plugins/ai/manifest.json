@@ -18,6 +18,8 @@
     "events",
     "backend",
     "editor-write",
-    "files"
+    "files",
+    "context-menu",
+    "secure-storage"
   ]
 }
