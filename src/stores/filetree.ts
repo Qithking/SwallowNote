@@ -28,6 +28,10 @@ function loadDirectoryDedup(
 // refreshNode 防抖定时器（按 path 合并）
 const refreshDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+// revealPath 代际 token：新 reveal 启动即递增；旧 reveal 收尾时发现代际过期
+// 则直接退出，防止快速连续切 tab 时旧 reveal 的迟到结果覆盖新 selectedPath
+let revealGeneration = 0
+
 export interface FileNode {
   id: string
   name: string
@@ -373,6 +377,9 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   revealPath: async (filePath, rootPath) => {
     if (!filePath || !rootPath) return
 
+    // 本次 reveal 的代际号（新 reveal 启动即递增）
+    const generation = ++revealGeneration
+
     // 文件不存在时不设置无效 selectedPath
     try {
       const exists = await pathExists(filePath)
@@ -382,6 +389,9 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       logger.warn('filetree-store', 'pathExists failed, aborting revealPath', e)
       return
     }
+
+    // pathExists 期间已有更新的 reveal 启动：本次已过期，直接退出
+    if (generation !== revealGeneration) return
 
     const { nodes, expanded } = get()
 
@@ -446,6 +456,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
 
     // 3. 最后 set selectedPath 并滚动
+    // batch 等待期间已有更新的 reveal 启动：本次已过期，不得覆盖新 selectedPath
+    if (generation !== revealGeneration) return
     set({ selectedPath: filePath })
 
     // 微任务在 React 渲染后执行，此时 DOM 已更新
