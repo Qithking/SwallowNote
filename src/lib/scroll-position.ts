@@ -45,26 +45,49 @@ export function readScrollTop(container: HTMLElement | null): number | null {
 
 /**
  * 在给定容器内恢复滚动位置。
- * 每次轮询重新查询 viewport（处理编辑器 remount 导致 viewport DOM 元素变化），
- * 检测 scrollHeight > clientHeight（内容已渲染到可滚动状态）后设置 scrollTop。
- * 超时放弃（默认 3000ms，留足 BlockNote 异步解析时间）。
+ * 每次轮询重新查询 viewport（处理编辑器 remount 导致 viewport DOM 元素变化）。
+ *
+ * 关键：不能在「首次可滚」的第一帧就设置——BlockNote 的图片/mermaid/代码高亮
+ * 等是异步渲染的，scrollHeight 会持续增长，过早恢复会导致位置偏上。
+ * 因此等待渲染稳定（scrollHeight 连续多帧不变且图片加载完成）后再设置；
+ * 超时兜底按当前高度尽力恢复，避免大文件/慢图永不恢复。
  *
  * @param container 编辑器容器 DOM 元素
  * @param savedScrollTop 要恢复的 scrollTop 值；0 或 null 时不执行恢复
  * @param timeoutMs 超时毫秒数，默认 3000
+ * @param signal 取消信号：tab 快速切换时调用方可中止旧恢复链，
+ *               防止把旧 tab 的位置写到已被新 tab 复用的容器上
  */
 export function restoreScrollTop(
   container: HTMLElement | null,
   savedScrollTop: number | null | undefined,
   timeoutMs = 3000,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!container) return Promise.resolve()
   if (!savedScrollTop || savedScrollTop <= 0) return Promise.resolve()
 
   const start = Date.now()
+  /** 连续 N 帧 scrollHeight 不变视为渲染稳定（约 64ms 稳定窗） */
+  const STABLE_FRAMES = 4
+  let lastHeight = -1
+  let stableFrames = 0
+
+  /** 容器内所有 <img> 均加载完成（complete 含加载失败），没有图片时恒真 */
+  const imagesReady = () => {
+    const imgs = container.querySelectorAll('img')
+    for (const img of imgs) {
+      if (!(img instanceof HTMLImageElement) || !img.complete) return false
+    }
+    return true
+  }
 
   return new Promise<void>((resolve) => {
     const tryRestore = () => {
+      if (signal?.aborted) {
+        resolve()
+        return
+      }
       // 每次轮询重新查询滚动容器（编辑器 remount 后 DOM 元素会变化）
       const viewport = findScrollContainer(container)
       if (!viewport) {
@@ -77,13 +100,32 @@ export function restoreScrollTop(
         return
       }
       const { scrollHeight, clientHeight } = viewport
-      if (scrollHeight > clientHeight) {
-        const clampedTop = Math.min(savedScrollTop, scrollHeight - clientHeight)
-        viewport.scrollTop = clampedTop
-        resolve()
+      if (scrollHeight <= clientHeight) {
+        // 内容不足一屏（或尚未渲染），无可滚；等待，超时放弃
+        if (Date.now() - start >= timeoutMs) {
+          resolve()
+          return
+        }
+        requestAnimationFrame(tryRestore)
         return
       }
-      if (Date.now() - start >= timeoutMs) {
+      // 高度仍在增长或图片未加载完 → 渲染未稳定，等稳定后再恢复
+      if (scrollHeight !== lastHeight || !imagesReady()) {
+        lastHeight = scrollHeight
+        stableFrames = 0
+        if (Date.now() - start >= timeoutMs) {
+          // 超时兜底：按当前高度尽力恢复
+          viewport.scrollTop = Math.min(savedScrollTop, scrollHeight - clientHeight)
+          resolve()
+          return
+        }
+        requestAnimationFrame(tryRestore)
+        return
+      }
+      stableFrames++
+      if (stableFrames >= STABLE_FRAMES || Date.now() - start >= timeoutMs) {
+        const clampedTop = Math.min(savedScrollTop, scrollHeight - clientHeight)
+        viewport.scrollTop = clampedTop
         resolve()
         return
       }

@@ -396,14 +396,15 @@ export function EditorView() {
     ) {
       const savedTop = activeTab.scrollTop
       restoredTabIdRef.current = currentId
-      let cancelled = false
+      // AbortController：tab 快速切换时 cleanup 中止旧恢复链，
+      // 防止旧链把位置写到已被新 tab 复用的容器上
+      const abort = new AbortController()
       const raf = requestAnimationFrame(() => {
-        if (cancelled) return
-        restoreScrollTop(editorContainerRef.current, savedTop).catch(() => { /* noop */ })
+        restoreScrollTop(editorContainerRef.current, savedTop, 3000, abort.signal).catch(() => { /* noop */ })
       })
       return () => {
-        cancelled = true
         cancelAnimationFrame(raf)
+        abort.abort()
       }
     }
   }, [activeTab?.id, activeTab?.scrollTop, activeTab?.content])

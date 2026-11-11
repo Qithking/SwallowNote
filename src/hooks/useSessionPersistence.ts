@@ -52,6 +52,7 @@ export function useSessionPersistence() {
           viewMode: tab.viewMode,
           cursorPosition: tab.cursorPosition,
           scrollTop: tab.scrollTop,
+          cursorAnchor: tab.cursorAnchor,
         }
       })
 

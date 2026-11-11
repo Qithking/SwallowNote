@@ -32,6 +32,12 @@ import {
 import { useEditorSearchIntegration, adaptBlockNoteSearch } from './useEditorSearchIntegration'
 import { useBlockNoteSearch } from './useBlockNoteSearch'
 import { parseMarkdownToBlocks, getSharedParseEditor } from './editorBlockTransforms'
+import { TextSelection } from 'prosemirror-state'
+import {
+  captureCursorAnchor,
+  validateCursorAnchor,
+  setCursorAnchorCache,
+} from '@/lib/cursor-anchor'
 import { MermaidBlockSpec } from './mermaidBlockSpec'
 import { KatexBlockSpec } from './katexBlockSpec'
 import { MarkmapBlockSpec } from './markmapBlockSpec'
@@ -196,19 +202,43 @@ function BlockNoteInner({
   const blocknoteTheme = isAppDark ? 'dark' as const : 'light' as const
 
 
-  /** BlockNote 未公开的内部 tiptap 编辑器（仅声明用到的 selection/doc 能力） */
+  /** BlockNote 未公开的内部 tiptap 编辑器（仅声明用到的 selection/doc/view 能力） */
   interface TiptapEditorLike {
     state: {
       selection: { from: number; to: number; empty: boolean }
-      doc: { textBetween(from: number, to: number, blockSeparator?: string): string }
+      doc: {
+        content: { size: number }
+        textBetween(from: number, to: number, blockSeparator?: string, leafText?: string | null): string
+      }
     }
+    /** BlockNoteView 渲染前可能未 attach，恢复光标前需判空 */
+    view?: {
+      dispatch: (tr: unknown) => void
+      focus: () => void
+      state: {
+        doc: TiptapEditorLike['state']['doc']
+        tr: { setSelection: (selection: unknown) => unknown }
+      }
+    } | null
+    /** tiptap emitter：监听/解绑 selectionUpdate */
+    on?: (event: string, cb: () => void) => void
+    off?: (event: string, cb: () => void) => void
   }
+
+  const getTiptapEditor = useCallback((): TiptapEditorLike | null => {
+    if (!editor) return null
+    try {
+      return (editor as unknown as { _tiptapEditor?: TiptapEditorLike })._tiptapEditor ?? null
+    } catch {
+      return null
+    }
+  }, [editor])
 
   // Methods for the context menu
   const getSelectedText = useCallback(() => {
     if (!editor) return ''
     try {
-      const tiptapEditor = (editor as unknown as { _tiptapEditor?: TiptapEditorLike })._tiptapEditor
+      const tiptapEditor = getTiptapEditor()
       if (!tiptapEditor) return ''
       const { from, to, empty } = tiptapEditor.state.selection
       if (empty) return ''
@@ -216,7 +246,57 @@ function BlockNoteInner({
     } catch {
       return ''
     }
-  }, [editor])
+  }, [editor, getTiptapEditor])
+
+  // 光标锚点恢复：tab 上保存的光标位置，校验文档一致性后设置选区并聚焦。
+  // 本组件按 tab id key 重挂载，effect 仅在 mount 时执行一次恢复。
+  const activeTabCursorAnchor = useEditorStore(
+    (s) => s.tabs.find((t) => t.id === s.activeTabId)?.cursorAnchor
+  )
+  useEffect(() => {
+    if (!activeTabId || !activeTabCursorAnchor) return
+    const tiptap = getTiptapEditor()
+    if (!tiptap) return
+    let tries = 0
+    let raf = 0
+    const attempt = () => {
+      const view = tiptap.view
+      if (!view) {
+        // view 尚未 attach（BlockNoteView 渲染前），有限重试
+        if (++tries <= 20) raf = requestAnimationFrame(attempt)
+        return
+      }
+      try {
+        // 上下文校验通过才恢复，避免文档被外部修改后光标落到错误位置
+        if (validateCursorAnchor(view.state.doc, activeTabCursorAnchor)) {
+          // 运行时 view.state.doc 就是 PM Node；接口只声明了最小结构，这里断言为 create 的参数类型
+          const doc = view.state.doc as unknown as Parameters<typeof TextSelection.create>[0]
+          const tr = view.state.tr.setSelection(TextSelection.create(doc, activeTabCursorAnchor.pos))
+          view.dispatch(tr)
+          view.focus()
+        }
+      } catch {
+        // 位置无效（如落在块边界），跳过恢复
+      }
+    }
+    raf = requestAnimationFrame(attempt)
+    return () => cancelAnimationFrame(raf)
+  }, [activeTabId, activeTabCursorAnchor, getTiptapEditor])
+
+  // 光标锚点保存：selectionUpdate 实时写入模块级缓存（不触发重渲染），
+  // tab 离开前由 editor store 的 saveActiveTabScrollTopIfNeeded 统一同步进 tab
+  useEffect(() => {
+    if (!activeTabId) return
+    const tiptap = getTiptapEditor()
+    if (!tiptap?.on) return
+    const handler = () => {
+      try {
+        setCursorAnchorCache(activeTabId, captureCursorAnchor(tiptap.state.selection, tiptap.state.doc))
+      } catch { /* 忽略 */ }
+    }
+    tiptap.on('selectionUpdate', handler)
+    return () => tiptap.off?.('selectionUpdate', handler)
+  }, [activeTabId, getTiptapEditor])
 
 
   // Custom slash menu items: default items + Mermaid/KaTeX/Markmap templates

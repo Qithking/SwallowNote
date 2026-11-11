@@ -269,7 +269,8 @@ function App() {
         const activeId = useEditorStore.getState().activeTabId
         if (activeId) {
           const top = readActiveEditorScrollTop()
-          if (top != null && top > 0) {
+          // 0 是合法位置（顶部），必须保存；仅位置未知（null）时跳过
+          if (top != null) {
             useEditorStore.getState().updateScrollTop(activeId, top)
           }
         }

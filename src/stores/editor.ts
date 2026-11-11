@@ -9,6 +9,8 @@ import { loadFileContent } from '@/lib/api'
 import { writeFile, gitAutoCommit } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
 import { findScrollContainer } from '@/lib/scroll-position'
+import { clearCursorAnchorCache, getCursorAnchorCache } from '@/lib/cursor-anchor'
+import type { CursorAnchor } from '@/lib/cursor-anchor'
 import { countWords } from '@/lib/utils/wordCount'
 import { parseFrontmatter, serializeFrontmatter, stripFrontmatter } from '@/lib/utils/frontmatter'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
@@ -111,11 +113,13 @@ export function readActiveEditorScrollTop(): number | null {
   }
   // DOM 读到非零值，直接返回
   if (domTop != null && domTop > 0) return domTop
-  // DOM 不可用或读到 0，尝试缓存兜底
+  // DOM 不可用或读到 0（可能是编辑器 remount 后尚未恢复的假 0）：
+  // 回退 scroll 监听缓存兜底。缓存含 0 —— 缓存由监听器实时更新，
+  // 0 表示用户最后确实滚回顶部，是合法值，不得丢弃（否则残留旧位置）
   const activeId = useEditorStore.getState().activeTabId
   if (activeId) {
     const cached = getLastScrollTopForTab(activeId)
-    if (cached != null && cached > 0) return cached
+    if (cached != null) return cached
   }
   return domTop
 }
@@ -129,8 +133,24 @@ function saveActiveTabScrollTopIfNeeded(get: () => EditorState) {
   const prevActiveId = get().activeTabId
   if (!prevActiveId) return
   const top = readActiveEditorScrollTop()
-  if (top != null && top > 0) {
+  // top 为 null 表示 DOM 与缓存都读不到（位置未知），不覆盖；
+  // 0 是合法位置（顶部），必须保存，否则 store 残留旧值导致恢复偏移
+  if (top != null) {
     get().updateScrollTop(prevActiveId, top)
+  }
+  saveActiveTabCursorAnchorIfNeeded(get)
+}
+
+/**
+ * 在切换 activeTabId 前把活动 tab 的光标锚点从模块级缓存同步进 tab。
+ * 编辑器 selectionUpdate 实时写缓存（不触发重渲染），离开前由本函数落盘。
+ */
+function saveActiveTabCursorAnchorIfNeeded(get: () => EditorState) {
+  const prevActiveId = get().activeTabId
+  if (!prevActiveId) return
+  const anchor = getCursorAnchorCache(prevActiveId)
+  if (anchor) {
+    get().updateCursorAnchor(prevActiveId, anchor)
   }
 }
 
@@ -194,6 +214,8 @@ export interface EditorTab {
   toolbarConfig?: EditorToolbarConfig
   /** 编辑器垂直滚动位置（px），tab 切换/应用关闭时保存，内容渲染完成后恢复 */
   scrollTop?: number
+  /** 光标锚点（仅预览模式 BlockNote）：离开 tab 时保存，内容渲染完成后校验恢复 */
+  cursorAnchor?: CursorAnchor
 }
 
 export interface EditorState {
@@ -216,6 +238,7 @@ export interface EditorState {
   updateTabPath: (oldPath: string, newPath: string, newName: string) => void
   updateCursorPosition: (id: string, line: number, column: number) => void
   updateScrollTop: (id: string, scrollTop: number) => void
+  updateCursorAnchor: (id: string, anchor: CursorAnchor) => void
   updateConflictTabState: (id: string, selectedFile: string | undefined, cursorLine: number | undefined) => void
   toggleViewMode: () => void
   getActiveTab: () => EditorTab | undefined
@@ -416,7 +439,8 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
-    // 清理插件 tab 运行时数据（icon、onChange 回调）
+    // 清理光标锚点缓存与插件 tab 运行时数据（icon、onChange 回调）
+    clearCursorAnchorCache(id)
     unregisterPluginTabRuntime(id)
     // 全部 tab 关闭时自动关属性面板
     autoCloseNoteProperties()
@@ -433,8 +457,9 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
       }
       return { tabs: newTabs, activeTabId: newActiveId }
     })
-    // 清理插件 tab 运行时数据
+    // 清理光标锚点缓存与插件 tab 运行时数据
     for (const id of ids) {
+      clearCursorAnchorCache(id)
       unregisterPluginTabRuntime(id)
     }
     // 为每个被移除的 tab 发射 note:close
@@ -709,6 +734,12 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
     set((state) => ({
       tabs: state.tabs.map((t) =>
         t.id === id ? { ...t, scrollTop } : t
+      ),
+    })),
+  updateCursorAnchor: (id, anchor) =>
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === id ? { ...t, cursorAnchor: anchor } : t
       ),
     })),
   updateConflictTabState: (id, selectedFile, cursorLine) =>
