@@ -42,14 +42,22 @@ function dispatchEditorEvent<T>(
   })
 }
 
-/** 将插件传入的相对路径规范化为工作区内绝对路径；绝对路径会被折叠进根内，`..` 逃逸直接拒绝。 */
+/** 将插件传入的相对路径规范化为工作区内绝对路径；绝对路径限根内直接使用（宿主 ctx.path 一贯为绝对路径），根外拒绝，`..` 逃逸直接拒绝。 */
 function resolveWorkspacePath(relPath: string, rootPath: string): string {
   const normalized = relPath.replace(/\\/g, '/').trim()
+  const rootNorm = rootPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  // 绝对路径分支：根内放行（文件树/编辑器/Tab 传给插件的 ctx.path 均为绝对路径），根外维持沙箱
+  if (normalized.startsWith('/') || /^[a-zA-Z]:\//.test(normalized)) {
+    if (normalized === rootNorm || normalized.startsWith(`${rootNorm}/`)) {
+      return normalized
+    }
+    throw new Error(`[plugin-write-api] path outside workspace: "${relPath}"`)
+  }
   const segments = normalized.split('/').filter((s) => s.length > 0 && s !== '.')
   if (segments.length === 0 || segments.includes('..')) {
     throw new Error(`[plugin-write-api] invalid workspace path: "${relPath}"`)
   }
-  return `${rootPath.replace(/\/+$/, '')}/${segments.join('/')}`
+  return `${rootNorm}/${segments.join('/')}`
 }
 
 /** 递归列出目录下全部 Markdown 文件（复用 list_directory 的 markdown_only 过滤），返回相对路径。 */

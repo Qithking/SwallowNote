@@ -504,6 +504,23 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const newIds = new Set(deduped.map((p) => p.id))
     const removed = state.plugins.filter((p) => !newIds.has(p.id))
     const added = deduped.filter((p) => !oldIds.has(p.id))
+    // 同 id 重载（重装/更新 → 新 bundle → module 引用变化）：旧实例必须
+    // 触发 onUnload（有限清理），新实例必须触发 onLoad。否则新 bundle 的
+    // 注册逻辑（菜单/命令等）被跳过，而旧注册残留显示（fileTree 菜单缺失根因）。
+    // 判据用 __pluginModule 引用：未变化的插件重扫时 blob URL 复用，引用相同 → 幂等。
+    const reloadedOld: PluginDefinition[] = []
+    const reloadedNew: PluginDefinition[] = []
+    for (const p of deduped) {
+      const old = state.plugins.find((q) => q.id === p.id)
+      if (
+        old &&
+        (old as PluginWithModule).__pluginModule !==
+          (p as PluginWithModule).__pluginModule
+      ) {
+        reloadedOld.push(old)
+        reloadedNew.push(p)
+      }
+    }
 
     // 为被移除的插件构建 active-state 更新（同 unregisterPlugin）
     const activeUpdates: Partial<PluginState> = {}
@@ -616,9 +633,32 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       // 清理移除插件的遥测缓冲。
       clearPluginMetrics(target.id)
     }
+    // 同 id 重载的旧实例：有限清理。触发 onUnload 并清掉运行期注册的
+    // 资源（菜单/命令/编辑器扩展/事件/接管/熔断/设置缓存/崩溃计数/旧 blob），
+    // 但保留：权限授权（onLoad 重跑注册时仍可通过门禁）、插件 storage
+    // （更新不丢用户数据）、自动更新 opt-in 与健康记录。
+    for (const target of reloadedOld) {
+      void runPluginLifecycleHook(
+        target,
+        target.hooks?.onUnload,
+        buildPluginContext(target),
+        'onUnload'
+      )
+      // 卸载持久化 host takeover（onUnload 之后）
+      uninstallHostTakeover(target.id)
+      dropPluginBlobUrl(target.pluginPath)
+      clearPluginHostState(target.id)
+      dropSettingsCache(target.id)
+      resetPluginCrashCount(target.id)
+      pluginEventBus.removeAllListenersForPlugin(target.id)
+      clearPluginMenuItems(target.id)
+      clearPluginCommands(target.id)
+      unregisterEditor(target.id)
+      clearPluginMetrics(target.id)
+    }
     // 清理已移除插件的命令快捷键绑定（用 post-set valid-id 集）
     useUIStore.getState().prunePluginCommandShortcuts(newIds)
-    for (const target of added) {
+    for (const target of [...added, ...reloadedNew]) {
       // 对新增插件触发 onLoad，跳过持久化为禁用的插件。
       if (target.enabled === false) {
         continue

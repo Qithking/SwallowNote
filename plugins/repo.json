@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T13:05:28Z",
+  "updated_at": "2026-11-11T13:34:25Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -106,7 +106,7 @@
     {
       "id": "com.swallownote.ai",
       "name": "AI 助手",
-      "version": "0.1.2",
+      "version": "0.1.4",
       "description": "与 AI 对话并操作笔记：智能问答、内容生成、笔记整理。支持多会话、角色动作、就地应用与多模型接入。",
       "author": "SwallowNote",
       "tags": [
@@ -117,12 +117,12 @@
         "writing"
       ],
       "download_url": "./ai/com.swallownote.ai.zip",
-      "sha256": "034e532ac437a6a9fc873baffbd1f0a2bd717da7d4b4ba78ab56e9806c913046",
+      "sha256": "5e35205e12234ed76ee426d172e2d2430c88b7c6f3fc95aec2c6bf061d509a03",
       "changelog": "初版发布：多会话对话与流式输出、编辑器右键 9 种角色动作、就地应用、@文件引用、多 Provider 接入（OpenAI 兼容 / Anthropic / Google / Ollama）、模型管理与密钥安全存储、历史数据迁移",
-      "published_at": "2026-11-11T13:05:16Z",
+      "published_at": "2026-11-11T13:34:19Z",
       "dependencies": [],
       "min_host_version": "0.1.0",
-      "signature_b64": "mfkjs/xDUrctZzE7ecd/uk/pb29QZQxH0Ieo4LvNzeaQFrERTOyC/Z9Bk2MNTHJaZhmjK9xN6CrB3kf2Mw7sAw=="
+      "signature_b64": "3/JujOQ/ZMwWvJ9W7bRdnkQIVXdSlSznG9dL9xxDdXbcVZWvG+/qlb7Iveg1sO3vQedOCQr/P67xYpgJm9NJDA=="
     }
   ],
   "pubkey_b64": "LCoNiX5mUrSXX3zq3p+ylQnRi+xKafJ//iQFrnGdif8="

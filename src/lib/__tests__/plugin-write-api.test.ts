@@ -309,6 +309,17 @@ describe('files.read 按路径读取（右键「添加到 AI 对话」底座）'
     expect(fileOps.readFile).not.toHaveBeenCalled()
   })
 
+  it('绝对路径（宿主 ctx.path 一贯语义，如文件树右键）：rootPath 之下正确解析', async () => {
+    fileOps.readFile.mockResolvedValue('# abs')
+    await expect(pluginFilesRead(PID, '/ws/notes/todo.md')).resolves.toBe('# abs')
+    expect(fileOps.readFile).toHaveBeenCalledWith('/ws/notes/todo.md')
+  })
+
+  it('绝对路径在工作区之外：拒绝且不触碰文件系统（维持沙箱）', async () => {
+    await expect(pluginFilesRead(PID, '/etc/evil.md')).rejects.toThrow(/outside workspace/)
+    expect(fileOps.readFile).not.toHaveBeenCalled()
+  })
+
   it('无工作区打开：抛错', async () => {
     wsState.rootPath = null
     await expect(pluginFilesRead(PID, 'a.md')).rejects.toThrow(/no workspace open/)

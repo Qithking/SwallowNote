@@ -106,7 +106,7 @@ export function MessageBubble({ message, meta, streaming, actions, canUndo }: Me
           borderRadius: 10,
           maxWidth: '85%',
           overflow: 'hidden',
-          background: isUser ? 'var(--theme-color, #0a84ff)' : 'var(--bg-secondary, #f5f5f7)',
+          background: isUser ? 'var(--theme-color, #0a84ff)' : 'var(--bg-primary, #f5f5f7)',
           color: isUser ? '#fff' : 'var(--text-primary, #1d1d1f)',
         }}
       >
