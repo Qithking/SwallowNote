@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next'
 import { Shield, Check, AlertTriangle } from 'lucide-react'
 import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
 import { grantPluginPermissions, revokePluginPermissions } from '@/lib/plugin-permissions'
+import { usePluginStore } from '@/stores'
 import {
   Dialog,
   DialogContent,
@@ -73,6 +74,12 @@ export function PluginPermissionDialog({
       })
       if (toGrant.length > 0) {
         await grantPluginPermissions(pluginId, toGrant)
+        // 首次授权补偿：安装流程中 onLoad 先于本弹窗执行，插件经权限
+        // 守卫的注册（右键菜单 / 编辑器扩展）被静默拒绝。仅在授权前
+        // 无任何 granted 项时重放，避免对已运行插件重复注入副作用。
+        if (!currentStatus.some((s) => s.granted)) {
+          usePluginStore.getState().replayPluginRegistration(pluginId)
+        }
       }
 
       // Revoke unselected permissions
@@ -187,7 +194,17 @@ export function PluginPermissionDialog({
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            marginTop: 16,
+            // 权限较多时限高滚动，防止弹框超出视口导致底部按钮不可达（对齐宿主弹框惯例）
+            maxHeight: 320,
+            overflowY: 'auto',
+          }}
+        >
           {permissions.map((permission) => {
             const isSelected = selectedPermissions.includes(permission)
             const currentStatusItem = currentStatus.find((s) => s.permission === permission)

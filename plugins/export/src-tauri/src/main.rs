@@ -165,11 +165,11 @@ fn handle_request(req: &JsonRpcRequest) -> Value {
                         id: req.id.clone(),
                         error: JsonRpcErrorDetail {
                             code: e.code(),
-                            // The host drops `code` and only
-                            // forwards `message` to the IPC layer,
-                            // so we embed the code in the message
-                            // string for the frontend to extract.
-                            message: e.display_with_code(),
+                            // The host now passes the JSON-RPC `code`
+                            // through to the frontend (B4), so the
+                            // message stays clean without the legacy
+                            // `[ERR_CODE=...]` prefix hack.
+                            message: e.to_string(),
                         },
                     };
                     serde_json::to_value(resp).unwrap()
@@ -198,7 +198,7 @@ fn handle_request(req: &JsonRpcRequest) -> Value {
                         id: req.id.clone(),
                         error: JsonRpcErrorDetail {
                             code: e.code(),
-                            message: e.display_with_code(),
+                            message: e.to_string(),
                         },
                     };
                     serde_json::to_value(resp).unwrap()

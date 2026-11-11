@@ -1,6 +1,6 @@
 [package]
 name = "swallownote-plugin-ai"
-version = "0.1.0"
+version = "0.1.2"
 description = "SwallowNote AI plugin backend — LLM provider adapter"
 authors = ["SwallowNote"]
 edition = "2021"

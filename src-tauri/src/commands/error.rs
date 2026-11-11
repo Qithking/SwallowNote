@@ -29,6 +29,14 @@ pub enum PluginError {
     #[error("{0}")]
     JsonRpc(String),
 
+    /// 后端 JSON-RPC error 帧：保留 code/data 供前端构造结构化 PluginError（B4）。
+    #[error("{message}")]
+    JsonRpcWithCode {
+        code: i64,
+        message: String,
+        data: Option<serde_json::Value>,
+    },
+
     /// 调用超时；携带结构化字段供诊断面板渲染。
     #[error("plugin backend timed out after {secs}s (plugin_id={plugin_id}, command={command})")]
     Timeout {
@@ -70,10 +78,24 @@ impl From<serde_json::Error> for PluginError {
     }
 }
 
-/// 借助 InvokeError::from_error 保持前端 wire format 不变。
+/// 借助 InvokeError 保持前端 wire format：结构化错误为 JSON 对象，其余为字符串。
 impl From<PluginError> for tauri::ipc::InvokeError {
     fn from(err: PluginError) -> Self {
-        tauri::ipc::InvokeError::from_error(err)
+        match &err {
+            // 结构化错误：JSON 对象 wire format，前端按 __pluginError 标记解析 code/data。
+            // 注意 InvokeError::from_error 只接受 std::error::Error，对 json! 对象
+            // 必须走 From<T: Serialize> blanket impl（tauri 2.11）。
+            PluginError::JsonRpcWithCode { code, message, data } => {
+                tauri::ipc::InvokeError::from(serde_json::json!({
+                    "__pluginError": true,
+                    "code": code,
+                    "message": message,
+                    "data": data,
+                }))
+            }
+            // 其余错误维持原字符串 message，前端既有契约不变。
+            _ => tauri::ipc::InvokeError::from_error(err),
+        }
     }
 }
 
@@ -115,5 +137,43 @@ mod tests {
         let bad: Result<serde_json::Value, _> = serde_json::from_str("not json");
         let e: PluginError = bad.unwrap_err().into();
         assert!(matches!(e, PluginError::JsonRpc(_)));
+    }
+
+    /// B4：JsonRpcWithCode 的 wire format 必须是带 __pluginError 标记的
+    /// JSON 对象，code/message/data 原样保留（前端据此构造 SDK PluginError）。
+    #[test]
+    fn jsonrpc_with_code_wire_format_is_structured_object() {
+        let e = PluginError::JsonRpcWithCode {
+            code: 1001,
+            message: "boom".to_string(),
+            data: Some(serde_json::json!({"detail": "x"})),
+        };
+        let wire = tauri::ipc::InvokeError::from(e);
+        assert_eq!(
+            wire.0,
+            serde_json::json!({
+                "__pluginError": true,
+                "code": 1001,
+                "message": "boom",
+                "data": {"detail": "x"},
+            })
+        );
+        // Display 仍输出纯 message，日志/诊断不受影响。
+        assert_eq!(PluginError::JsonRpcWithCode {
+            code: 1001,
+            message: "boom".to_string(),
+            data: None,
+        }
+        .to_string(), "boom");
+    }
+
+    /// 回归：其余变体 wire format 仍是字符串（前端既有 reject 字符串契约不变）。
+    #[test]
+    fn other_variants_wire_format_remains_string() {
+        let wire = tauri::ipc::InvokeError::from(PluginError::JsonRpc("stale".to_string()));
+        assert_eq!(wire.0, serde_json::Value::String("stale".to_string()));
+
+        let wire = tauri::ipc::InvokeError::from(PluginError::NotFound("gone".to_string()));
+        assert_eq!(wire.0, serde_json::Value::String("gone".to_string()));
     }
 }

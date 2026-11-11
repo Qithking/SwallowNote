@@ -9,10 +9,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/lib/*": ["../../src/lib/*"]
-    }
+    "noEmit": true
   },
-  "include": ["src", "../../docs/plugin-sdk/src"]
+  "include": ["src"]
 }

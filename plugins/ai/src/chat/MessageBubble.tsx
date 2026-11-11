@@ -94,7 +94,7 @@ export function MessageBubble({ message, meta, streaming, actions, canUndo }: Me
       <div
         style={{
           ...avatarStyle,
-          background: isUser ? 'var(--accent-color, #0a84ff)' : 'rgba(128,128,128,0.2)',
+          background: isUser ? 'var(--theme-color, #0a84ff)' : 'rgba(128,128,128,0.2)',
           color: isUser ? '#fff' : 'var(--text-secondary, #6e6e73)',
         }}
       >
@@ -106,7 +106,7 @@ export function MessageBubble({ message, meta, streaming, actions, canUndo }: Me
           borderRadius: 10,
           maxWidth: '85%',
           overflow: 'hidden',
-          background: isUser ? 'var(--accent-color, #0a84ff)' : 'var(--bg-secondary, #f5f5f7)',
+          background: isUser ? 'var(--theme-color, #0a84ff)' : 'var(--bg-secondary, #f5f5f7)',
           color: isUser ? '#fff' : 'var(--text-primary, #1d1d1f)',
         }}
       >

@@ -300,6 +300,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "swallow-plugin-rpc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "swallownote-plugin-secret-disk"
 version = "0.1.7"
 dependencies = [
@@ -307,6 +315,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "swallow-plugin-rpc",
  "uuid",
  "zeroize",
 ]

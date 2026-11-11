@@ -18,6 +18,7 @@ const fileOps = vi.hoisted(() => ({
   pathExists: vi.fn(),
   createFile: vi.fn(),
   writeFile: vi.fn(),
+  readFile: vi.fn(),
 }))
 vi.mock('../tauri/file-ops', () => fileOps)
 
@@ -34,6 +35,7 @@ import {
   pluginEditorReplaceContent,
   pluginFilesCreateNote,
   pluginFilesListWorkspace,
+  pluginFilesRead,
 } from '../plugin-write-api'
 
 const PID = 'test-plugin'
@@ -283,5 +285,41 @@ describe('listWorkspace 递归与过滤', () => {
   it('无工作区打开：抛错', async () => {
     wsState.rootPath = null
     await expect(pluginFilesListWorkspace(PID)).rejects.toThrow(/no workspace open/)
+  })
+})
+
+describe('files.read 按路径读取（右键「添加到 AI 对话」底座）', () => {
+  beforeEach(() => {
+    setGranted(PID, ['files'])
+  })
+
+  it('无 files 权限：抛 PluginPermissionDeniedError', async () => {
+    clearAll()
+    await expect(pluginFilesRead(PID, 'a.md')).rejects.toBeInstanceOf(PluginPermissionDeniedError)
+  })
+
+  it('正常读取：反斜杠归一后派发 readFile', async () => {
+    fileOps.readFile.mockResolvedValue('# hello')
+    await expect(pluginFilesRead(PID, 'sub\\note.md')).resolves.toBe('# hello')
+    expect(fileOps.readFile).toHaveBeenCalledWith('/ws/sub/note.md')
+  })
+
+  it('`..` 逃逸拒绝：不触碰文件系统', async () => {
+    await expect(pluginFilesRead(PID, '../evil.md')).rejects.toThrow(/invalid workspace path/)
+    expect(fileOps.readFile).not.toHaveBeenCalled()
+  })
+
+  it('无工作区打开：抛错', async () => {
+    wsState.rootPath = null
+    await expect(pluginFilesRead(PID, 'a.md')).rejects.toThrow(/no workspace open/)
+  })
+
+  it('超长文件截断并附加标记；恰好上限不截断', async () => {
+    fileOps.readFile.mockResolvedValue('x'.repeat(200_001))
+    const truncated = await pluginFilesRead(PID, 'big.md')
+    expect(truncated.startsWith('x'.repeat(200_000))).toBe(true)
+    expect(truncated).toContain('已截断')
+    fileOps.readFile.mockResolvedValue('x'.repeat(200_000))
+    await expect(pluginFilesRead(PID, 'big.md')).resolves.toBe('x'.repeat(200_000))
   })
 })

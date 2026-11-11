@@ -1,0 +1,16 @@
+{
+  "id": "__PLUGIN_ID__",
+  "name": "__PLUGIN_NAME__",
+  "description": "__PLUGIN_DESCRIPTION__",
+  "version": "0.1.0",
+  "manifestVersion": 1,
+  "author": "SwallowNote",
+  "publishedAt": "__PUBLISHED_AT__",
+  "iconPosition": "sidebar",
+  "contentPosition": "leftPanel",
+  "order": 100,
+  "enabled": true,
+  "hasBackend": __HAS_BACKEND__,
+  "entry": "src/index.tsx",
+  "permissions": __PERMISSIONS_JSON__
+}

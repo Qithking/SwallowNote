@@ -8,6 +8,7 @@ import type {
   PluginPanelProps,
   PluginPanelRequest,
   ToolbarButtonProps,
+  InvokeBackendStreamOptions,
 } from '@/types/plugin'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { useUIStore, usePluginStore } from '@/stores'
@@ -31,8 +32,9 @@ import {
   pluginEditorReplaceContent,
   pluginFilesCreateNote,
   pluginFilesListWorkspace,
+  pluginFilesRead,
 } from './plugin-write-api'
-import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
+import { emitPluginSettingsChanged, PluginError } from '@swallow-note/plugin-sdk'
 import { useEditorStore } from '@/stores/editor'
 
 /**
@@ -80,6 +82,40 @@ export function pluginSidebarView(pluginId: string): SidebarView {
  */
 export function pluginRightPanelType(pluginId: string): RightPanelType {
   return `plugin:${pluginId}` as RightPanelType
+}
+
+// ─── Backend error normalization (P2 B4) ─────────────────────────────────────
+
+/**
+ * 后端结构化错误帧的 wire format：Rust `PluginError::JsonRpcWithCode` 经
+ * `From<PluginError> for InvokeError` 序列化为带 `__pluginError` 标记的 JSON
+ * 对象；Tauri 原样 reject 该对象（字符串错误仍是原始字符串）。
+ */
+interface PluginErrorWire {
+  __pluginError: true
+  code?: number
+  message?: string
+  data?: unknown
+}
+
+/**
+ * 规范化后端调用错误（B4）：带 `__pluginError` 标记的对象 → SDK `PluginError`
+ * 实例（携带 code/data，供插件按业务错误码分支）；其余（字符串 / 普通 Error，
+ * 传输层错误与既有测试 mock）原样返回，既有契约不变。
+ */
+export function normalizePluginBackendError(err: unknown): unknown {
+  if (
+    err !== null &&
+    typeof err === 'object' &&
+    (err as { __pluginError?: unknown }).__pluginError === true
+  ) {
+    const frame = err as PluginErrorWire
+    return new PluginError(frame.message ?? String(err), {
+      code: frame.code,
+      data: frame.data,
+    })
+  }
+  return err
 }
 
 // ─── Panel request pipeline (P1.4) ───────────────────────────────────────────
@@ -232,7 +268,7 @@ export function createPluginPanelProps(
     // "plugin backend not found" which the panel can catch and treat
     // as a graceful-degradation path (e.g. show "backend unavailable"
     // UI) rather than crashing.
-    invokeBackend: async (command: string, args?: Record<string, unknown>) => {
+    invokeBackend: async <T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> => {
       // Backend IPC is opt-in. The Rust host would happily spawn a
       // subprocess for any plugin that calls this, but we cut the
       // call short here so a plugin without the `backend` grant
@@ -244,11 +280,14 @@ export function createPluginPanelProps(
       let success = true
       let errorMsg: string | undefined
       try {
-        return await invoke('invoke_plugin', { pluginId, command, args })
+        return (await invoke('invoke_plugin', { pluginId, command, args })) as T
       } catch (err) {
         success = false
-        errorMsg = String(err)
-        throw err
+        // B4：结构化错误帧（__pluginError）→ SDK PluginError，其余原样透传；
+        // PluginError.toString() 输出纯 message，遥测格式与旧字符串路径一致。
+        const normalized = normalizePluginBackendError(err)
+        errorMsg = String(normalized)
+        throw normalized
       } finally {
         // Record backend metrics for the diagnostics panel. Lazy-import
         // the telemetry module so this file stays free of a hard
@@ -264,7 +303,7 @@ export function createPluginPanelProps(
       command: string,
       args: Record<string, unknown> | undefined,
       onChunk: (chunk: T) => void,
-      options?: { firstChunkTimeoutSecs?: number }
+      options?: InvokeBackendStreamOptions
     ): Promise<R> =>
       invokePluginBackendStream<T, R>(pluginId, command, args, onChunk, options),
     // Per-plugin persistent storage. `getPluginStorage` already caches
@@ -345,6 +384,7 @@ export function createPluginPanelProps(
     files: {
       createNote: (relPath: string, content: string) => pluginFilesCreateNote(pluginId, relPath, content),
       listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
+      read: (relPath: string) => pluginFilesRead(pluginId, relPath),
     },
     // 安全存储（P1.5 / ADR-0003）：加密落盘，独立 'secure-storage' 权限门控，
     // 加解密内聚在 Rust 侧，此处仅权限检查 + IPC 转发。
@@ -416,18 +456,21 @@ export function createToolbarButtonProps(
     size,
     isActive,
     pluginId,
-    invokeBackend: async (command: string, args?: Record<string, unknown>) => {
+    invokeBackend: async <T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> => {
       assertPermission(pluginId, 'backend', `invoke backend command "${command}"`)
       const { invoke } = await import('@tauri-apps/api/core')
       const start = performance.now()
       let success = true
       let errorMsg: string | undefined
       try {
-        return await invoke('invoke_plugin', { pluginId, command, args })
+        return (await invoke('invoke_plugin', { pluginId, command, args })) as T
       } catch (err) {
         success = false
-        errorMsg = String(err)
-        throw err
+        // B4：结构化错误帧（__pluginError）→ SDK PluginError，其余原样透传；
+        // PluginError.toString() 输出纯 message，遥测格式与旧字符串路径一致。
+        const normalized = normalizePluginBackendError(err)
+        errorMsg = String(normalized)
+        throw normalized
       } finally {
         const durationMs = performance.now() - start
         void import('./plugin-telemetry').then(({ recordBackendMetric }) => {
@@ -440,7 +483,7 @@ export function createToolbarButtonProps(
       command: string,
       args: Record<string, unknown> | undefined,
       onChunk: (chunk: T) => void,
-      options?: { firstChunkTimeoutSecs?: number }
+      options?: InvokeBackendStreamOptions
     ): Promise<R> =>
       invokePluginBackendStream<T, R>(pluginId, command, args, onChunk, options),
     store: getPluginStorage(pluginId),
@@ -520,6 +563,7 @@ export function createToolbarButtonProps(
     files: {
       createNote: (relPath: string, content: string) => pluginFilesCreateNote(pluginId, relPath, content),
       listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
+      read: (relPath: string) => pluginFilesRead(pluginId, relPath),
     },
     // 安全存储：同面板版本，独立 'secure-storage' 权限门控。
     secureStorage: {

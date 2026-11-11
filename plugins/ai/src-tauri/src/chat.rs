@@ -199,8 +199,11 @@ pub fn stream_chat(
     }
 }
 
-/// 读循环唤醒间隔（毫秒）：ureq 读超时到期后返回，用于周期性检查停止标志。
-const READ_WAKE_MS: u64 = 1000;
+/// 等待响应头（首字节 TTFB）上限（秒）：思考型模型生成首 token 前可静默
+/// 数十秒。ureq 2.x 仅支持 agent 级 timeout_read（无 per-request / reader
+/// 分离 API），该值同时是读循环的唤醒间隔——停止响应性由读循环每个
+/// chunk 到达后的 cancel 检查兜底（见 attempt_stream）。
+const TTFB_TIMEOUT_SECS: u64 = 60;
 
 /// 单次流式尝试：建连 → 响应分类 → 读循环（SSE 解析 + 通知帧输出）。
 /// 成功返回后由 with_retry 判定；读循环内任何错误都是 Fatal（不可重试）。
@@ -213,9 +216,11 @@ fn attempt_stream(
     if cancel.load(Ordering::Relaxed) {
         return Attempt::Fatal(STOPPED.to_string());
     }
-    // B7：读超时唤醒机制——每 READ_WAKE_MS 醒一次检查停止标志（AgentBuilder 才有 timeout_read）
+    // 读超时双职责（ureq 2.x 仅 agent 级 timeout_read，无法分离两段）：既是
+    // 等待响应头（TTFB）上限，也是读循环唤醒间隔。旧值 1s 会把思考型模型
+    // 的首字节静默误判为连接失败并触发重试（2026-11-11 回归）。
     let agent = ureq::AgentBuilder::new()
-        .timeout_read(std::time::Duration::from_millis(READ_WAKE_MS))
+        .timeout_read(std::time::Duration::from_secs(TTFB_TIMEOUT_SECS))
         .build();
     let mut request = agent.post(&built.url);
     for (k, v) in &built.headers {
@@ -249,6 +254,11 @@ fn attempt_stream(
                             StreamTick::Error(m) => return Attempt::Fatal(m),
                             StreamTick::Ignore => {}
                         }
+                    }
+                    // 有数据到达说明流活跃：此处检查停止标志使停止即时生效，
+                    // 不再依赖读超时唤醒（TTFB_TIMEOUT_SECS 间隔过长）
+                    if cancel.load(Ordering::Relaxed) {
+                        return Attempt::Fatal(STOPPED.to_string());
                     }
                 }
                 // 64KB 上限：该行已丢弃，自愈后继续读（与内置实现语义一致）
@@ -368,5 +378,55 @@ mod tests {
             parse_sse_data("openai", "{not json"),
             StreamTick::Error(_)
         ));
+    }
+
+    /// 慢 TTFB mock 上游：收到请求后延迟 `delay` 才返回 status line + SSE 流
+    /// （模拟思考型模型「首字节前长时间静默」）。
+    fn spawn_slow_ttfb_server(delay: std::time::Duration) -> String {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            // 单次尝试：accept 一次即可（重试在外层 with_retry）
+            let (mut sock, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 4096];
+            let _ = sock.read(&mut buf); // 读掉请求头（不解析）
+            std::thread::sleep(delay);
+            let body = concat!(
+                r#"data: {"choices":[{"delta":{"content":"早"}}]}"#,
+                "\n\n",
+                "data: [DONE]\n\n"
+            );
+            let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n{body}");
+            let _ = sock.write_all(resp.as_bytes());
+        });
+        format!("http://{addr}")
+    }
+
+    /// 回归（2026-11-11）：等待响应头（首字节）不得被读唤醒间隔约束。
+    /// TTFB 2.5s（> 旧 1s 读超时）必须仍能成功收流，而不是误报「连接失败」。
+    #[test]
+    fn slow_ttfb_stream_still_succeeds() {
+        let base = spawn_slow_ttfb_server(std::time::Duration::from_millis(2500));
+        let cfg = ProviderConfig {
+            provider: "openai".into(),
+            model_id: "test-model".into(),
+            base_url: base,
+            api_key: "k".into(),
+        };
+        let built = provider::build_request(&cfg, &[json!({"role": "user", "content": "hi"})]);
+        let mut chunks: Vec<String> = Vec::new();
+        let mut emit = |_event: &str, v: Value| {
+            if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
+                chunks.push(t.to_string());
+            }
+        };
+        let cancel = AtomicBool::new(false);
+        let result = attempt_stream(&built, "openai", &mut emit, &cancel);
+        assert!(
+            matches!(result, Attempt::Success(())),
+            "慢 TTFB 不应导致流失败: {result:?}"
+        );
+        assert_eq!(chunks, vec!["早".to_string()]);
     }
 }

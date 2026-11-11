@@ -45,15 +45,23 @@ impl JsonRpcResponse {
         let id = v.get("id")?.as_u64()?;
         if let Some(err) = v.get("error") {
             // Mirror the JSON-RPC error shape so the plugin can return
-            // a meaningful message. We don't surface the `code` to the
-            // TS side because the IPC layer only carries a string.
+            // a meaningful message. B4：code/data 随 JsonRpcWithCode 透传
+            // 给前端（结构化 PluginError），不再丢弃。
             let message = err
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("plugin error");
+            // JSON-RPC 规范要求 error 必带 code；缺失时兜底 0 保持宽松解析。
+            let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
+            // data 为可选扩展字段，缺省 None。
+            let data = err.get("data").cloned();
             Some(Self {
                 id,
-                body: Err(PluginError::JsonRpc(message.to_string())),
+                body: Err(PluginError::JsonRpcWithCode {
+                    code,
+                    message: message.to_string(),
+                    data,
+                }),
             })
         } else if v.get("result").is_some() {
             // A JSON-RPC response must have exactly one of `result`
@@ -863,6 +871,37 @@ mod tests {
         .expect("parse");
         assert_eq!(r.id, 7);
         assert_eq!(r.body.unwrap_err().to_string(), "method not found");
+    }
+
+    /// B4：error 帧的 code/data 必须保留进 JsonRpcWithCode（前端据此分支业务错误）。
+    #[test]
+    fn jsonrpc_parse_error_preserves_code_and_data() {
+        let r = JsonRpcResponse::parse(
+            r#"{"jsonrpc":"2.0","id":9,"error":{"code":1001,"message":"too large","data":{"max":5242880}}}"#,
+        )
+        .expect("parse");
+        assert_eq!(r.id, 9);
+        match r.body {
+            Err(PluginError::JsonRpcWithCode { code, message, data }) => {
+                assert_eq!(code, 1001);
+                assert_eq!(message, "too large");
+                assert_eq!(data, Some(serde_json::json!({"max": 5242880})));
+            }
+            other => panic!("expected JsonRpcWithCode, got {other:?}"),
+        }
+
+        // 无 data 字段：缺省 None；无 code 字段：兜底 0（宽松解析不丢弃帧）。
+        let r = JsonRpcResponse::parse(
+            r#"{"jsonrpc":"2.0","id":10,"error":{"message":"no code"}}"#,
+        )
+        .expect("parse");
+        match r.body {
+            Err(PluginError::JsonRpcWithCode { code, data, .. }) => {
+                assert_eq!(code, 0);
+                assert_eq!(data, None);
+            }
+            other => panic!("expected JsonRpcWithCode, got {other:?}"),
+        }
     }
 
     #[test]

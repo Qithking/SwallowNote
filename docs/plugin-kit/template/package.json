@@ -1,0 +1,24 @@
+{
+  "name": "__NPM_NAME__",
+  "version": "0.1.0",
+  "description": "__PLUGIN_DESCRIPTION__",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "swallow-plugin build",
+    "package": "swallow-plugin package",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@swallow-note/plugin-sdk": "file:__SDK_DEP_PATH__",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@swallow-note/plugin-kit": "file:__KIT_DEP_PATH__",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-10T03:14:09Z",
+  "updated_at": "2026-11-11T13:05:28Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -97,16 +97,16 @@
         "markdown"
       ],
       "download_url": "./secret-disk/com.swallownote.secret-disk.zip",
-      "sha256": "9ec4fda4bebf4f893919646a7c3f6b16d443328a3efc820b6db11b670f1056bc",
+      "sha256": "9e9278edc141be499782705a7236706eab41e316ce9c3a73e9c24533f9ca3bb7",
       "changelog": "初版发布：加密的私有笔记空间，支持 SQLite 加密存储、密码管理、主编辑器打开密盘笔记、文件树右键操作及安全增强",
-      "published_at": "2026-10-20T13:17:51Z",
+      "published_at": "2026-11-10T06:29:01Z",
       "dependencies": [],
-      "signature_b64": "hqEZ6QhwQK7IJvbsFwwn0TBEJWIPuEYIa2dL2Y+iczO6INycx48ZrqmHG1No6FLDDeNwXd3jiJIeR559mrMOAw=="
+      "signature_b64": "SjuWVczpkyAoXUCLGj9ydklK5jBYViaT6eb2Gir7H59LnyKl9QeKovcwvXdmT6Pyd1Ld7x8tABey9LakzDdyDw=="
     },
     {
       "id": "com.swallownote.ai",
       "name": "AI 助手",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "description": "与 AI 对话并操作笔记：智能问答、内容生成、笔记整理。支持多会话、角色动作、就地应用与多模型接入。",
       "author": "SwallowNote",
       "tags": [
@@ -117,12 +117,12 @@
         "writing"
       ],
       "download_url": "./ai/com.swallownote.ai.zip",
-      "sha256": "898900eeb1eddf20bc5e4ddb183c2d6d6beeced261b5d26e489aba46a061b950",
+      "sha256": "034e532ac437a6a9fc873baffbd1f0a2bd717da7d4b4ba78ab56e9806c913046",
       "changelog": "初版发布：多会话对话与流式输出、编辑器右键 9 种角色动作、就地应用、@文件引用、多 Provider 接入（OpenAI 兼容 / Anthropic / Google / Ollama）、模型管理与密钥安全存储、历史数据迁移",
-      "published_at": "2026-11-10T03:13:38Z",
+      "published_at": "2026-11-11T13:05:16Z",
       "dependencies": [],
       "min_host_version": "0.1.0",
-      "signature_b64": "0F5xCaIiSX32WQqEJ24N4ef13+xLLy6Yz81i6dKoDUg8WAxTCjKpvMBoYhojoElQw4dxQM4QbUg+TSPxEUBPCA=="
+      "signature_b64": "mfkjs/xDUrctZzE7ecd/uk/pb29QZQxH0Ieo4LvNzeaQFrERTOyC/Z9Bk2MNTHJaZhmjK9xN6CrB3kf2Mw7sAw=="
     }
   ],
   "pubkey_b64": "LCoNiX5mUrSXX3zq3p+ylQnRi+xKafJ//iQFrnGdif8="

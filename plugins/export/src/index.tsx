@@ -15,6 +15,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import type { PluginManifest, PluginPanelProps, ToolbarButtonProps } from '@swallow-note/plugin-sdk'
+import { PluginError } from '@swallow-note/plugin-sdk'
 // 导出 setHost 供宿主运行时安装 SDK overrides
 export { setHost } from '@swallow-note/plugin-sdk'
 import { save } from '@tauri-apps/plugin-dialog'
@@ -68,38 +69,6 @@ function readLocale(): string {
     return navigator.language
   }
   return 'zh-CN'
-}
-
-/**
- * Pull a JSON-RPC `code` and human-readable `message` out of an
- * unknown thrown value. The host's `invoke_plugin` wraps the
- * backend's JSON-RPC error response into a JS error whose
- * `message` is exactly the backend's `display_with_code()`
- * output, e.g. `"[ERR_CODE=1001] Markdown too large: 5242880
- * bytes (max 5242880)"`. The host drops the structured `code`
- * field, so the backend has to embed the code in the message
- * string (see `ExportError::display_with_code` in convert.rs).
- *
- * We prefer parsing the `[ERR_CODE=…]` tag over substring
- * matching the human string so the toast stays correct even
- * when translations of the error message change.
- *
- * Returns `code: 0` when the error is not JSON-RPC shaped (e.g.
- * a frontend-only exception from `domToCanvas`); callers fall
- * through to the format-specific default toast in that case.
- */
-function extractErrCode(err: unknown): { code: number; message: string } {
-  const raw = err instanceof Error ? err.message : String(err)
-  const codeMatch = raw.match(/^\[ERR_CODE=(-?\d+)\]\s*([\s\S]*)$/)
-  if (codeMatch) {
-    const code = Number.parseInt(codeMatch[1], 10)
-    return {
-      code: Number.isFinite(code) ? code : 0,
-      message: codeMatch[2].trim(),
-    }
-  }
-  // 回退：无前缀的旧消息（前端错误、宿主传输错误等）
-  return { code: 0, message: raw }
 }
 
 // ─── 图标组件 ───
@@ -993,13 +962,11 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
         await invoke('write_binary_file', { path: filePath, data: b64 })
         toast.success(strings.exportSuccess, { id: toastId })
       } catch (err) {
-        // Branch on the JSON-RPC `code` field (extracted from
-        // the host's wrapped error) rather than substring
-        // matching the human-readable message. The codes are
-        // documented in `RPC_ERR_*` and `ERR_*` constants near
-        // the top of this file.
-        const { code, message } = extractErrCode(err)
-        if (code === ERR_MARKDOWN_TOO_LARGE) {
+        // B4：宿主透传 JSON-RPC error 的 code/data，后端错误 reject 为 SDK
+        // `PluginError`（携带结构化 code），按 instanceof 分支业务错误码；
+        // 传输层/前端错误仍是普通 Error 或字符串，走默认 toast。文案保持不变。
+        const message = err instanceof Error ? err.message : String(err)
+        if (err instanceof PluginError && err.code === ERR_MARKDOWN_TOO_LARGE) {
           toast.error(strings.tooLarge, { id: toastId, description: message })
         } else if (format === 'pdf') {
           toast.error(strings.pdfExportFailed, { id: toastId, description: message })

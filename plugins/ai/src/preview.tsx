@@ -77,16 +77,17 @@ export function Preview() {
     close: () => setActive(false),
     // standalone 无 openPluginPanel 请求
     pendingRequest: null,
-    invokeBackend: async (cmd, args) => {
+    // B1 泛型签名：standalone mock 显式泛型，内部结果按调用方期望类型断言返回
+    invokeBackend: async <T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
       console.warn('[preview] invokeBackend 内存 mock', cmd, args)
-      if (cmd === 'getSetting') return { value: (settingsMap.get(String(args?.key)) as string | null) ?? null }
+      if (cmd === 'getSetting') return { value: (settingsMap.get(String(args?.key)) as string | null) ?? null } as T
       if (cmd === 'setSetting') {
         settingsMap.set(String(args?.key), args?.value)
-        return null
+        return null as T
       }
-      if (cmd === 'listModels') return { models: [] }
-      if (cmd === 'listSessions') return { sessions: [] }
-      return null
+      if (cmd === 'listModels') return { models: [] } as T
+      if (cmd === 'listSessions') return { sessions: [] } as T
+      return null as T
     },
     invokeBackendStream: async <T, R>(_cmd: string, _args?: Record<string, unknown>, _onChunk?: (chunk: T) => void) => {
       console.warn('[preview] invokeBackendStream 后端未接入，调用被丢弃')

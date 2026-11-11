@@ -6,7 +6,7 @@ import { useMemo } from 'react'
 import { Sparkles } from 'lucide-react'
 import { ChatPanel } from './chat/ChatPanel'
 import type { AiServices } from './chat/hooks'
-import { registerRoleActions } from './actions/registerActions'
+import { registerRoleActions, registerFileTreeAction } from './actions/registerActions'
 import manifestJson from '../manifest.json'
 
 /** 标题栏入口图标 */
@@ -39,8 +39,9 @@ const manifest = {
   // 即使为空也触发 runPluginLifecycleHook 执行 setHost，
   // 使 SDK 的 openEditorTab 等 API 能转发到宿主实现
   onLoad: () => {
-    // 注册编辑器右键 9 角色动作（context-menu 权限；插件禁用/卸载时宿主自动清理）
+    // 注册编辑器右键 9 角色动作 + 文件树「添加到 AI 对话」（context-menu/files 权限；插件禁用/卸载时宿主自动清理）
     registerRoleActions()
+    registerFileTreeAction()
   },
 } as PluginManifest
 

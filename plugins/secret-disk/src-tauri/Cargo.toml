@@ -16,3 +16,6 @@ serde_json = "1"
 zeroize = { version = "1", features = ["alloc"] }
 libc = "0.2"
 uuid = { version = "1", features = ["v4"] }
+# 宿主插件 RPC 骨架 crate（仓库内 docs/plugin-rpc，path 依赖不引入 workspace；
+# Cargo 相对 src-tauri/ 解析，故比 npm file: 多一级 ../）
+swallow-plugin-rpc = { path = "../../../docs/plugin-rpc" }

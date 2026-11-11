@@ -1,33 +1,47 @@
 /** 插件系统类型定义：清单、生命周期 hook、运行时定义、市场索引等。 */
+// B7 类型单源：清单/权限/事件/上下文等宿主与插件共享的类型一律从
+// @swallow-note/plugin-sdk re-export，宿主侧不再手工双写（防类型漂移）。
 
 import type { ReactNode, ComponentType } from 'react'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
+import type {
+  IconPosition,
+  ContentPosition,
+  ContextMenuLocation,
+  PluginPermission,
+  PluginEvent,
+  PluginEventPayloadMap,
+  PluginEventHandler,
+  PluginLogger,
+  PluginContext,
+  PluginLifecycleHook,
+  PluginStorage,
+  PluginEventBus,
+  PluginDependency,
+  PluginManifest,
+  InvokeBackendStreamOptions,
+} from '@swallow-note/plugin-sdk'
 
-// 枚举类型
+// 单源 re-export：宿主侧直接引用 SDK 类型（B7 防手工双写漂移）
+export type {
+  IconPosition,
+  ContentPosition,
+  ContextMenuLocation,
+  PluginPermission,
+  PluginEvent,
+  PluginEventPayloadMap,
+  PluginEventHandler,
+  PluginLogger,
+  PluginContext,
+  PluginLifecycleHook,
+  PluginStorage,
+  PluginEventBus,
+  PluginDependency,
+  PluginManifest,
+  InvokeBackendStreamOptions,
+}
 
-/** 插件图标显示位置 */
-export type IconPosition = 'sidebar' | 'editorToolbar' | 'titleBar'
-
-/** 插件面板显示位置 */
-export type ContentPosition = 'leftPanel' | 'rightPanel' | 'fullPanel' | 'editorArea'
-
-// 权限类型
-
-/** 插件权限类型，清单中声明，安装或设置时授权 */
-export type PluginPermission =
-  | 'storage'           // 持久化存储
-  | 'events'            // 订阅宿主事件
-  | 'context-menu'      // 注册右键菜单项
-  | 'backend'           // Rust 后端 IPC
-  | 'filesystem-read'   // 读文件系统
-  | 'filesystem-write'  // 写文件系统
-  | 'network'           // 网络请求
-  | 'clipboard'         // 访问剪贴板
-  | 'notifications'     // 显示通知
-  | 'editor'            // 注册自定义编辑器
-  | 'editor-write'      // 编辑器写操作（插入/替换内容）
-  | 'files'             // 工作区文件 API（createNote/listWorkspace）
-  | 'secure-storage'    // 加密安全存储（P1.5，API 密钥等敏感值）
+// 权限类型（宿主 UI 元数据，运行时部分）
 
 /** 权限元数据（UI 展示用） */
 export interface PermissionInfo {
@@ -59,160 +73,7 @@ export const PLUGIN_PERMISSIONS: PermissionInfo[] = [
   { permission: 'secure-storage' },
 ]
 
-// 事件总线类型
-
-/** 宿主事件，每个事件有强类型 payload */
-export type PluginEvent =
-  | 'note:open'
-  | 'note:close'
-  | 'note:save'
-  | 'note:change'
-  | 'theme:change'
-  | 'locale:change'
-  | 'settings:change'
-  | 'app:ready'
-  | 'app:exit'
-  | 'plugin-settings:change'
-  | 'editor:registered'
-  | 'editor:unregistered'
-
-/** 各事件 payload 类型，新增事件时添加分支 */
-export interface PluginEventPayloadMap {
-  'note:open': { noteId: string; path: string }
-  'note:close': { noteId: string; path: string }
-  'note:save': { noteId: string; path: string }
-  'note:change': { noteId: string; path: string; content: string }
-  'theme:change': { theme: string }
-  'locale:change': { locale: string }
-  'settings:change': { key: string; value: unknown }
-  'app:ready': Record<string, never>
-  'app:exit': Record<string, never>
-  'plugin-settings:change': { pluginId: string; values: Record<string, unknown> }
-  'editor:registered': { pluginId: string; extension: string }
-  'editor:unregistered': { pluginId: string; extension: string }
-}
-
-/** 事件订阅 handler 签名 */
-export type PluginEventHandler<E extends PluginEvent = PluginEvent> = (
-  payload: PluginEventPayloadMap[E]
-) => void
-
-// 插件清单（来自 index.js）
-
-/** 插件 logger 接口：5 级日志方法，自动带 plugin:<pluginId> source 前缀 */
-export interface PluginLogger {
-  trace(message: string, ...args: unknown[]): void
-  debug(message: string, ...args: unknown[]): void
-  info(message: string, ...args: unknown[]): void
-  warn(message: string, ...args: unknown[]): void
-  error(message: string, ...args: unknown[]): void
-}
-
-/** 运行时上下文，传递给生命周期 hook */
-export interface PluginContext {
-  pluginId: string
-  pluginPath: string
-  invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
-  /** 统一日志通道，自动带 plugin:<pluginId> source 前缀 */
-  log: PluginLogger
-}
-
-/** 生命周期 hook 签名，可同步或异步 */
-export type PluginLifecycleHook = (context: PluginContext) => void | Promise<void>
-
-/** 插件持久化存储，按插件 id 隔离键空间 */
-export interface PluginStorage {
-  get<T = unknown>(key: string): Promise<T | null>
-  set<T = unknown>(key: string, value: T): Promise<void>
-  delete(key: string): Promise<void>
-  clear(): Promise<void>
-  /** 列出键，用于调试和导出 */
-  keys(): Promise<string[]>
-  /** keys(): 列出键。entries(): 返回 [{key, size}] 按 size 降序。 */
-  entries(): Promise<Array<{ key: string; size: number }>>
-}
-
-/** 面板事件订阅 API，on 返回取消函数 */
-export interface PluginEventBus {
-  on<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): () => void
-  off<E extends PluginEvent>(event: E, handler: PluginEventHandler<E>): void
-  /** 移除该插件的所有监听器（卸载时调用） */
-  removeAllListenersForPlugin(pluginId: string): void
-}
-
-/** 插件间依赖声明。version 为 npm 风格 semver 范围。 */
-export interface PluginDependency {
-  /** 唯一插件标识符 */
-  id: string
-  /** semver 范围，空或 * 匹配任意版本 */
-  version: string
-}
-
-/** 插件 index.js 导出的原始清单。 */
-export interface PluginManifest {
-  /** 唯一插件标识符 */
-  id: string
-  /** 显示名 */
-  name: string
-  /** 插件描述 */
-  description?: string
-  /** 版本号（建议 semver） */
-  version?: string
-  /** 作者名 */
-  author?: string
-  /** ISO-8601 发布日期 */
-  publishedAt?: string
-  /** 图标位置，无 UI 的插件可省略 */
-  iconPosition?: IconPosition
-  /** 面板位置，仅贡献编辑器组件时可省略 */
-  contentPosition?: ContentPosition
-  /** 图标栏排序（小者靠前），默认 100 */
-  order?: number
-  /** 是否启用，默认 true */
-  enabled?: boolean
-  /** 图标，可为组件或 ReactNode，省略则不渲染 */
-  icon?: ComponentType<{ size?: number }> | ReactNode
-  /** 面板内容，可为组件或 ReactNode，省略则不挂载 */
-  panel?: ComponentType<PluginPanelProps> | ReactNode
-  /** 可选自定义工具栏按钮组件。 */
-  toolbarButton?: ComponentType<ToolbarButtonProps> | ReactNode
-  /** 设置 UI 组件，在弹窗中渲染，用 close 关闭 */
-  settings?: ComponentType<PluginPanelProps> | ReactNode
-  /** 可渲染的文件扩展名（带点小写），同一扩展名仅允许一个插件注册 */
-  editorFileExtensions?: string[]
-  /** 编辑器组件，接收 content/onChange */
-  editorComponent?: ComponentType<{
-    content: string
-    onChange: (content: string) => void
-  }> | ReactNode
-  /** 插件所需权限。 */
-  permissions?: PluginPermission[]
-  /** 依赖的其他插件。 */
-  dependencies?: PluginDependency[]
-  /** 贡献给命令面板的 id 列表。 */
-  commandPalette?: string[]
-  /** 用户 opt-in 的自动更新标志，持久化在 localStorage。 */
-  autoUpdate?: boolean
-  /** 插件要求的最低宿主版本（semver），未声明则不校验。 */
-  minHostVersion?: string
-  // 生命周期 hook（均可选）
-  /** 插件模块加载后调用一次 */
-  onLoad?: PluginLifecycleHook
-  /** 插件注销前调用一次 */
-  onUnload?: PluginLifecycleHook
-  /** 插件切换为启用时调用一次 */
-  onEnable?: PluginLifecycleHook
-  /** 插件切换为禁用时调用一次 */
-  onDisable?: PluginLifecycleHook
-  /** 面板组件挂载时调用 */
-  onMount?: PluginLifecycleHook
-  /** 面板组件卸载时调用 */
-  onUnmount?: PluginLifecycleHook
-  /** 面板变为活动/可见时调用 */
-  onActivate?: PluginLifecycleHook
-  /** 面板不再活动/可见时调用 */
-  onDeactivate?: PluginLifecycleHook
-}
+// 插件清单（来自 index.js）：PluginManifest / PluginContext 等已由 SDK re-export（B7 单源）
 
 // 运行时插件定义（存储在 plugin store 中）
 
@@ -412,6 +273,8 @@ export interface PluginFilesApi {
   createNote(relPath: string, content: string): Promise<void>
   /** 递归列出工作区内 Markdown 文件（正斜杠相对路径）；query 大小写不敏感子串过滤 */
   listWorkspace(query?: string): Promise<string[]>
+  /** 按工作区相对路径读取文本文件内容（UTF-8），超长截断并附加标记 */
+  read(relPath: string): Promise<string>
 }
 
 /**
@@ -456,14 +319,14 @@ export interface PluginPanelProps {
    * 面板挂载后宿主自动清空，下次打开不再重复收到。
    */
   pendingRequest: unknown
-  /** 调用该插件的后端命令，命令名相对于插件后端命名空间 */
-  invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 调用该插件的后端命令，命令名相对于插件后端命名空间；T 为后端返回的 payload 类型 */
+  invokeBackend<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>
   /** 调用插件后端流式命令：onChunk 逐块回调增量，Promise 以最终响应帧结果终结 */
   invokeBackendStream: <T = unknown, R = unknown>(
     command: string,
     args: Record<string, unknown> | undefined,
     onChunk: (chunk: T) => void,
-    options?: { firstChunkTimeoutSecs?: number }
+    options?: InvokeBackendStreamOptions
   ) => Promise<R>
   /** 插件隔离的持久化键值存储 */
   store: PluginStorage
@@ -503,14 +366,14 @@ export interface ToolbarButtonProps {
   isActive: boolean
   /** 插件 ID */
   pluginId: string
-  /** 调用插件后端命令 */
-  invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  /** 调用插件后端命令；T 为后端返回的 payload 类型 */
+  invokeBackend<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>
   /** 调用插件后端流式命令，参见 {@link PluginPanelProps.invokeBackendStream} */
   invokeBackendStream: <T = unknown, R = unknown>(
     command: string,
     args: Record<string, unknown> | undefined,
     onChunk: (chunk: T) => void,
-    options?: { firstChunkTimeoutSecs?: number }
+    options?: InvokeBackendStreamOptions
   ) => Promise<R>
   /** 插件隔离的持久化存储 */
   store: PluginStorage
@@ -570,13 +433,7 @@ export const emptyRegistry: PluginRegistry = {
 
 // 右键菜单贡献
 
-/** 插件可贡献右键菜单项的位置 */
-export type ContextMenuLocation =
-  | 'fileTree'        // 文件树中右键文件/文件夹
-  | 'fileTreeEmpty'   // 文件树空白处右键
-  | 'editor'          // 编辑器内右键
-  | 'tab'             // 右键 tab
-  | 'tabBarEmpty'     // tab 栏空白处右键
+// 插件可贡献右键菜单项的位置：ContextMenuLocation 已由 SDK re-export（B7 单源）
 
 /** 传给 when 谓词的上下文。 */
 export interface ContextMenuContext {

@@ -7,6 +7,7 @@
  * invoke 的 Promise 仍由响应帧终结（返回最终结果 R）。
  */
 import { assertPermission } from './plugin-permission-guard'
+import { normalizePluginBackendError } from './plugin-utils'
 import { logger } from './logger'
 
 /** 经 Channel 推送到前端的事件载荷（与 Rust 侧 StreamEvent 对齐）。 */
@@ -67,8 +68,11 @@ export async function invokePluginBackendStream<T = unknown, R = unknown>(
     })) as R
   } catch (err) {
     success = false
-    errorMsg = String(err)
-    throw err
+    // B4：响应帧 error 经 Rust 侧为结构化错误帧（__pluginError）→ SDK
+    // PluginError（携带 code/data）；通知帧 error 语义仍由响应帧终结。
+    const normalized = normalizePluginBackendError(err)
+    errorMsg = String(normalized)
+    throw normalized
   } finally {
     const durationMs = performance.now() - start
     void import('./plugin-telemetry').then(({ recordBackendMetric }) => {

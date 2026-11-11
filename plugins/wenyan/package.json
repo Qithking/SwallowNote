@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:backend": "bash build.sh release",
-    "package": "bash package.sh",
+    "build": "swallow-plugin build",
+    "package": "swallow-plugin package",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -28,6 +27,7 @@
     "tailwind-merge": "^2.5.0"
   },
   "devDependencies": {
+    "@swallow-note/plugin-kit": "file:../../docs/plugin-kit",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.0",

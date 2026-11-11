@@ -94,6 +94,20 @@ export function ModelSettings({ services, models, onSave, onDelete, onSetDefault
     }
   }
 
+  // Esc 关闭：表单态先返回列表避免丢输入，列表态关闭弹框（对齐宿主 Dialog 键盘行为）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (editing) {
+        setEditing(null)
+      } else {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editing, onClose])
+
   return (
     <Overlay>
       <div style={cardStyle}>
@@ -289,34 +303,46 @@ function providerLabel(p: string): string {
 
 function Overlay({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 30,
-        background: 'rgba(0,0,0,0.25)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 12,
-      }}
-    >
-      {children}
-    </div>
+    <>
+      {/* 进场动画 keyframes：前缀命名防与宿主全局样式冲突 */}
+      <style>{`
+        @keyframes swallow-ai-ms-fade-in { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes swallow-ai-ms-zoom-in { from { opacity: 0; transform: scale(0.95) } to { opacity: 1; transform: scale(1) } }
+      `}</style>
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 30,
+          // 对齐宿主 Dialog 遮罩（bg-black/80）
+          background: 'rgba(0,0,0,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 12,
+          animation: 'swallow-ai-ms-fade-in 0.15s ease-out',
+        }}
+      >
+        {children}
+      </div>
+    </>
   )
 }
 
 const cardStyle: CSSProperties = {
-  background: 'var(--bg-primary, #fff)',
+  // 对齐宿主 Dialog：白底卡片 + 边框 + zoom/fade 进场
+  background: 'var(--bg-secondary, #fff)',
+  border: '1px solid var(--border-color, #e5e5e5)',
   borderRadius: 12,
   padding: 14,
   width: '100%',
   maxHeight: '100%',
   overflowY: 'auto',
   boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
+  animation: 'swallow-ai-ms-zoom-in 0.2s ease-out',
 }
 const headRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }
-const modelRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4, padding: '6px 0', borderBottom: '1px solid var(--border-color, #e5e5ea)' }
+const modelRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 4, padding: '6px 0', borderBottom: '1px solid var(--border-color, #e5e5e5)' }
 const labelStyle: CSSProperties = { display: 'block', fontSize: 11, color: 'var(--text-secondary, #6e6e73)', marginBottom: 3 }
 const hintStyle: CSSProperties = { display: 'block', fontSize: 10, color: 'var(--text-secondary, #6e6e73)', marginTop: 2 }
 const errorStyle: CSSProperties = { color: '#e5484d', fontSize: 12, margin: '8px 0 0' }
@@ -325,7 +351,7 @@ const errorStyle: CSSProperties = { color: '#e5484d', fontSize: 12, margin: '8px
 const behaviorStyle: CSSProperties = {
   marginTop: 14,
   paddingTop: 12,
-  borderTop: '1px solid var(--border-color, #d2d2d7)',
+  borderTop: '1px solid var(--border-color, #e5e5e5)',
 }
 const behaviorTitleStyle: CSSProperties = { fontSize: 12, fontWeight: 500, marginBottom: 6 }
 const behaviorRowStyle: CSSProperties = {
@@ -346,8 +372,9 @@ const inputStyle: CSSProperties = {
   padding: '6px 8px',
   fontSize: 12,
   borderRadius: 6,
-  border: '1px solid var(--border-color, #d2d2d7)',
-  background: 'var(--bg-primary, #fff)',
+  border: '1px solid var(--border-color, #e5e5e5)',
+  // 对齐宿主 Input（bg-transparent）：白卡片上透明底描边
+  background: 'transparent',
   color: 'var(--text-primary, #1d1d1f)',
   boxSizing: 'border-box',
 }
@@ -370,12 +397,13 @@ const primaryBtnStyle: CSSProperties = {
   padding: '6px 12px',
   fontSize: 12,
   cursor: 'pointer',
-  background: 'var(--accent-color, #0a84ff)',
+  background: 'var(--theme-color, #0a84ff)',
   color: '#fff',
 }
 const secondaryBtnStyle: CSSProperties = {
   ...primaryBtnStyle,
-  background: 'var(--bg-secondary, #f5f5f7)',
+  // 白卡片上的次按钮用宿主外壳灰，避免白底不可见
+  background: 'var(--bg-primary, #f5f5f7)',
   color: 'var(--text-primary, #1d1d1f)',
 }
 
@@ -386,8 +414,9 @@ function DefaultBadge({ children }: { children: React.ReactNode }) {
         fontSize: 10,
         padding: '1px 5px',
         borderRadius: 4,
-        background: 'rgba(10,132,255,0.12)',
-        color: 'var(--accent-color, #0a84ff)',
+        // 主题色淡底（color-mix 从 --theme-color 派生，不再硬编码蓝色）
+        background: 'color-mix(in srgb, var(--theme-color, #0a84ff) 12%, transparent)',
+        color: 'var(--theme-color, #0a84ff)',
         flexShrink: 0,
       }}
     >

@@ -49,8 +49,9 @@ import {
   pluginEditorReplaceContent,
   pluginFilesCreateNote,
   pluginFilesListWorkspace,
+  pluginFilesRead,
 } from './plugin-write-api'
-import { openPluginPanel } from './plugin-utils'
+import { normalizePluginBackendError, openPluginPanel } from './plugin-utils'
 import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
 import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
 import { logger } from './logger'
@@ -110,8 +111,8 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       assertPermission(pluginId, 'events', `emit "${e}"`)
       pluginEventBus.emit(e, p)
     },
-    // invokeBackend 经 SDK 路径调用。
-    invokeBackend: async (cmd, args) => {
+    // invokeBackend 经 SDK 路径调用；B1 泛型化与 SDK 签名保持一致。
+    invokeBackend: async <T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
       // 熔断插件拒绝 IPC，防超时后后台钩子副作用
       if (isPluginTripped(pluginId)) {
         throw new Error(
@@ -124,11 +125,13 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       let success = true
       let errorMsg: string | undefined
       try {
-        return await invoke('invoke_plugin', { pluginId, command: cmd, args })
+        return (await invoke('invoke_plugin', { pluginId, command: cmd, args })) as T
       } catch (err) {
         success = false
-        errorMsg = String(err)
-        throw err
+        // B4：结构化错误帧（__pluginError）→ SDK PluginError，其余原样透传。
+        const normalized = normalizePluginBackendError(err)
+        errorMsg = String(normalized)
+        throw normalized
       } finally {
         const durationMs = performance.now() - start
         void import('./plugin-telemetry').then(({ recordBackendMetric }) => {
@@ -154,6 +157,7 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
     __files_createNote: (relPath: string, content: string) =>
       pluginFilesCreateNote(pluginId, relPath, content),
     __files_listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
+    __files_read: (relPath: string) => pluginFilesRead(pluginId, relPath),
     /** 打开面板管道（P1.4/P2.5）：模块级 openPluginPanel 强制绑定当前插件，payload 结构宿主不解析。 */
     __openPluginPanel: (payload: unknown) => openPluginPanel(pluginId, payload),
     /** 插件设置桥接（SQLite-backed），复用 storage 权限。 */

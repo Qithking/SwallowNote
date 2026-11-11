@@ -11,7 +11,7 @@
 import { assertPermission } from './plugin-permission-guard'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { PluginEditorSelection } from '@/types/plugin'
-import { listDirectory, pathExists, createFile, writeFile } from './tauri/file-ops'
+import { listDirectory, pathExists, createFile, writeFile, readFile } from './tauri/file-ops'
 
 /** 编辑器写事件回执的超时兜底：编辑器未挂载/无监听者场景 1s 后回执 false。 */
 const EDITOR_WRITE_REPLY_TIMEOUT_MS = 1000
@@ -125,4 +125,22 @@ export async function pluginFilesListWorkspace(pluginId: string, query?: string)
   if (!query) return files
   const q = query.toLowerCase()
   return files.filter((p) => p.toLowerCase().includes(q))
+}
+
+/** 文件读取上限（字符数）：防超大文件撑爆插件面板，超出截断并附加标记。 */
+const FILE_READ_MAX_CHARS = 200_000
+
+/** 文件 API：按工作区相对路径读取文本文件内容（UTF-8），超长截断。 */
+export async function pluginFilesRead(pluginId: string, relPath: string): Promise<string> {
+  assertPermission(pluginId, 'files', 'files.read')
+  const rootPath = useWorkspaceStore.getState().rootPath
+  if (!rootPath) {
+    throw new Error('[plugin-write-api] files.read: no workspace open')
+  }
+  const abs = resolveWorkspacePath(relPath, rootPath)
+  const content = await readFile(abs)
+  if (content.length > FILE_READ_MAX_CHARS) {
+    return `${content.slice(0, FILE_READ_MAX_CHARS)}\n\n[文件过大，已截断至前 ${FILE_READ_MAX_CHARS} 字符]`
+  }
+  return content
 }

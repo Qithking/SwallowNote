@@ -16,26 +16,16 @@
  * WeChat Official Accounts (公众号草稿箱).
  */
 /* eslint-disable react-refresh/only-export-components */
-import type { PluginManifest } from '@swallow-note/plugin-sdk'
+import { definePlugin } from '@swallow-note/plugin-sdk'
 export { setHost } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'
 import { WenyanIcon } from './WenyanIcon'
 import { WenyanToolbarButton } from './WenyanToolbarButton'
 
-const manifest: PluginManifest = {
-  id: 'com.swallownote.wenyan',
-  name: '文颜排版',
-  description: '使用文颜引擎将 Markdown 排版为微信公众号样式的富文本，支持推送到公众号草稿箱',
-  version: '0.1.6',
-  author: 'SwallowNote',
-  publishedAt: '2026-10-15T03:47:49Z',
-  iconPosition: 'editorToolbar',
-  contentPosition: 'editorArea',
-  order: 45,
-  enabled: true,
+// manifest.json 单一来源：静态字段（版本/权限等）只维护 manifest.json 一处，
+// 组件由运行时参数注入，不再内嵌 manifest 副本
+export default definePlugin(manifestJson, {
   icon: WenyanIcon,
   panel: () => null,
   toolbarButton: WenyanToolbarButton,
-  permissions: ['clipboard', 'storage', 'events', 'backend'],
-}
-
-export default manifest
+})

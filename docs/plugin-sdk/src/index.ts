@@ -75,7 +75,7 @@ export interface InvokeBackendStreamOptions {
 export interface PluginContext {
   pluginId: string
   pluginPath: string
-  invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  invokeBackend<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>
   /** 流式调用后端命令：onChunk 逐块回调增量，Promise 以最终响应帧结果终结 */
   invokeBackendStream: <T = unknown, R = unknown>(
     command: string,
@@ -209,6 +209,8 @@ export interface PluginFilesApi {
   createNote(relPath: string, content: string): Promise<void>
   /** 递归列出工作区内全部 Markdown 文件（正斜杠相对路径）；query 大小写不敏感子串过滤 */
   listWorkspace(query?: string): Promise<string[]>
+  /** 按工作区相对路径读取文本文件内容（UTF-8），超长截断并附加标记 */
+  read(relPath: string): Promise<string>
 }
 
 /**
@@ -247,7 +249,7 @@ export interface PluginPanelProps {
    * 仅当请求归属本插件时透出，否则为 null；面板挂载后宿主自动清空。
    */
   pendingRequest: unknown
-  invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  invokeBackend<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>
   /** 流式调用后端命令：onChunk 逐块回调增量，Promise 以最终响应帧结果终结 */
   invokeBackendStream: <T = unknown, R = unknown>(
     command: string,
@@ -349,7 +351,7 @@ export interface ToolbarButtonProps {
   /** 插件 ID */
   pluginId: string
   /** 调用插件后端命令 */
-  invokeBackend: (command: string, args?: Record<string, unknown>) => Promise<unknown>
+  invokeBackend<T = unknown>(command: string, args?: Record<string, unknown>): Promise<T>
   /** 流式调用后端命令，参见 PluginPanelProps.invokeBackendStream */
   invokeBackendStream: <T = unknown, R = unknown>(
     command: string,
@@ -453,6 +455,82 @@ export interface PluginManifest {
   onUnmount?: PluginLifecycleHook
   onActivate?: PluginLifecycleHook
   onDeactivate?: PluginLifecycleHook
+}
+
+/**
+ * manifest.json 静态字段的形状：PluginManifest 去掉 React 组件字段
+ * （无法放入 JSON）与生命周期钩子（由代码注入）。
+ * `iconPosition`/`contentPosition` 放宽为 string——resolveJsonModule
+ * 会把 JSON 字面量宽化为 string，放宽后调用处无需类型断言。
+ * 配合 `import manifestJson from '../manifest.json'` 实现单一来源：
+ * 版本/权限等静态字段只维护 manifest.json 一处。
+ */
+export type PluginManifestJson = Omit<
+  PluginManifest,
+  | 'icon'
+  | 'panel'
+  | 'toolbarButton'
+  | 'settings'
+  | 'editorComponent'
+  | 'iconPosition'
+  | 'contentPosition'
+  | 'permissions'
+  | 'onLoad'
+  | 'onUnload'
+  | 'onEnable'
+  | 'onDisable'
+  | 'onMount'
+  | 'onUnmount'
+  | 'onActivate'
+  | 'onDeactivate'
+> & {
+  iconPosition?: string
+  contentPosition?: string
+  /** 同理放宽：resolveJsonModule 把权限名宽化为 string */
+  permissions?: string[]
+}
+
+/**
+ * 插件入口帮手：manifest 单一来源。
+ *
+ * 静态字段来自 manifest.json（Vite JSON import），组件与生命周期钩子
+ * 由 runtime 参数注入，插件入口收敛为 ~10 行且不再需要 `as PluginManifest`
+ * 断言。示例：
+ *
+ * ```ts
+ * import manifestJson from '../manifest.json'
+ * export default definePlugin(manifestJson, {
+ *   icon: MyIcon,
+ *   panel: MyPanel,
+ *   onLoad: () => registerActions(),
+ * })
+ * ```
+ */
+export function definePlugin(
+  manifestJson: PluginManifestJson,
+  runtime: {
+    icon?: PluginManifest['icon']
+    panel?: PluginManifest['panel']
+    toolbarButton?: PluginManifest['toolbarButton']
+    settings?: PluginManifest['settings']
+    editorComponent?: PluginManifest['editorComponent']
+  } & Partial<
+    Pick<
+      PluginManifest,
+      | 'onLoad'
+      | 'onUnload'
+      | 'onEnable'
+      | 'onDisable'
+      | 'onMount'
+      | 'onUnmount'
+      | 'onActivate'
+      | 'onDeactivate'
+    >
+  >
+): PluginManifest {
+  // 单点断言：iconPosition/contentPosition 已放宽为 string（见 PluginManifestJson），
+  // 其余字段形状与 PluginManifest 一致，收窄在此处而非各插件调用点。
+  return { ...manifestJson, ...runtime } as PluginManifest
 }
 
 /**
@@ -1217,6 +1295,53 @@ export class PluginPermissionDeniedError extends Error {
 }
 
 /**
+ * 后端业务错误：宿主透传 JSON-RPC error 帧的 `code` / `data`（B4）。
+ *
+ * 当插件后端返回 JSON-RPC error（如 `{ code: 1001, message: "..." }`）时，
+ * 宿主的 `invokeBackend` / `invokeBackendStream` 会 reject 一个本类实例；
+ * 传输层错误（超时/进程退出等）仍是普通字符串或 Error，用 `instanceof`
+ * 判断即可安全区分。
+ *
+ * ```ts
+ * try {
+ *   await invokeBackend('markdown_to_docx', { markdown })
+ * } catch (err) {
+ *   if (err instanceof PluginError && err.code === 1001) {
+ *     // 后端业务错误码分支
+ *   } else {
+ *     // 其它错误回退默认处理
+ *   }
+ * }
+ * ```
+ */
+export class PluginError extends Error {
+  readonly name = 'PluginError'
+  /** 后端 JSON-RPC error 的 `code` 字段（未透传时为 undefined）。 */
+  readonly code?: number
+  /** 后端 JSON-RPC error 的附加 `data` 载荷（未携带时为 undefined）。 */
+  readonly data?: unknown
+
+  constructor(
+    message: string,
+    options?: { code?: number; data?: unknown; cause?: unknown },
+  ) {
+    super(message)
+    if (options?.code !== undefined) this.code = options.code
+    if (options?.data !== undefined) this.data = options.data
+    // Error.cause 是 ES2022 特性，SDK lib 为 ES2020，经属性赋值兼容。
+    if (options?.cause !== undefined) {
+      ;(this as { cause?: unknown }).cause = options.cause
+    }
+    Object.setPrototypeOf(this, PluginError.prototype)
+  }
+
+  /** String(err) 输出纯 message，与宿主旧字符串错误路径的遥测格式一致。 */
+  toString(): string {
+    return this.message
+  }
+}
+
+/**
  * Per-extension entry in the standalone editor registry. The
  * component is held as `unknown` so the SDK stays
  * React-agnostic at the registry layer; consumers narrow it back
@@ -1507,6 +1632,12 @@ export const files: PluginFilesApi = {
     warnStandaloneWriteApi('files.listWorkspace', 'returning an empty list')
     return []
   },
+  read: async (relPath) => {
+    const host = currentHostOverrides().__files_read
+    if (host) return host(relPath)
+    warnStandaloneWriteApi('files.read', 'returning an empty string')
+    return ''
+  },
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1522,12 +1653,12 @@ export function buildPluginContext(plugin: Pick<PluginDefinition, 'id' | 'plugin
   return {
     pluginId: plugin.id,
     pluginPath: plugin.pluginPath,
-    invokeBackend: async (cmd: string, args?: Record<string, unknown>) => {
+    invokeBackend: async <T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
       // In standalone mode, return a friendly stub.
       const hostInvoke = currentHostOverrides().invokeBackend
-      if (hostInvoke) return hostInvoke(cmd, args)
+      if (hostInvoke) return (await hostInvoke(cmd, args)) as T
       console.warn(`[plugin-sdk] invokeBackend(${cmd}) called in standalone mode; returning null`)
-      return null
+      return null as T
     },
     invokeBackendStream: async <T, R>(
       cmd: string,
@@ -1659,7 +1790,7 @@ export interface HostOverrides {
   clearPluginCommands?: (pluginId: string) => void
   listPluginCommands?: () => PluginCommand[]
   subscribePluginCommands?: (listener: () => void) => () => void
-  invokeBackend?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
+  invokeBackend?: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T>
   /** 流式调用桥接：权限与遥测由宿主实现内聚处理；未安装时 SDK 回退 standalone stub */
   invokeBackendStream?: (
     cmd: string,
@@ -1686,6 +1817,7 @@ export interface HostOverrides {
   __openPluginPanel?: (payload: unknown) => void
   __files_createNote?: (relPath: string, content: string) => Promise<void>
   __files_listWorkspace?: (query?: string) => Promise<string[]>
+  __files_read?: (relPath: string) => Promise<string>
   /**
    * Optional full event-bus replacement. If the host provides only
    * `on`/`off` (no `emit`), the per-event emit helpers in this

@@ -26,6 +26,7 @@ import {
 import { MessageBubble, type BubbleActions } from './MessageBubble'
 import { ModelSettings } from './ModelSettings'
 import type { RoleActionPayload } from '../actions/roles'
+import { buildAttachPrefill, type FileAttachPayload } from '../actions/registerActions'
 
 export interface ChatPanelProps {
   services: AiServices
@@ -56,6 +57,30 @@ export function ChatPanel({ services, pendingRequest }: ChatPanelProps) {
     noticeTimer.current = setTimeout(() => setNotice(null), 3000)
   }, [])
   useEffect(() => () => clearTimeout(noticeTimer.current), [])
+
+  // ── P3.4 升级路径联调（§6.5）：面板首开触发老数据导入 ──
+  // 宿主导出的迁移文件由后端 importLegacyData 落库（幂等保护），成功后刷新
+  // 会话/模型列表并删除迁移文件；无文件（全新安装）或已有数据则静默跳过。
+  const legacyImportTriedRef = useRef(false)
+  useEffect(() => {
+    if (legacyImportTriedRef.current) return
+    legacyImportTriedRef.current = true
+    void (async () => {
+      const r = await services.invokeBackend<{
+        imported: boolean
+        counts?: { messages: number; rolePrompts: number; models: number }
+      }>('importLegacyData')
+      if (!r?.imported) return
+      const c = r.counts
+      showNotice(
+        `已导入历史数据：消息 ${c?.messages ?? 0} 条 · 角色 ${c?.rolePrompts ?? 0} 个 · 模型 ${c?.models ?? 0} 个`,
+      )
+      await Promise.all([sessions.refresh(), modelCtl.refresh()])
+      await services.invokeBackend('finalizeLegacyImport')
+    })().catch(() => {})
+    // 仅挂载执行一次（ref 防重 + 后端 already-initialized 幂等双保险）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /** 右键动作发送上下文：就地应用仅在「本条来自角色动作且有选区」时生效 */
   const actionCtxRef = useRef<{ selectionOriginal: string } | null>(null)
@@ -180,6 +205,16 @@ export function ChatPanel({ services, pendingRequest }: ChatPanelProps) {
       )
     })()
   }, [pendingRequest, modelCtl, sessions, store, sendMessage, stop, showNotice])
+
+  // ── 文件树右键「添加到 AI 对话」消费：预填输入区，用户确认后发送（幂等守卫同上）──
+  useEffect(() => {
+    const req = pendingRequest as FileAttachPayload | null
+    if (!req || typeof req !== 'object' || req.type !== 'file-attach') return
+    if (consumedRequestIdRef.current === req.id) return
+    consumedRequestIdRef.current = req.id
+    const prefill = buildAttachPrefill(req.path, req.content)
+    setInput((prev) => (prev ? `${prev}\n\n${prefill}` : prefill))
+  }, [pendingRequest])
 
   // ── 回写四操作（§6.8 / 对齐内置版）：编辑器 API + 反馈提示内聚在面板层 ──
   const writeback = useMemo<BubbleActions>(
@@ -585,7 +620,8 @@ const rootStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   height: '100%',
-  background: 'var(--bg-primary, #fff)',
+  // 对齐宿主面板容器背景 token（App.tsx 右侧面板同款），亮暗色及自定义主题均跟随
+  background: 'var(--bg-secondary-gradient, var(--bg-secondary, #fff))',
   color: 'var(--text-primary, #1d1d1f)',
   overflow: 'hidden',
 }
@@ -642,7 +678,8 @@ const inputWrapStyle: CSSProperties = {
   margin: '0 10px 10px',
   border: '1px solid var(--border-color, #d2d2d7)',
   borderRadius: 10,
-  background: 'var(--bg-secondary, #f5f5f7)',
+  // 面板底色改为白后，输入区用宿主外壳灰（--bg-primary）保持层次对比
+  background: 'var(--bg-primary, #f5f5f7)',
 }
 const textareaStyle: CSSProperties = {
   width: '100%',
@@ -666,7 +703,7 @@ const sendBtnStyle: CSSProperties = {
   padding: '5px 12px',
   fontSize: 12,
   cursor: 'pointer',
-  background: 'var(--accent-color, #0a84ff)',
+  background: 'var(--theme-color, #0a84ff)',
   color: '#fff',
 }
 const stopBtnStyle: CSSProperties = {
@@ -695,7 +732,7 @@ const noticeStyle: CSSProperties = {
   padding: '5px 10px',
   borderRadius: 8,
   background: 'rgba(10,132,255,0.08)',
-  color: 'var(--accent-color, #0a84ff)',
+  color: 'var(--theme-color, #0a84ff)',
   fontSize: 12,
   flexShrink: 0,
 }
@@ -758,7 +795,7 @@ const sessionInputStyle: CSSProperties = {
   fontSize: 12,
   padding: '5px 6px',
   borderRadius: 5,
-  border: '1px solid var(--accent-color, #0a84ff)',
+  border: '1px solid var(--theme-color, #0a84ff)',
   outline: 'none',
   background: 'var(--bg-primary, #fff)',
   color: 'var(--text-primary, #1d1d1f)',
@@ -774,7 +811,7 @@ const primaryBtnStyle: CSSProperties = {
   padding: '6px 12px',
   fontSize: 12,
   cursor: 'pointer',
-  background: 'var(--accent-color, #0a84ff)',
+  background: 'var(--theme-color, #0a84ff)',
   color: '#fff',
   flexShrink: 0,
 }

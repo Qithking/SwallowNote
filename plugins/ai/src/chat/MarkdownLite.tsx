@@ -57,7 +57,7 @@ export function MarkdownLite({ content }: { content: string }) {
           ul: ({ children }) => <ul style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ul>,
           ol: ({ children }) => <ol style={{ margin: '4px 0 8px', paddingLeft: 20 }}>{children}</ol>,
           a: ({ children, href }) => (
-            <a href={href} style={{ color: 'var(--accent-color, #0a84ff)' }} target="_blank" rel="noreferrer">
+            <a href={href} style={{ color: 'var(--theme-color, #0a84ff)' }} target="_blank" rel="noreferrer">
               {children}
             </a>
           ),
