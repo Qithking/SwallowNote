@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-11T13:34:25Z",
+  "updated_at": "2026-11-12T08:19:54Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
       "name": "思维导图",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "description": "基于 simple-mind-map 的独立 .smm 文件编辑器，提供逻辑结构图/思维导图/组织结构/时间轴/鱼骨图等多种布局",
       "author": "SwallowNote",
       "tags": [
@@ -15,16 +15,16 @@
         "brainstorm"
       ],
       "download_url": "./mindmap/com.swallownote.mindmap.zip",
-      "sha256": "32e5e63e124dbf51f8342ba7d07275159d733b27260b6acc11a841e6c0e464f1",
+      "sha256": "60efc7fed6df7cdbbee9edac2a9b9948757d7db42a3254d3761d6ea42d8c833f",
       "changelog": "初版发布：从 host 抽出为独立插件，支持 .smm 文件编辑、5 大布局组（逻辑结构/思维导图/组织结构/时间轴/鱼骨图）、多种主题、外框/水印/节点样式",
-      "published_at": "2026-10-20T13:14:16Z",
+      "published_at": "2026-11-12T08:19:27Z",
       "dependencies": [],
-      "signature_b64": "ZaI7RAr+9S3ykPSJn4WlmX2FbgAgJujXYCjIxkDsm8esPcWhYXK4UQb1zYtloFyztmKy2Uet4i2vlk8bLItxDA=="
+      "signature_b64": "hXe0ockdlunE+ddun4s2B1WqDh1HW/NYYmxvkiB+n0M2KeLjpWRK3GRb7beAUF4AuVgIgg1IX4jmGUHkoEkQDA=="
     },
     {
       "id": "com.swallownote.export",
       "name": "文档导出",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "description": "将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式",
       "author": "SwallowNote",
       "tags": [
@@ -35,16 +35,16 @@
         "html"
       ],
       "download_url": "./export/com.swallownote.export.zip",
-      "sha256": "fabf954fe1e436925b47e81fce727737c0e8e05c308e0504051012448bce2ebd",
+      "sha256": "a8dee7f6f3621e86b0f9fd37a1b70ec8185e3044daf86423184919edd7432d17",
       "changelog": "v0.2.4: 同步 manifest 与构建产物；v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
-      "published_at": "2026-10-20T13:16:19Z",
+      "published_at": "2026-11-12T08:19:17Z",
       "dependencies": [],
-      "signature_b64": "3wCpKDAb2BJVh682QiKRuGwKbAayWkM+vJVqdeYtHfBi5lSTRj1gLNhYtvLn68UwH2/p1iQQrcTxyKN0KWLmCA=="
+      "signature_b64": "g4x4U75BtM5fu/wQhKtqWQBU3spU31lZQNTNtX0dIRvmn6wqOzMVFjSlUdf6q0/I+o91KVK2jTEN/VJ4r2f7Cw=="
     },
     {
       "id": "com.swallownote.wenyan",
       "name": "文颜排版",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "description": "使用文颜引擎将 Markdown 排版为微信公众号样式的富文本",
       "author": "SwallowNote",
       "tags": [
@@ -55,16 +55,16 @@
         "theme"
       ],
       "download_url": "./wenyan/com.swallownote.wenyan.zip",
-      "sha256": "f9d4b5bd7693e53efe6c7f12947cd0772e526d3e1aa836292dc3e58b721ed9bb",
+      "sha256": "5180510bee5665d137f92ab4bbdf636b4cd4dce3bce337b1bbdfad9924c48c8f",
       "changelog": "初版发布：集成 @wenyan-md/core 排版引擎，支持多主题、代码高亮、实时预览、一键复制",
-      "published_at": "2026-10-20T13:16:49Z",
+      "published_at": "2026-11-12T08:19:41Z",
       "dependencies": [],
-      "signature_b64": "f9ZDmv6YVtAuNp73DOyOd6sifGHWxGLx9DQ53DrfYyCVk51l3QV504EOV6M/D4NwM4RbCvLkV+KhkFr0J76OBA=="
+      "signature_b64": "ywV39Mgtn6337QcNdE5S4LTKjJqEs9m2mkMQzSdeOdxib5HLg9XOsNbBTa2ConwDK5MEJYh2AVr3aJA5HNafAg=="
     },
     {
       "id": "com.swallownote.picgo",
       "name": "图床",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "description": "将本地/剪贴板图片一键上传到云端图床（SM.MS / Imgur / GitHub / 自定义端点），并插入到当前笔记。",
       "author": "SwallowNote",
       "tags": [
@@ -77,16 +77,16 @@
         "markdown"
       ],
       "download_url": "./picgo/com.swallownote.picgo.zip",
-      "sha256": "3452e6ecdb426d8fac80797b0c53990a77742b31695a88eafc563e2e80109908",
+      "sha256": "2391566380241e13ef91aaff446ff13fc82fd9803a2ac2e602c2de1801580c44",
       "changelog": "初版发布：4 个 provider（SM.MS / Imgur / GitHub / Custom）、右侧面板 UI、上传历史、客户端转码、文件名策略、链接格式",
-      "published_at": "2026-10-20T13:16:46Z",
+      "published_at": "2026-11-12T08:19:32Z",
       "dependencies": [],
-      "signature_b64": "qi3fDVg41u5zIfXGg2EkGn2UgwhhnSD9NNSPvYh+80UuUeN0Wls5WHYXytUGdwEqY8IkFPcAAxoyFZFgbaRHCA=="
+      "signature_b64": "mMq4GF5J50j2AobP8uSPxLACgzWf0iB8rEiFe1Ibs2xnbekYhd9i7ilmbULDeiWBZMF7ZGdqa4tKp1a06vpDBg=="
     },
     {
       "id": "com.swallownote.secret-disk",
       "name": "密盘",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "description": "加密的私有笔记空间，所有数据以 markdown 存储于严格加密的 SQLite 数据库（.swl）。",
       "author": "SwallowNote",
       "tags": [
@@ -97,16 +97,16 @@
         "markdown"
       ],
       "download_url": "./secret-disk/com.swallownote.secret-disk.zip",
-      "sha256": "9e9278edc141be499782705a7236706eab41e316ce9c3a73e9c24533f9ca3bb7",
+      "sha256": "dead5be14e4b875a7632b581f6f9b647c006770ca19ae2dca894b6c0926d106e",
       "changelog": "初版发布：加密的私有笔记空间，支持 SQLite 加密存储、密码管理、主编辑器打开密盘笔记、文件树右键操作及安全增强",
-      "published_at": "2026-11-10T06:29:01Z",
+      "published_at": "2026-11-12T08:19:34Z",
       "dependencies": [],
-      "signature_b64": "SjuWVczpkyAoXUCLGj9ydklK5jBYViaT6eb2Gir7H59LnyKl9QeKovcwvXdmT6Pyd1Ld7x8tABey9LakzDdyDw=="
+      "signature_b64": "+IdcixM0naiR9wjbtHUrNhS3+7xJsp8YykiXddSKlnJNlcK/qJB8H+SncjOUWqaxk0ip3qI+IlTyx5cgfZf/AQ=="
     },
     {
       "id": "com.swallownote.ai",
       "name": "AI 助手",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "description": "与 AI 对话并操作笔记：智能问答、内容生成、笔记整理。支持多会话、角色动作、就地应用与多模型接入。",
       "author": "SwallowNote",
       "tags": [
@@ -117,12 +117,12 @@
         "writing"
       ],
       "download_url": "./ai/com.swallownote.ai.zip",
-      "sha256": "5e35205e12234ed76ee426d172e2d2430c88b7c6f3fc95aec2c6bf061d509a03",
+      "sha256": "2c3a24ee0235064bcc926a947d946be05febd65cfb1d1f0f49be7a3dbda76f80",
       "changelog": "初版发布：多会话对话与流式输出、编辑器右键 9 种角色动作、就地应用、@文件引用、多 Provider 接入（OpenAI 兼容 / Anthropic / Google / Ollama）、模型管理与密钥安全存储、历史数据迁移",
-      "published_at": "2026-11-11T13:34:19Z",
+      "published_at": "2026-11-12T08:18:59Z",
       "dependencies": [],
       "min_host_version": "0.1.0",
-      "signature_b64": "3/JujOQ/ZMwWvJ9W7bRdnkQIVXdSlSznG9dL9xxDdXbcVZWvG+/qlb7Iveg1sO3vQedOCQr/P67xYpgJm9NJDA=="
+      "signature_b64": "/PegBMgkweF+6ghE4qHLb22gzLtB/YATwZwjz7DaApChDnGvX9k/W5grGdj7TfpCBSX1O//qX0eJhGnb1rPXAA=="
     }
   ],
   "pubkey_b64": "LCoNiX5mUrSXX3zq3p+ylQnRi+xKafJ//iQFrnGdif8="

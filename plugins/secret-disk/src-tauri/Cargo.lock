@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "swallownote-plugin-secret-disk"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "libc",
  "rusqlite",
