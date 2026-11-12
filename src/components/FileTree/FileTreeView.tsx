@@ -36,6 +36,8 @@ import {
 import { getFileFrontmatter, getFileFrontmattersByPrefix } from '@/lib/utils/searchQuery'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { logger } from '@/lib/logger'
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 
 export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
 
@@ -889,10 +891,25 @@ const { t } = useTranslation()
             </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
-            <FolderOpen size={24} className="mb-2 opacity-50" />
-            <p>{t('fileTree.noFolderOpened')}</p>
-          </div>
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
+                <FolderOpen size={24} className="mb-2 opacity-50" />
+                <p>{t('fileTree.noFolderOpened')}</p>
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent
+              className="min-w-[160px]"
+              style={{
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+              }}
+            >
+              {/* 文件树空白区：插件可经 registerContextMenu 向 fileTreeEmpty 贡献菜单项 */}
+              <PluginContextMenuItems location="fileTreeEmpty" ctx={{}} />
+            </ContextMenuContent>
+          </ContextMenu>
         )}
       </ScrollArea>
     </div>
