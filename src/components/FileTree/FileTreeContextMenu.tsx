@@ -162,7 +162,11 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
 
   const handleShowInFinder = async () => {
     try {
-      await invoke('open_in_finder', { path: node.path })
+      // workspaceRoot 注入：后端 fs_guard 白名单校验（架构审计候选 2）
+      await invoke('open_in_finder', {
+        path: node.path,
+        workspaceRoot: useWorkspaceStore.getState().rootPath || null,
+      })
     } catch (e) {
       logger.error('file-tree-menu', 'Failed to open in finder:', e)
     }
@@ -237,7 +241,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           await deleteFile(sourcePath)
           // 源文件已删除，使其 frontmatter 缓存失效
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          invalidateFrontmatterCache(sourcePath)
+          invalidateFrontmatterCache(sourcePath, useWorkspaceStore.getState().rootPath)
           // Update tabs: move from source path to destination path
           const editorStore = useEditorStore.getState()
           const destName = getFileName(destPath)
@@ -275,7 +279,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
 
       // 删除文件后使该路径的 frontmatter 缓存失效，避免残留
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-      invalidateFrontmatterCache(node.path)
+      invalidateFrontmatterCache(node.path, useWorkspaceStore.getState().rootPath)
 
       // Close any open tabs for the deleted file or files within the deleted directory
       const editorStore = useEditorStore.getState()

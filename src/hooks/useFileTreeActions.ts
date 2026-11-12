@@ -115,9 +115,9 @@ export function useFileTreeActions() {
       const newName = editingName.trim()
       const newPath = parentPath + '/' + newName
       await renameFile(editingPath, newPath)
-      // 旧路径已失效，使其 frontmatter 缓存失效
+      // 旧路径已失效，使其 frontmatter 缓存失效（传 rootPath 供后端 fs_guard 校验）
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-      invalidateFrontmatterCache(editingPath)
+      invalidateFrontmatterCache(editingPath, rootPath)
       updateTabPath(editingPath, newPath, newName)
 
       if (parent) {
@@ -235,7 +235,7 @@ export function useFileTreeActions() {
     for (const path of pathsToDelete) {
       try {
         await deleteFileTauri(path)
-        invalidateFrontmatterCache(path)
+        invalidateFrontmatterCache(path, rootPath)
         const editorStore = useEditorStore.getState()
         const node = findNodeByPath(path, nodes)
         const tabsToClose = editorStore.tabs.filter(tab =>

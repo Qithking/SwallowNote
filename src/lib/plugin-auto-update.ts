@@ -1,7 +1,8 @@
 /** 插件自动更新：启动时扫描 opted-in 插件下载新版本 */
 import { toast } from 'sonner'
 import type { PluginDefinition, PluginIndex, PluginIndexEntry } from '@/types/plugin'
-import { usePluginStore, PLUGIN_AUTO_UPDATE_KEY_PREFIX } from '@/stores/plugin'
+import { usePluginStore } from '@/stores/plugin'
+import { PLUGIN_AUTO_UPDATE_KEY_PREFIX } from '@/lib/plugin-teardown'
 import { usePluginMarketStore } from '@/stores/plugin-market'
 import {
   downloadPluginZip,

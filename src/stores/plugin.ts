@@ -12,24 +12,18 @@ import type {
 } from '@/types/plugin'
 import { emptyRegistry } from '@/types/plugin'
 import { useUIStore } from './ui'
-import { dropPluginStorage, pluginEventBus, buildPluginContext, clearPluginTripped, clearPluginHostState } from '@/lib/plugin-host'
-import { runPluginLifecycleHook, installHostTakeover, uninstallHostTakeover, type PluginWithModule } from '@/lib/plugin-host-takeover'
-import { clearPluginMenuItems } from '@/lib/plugin-menu'
-import { clearPluginCommands } from '@/lib/plugin-commands'
-import { clearGranted } from '@/lib/plugin-permission-guard'
+import { buildPluginContext, clearPluginTripped } from '@/lib/plugin-host'
+import { runPluginLifecycleHook, installHostTakeover, type PluginWithModule } from '@/lib/plugin-host-takeover'
 import {
   detectPluginConflicts,
   type PluginConflict,
 } from '@/lib/plugin-conflicts'
-import { clearPluginMetrics, recordPluginConflict } from '@/lib/plugin-telemetry'
-import { dropSettingsCache } from '@/lib/plugin-settings'
-import { resetPluginCrashCount } from '@/lib/plugin-health'
-import { dropPluginBlobUrl } from '@/lib/plugin-loader'
+import { recordPluginConflict } from '@/lib/plugin-telemetry'
+// B7：三处清理序列（unregisterPlugin / setPlugins removed / reloadedOld）
+// 收编为 lib 层 teardownPlugin，自动更新 opt-in 键前缀随迁。
+import { teardownPlugin, PLUGIN_AUTO_UPDATE_KEY_PREFIX } from '@/lib/plugin-teardown'
 // B5：编辑器生命周期由宿主接管——启用补注册 / 禁用与卸载注销
 import { registerEditorsFromManifest, unregisterEditor } from './pluginEditor'
-
-/** localStorage 键前缀，严格 opt-in。 */
-export const PLUGIN_AUTO_UPDATE_KEY_PREFIX = 'plugin_auto_update_'
 
 /** 插件健康状态：healthy/unhealthy/unknown。 */
 export type PluginHealth = 'healthy' | 'unhealthy' | 'unknown'
@@ -365,49 +359,12 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     if (ui.rightPanelType === `plugin:${id}`) {
       ui.setRightPanelType(null)
     }
-    // 触发 onUnload 并丢弃缓存，便于重装
-    if (target) {
-      void runPluginLifecycleHook(
-        target,
-        target.hooks?.onUnload,
-        buildPluginContext(target),
-        'onUnload'
-      )
-    }
-    // 卸载 host takeover（须在 onUnload 后，onUnload 可能仍需 SDK API）
-    uninstallHostTakeover(id)
-    dropPluginStorage(id)
-    // 释放插件加载时缓存的 blob URL，避免 Blob 对象内存泄漏
-    if (target) dropPluginBlobUrl(target.pluginPath)
-    // 清理 plugin-host 残留状态（熔断标志、事件总线"已拆线"计数器）。
-    clearPluginHostState(id)
-    // 清理 plugin-settings 内存缓存，避免同 id 重装读到旧设置。
-    dropSettingsCache(id)
-    // 清理插件崩溃计数，避免同 id 重装继承历史崩溃记录。
-    resetPluginCrashCount(id)
-    // 移除插件注册的所有事件处理器，避免残留订阅触发
-    pluginEventBus.removeAllListenersForPlugin(id)
-    // 清理插件贡献的右键菜单项（onUnload 前清理避免残留）
-    clearPluginMenuItems(id)
-    // 清理命令面板条目。
-    clearPluginCommands(id)
+    // lib 层资源清理（默认全清：storage / 权限 / 自动更新 opt-in 一并丢弃）
+    teardownPlugin(id, target)
     // B5：注销该插件注册的所有编辑器扩展（旧式插件可能在 onUnload 中
     // 自行注销，unregister 幂等无副作用；此处保证新式仅靠清单声明的
     // 插件卸载后不再占用扩展）。
     unregisterEditor(id)
-    // 清除权限授予缓存。
-    clearGranted(id)
-    void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
-      void dropPluginPermissions(id)
-    })
-    // 清除持久化的自动更新 opt-in。
-    try {
-      window.localStorage.removeItem(`${PLUGIN_AUTO_UPDATE_KEY_PREFIX}${id}`)
-    } catch (e) {
-      logger.warn('plugin-store', 'localStorage write failed', e)
-    }
-    // 清理遥测缓冲、存储尺寸映射和 lastError。
-    clearPluginMetrics(id)
     // 修剪已卸载插件的快捷键绑定。
     const remainingIds = new Set(get().plugins.map((p) => p.id))
     useUIStore.getState().prunePluginCommandShortcuts(remainingIds)
@@ -594,67 +551,17 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }
 
     for (const target of removed) {
-      void runPluginLifecycleHook(
-        target,
-        target.hooks?.onUnload,
-        buildPluginContext(target),
-        'onUnload'
-      )
-      // 卸载持久化 host takeover（onUnload 之后）
-      uninstallHostTakeover(target.id)
-      dropPluginStorage(target.id)
-      // 释放插件加载时缓存的 blob URL，避免 Blob 对象内存泄漏
-      dropPluginBlobUrl(target.pluginPath)
-      // 清理 plugin-host 残留状态（熔断标志、事件总线"已拆线"计数器）。
-      clearPluginHostState(target.id)
-      // 清理 plugin-settings 内存缓存，避免同 id 重装读到旧设置。
-      dropSettingsCache(target.id)
-      // 清理插件崩溃计数，避免同 id 重装继承历史崩溃记录。
-      resetPluginCrashCount(target.id)
-      pluginEventBus.removeAllListenersForPlugin(target.id)
-      clearPluginMenuItems(target.id)
-      // 清理命令面板条目（同 clearPluginMenuItems 理由）
-      clearPluginCommands(target.id)
-      // B5：注销被移除插件注册的所有编辑器扩展（同 unregisterPlugin）
+      teardownPlugin(target.id, target)
+      // B5：注销被移除插件注册的所有编辑器扩展（store 层，同 unregisterPlugin）
       unregisterEditor(target.id)
-      // 同步丢弃内存权限缓存（clearGranted 是安全边界，磁盘删除异步）
-      clearGranted(target.id)
-      void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
-        void dropPluginPermissions(target.id)
-      })
-      // 丢弃持久化的自动更新 opt-in（重装时默认禁用）
-      try {
-        window.localStorage.removeItem(
-          `${PLUGIN_AUTO_UPDATE_KEY_PREFIX}${target.id}`,
-        )
-      } catch (e) {
-        logger.warn('plugin-store', 'localStorage write failed', e)
-      }
-      // 清理移除插件的遥测缓冲。
-      clearPluginMetrics(target.id)
     }
-    // 同 id 重载的旧实例：有限清理。触发 onUnload 并清掉运行期注册的
-    // 资源（菜单/命令/编辑器扩展/事件/接管/熔断/设置缓存/崩溃计数/旧 blob），
-    // 但保留：权限授权（onLoad 重跑注册时仍可通过门禁）、插件 storage
-    // （更新不丢用户数据）、自动更新 opt-in 与健康记录。
+    // 同 id 重载的旧实例：有限清理（keepPermissions/keepStorage 保留权限、
+    // 插件 storage 与自动更新 opt-in），运行期注册的资源（菜单/命令/事件/
+    // 接管/熔断/设置缓存/崩溃计数/旧 blob）全部清掉；健康记录由上方
+    // set() 未删而保留。
     for (const target of reloadedOld) {
-      void runPluginLifecycleHook(
-        target,
-        target.hooks?.onUnload,
-        buildPluginContext(target),
-        'onUnload'
-      )
-      // 卸载持久化 host takeover（onUnload 之后）
-      uninstallHostTakeover(target.id)
-      dropPluginBlobUrl(target.pluginPath)
-      clearPluginHostState(target.id)
-      dropSettingsCache(target.id)
-      resetPluginCrashCount(target.id)
-      pluginEventBus.removeAllListenersForPlugin(target.id)
-      clearPluginMenuItems(target.id)
-      clearPluginCommands(target.id)
+      teardownPlugin(target.id, target, { keepPermissions: true, keepStorage: true })
       unregisterEditor(target.id)
-      clearPluginMetrics(target.id)
     }
     // 清理已移除插件的命令快捷键绑定（用 post-set valid-id 集）
     useUIStore.getState().prunePluginCommandShortcuts(newIds)

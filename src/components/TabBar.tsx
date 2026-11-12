@@ -156,7 +156,11 @@ function TabBar() {
 
   const handleShowInFinder = async (tab: TabBarItem) => {
     try {
-      await invoke('open_in_finder', { path: tab.path })
+      // workspaceRoot 注入：后端 fs_guard 白名单校验（架构审计候选 2）
+      await invoke('open_in_finder', {
+        path: tab.path,
+        workspaceRoot: useWorkspaceStore.getState().rootPath || null,
+      })
     } catch {
       showToast(t('tabBar.openFailed'))
     }

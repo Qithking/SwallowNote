@@ -59,7 +59,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       // 非阻塞：保存历史、启动文件监听和frontmatter扫描
       saveFolderHistory(path).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
       watchDirectory(path).catch(err => logger.warn('workspace-store', `Failed to watch directory ${path}:`, err))
-      triggerFrontmatterScan(path).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${path}:`, err))
+      triggerFrontmatterScan(path, path).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${path}:`, err))
       // B4：asset protocol 静态白名单已收敛为 $APPDATA，工作区目录需运行期注册（本地图片显示）
       registerAssetScope(path).catch(err => logger.warn('workspace-store', `Failed to register asset scope for ${path}:`, err))
     } catch (err) {
@@ -149,8 +149,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // B4：多根工作区同样需运行期注册 asset scope
     registerAssetScope(path).catch(err => logger.warn('workspace-store', `Failed to register asset scope for ${path}:`, err))
 
-    // 触发 frontmatter 索引扫描
-    triggerFrontmatterScan(path)
+    // 触发 frontmatter 索引扫描（多根附加 folder 若在主根外，与 read_file 同一白名单模型）
+    triggerFrontmatterScan(path, get().rootPath)
     
     await get().saveWorkspaceFile(true)
   },
@@ -234,7 +234,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         saveFolderHistory(workspacePath).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
         for (const folder of workspace.folders) {
           watchDirectory(folder).catch(err => logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err))
-          triggerFrontmatterScan(folder).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
+          triggerFrontmatterScan(folder, workspacePath).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
         }
       }
     } catch (err) {
@@ -340,7 +340,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         watchDirectory(folder).catch((err) => {
           logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err)
         })
-        triggerFrontmatterScan(folder).catch((err) => {
+        triggerFrontmatterScan(folder, get().rootPath).catch((err) => {
           logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err)
         })
       }, index * 200)

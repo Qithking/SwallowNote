@@ -63,7 +63,7 @@ export interface FileMetadata {
 }
 
 export async function getFileMetadata(path: string): Promise<FileMetadata> {
-  return await invoke('get_file_metadata', { path })
+  return await invoke('get_file_metadata', { path, workspaceRoot: workspaceRoot() })
 }
 
 export async function listDirectory(
@@ -73,6 +73,7 @@ export async function listDirectory(
 ): Promise<FileNode[]> {
   return await invoke('list_directory', {
     path,
+    workspaceRoot: workspaceRoot(),
     showAllFiles: showAllFiles ?? false,
     markdownOnly: markdownOnly ?? false,
   })
@@ -90,6 +91,7 @@ export async function listDirectoriesBatch(
 ): Promise<BatchDirResult[]> {
   return await invoke('list_directories_batch', {
     paths,
+    workspaceRoot: workspaceRoot(),
     showAllFiles: showAllFiles ?? false,
     markdownOnly: markdownOnly ?? false,
   })
@@ -145,16 +147,21 @@ export interface RemoteImageResult {
 /** 批量下载入参（与后端 DownloadImagesPayload 对应）。 */
 export interface DownloadImagesPayload {
   images: RemoteImageRequest[]
+  /** 工作区根：后端 fs_guard 白名单校验用（未打开工作区时为空 → fail-closed 拒绝） */
+  workspace_root?: string | null
 }
 
 /**
  * 调用后端 `download_remote_images` 命令批量下载远程图片。
  * 前端不直接下载图片字节，所有下载 / 落盘 / 相对路径计算均由后端完成。
+ * 调用方未显式传 workspace_root 时，此处注入当前工作区根供后端校验。
  */
 export async function downloadRemoteImages(
   payload: DownloadImagesPayload
 ): Promise<RemoteImageResult[]> {
-  return await invoke<RemoteImageResult[]>('download_remote_images', { payload })
+  return await invoke<RemoteImageResult[]>('download_remote_images', {
+    payload: { ...payload, workspace_root: payload.workspace_root ?? workspaceRoot() },
+  })
 }
 
 export async function getHomeDir(): Promise<string> {
@@ -191,5 +198,10 @@ export async function registerAssetScope(path: string): Promise<void> {
 }
 
 export async function searchInFiles(req: SearchRequest): Promise<SearchResult[]> {
-  return await invoke('search_in_files', { req })
+  return await invoke('search_in_files', { req, workspaceRoot: workspaceRoot() })
+}
+
+/** 保存 .md 后同步解析 frontmatter 并更新索引表（fs_guard 白名单校验） */
+export async function indexSavedFile(path: string): Promise<void> {
+  await invoke('index_saved_file', { path, workspaceRoot: workspaceRoot() })
 }

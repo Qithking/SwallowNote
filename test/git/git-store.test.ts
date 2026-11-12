@@ -1,17 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useGitStore, mapRepoInfoToRepository, mapRepoInfosToRepositories, type GitRepository, type GitRepositoryInfo, type RepoStatus } from '@/stores/git'
-import { gitPull, gitCredentialGet, gitPullWithCredentials } from '@/lib/tauri'
+import { gitPull, gitCredentialGet } from '@/lib/tauri'
 
 vi.mock('@/lib/tauri', () => ({
   gitPull: vi.fn().mockResolvedValue(undefined),
   gitCredentialGet: vi.fn().mockResolvedValue(null),
-  gitPullWithCredentials: vi.fn().mockResolvedValue(undefined),
   gitForcePush: vi.fn().mockResolvedValue(undefined),
-  gitForcePushWithCredentials: vi.fn().mockResolvedValue(undefined),
   gitForcePull: vi.fn().mockResolvedValue(undefined),
-  gitForcePullWithCredentials: vi.fn().mockResolvedValue(undefined),
   gitCommitAndPush: vi.fn().mockResolvedValue(undefined),
-  gitPushWithCredentials: vi.fn().mockResolvedValue(undefined),
   getConflictRepoRecords: vi.fn().mockResolvedValue([]),
   removeConflictRepoRecord: vi.fn().mockResolvedValue(undefined),
   syncConflictRepoRecords: vi.fn().mockResolvedValue([]),
@@ -413,20 +409,20 @@ describe('TC-035: pullAllRepos 错误分类 characterization', () => {
   it('TC-035-02: AUTH_REQUIRED + 凭证成功 → success:true', async () => {
     vi.mocked(gitPull).mockRejectedValueOnce('AUTH_REQUIRED:fatal: could not read Username')
     vi.mocked(gitCredentialGet).mockResolvedValue({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitPullWithCredentials).mockResolvedValueOnce(undefined)
 
     const repos = [createTestRepo('/ws/repo1', 'repo1')]
     const results = await useGitStore.getState().pullAllRepos(repos)
 
     expect(results).toHaveLength(1)
     expect(results[0].success).toBe(true)
-    expect(gitPullWithCredentials).toHaveBeenCalledWith('/ws/repo1', 'u', 'p')
+    // 对偶合并 Q8：凭证 fallback 与主操作共用 gitPull，第二次调用带 'u','p'
+    expect(gitPull).toHaveBeenCalledWith('/ws/repo1', 'u', 'p')
   })
 
   it('TC-035-03: AUTH_REQUIRED + 凭证拉取 REBASE_CONFLICT → isConflict:true', async () => {
     vi.mocked(gitPull).mockRejectedValueOnce('AUTH_REQUIRED:fatal: could not read Username')
     vi.mocked(gitCredentialGet).mockResolvedValue({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitPullWithCredentials).mockRejectedValueOnce('REBASE_CONFLICT:CONFLICT in file')
+    vi.mocked(gitPull).mockRejectedValueOnce('REBASE_CONFLICT:CONFLICT in file')
 
     const repos = [createTestRepo('/ws/repo1', 'repo1')]
     const results = await useGitStore.getState().pullAllRepos(repos)

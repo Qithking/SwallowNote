@@ -12,7 +12,7 @@
  */
 import { create } from 'zustand'
 import { logger } from '@/lib/logger'
-import { gitClone, gitCloneWithCredentials, gitCloneCancel, gitCloneStatus } from '@/lib/tauri'
+import { gitClone, gitCloneCancel, gitCloneStatus } from '@/lib/tauri'
 import { listen } from '@tauri-apps/api/event'
 import i18n from '@/i18n'
 import { useUIStore } from './ui'
@@ -137,9 +137,13 @@ export const useCloneStore = create<CloneState>((set, get) => ({
     })
 
     try {
-      const clonedPath = isPrivate
-        ? await gitCloneWithCredentials(url, localPath, username, password)
-        : await gitClone(url, localPath)
+      // 对偶合并 Q8：私有仓库传凭证，公共仓库传 undefined（后端 Option::None）
+      const clonedPath = await gitClone(
+        url,
+        localPath,
+        isPrivate ? username : undefined,
+        isPrivate ? password : undefined,
+      )
 
       set({
         isCloning: false,

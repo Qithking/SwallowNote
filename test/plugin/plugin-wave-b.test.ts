@@ -49,7 +49,8 @@ import {
   dispatchBuiltin,
 } from '@/hooks/useKeyboardShortcuts'
 import { useUIStore } from '@/stores/ui'
-import { usePluginStore, PLUGIN_AUTO_UPDATE_KEY_PREFIX } from '@/stores/plugin'
+import { usePluginStore } from '@/stores/plugin'
+import { PLUGIN_AUTO_UPDATE_KEY_PREFIX } from '@/lib/plugin-teardown'
 import { toast } from 'sonner'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

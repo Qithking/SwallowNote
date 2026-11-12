@@ -17,6 +17,9 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex as TokioMutex;
 
+// 落盘路径白名单校验统一收编到 services::fs_guard（架构审计候选 2）
+use crate::services::fs_guard::check_path_in_roots;
+
 /// URL in-flight 锁表：同一 URL 的并发请求串行化，保证只下载一次。
 /// key 为 URL，value 为对应 URL 专属的异步锁；锁释放后 entry 保留以便复用。
 type UrlLockMap = StdMutex<HashMap<String, Arc<TokioMutex<()>>>>;
@@ -258,6 +261,9 @@ pub struct RemoteImageResult {
 #[derive(Debug, Clone, Deserialize)]
 pub struct DownloadImagesPayload {
     pub images: Vec<RemoteImageRequest>,
+    /// 已打开的工作区根（fs_guard 白名单校验用；未打开工作区时为空 → fail-closed）
+    #[serde(default)]
+    pub workspace_root: Option<String>,
 }
 
 /// 仅从 URL 路径推断扩展名（不发 HTTP 请求），无扩展名返回空字符串。
@@ -390,6 +396,7 @@ async fn download_one(
     req: RemoteImageRequest,
     permit: tokio::sync::OwnedSemaphorePermit,
     ctx: Arc<DownloadContext>,
+    allowed_roots: Arc<Vec<PathBuf>>,
 ) -> (RemoteImageResult, tokio::sync::OwnedSemaphorePermit) {
     // 1. 发送"doing"事件：标识这张图片开始下载（done 还未递增）
     ctx.emit(ctx.build_progress(
@@ -399,7 +406,7 @@ async fn download_one(
     ));
 
     // 2. 执行下载（permit 在函数返回时 drop，槽位归还）
-    let result = download_one_inner(req).await;
+    let result = download_one_inner(req, &allowed_roots).await;
 
     // 2.5 立即 emit 单张完成事件：前端收到后可以马上替换 block URL，不需等整批
     let _ = ctx.app_handle.emit(
@@ -551,52 +558,12 @@ async fn fetch_image_with_retry(url: &str) -> Result<reqwest::Response, String> 
     }
 }
 
-/// 对可能尚不存在的路径做规范化：逐级向上找到已存在的祖先 canonicalize 后，
-/// 再把剩余路径片段拼回，用于在 create_dir_all 之前校验 target_dir 归属。
-fn canonicalize_for_check(path: &Path) -> Option<PathBuf> {
-    // 路径已存在：直接 canonicalize
-    if let Ok(canon) = path.canonicalize() {
-        return Some(canon);
-    }
-    // 路径不存在：逐级向上找已存在的祖先
-    let mut current = path.to_path_buf();
-    let mut remaining: Vec<PathBuf> = Vec::new();
-    while !current.exists() {
-        let name = current.file_name()?;
-        remaining.push(PathBuf::from(name));
-        if !current.pop() {
-            return None;
-        }
-    }
-    let mut canon = current.canonicalize().ok()?;
-    for part in remaining.into_iter().rev() {
-        canon = canon.join(part);
-    }
-    Some(canon)
-}
-
-/// 校验 target_dir 规范化后必须位于 root_path 之内，防止路径穿越。
-/// root_path 必须已存在；target_dir 允许不存在（用 canonicalize_for_check 规范化）。
-fn resolve_within_root(target_dir: &str, root_path: &str) -> Result<PathBuf, String> {
-    let root_canon = PathBuf::from(root_path)
-        .canonicalize()
-        .map_err(|e| format!("root_path canonicalize failed ({}): {}", root_path, e))?;
-    let target_canon = canonicalize_for_check(Path::new(target_dir))
-        .ok_or_else(|| format!("target_dir canonicalize failed: {}", target_dir))?;
-    // starts_with 按 path 组件比较，可正确处理边界（/foo/bar 不算在 /foo/ba 内）
-    if !target_canon.starts_with(&root_canon) {
-        return Err(format!(
-            "target_dir not within root_path: target={} root={}",
-            target_canon.display(),
-            root_canon.display()
-        ));
-    }
-    Ok(target_canon)
-}
-
 /// 单张图片下载 + 落盘（tokio 异步）核心逻辑。
 /// 同一 URL 的并发请求通过 in-flight 锁串行化，保证只下载一次；后续命中已下载文件。
-async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
+async fn download_one_inner(
+    req: RemoteImageRequest,
+    allowed_roots: &[PathBuf],
+) -> RemoteImageResult {
     let url = req.url.clone();
 
     // 1. SSRF 校验（锁外，无副作用）：拒绝非 http/https 与私网/环回 IP 字面量
@@ -608,19 +575,18 @@ async fn download_one_inner(req: RemoteImageRequest) -> RemoteImageResult {
     let mut ext = infer_ext_from_url(&req.url);
     let mut file_name = generate_file_name(&req.url, &ext);
 
-    // 3. 确定 target_dir + 路径穿越校验（锁外，无副作用）
+    // 3. 确定 target_dir + 落盘路径白名单校验（锁外，无副作用）
     let target_dir = req.target_dir.trim().to_string();
     let target_dir = if target_dir.is_empty() {
         req.file_dir.clone()
     } else {
         target_dir
     };
-    // 安全校验（MISS-2）：target_dir 规范化后必须位于 root_path 之内，
-    // 防止前端传入任意路径造成路径穿越。root_path 为空时无法校验，跳过（保持原行为）。
-    if !target_dir.is_empty() && !req.root_path.trim().is_empty() {
-        if let Err(e) = resolve_within_root(&target_dir, &req.root_path) {
-            return err_result(url, format!("path traversal blocked: {}", e));
-        }
+    // 安全校验（候选 2 fail-closed）：落盘目录规范化后必须位于 fs_guard 允许集
+    // （工作区根 + 应用数据目录）之内。target_dir 与工作区根任一为空均无法通过
+    // 校验即拒绝，不再回退为跳过校验。
+    if let Err(e) = check_path_in_roots(allowed_roots, Path::new(&target_dir)) {
+        return err_result(url, format!("path traversal blocked: {}", e));
     }
 
     // 4. 获取 URL in-flight 锁（同一 URL 的并发请求串行化，保证只下载一次）
@@ -775,6 +741,13 @@ pub async fn download_remote_images(
     // 0. 发送 start 事件
     ctx.emit(ctx.build_progress("start", 0, None));
 
+    // 0.5 预组装 fs_guard 允许根（工作区根 + 应用数据目录），批量任务复用。
+    // workspace_root 为空（未打开工作区）时允许根只剩应用数据目录 → fail-closed。
+    let allowed_roots = Arc::new(crate::services::fs_guard::allowed_roots(
+        &app_handle,
+        payload.workspace_root.as_deref(),
+    )?);
+
     // 1. 创建信号量，限制最多 MAX_CONCURRENT_DOWNLOADS 个并发下载任务，避免资源占用过大
     let semaphore = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
     let mut tasks = Vec::with_capacity(total);
@@ -791,6 +764,7 @@ pub async fn download_remote_images(
             req,
             permit,
             ctx.clone(),
+            allowed_roots.clone(),
         )));
     }
 

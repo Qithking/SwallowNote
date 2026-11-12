@@ -249,7 +249,12 @@ function EditorToolbar() {
 
   const handleOpenFolder = async () => {
     try {
-      await invoke('open_in_finder', { path })
+      // workspaceRoot 注入：后端 fs_guard 白名单校验（架构审计候选 2）。
+      // 组件本地注入而非引 file-ops 包装，避免测试环境拉入额外 import 链。
+      await invoke('open_in_finder', {
+        path,
+        workspaceRoot: useWorkspaceStore.getState().rootPath || null,
+      })
     } catch (err) {
       logger.error('editor-toolbar', 'Failed to open folder:', err)
     }

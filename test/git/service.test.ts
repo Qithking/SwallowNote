@@ -9,11 +9,11 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  gitPull, gitPullWithCredentials,
-  gitForcePush, gitForcePushWithCredentials,
-  gitForcePull, gitForcePullWithCredentials,
+  gitPull, gitPush,
+  gitForcePush,
+  gitForcePull,
   gitCredentialGet,
-  gitCommitAndPush, gitPushWithCredentials,
+  gitCommitAndPush,
 } from '@/lib/tauri'
 import { withCredentialFallback, commitAndPushRepo } from '@/lib/git/service'
 import { GitErrorCode } from '@/lib/git/errors'
@@ -21,14 +21,11 @@ import type { GitRepository } from '@/lib/tauri'
 
 vi.mock('@/lib/tauri', () => ({
   gitPull: vi.fn(),
-  gitPullWithCredentials: vi.fn(),
+  gitPush: vi.fn(),
   gitForcePush: vi.fn(),
-  gitForcePushWithCredentials: vi.fn(),
   gitForcePull: vi.fn(),
-  gitForcePullWithCredentials: vi.fn(),
   gitCredentialGet: vi.fn(),
   gitCommitAndPush: vi.fn(),
-  gitPushWithCredentials: vi.fn(),
 }))
 
 const createRepo = (path: string, name: string): GitRepository => ({
@@ -55,23 +52,24 @@ describe('withCredentialFallback · pull 操作', () => {
     expect(r.success).toBe(true)
     expect(r.error).toBeUndefined()
     expect(r.needsCredential).toBeFalsy()
-    expect(gitPullWithCredentials).not.toHaveBeenCalled()
+    // 对偶合并 Q8：凭证 fallback 与主操作共用同一函数，此处仅主操作调用一次
+    expect(gitPull).toHaveBeenCalledTimes(1)
   })
 
   it('AUTH_REQUIRED + 有凭证 → 凭证操作成功 → success:true', async () => {
     vi.mocked(gitPull).mockRejectedValueOnce('AUTH_REQUIRED:fatal: could not read Username')
     vi.mocked(gitCredentialGet).mockResolvedValueOnce({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitPullWithCredentials).mockResolvedValueOnce(undefined)
 
     const r = await withCredentialFallback(createRepo('/ws/r1', 'r1'), 'pull')
     expect(r.success).toBe(true)
-    expect(gitPullWithCredentials).toHaveBeenCalledWith('/ws/r1', 'u', 'p')
+    // 第二次调用即凭证 fallback（带 'u','p' 参数）
+    expect(gitPull).toHaveBeenCalledWith('/ws/r1', 'u', 'p')
   })
 
   it('AUTH_REQUIRED + 有凭证 → 凭证操作 REBASE_CONFLICT → errorCode:RebaseConflict', async () => {
     vi.mocked(gitPull).mockRejectedValueOnce('AUTH_REQUIRED:fatal: could not read Username')
     vi.mocked(gitCredentialGet).mockResolvedValueOnce({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitPullWithCredentials).mockRejectedValueOnce('REBASE_CONFLICT:CONFLICT in file')
+    vi.mocked(gitPull).mockRejectedValueOnce('REBASE_CONFLICT:CONFLICT in file')
 
     const r = await withCredentialFallback(createRepo('/ws/r1', 'r1'), 'pull')
     expect(r.success).toBe(false)
@@ -84,7 +82,7 @@ describe('withCredentialFallback · pull 操作', () => {
   it('AUTH_REQUIRED + 有凭证 → 凭证操作其他错误 → needsCredential:true', async () => {
     vi.mocked(gitPull).mockRejectedValueOnce('AUTH_REQUIRED:fatal: could not read Username')
     vi.mocked(gitCredentialGet).mockResolvedValueOnce({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitPullWithCredentials).mockRejectedValueOnce('fatal: network error')
+    vi.mocked(gitPull).mockRejectedValueOnce('fatal: network error')
 
     const r = await withCredentialFallback(createRepo('/ws/r1', 'r1'), 'pull')
     expect(r.success).toBe(false)
@@ -145,14 +143,13 @@ describe('withCredentialFallback · forcePush / forcePull 操作', () => {
     vi.mocked(gitCredentialGet).mockResolvedValue(null)
   })
 
-  it('forcePush AUTH_REQUIRED + 有凭证 → gitForcePushWithCredentials 被调', async () => {
+  it('forcePush AUTH_REQUIRED + 有凭证 → gitForcePush 带凭证被调', async () => {
     vi.mocked(gitForcePush).mockRejectedValueOnce('AUTH_REQUIRED:auth failed')
     vi.mocked(gitCredentialGet).mockResolvedValueOnce({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitForcePushWithCredentials).mockResolvedValueOnce(undefined)
 
     const r = await withCredentialFallback(createRepo('/ws/r2', 'r2'), 'forcePush')
     expect(r.success).toBe(true)
-    expect(gitForcePushWithCredentials).toHaveBeenCalledWith('/ws/r2', 'u', 'p')
+    expect(gitForcePush).toHaveBeenCalledWith('/ws/r2', 'u', 'p')
   })
 
   it('forcePull AUTH_REQUIRED + 无凭证 → needsCredential:true', async () => {
@@ -177,7 +174,7 @@ describe('commitAndPushRepo · commit+push 复合操作', () => {
     expect(r.success).toBe(true)
     expect(r.committed).toBe(true)
     expect(r.pushed).toBe(true)
-    expect(gitPushWithCredentials).not.toHaveBeenCalled()
+    expect(gitPush).not.toHaveBeenCalled()
   })
 
   it('gitCommitAndPush 无改动 → success:true, committed:false, pushed:false', async () => {
@@ -191,21 +188,19 @@ describe('commitAndPushRepo · commit+push 复合操作', () => {
   it('AUTH_REQUIRED + 有凭证 → pull+push with credentials 成功 → success:true', async () => {
     vi.mocked(gitCommitAndPush).mockRejectedValueOnce('AUTH_REQUIRED:auth failed')
     vi.mocked(gitCredentialGet).mockResolvedValueOnce({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitPullWithCredentials).mockResolvedValueOnce(undefined)
-    vi.mocked(gitPushWithCredentials).mockResolvedValueOnce(undefined)
 
     const r = await commitAndPushRepo(createRepo('/ws/r1', 'r1'), 'msg')
     expect(r.success).toBe(true)
     expect(r.committed).toBe(true)
     expect(r.pushed).toBe(true)
-    expect(gitPullWithCredentials).toHaveBeenCalledWith('/ws/r1', 'u', 'p')
-    expect(gitPushWithCredentials).toHaveBeenCalledWith('/ws/r1', 'u', 'p')
+    expect(gitPull).toHaveBeenCalledWith('/ws/r1', 'u', 'p')
+    expect(gitPush).toHaveBeenCalledWith('/ws/r1', 'u', 'p')
   })
 
   it('AUTH_REQUIRED + 有凭证 → pull REBASE_CONFLICT → errorCode:RebaseConflict', async () => {
     vi.mocked(gitCommitAndPush).mockRejectedValueOnce('AUTH_REQUIRED:auth failed')
     vi.mocked(gitCredentialGet).mockResolvedValueOnce({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitPullWithCredentials).mockRejectedValueOnce('REBASE_CONFLICT:conflict')
+    vi.mocked(gitPull).mockRejectedValueOnce('REBASE_CONFLICT:conflict')
 
     const r = await commitAndPushRepo(createRepo('/ws/r1', 'r1'), 'msg')
     expect(r.success).toBe(false)
@@ -217,8 +212,7 @@ describe('commitAndPushRepo · commit+push 复合操作', () => {
   it('AUTH_REQUIRED + 有凭证 → push 失败 → needsCredential:true', async () => {
     vi.mocked(gitCommitAndPush).mockRejectedValueOnce('AUTH_REQUIRED:auth failed')
     vi.mocked(gitCredentialGet).mockResolvedValueOnce({ username: 'u', password: 'p' } as any)
-    vi.mocked(gitPullWithCredentials).mockResolvedValueOnce(undefined)
-    vi.mocked(gitPushWithCredentials).mockRejectedValueOnce('fatal: push rejected')
+    vi.mocked(gitPush).mockRejectedValueOnce('fatal: push rejected')
 
     const r = await commitAndPushRepo(createRepo('/ws/r1', 'r1'), 'msg')
     expect(r.success).toBe(false)

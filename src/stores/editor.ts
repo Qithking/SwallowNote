@@ -6,7 +6,7 @@ import { logger } from '@/lib/logger'
 import { subscribeWithSelector } from 'zustand/middleware'
 import type { ReactNode } from 'react'
 import { loadFileContent } from '@/lib/api'
-import { writeFile, gitAutoCommit } from '@/lib/tauri'
+import { writeFile, gitAutoCommit, indexSavedFile } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
 import { findScrollContainer } from '@/lib/scroll-position'
 import { clearCursorAnchorCache, getCursorAnchorCache } from '@/lib/cursor-anchor'
@@ -839,8 +839,8 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         // 保存 .md 文件后，同步更新 md_frontmatter 表
         if (isMarkdown) {
           try {
-            const { invoke } = await import('@tauri-apps/api/core')
-            await invoke('index_saved_file', { path: tab.path })
+            // indexSavedFile 内部注入 workspaceRoot 供后端 fs_guard 白名单校验
+            await indexSavedFile(tab.path)
           } catch (e) {
             // 索引线程会异步补偿，但记录日志便于排查
             logger.error('editor-store', 'Failed to index saved file:', tab.path, e)
@@ -860,7 +860,8 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         // 失效 frontmatter 缓存以刷新搜索/文件树
         if (isMarkdown) {
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          invalidateFrontmatterCache(tab.path)
+          const { useWorkspaceStore } = await import('@/stores/workspace')
+          invalidateFrontmatterCache(tab.path, useWorkspaceStore.getState().rootPath)
         }
         window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: tab.path } }))
         // 若在 git 仓库则自动提交（异步非阻塞）

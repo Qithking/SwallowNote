@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, PullResult } from '@/stores/git'
-import { gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitAttachBranchToHead, gitSwitchToLocalBranch } from '@/lib/tauri'
+import { gitPush, gitForcePush, gitForcePull, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitAttachBranchToHead, gitSwitchToLocalBranch } from '@/lib/tauri'
 import { withCredentialFallback, commitAndPushRepo } from '@/lib/git/service'
 import { GitErrorCode, parseDivergedInfo } from '@/lib/git/errors'
 import { DetachedHeadDivergedDialog } from '@/components/Git/DetachedHeadDivergedDialog'
@@ -223,7 +223,7 @@ function CommitSection({
   const handlePushWithCredentials = async (username: string, password: string) => {
     setIsPushingWithCredentials(true)
     try {
-      await gitPushWithCredentials(credentialDialog.repoPath, username, password)
+      await gitPush(credentialDialog.repoPath, username, password)
       setCredentialDialog({ open: false, repoPath: '', repoName: '' })
       showToast(`${credentialDialog.repoName}: ${t('git.syncSuccess', { count: 1 })}`, 'success')
       onRefresh()
@@ -505,10 +505,10 @@ function RepositoryItem({
     setIsCredentialLoading(true)
     try {
       if (credentialDialog.action === 'forcePush') {
-        await gitForcePushWithCredentials(repo.path, username, password)
+        await gitForcePush(repo.path, username, password)
         showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
       } else {
-        await gitForcePullWithCredentials(repo.path, username, password)
+        await gitForcePull(repo.path, username, password)
         showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
       }
       setCredentialDialog({ open: false, action: 'forcePush' })
