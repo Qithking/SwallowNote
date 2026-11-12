@@ -11,13 +11,13 @@
 | `note:save` | `{ noteId, path }` | 写盘成功 |
 | `note:change` | `{ noteId, path, content }` | 编辑器内容变化 |
 | `theme:change` | `{ theme }` | 用户切换主题 |
-| `locale:change` | `{ locale }` | 用户切换语言（i18n 已就绪，待接入） |
+| `locale:change` | `{ locale }` | 用户切换语言（i18n 已就绪，切换入口真实 emit） |
 | `settings:change` | `{ key, value }` | 用户修改任意设置项 |
 | `app:ready` | `{}` | 应用启动完成 |
 | `app:exit` | `{}` | 应用开始关闭 |
 | `plugin-settings:change` | `{ pluginId, values }` | 某插件自身的设置被修改后（`values` 为该插件完整设置 map） |
-| `editor:registered` | `{ pluginId, extension }` | 插件调用 `registerEditor` 注册文件编辑器后 |
-| `editor:unregistered` | `{ pluginId, extension }` | 插件调用 `unregisterEditor` 注销文件编辑器后 |
+| `editor:registered` | `{ pluginId, extension }` | 文件编辑器注册成功后（`registerEditor` 手动注册与 manifest `editorFileExtensions` + `editorComponent` 声明式自动注册两条路径均触发） |
+| `editor:unregistered` | `{ pluginId, extension }` | 文件编辑器注销后（手动注销与声明式自动清理均触发） |
 
 ## 获取当前笔记内容：`activeNoteContent` vs `note:change`
 

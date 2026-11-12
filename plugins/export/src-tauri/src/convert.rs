@@ -68,19 +68,6 @@ impl ExportError {
             ExportError::DocxGeneration(_) => ERR_DOCX_GENERATION,
         }
     }
-
-    /// Format the error message with an `[ERR_CODE=xxx]` prefix
-    /// that the frontend can extract via regex. The host's
-    /// [`plugin_invoke.rs`](file:///Users/thking/code/codeBuddy/SwallowNote/src-tauri/src/commands/plugin_invoke.rs)
-    /// currently drops the JSON-RPC `code` field and only
-    /// forwards the message string to the IPC layer, so we
-    /// embed the code in the message itself for cross-process
-    /// classification. If the host later starts passthrough'ing
-    /// the `code` field, the frontend's regex still falls back
-    /// gracefully (returns `code: 0` on no match → default toast).
-    pub fn display_with_code(&self) -> String {
-        format!("[ERR_CODE={}] {}", self.code(), self)
-    }
 }
 
 // Reject obviously oversized inputs to avoid hanging the worker on

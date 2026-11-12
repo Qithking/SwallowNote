@@ -443,7 +443,35 @@ export async function loadAllPlugins(
   if (import.meta.env.DEV) {
     logger.info('plugin-loader', `loadAllPlugins called with ${rustMetas.length} plugins:`, rustMetas.map(m => ({ id: m.id, path: m.plugin_path, iconPos: m.icon_position, enabled: m.enabled })))
   }
+  // B2/B5 前置依赖：宿主接管（setHost）与清单编辑器注册帮手。
+  // 采用动态 import 规避静态循环依赖——plugin-loader ← plugin store
+  // （store 已静态 import dropPluginBlobUrl），而 plugin-host-takeover /
+  // pluginEditor 均反向依赖该 store，静态引入会形成 loader → takeover →
+  // pluginEditor → store → loader 的环；动态 import 延迟到运行时解析，
+  // 模块加载完成后缓存命中，无额外成本。
+  const [{ installHostTakeover }, { registerEditorsFromManifest }] = await Promise.all([
+    import('./plugin-host-takeover'),
+    import('@/stores/pluginEditor'),
+  ])
   return loadWithConcurrency(rustMetas, async (meta) => {
+      // 宿主版本不满足 minHostVersion：跳过加载，仅推送 failure 说明原因
+      if (meta.host_compatible === false) {
+        const reason = `${i18n.t('pluginLoader.hostIncompatibleBase')}\n\n${i18n.t('pluginLoader.hostIncompatibleDetail', { min: meta.min_host_version ?? '?' })}`
+        logger.warn(
+          'plugin-loader',
+          `Skipping plugin ${meta.id}: requires host >= ${meta.min_host_version}`,
+        )
+        return {
+          definition: null,
+          failure: {
+            id: meta.id,
+            name: meta.name,
+            reason,
+            ts: Date.now(),
+            pluginPath: meta.plugin_path,
+          },
+        }
+      }
       // manifest 为 null 时按加载失败处理
       const { manifest, module, error } = await loadPluginModuleWithRef(meta.plugin_path)
 
@@ -466,6 +494,9 @@ export async function loadAllPlugins(
           toolbarButton: manifest.toolbarButton,
           // 设置对话框组件，未声明时为 undefined
           settings: manifest.settings,
+          // B5：镜像清单中的编辑器声明字段，供 store 启用路径补注册使用
+          editorFileExtensions: manifest.editorFileExtensions,
+          editorComponent: manifest.editorComponent,
           pluginPath: meta.plugin_path,
           hasBackend: meta.has_backend,
           // 是否随附 settings.json schema
@@ -487,6 +518,18 @@ export async function loadAllPlugins(
           source: meta.source,
         } satisfies PluginDefinition
         attachPluginModule(def, module)
+        // B2（setHost 时机前移）：模块加载完成即安装宿主接管，插件 SDK API
+        // 在 onLoad 之前 / 生命周期之外的调用不再落入 SDK stub。
+        // store.registerPlugins 内的同名调用命中幂等表（hostTakeoverRestoreMap），
+        // 仅作双保险，不产生副作用。
+        installHostTakeover(def)
+        // B5（manifest 驱动注册）：enabled 且同时声明 editorFileExtensions +
+        // editorComponent 的插件，由宿主自动逐扩展注册编辑器；disabled 插件
+        // 在 loader 阶段不注册（由 store 的启用路径补注册）。注册帮手内部
+        // 为「同插件同扩展」替换语义，重扫重复调用天然幂等。
+        if (meta.enabled) {
+          registerEditorsFromManifest(def.id, def.editorFileExtensions, def.editorComponent)
+        }
         return { definition: def, failure: null }
       }
       // 无效 manifest 时返回占位组件

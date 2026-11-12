@@ -7,6 +7,7 @@ dist/
 
 # Plugin build artifacts
 plugins/*/dist/
+plugins/*/backend/
 plugins/*/node_modules/
 plugins/*/src-tauri/target/
 
@@ -48,6 +49,9 @@ target/
 # 插件构建产物
 plugins/*/*.zip
 
+# 插件签名私钥（发布凭证，绝不入库）
+plugins/.signing-key
+
 # 测试覆盖率
 coverage/
 
@@ -58,3 +62,9 @@ vite.config.ts.timestamp-*
 vite.config.js.timestamp-*
 scripts/
 .claude/
+# docs/ 默认忽略；插件 SDK/kit/RPC 共享包需入库，显式例外
+docs/*
+!docs/plugin-kit/
+!docs/plugin-rpc/
+!docs/plugin-samples/
+GLOSSARY.md

@@ -5,16 +5,20 @@
  * All tests use the SDK's standalone stub — no host takeover is
  * installed — so the SDK has to behave consistently in both modes.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { describe, afterEach, expect, it, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import type { PluginContext } from '@swallow-note/plugin-sdk'
 import {
   PluginLifecycleTimeoutError,
   clearHost,
   clearPluginCommands,
+  getAllSettings,
+  getSetting,
   getStubCommandRegistry,
   registerCommand,
   runLifecycleHook,
+  setHost,
+  setSetting,
   usePluginCommands,
   usePluginServices,
   type PluginPanelProps,
@@ -105,5 +109,54 @@ describe('SDK usePluginCommands', () => {
     expect(getStubCommandRegistry().list().length).toBe(1)
     clearPluginCommands('__test__')
     expect(getStubCommandRegistry().list()).toEqual([])
+  })
+})
+
+describe('SDK settings API 隐式绑定当前插件 (P0.2)', () => {
+  afterEach(() => {
+    // 每个用例自清理，clearHost 兜底防止绑定层泄漏到相邻用例
+    clearHost()
+  })
+
+  it('getSetting 把绑定层的 pluginId 透传给 host override', async () => {
+    const seen: Array<{ pluginId: string; key: string }> = []
+    const restore = setHost(
+      {
+        __pluginSettings_get: async (pluginId, key) => {
+          seen.push({ pluginId, key })
+          return `v:${key}`
+        },
+      },
+      'com.test.a',
+    )
+    // 调用方不传 pluginId：SDK 从 override 层隐式解析，插件无法指定别的插件
+    await expect(getSetting('theme')).resolves.toBe('v:theme')
+    expect(seen).toEqual([{ pluginId: 'com.test.a', key: 'theme' }])
+    restore()
+  })
+
+  it('内层未绑定的 override 层回落解析外层绑定', async () => {
+    const seen: string[] = []
+    const restoreOuter = setHost(
+      {
+        __pluginSettings_get: async (id) => {
+          seen.push(id)
+          return null
+        },
+      },
+      'com.test.outer',
+    )
+    // 模拟宿主并发场景：内层临时覆盖某个与 settings 无关的能力，未带 pluginId
+    const restoreInner = setHost({ emit: () => {} })
+    await getSetting('k')
+    expect(seen).toEqual(['com.test.outer'])
+    restoreInner()
+    restoreOuter()
+  })
+
+  it('无任何绑定时抛出带指引的错误（不静默读写错误插件）', async () => {
+    await expect(getSetting('k')).rejects.toThrow(/没有可解析的 pluginId/)
+    await expect(setSetting('k', 1)).rejects.toThrow(/没有可解析的 pluginId/)
+    await expect(getAllSettings()).rejects.toThrow(/没有可解析的 pluginId/)
   })
 })

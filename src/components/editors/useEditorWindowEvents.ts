@@ -9,7 +9,8 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { downloadCoordinator } from '@/lib/download-coordinator'
 import { logger } from '@/lib/logger'
-import { walkBlocks, parseMarkdownToBlocks } from './editorBlockTransforms'
+import { walkBlocks, parseMarkdownToBlocks, serializeBlocksForMarkdown } from './editorBlockTransforms'
+import { compactMarkdown } from '@/utils/compact-markdown'
 
 /**
  * 滚动定位：监听 scroll-to-line / scroll-to-block-id 事件。
@@ -131,8 +132,10 @@ export function useEditorScrollEvents(editor: BlockNoteEditor<any, any, any>) {
 }
 
 /**
- * AI 协作事件：监听 insert-at-cursor / replace-content 插入或替换内容，
+ * AI 协作事件：监听 insert-at-cursor / replace-content / replace-selection 插入或替换内容，
  * 以及 Cmd/Ctrl+A 全选（Tauri WebView 下原生 selectAll 会先于 ProseMirror 拦截）。
+ * 事件 detail 中的 __reply 为可选回执回调：带 __reply 的派发方（插件编辑器写 API）
+ * 需要执行结果回执，旧派发方（editorStore）不带 __reply 自动兼容。
  */
 export function useEditorAIEvents(editor: BlockNoteEditor<any, any, any>) {
   // Insert text at cursor position in BlockNote
@@ -141,9 +144,12 @@ export function useEditorAIEvents(editor: BlockNoteEditor<any, any, any>) {
   useEffect(() => {
     let cancelled = false
     const handler = async (e: Event) => {
-      if (cancelled || !editor) return
-      const { text } = (e as CustomEvent).detail
-      if (!text) return
+      if (cancelled) return
+      const { text, __reply } = (e as CustomEvent).detail
+      if (!editor || !text) {
+        __reply?.(false)
+        return
+      }
 
       try {
         // 解析 Markdown 并应用特殊 block 转换（失败时降级为纯文本段落）
@@ -163,8 +169,11 @@ export function useEditorAIEvents(editor: BlockNoteEditor<any, any, any>) {
             editor.insertBlocks(blocks, currentBlock.id, 'after')
           }
         }
+        // 解析后无可用 block 时视为未写入，回执 false
+        __reply?.(blocks.length > 0)
       } catch (err) {
         logger.error('markdown-editor', 'Failed to insert at cursor in BlockNote:', err)
+        __reply?.(false)
       }
     }
     window.addEventListener('insert-at-cursor', handler)
@@ -233,6 +242,144 @@ export function useEditorAIEvents(editor: BlockNoteEditor<any, any, any>) {
     return () => {
       cancelled = true
       window.removeEventListener('replace-content', handler)
+    }
+  }, [editor])
+
+  // 替换当前选区（插件 editor.replaceSelection 专用）：无选区时拒绝并回执 false，
+  // 避免误触发整文替换（replace-content 在无选区时为整文替换，数据破坏风险高）。
+  useEffect(() => {
+    let cancelled = false
+    const handler = async (e: Event) => {
+      if (cancelled) return
+      const { text, __reply } = (e as CustomEvent).detail
+      if (!editor || !text) {
+        __reply?.(false)
+        return
+      }
+
+      try {
+        const tiptapEditor = (editor as any)._tiptapEditor
+        if (!tiptapEditor) {
+          __reply?.(false)
+          return
+        }
+        // 无选区：拒绝（SDK 约定 replaceSelection 无选区返回 false）
+        if (tiptapEditor.state.selection.empty) {
+          __reply?.(false)
+          return
+        }
+
+        // 解析 Markdown 并应用特殊 block 转换（失败时降级为纯文本段落）
+        const blocks = await parseMarkdownToBlocks(editor, text, 'Failed to parse markdown for replace-selection')
+        if (blocks.length === 0) {
+          __reply?.(false)
+          return
+        }
+
+        const { from, to } = tiptapEditor.state.selection
+        const doc = tiptapEditor.state.doc
+
+        // 收集与选区重叠的 block ID
+        const blockIdsToRemove: string[] = []
+        doc.descendants((node: any, pos: number) => {
+          if (node.type.name === 'blockContainer' && node.attrs?.id) {
+            const blockStart = pos
+            const blockEnd = pos + node.nodeSize
+            // Check if this block overlaps with the selection
+            if (blockStart < to && blockEnd > from) {
+              blockIdsToRemove.push(node.attrs.id)
+            }
+          }
+        })
+
+        if (blockIdsToRemove.length > 0) {
+          editor.replaceBlocks(blockIdsToRemove, blocks)
+        } else {
+          // Fallback: insert after current block
+          const currentBlock = editor.getTextCursorPosition().block
+          editor.insertBlocks(blocks, currentBlock.id, 'after')
+        }
+        __reply?.(true)
+      } catch (err) {
+        logger.error('markdown-editor', 'Failed to replace selection in BlockNote:', err)
+        __reply?.(false)
+      }
+    }
+    window.addEventListener('replace-selection', handler)
+    return () => {
+      cancelled = true
+      window.removeEventListener('replace-selection', handler)
+    }
+  }, [editor])
+
+  // 查询当前选区（插件 editor.getSelection 专用，P1.3）：回执 { text, lineRange }，
+  // 无选区/编辑器未挂载回执 null；行号计算与 MarkdownEditor 右键菜单先例同算法（1-based）。
+  useEffect(() => {
+    let cancelled = false
+    const handler = (e: Event) => {
+      if (cancelled) return
+      const { __reply } = (e as CustomEvent).detail
+      if (!editor) {
+        __reply?.(null)
+        return
+      }
+      try {
+        const tiptapEditor = (editor as any)._tiptapEditor
+        if (!tiptapEditor) {
+          __reply?.(null)
+          return
+        }
+        const { from, to, empty } = tiptapEditor.state.selection
+        if (empty) {
+          __reply?.(null)
+          return
+        }
+        const text = tiptapEditor.state.doc.textBetween(from, to, '\n')
+        // 1-based 行号：统计选区起点/终点之前文本的换行数
+        const textBeforeFrom = tiptapEditor.state.doc.textBetween(0, from, '\n')
+        const textBeforeTo = tiptapEditor.state.doc.textBetween(0, to, '\n')
+        const startLine = (textBeforeFrom.match(/\n/g) || []).length + 1
+        const endLine = (textBeforeTo.match(/\n/g) || []).length + 1
+        __reply?.({ text, lineRange: [startLine, endLine] })
+      } catch (err) {
+        logger.error('markdown-editor', 'Failed to query selection in BlockNote:', err)
+        __reply?.(null)
+      }
+    }
+    window.addEventListener('query-selection', handler)
+    return () => {
+      cancelled = true
+      window.removeEventListener('query-selection', handler)
+    }
+  }, [editor])
+
+  // 查询当前笔记全文（插件 editor.getActiveContent 专用，P2.5）：回执 markdown 源码，
+  // 序列化与 useEditorSerialization 的 onChange 路径一致（serializeBlocksForMarkdown →
+  // blocksToMarkdownLossy → compactMarkdown），无编辑器/序列化失败回执 null。
+  useEffect(() => {
+    let cancelled = false
+    const handler = (e: Event) => {
+      if (cancelled) return
+      const { __reply } = (e as CustomEvent).detail
+      if (!editor) {
+        __reply?.(null)
+        return
+      }
+      void (async () => {
+        try {
+          const serialized = serializeBlocksForMarkdown(editor.document as any[])
+          const rawMd = await editor.blocksToMarkdownLossy(serialized as typeof editor.document)
+          __reply?.(compactMarkdown(rawMd))
+        } catch (err) {
+          logger.error('markdown-editor', 'Failed to serialize document for plugin query-content:', err)
+          __reply?.(null)
+        }
+      })()
+    }
+    window.addEventListener('query-content', handler)
+    return () => {
+      cancelled = true
+      window.removeEventListener('query-content', handler)
     }
   }, [editor])
 

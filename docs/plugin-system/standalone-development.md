@@ -53,53 +53,40 @@ npm install @swallow-note/plugin-sdk react react-dom
 在 `src/MyPlugin.tsx`：
 
 ```typescript
-import { type PluginManifest, usePluginStorage } from '@swallow-note/plugin-sdk'
+import { definePlugin } from '@swallow-note/plugin-sdk'
+import manifestJson from './manifest.json'
 
-// ... 实现你的 manifest
-export default manifest
+// ... 实现 MyPanel 组件，内部使用 usePluginStorage 等 SDK hooks
+
+// manifest.json 是 id / name / permissions 等静态字段的唯一来源，入口只负责聚合运行时对象
+export default definePlugin(manifestJson, {
+  panel: MyPanel,
+  // settings / toolbarButton / editorComponent / 生命周期钩子（onLoad 等顶层平铺字段）按需注入
+})
+
+// 必须保留此导出：宿主模块加载后、首个 API 调用前通过它完成 setHost 接管
+export { setHost } from '@swallow-note/plugin-sdk'
 ```
 
-构建时用 Vite library mode，产物为 **ES 模块**（与官方模板和示例一致）：
+构建配置只需 3 行——[`@swallow-note/plugin-kit`](../plugin-kit) 的 `definePluginViteConfig` 已内置 Vite library mode（ES 模块产物）、externals、`inlineDynamicImports` 与 `// @swallow-manifest` 头部注释注入：
 
 ```typescript
 // vite.config.ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { resolve } from 'node:path'
+import { definePluginViteConfig } from '@swallow-note/plugin-kit'
 
-export default defineConfig(({ mode }) => {
-  if (mode === 'production') {
-    return {
-      plugins: [react()],
-      define: { 'process.env.NODE_ENV': JSON.stringify('production') },
-      build: {
-        outDir: 'dist',
-        emptyOutDir: true,
-        lib: {
-          entry: resolve(__dirname, 'src/MyPlugin.tsx'),
-          formats: ['es'],
-          fileName: () => 'index.js',
-        },
-        rollupOptions: {
-          external: [
-            'react', 'react-dom', 'react-dom/client',
-            'react/jsx-runtime', 'react/jsx-dev-runtime',
-            'sonner', 'react-i18next', 'i18next',
-          ],
-          output: {
-            inlineDynamicImports: true,  // 禁用代码分割，blob URL 无法解析分块导入
-          },
-        },
-      },
-    }
-  }
-  return { plugins: [react()], server: { port: 5173, open: true } }
+export default definePluginViteConfig({
+  externals: [
+    'react', 'react-dom', 'react-dom/client',
+    'react/jsx-runtime', 'react/jsx-dev-runtime',
+    'sonner', 'react-i18next', 'i18next',
+  ],
+  port: 5173,
 })
 ```
 
 > **external 说明**：`react` / `react-dom` / `react/jsx-runtime` 由宿主通过 `window.React` / `window.ReactDOM` 提供；`sonner` 由宿主通过 `window.SonnerToast` 提供；`react-i18next` / `i18next` 由宿主通过 `window.ReactI18Next` 提供。这些依赖不需要打包进插件产物，否则会导致体积膨胀或运行时冲突。
 
-> **`inlineDynamicImports` 说明**：插件加载器使用 blob URL 加载插件代码，blob URL 无法解析相对路径的 chunk 文件导入。因此必须设置 `inlineDynamicImports: true` 禁用代码分割，确保所有代码输出到单个 `index.js` 文件中。
+> **`inlineDynamicImports` 说明**：插件加载器使用 blob URL 加载插件代码，blob URL 无法解析相对路径的 chunk 文件导入。因此必须禁用代码分割，确保所有代码输出到单个 `index.js` 文件中（`definePluginViteConfig` 已内置该选项）。
 
 ## SDK 双模式详解
 
@@ -152,6 +139,16 @@ import {
 } from '@/stores/pluginEditor'
 import { useEditorStore, registerPluginTabRuntime } from '@/stores/editor'
 import { assertPermission } from '@/lib/plugin-permission-guard'
+import { invokePluginBackendStream } from '@/lib/plugin-stream'
+import {
+  pluginEditorInsertAtCursor, pluginEditorReplaceSelection, pluginEditorReplaceContent,
+  pluginEditorGetSelection, pluginEditorGetActiveContent,
+  pluginFilesCreateNote, pluginFilesListWorkspace, pluginFilesRead,
+} from '@/lib/plugin-write-api'
+import { openPluginPanel } from '@/lib/plugin-utils'
+import {
+  readSecureStorage, writeSecureStorage, deleteSecureStorage, listSecureStorageKeys,
+} from '@/lib/tauri'
 import { loadSettings, readSetting, writePluginSettings } from '@/lib/plugin-settings'
 import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
 
@@ -181,6 +178,21 @@ const restore = setHost({
   subscribePluginCommands: (listener) => subscribePluginCommands(listener),
   // Backend
   invokeBackend: async (cmd, args) => invoke('invoke_plugin', { pluginId, command: cmd, args }),
+  invokeBackendStream: (cmd, args, onChunk, options) =>
+    invokePluginBackendStream(pluginId, cmd, args, onChunk, options),
+  // 编辑器内容 API（editor / editor-write 权限，按插件 ID 转发）
+  __editor_insertAtCursor: (text: string) => pluginEditorInsertAtCursor(pluginId, text),
+  __editor_replaceSelection: (text: string) => pluginEditorReplaceSelection(pluginId, text),
+  __editor_replaceContent: (text: string) => pluginEditorReplaceContent(pluginId, text),
+  __editor_getSelection: () => pluginEditorGetSelection(pluginId),
+  __editor_getActiveContent: () => pluginEditorGetActiveContent(pluginId),
+  // 文件 API（files 权限）
+  __files_createNote: (relPath: string, content: string) =>
+    pluginFilesCreateNote(pluginId, relPath, content),
+  __files_listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
+  __files_read: (relPath: string) => pluginFilesRead(pluginId, relPath),
+  // 打开插件面板管道（payload 结构宿主不解析）
+  __openPluginPanel: (payload: unknown) => openPluginPanel(pluginId, payload),
   // 设置桥接（SQLite-backed，复用 storage 权限）
   __pluginSettings_get: async (id, key) => {
     assertPermission(id, 'storage', `read plugin setting "${key}"`)
@@ -203,6 +215,23 @@ const restore = setHost({
     const tagged = handler as unknown as { __pluginId?: string }
     tagged.__pluginId = pluginId
     return pluginEvents.on('plugin-settings:change', (payload) => handler(payload))
+  },
+  // 安全存储桥接（AES-256-GCM，密钥按插件派生；独立 'secure-storage' 权限细目）
+  __pluginSecureStorage_get: async (id, key) => {
+    assertPermission(id, 'secure-storage', `read secure storage key "${key}"`)
+    return readSecureStorage(id, key)
+  },
+  __pluginSecureStorage_set: async (id, key, value) => {
+    assertPermission(id, 'secure-storage', `write secure storage key "${key}"`)
+    await writeSecureStorage(id, key, value)
+  },
+  __pluginSecureStorage_delete: async (id, key) => {
+    assertPermission(id, 'secure-storage', `delete secure storage key "${key}"`)
+    await deleteSecureStorage(id, key)
+  },
+  __pluginSecureStorage_keys: async (id) => {
+    assertPermission(id, 'secure-storage', `list secure storage keys`)
+    return listSecureStorageKeys(id)
   },
   // 文件编辑器注册（需 editor 权限）
   registerEditor: (id, extension, component) => registerEditor(pluginId, extension, component),
@@ -294,6 +323,7 @@ npm run build
 
 # 打包成 zip
 cd dist && zip -r ../my-plugin-v0.1.0.zip . && cd ..
+# 或使用 plugin-kit CLI：npx swallow-plugin package（build + 打包 dist 为 zip 一步完成）
 
 # 在 SwallowNote 中：Settings → Plugins → Upload my-plugin-v0.1.0.zip
 ```

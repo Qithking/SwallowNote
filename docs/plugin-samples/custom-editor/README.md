@@ -1,25 +1,24 @@
 # Custom Editor 示例
 
-展示 `registerEditor` + `editorFileExtensions` + `editorComponent` 三层机制，为 `.smm` 文件注册自定义编辑器。
+展示**声明式自定义编辑器机制**：在 manifest.json 声明 `editorFileExtensions`，入口经 `definePlugin` 注入 `editorComponent`，宿主在插件启用时自动把组件注册到编辑器注册表并广播 `editor:registered` 事件，卸载/禁用时自动清理。
 
 **学习目标**：让插件接管特定扩展名文件的渲染，替代内置 Markdown / 代码编辑器。
 
-## 三层机制
+## 声明式机制
 
-| 层级 | 字段 / API | 作用 |
+| 环节 | 位置 | 说明 |
 | --- | --- | --- |
-| 静态声明 | manifest.`editorFileExtensions` | 加载前供宿主做权限/冲突预检 |
-| 静态声明 | manifest.`editorComponent` | 声明匹配扩展名时挂载的组件 |
-| 运行时注册 | `registerEditor(pluginId, ext, component)` | 把组件写入运行时注册表，宿主打开文件时查表 |
+| 静态声明 | manifest.json `editorFileExtensions` | 声明能渲染的扩展名（如 `['.smm']`），需同时声明 `editor` 权限 |
+| 组件注入 | 入口 `definePlugin(manifestJson, { editorComponent: SmmEditor })` | 声明匹配扩展名时挂载的组件 |
+| 宿主自动注册 | 宿主 plugin-loader | 插件 enabled 且同时具备 `editorFileExtensions` + `editorComponent` 时，逐扩展自动注册（同插件同扩展替换语义，重扫幂等） |
+| 生命周期事件 | `editor:registered` | 注册完成后宿主广播，面板或其他插件可订阅感知 |
 
-三者缺一不可：
-- 只写 manifest 字段，宿主预检通过但运行时查不到组件 → 文件回落到内置编辑器；
-- 只调 `registerEditor`，宿主预检看不到声明 → 可能在权限审计时漏报。
+无需（也不应）手动调用 `registerEditor` / `unregisterEditor` —— 注册与清理由宿主依据 manifest 自动配对，插件代码只保留组件本体。
 
 ## 文件
 
-- [manifest.json](./manifest.json) — 元数据（`hasBackend: false`）
-- [index.tsx](./index.tsx) — `SmmEditor` 组件 + `onLoad`/`onUnload` 注册
+- [manifest.json](./manifest.json) — 静态声明（`editorFileExtensions` / `permissions`，`hasBackend: false`）
+- [src/index.tsx](./src/index.tsx) — `SmmEditor` 组件 + `definePlugin` 入口
 
 ## editorComponent props
 
@@ -35,22 +34,21 @@
 ## 预期效果
 
 1. 侧边栏出现文件图标，点击展开面板显示 `.smm` 注册状态
-2. `onLoad` 触发时调用 `registerEditor`，面板"注册状态"变为"已注册"
+2. 插件启用时宿主自动注册，面板"注册状态"变为"已注册"（可订阅 `editor:registered` 事件感知）
 3. 打开任意 `.smm` 文件 → 主区域挂载 `SmmEditor`：左侧编辑 JSON 源码，右侧实时预览解析结果
 4. 编辑内容 → `onChange` 触发，宿主标记文件未保存
-5. 卸载插件 → `onUnload` 调用 `unregisterEditor`，`.smm` 回落到内置编辑器
+5. 卸载/禁用插件 → 宿主自动清理注册，`.smm` 回落到内置编辑器
 
 ## 冲突检测
 
-宿主在 `registerEditor` 时检测扩展名冲突：同一扩展名若已被其他插件注册，会抛出错误并 toast 提示。本示例使用 `.smm`（SwallowNote Memo 的缩写），不易与常见格式冲突。
+宿主自动注册时检测扩展名冲突：同一扩展名若已被其他插件注册，会抛出错误并 toast 提示。本示例使用 `.smm`（SwallowNote Memo 的缩写），不易与常见格式冲突。
 
 ## 权限
 
-`permissions: ['editor']` —— 注册文件编辑器必须声明 `editor` 权限。宿主在 `registerEditor` 调用时通过 `assertPermission(pluginId, 'editor', ...)` 校验，未授权抛 `PluginPermissionDeniedError`。
+manifest `permissions: ['editor']` —— 注册文件编辑器必须声明 `editor` 权限。宿主在自动注册时校验，未授权抛 `PluginPermissionDeniedError`。
 
 ## 相关 API
 
-- `registerEditor(pluginId, extension, component)` — 注册
-- `unregisterEditor(pluginId)` — 卸载本插件所有编辑器
+- `definePlugin(manifestJson, { editorComponent })` — 入口帮手，manifest 单一来源
 - `getActivePluginExtensions()` — 查询当前注册表快照
 - `getEditorForExtension(ext)` — 按扩展名查组件（宿主打开文件时用）

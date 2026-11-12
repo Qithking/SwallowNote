@@ -13,7 +13,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "noEmit": true
   },
-  "include": ["src", "../../docs/plugin-sdk/src"]
+  "include": ["src"]
 }

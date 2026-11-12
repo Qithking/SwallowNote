@@ -7,7 +7,7 @@
 ## 文件
 
 - [manifest.json](./manifest.json) — 元数据
-- [index.tsx](./index.tsx) — 命令注册 + 面板展示
+- [index.tsx](./src/index.tsx) — 命令注册 + 面板展示
 
 ## PluginCommand 接口
 

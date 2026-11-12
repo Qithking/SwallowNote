@@ -10,5 +10,7 @@
   "order": 100,
   "enabled": true,
   "hasBackend": false,
-  "entry": "index.tsx"
+  "entry": "index.tsx",
+  "editorFileExtensions": [".smm"],
+  "permissions": ["editor"]
 }

@@ -41,6 +41,7 @@ import { Suspense, useEffect, useSyncExternalStore, useRef, useState, type React
 import type { PluginDefinition, PluginPanelProps, PluginPermissionStatus } from '@/types/plugin'
 import { buildPluginContext } from '@/lib/plugin-host'
 import { runPluginLifecycleHook } from '@/lib/plugin-host-takeover'
+import { useUIStore } from '@/stores'
 import {
   hasPermission,
   subscribePermissionChanges,
@@ -89,6 +90,17 @@ function GrantedPluginPanelHost({
   // needing a second state variable that would itself trigger a
   // re-render.
   const wasActiveRef = useRef(isActive)
+
+  // 一次性请求管道（P1.4）：面板已挂载即视为 pendingRequest props 已送达
+  // （消费完成），清空宿主状态避免下次打开面板读到旧 payload；连续触发
+  // 时旧请求已被新请求覆盖。置于权限门控之后，门控未通过时 payload 保留，
+  // 授权后重挂仍能送达。
+  const pendingPluginRequest = useUIStore((s) => s.pendingPluginRequest)
+  useEffect(() => {
+    if (pendingPluginRequest) {
+      useUIStore.getState().setPendingPluginRequest(null)
+    }
+  }, [pendingPluginRequest])
 
   // Mount / unmount. We depend only on plugin.id so React's key-based
   // remount naturally produces a fresh onMount → onUnmount cycle.

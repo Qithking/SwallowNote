@@ -1,0 +1,216 @@
+/**
+ * Context Menu Item — demonstrates registerContextMenu
+ *
+ * Concepts shown:
+ *  - Register multiple items in onLoad, each with its own id
+ *  - locations array: which surfaces the item appears on
+ *  - when predicate: dynamically hide based on context
+ *  - onClick: receives the resolved ContextMenuContext
+ *  - Two layers of cleanup:
+ *      1. Explicit unregister in onUnload (best practice)
+ *      2. host's automatic clearPluginMenuItems(id) on unregister
+ *
+ * Note: lifecycle hooks are flat top-level fields on the manifest.
+ * The host's plugin-loader copies them onto PluginDefinition.hooks.
+ *
+ * Plugin-internal pub/sub (e.g. menu onClick → panel refresh) uses
+ * a small in-process bus below. The host bus is one-way.
+ */
+import { useEffect, useState } from 'react'
+import type {
+  PluginContext,
+  PluginLifecycleHook,
+  PluginPanelProps,
+} from '@swallow-note/plugin-sdk'
+import {
+  definePlugin,
+  registerContextMenu,
+  unregisterContextMenu,
+  getContextMenuItems,
+  usePluginStorage,
+} from '@swallow-note/plugin-sdk'
+// 静态字段（版本/权限等）单一来源：见 ../manifest.json
+import manifestJson from '../manifest.json'
+// Re-export `setHost` so the host can install its real
+// implementations on this bundle before firing lifecycle hooks.
+// This is critical for this sample: `registerContextMenu` must
+// reach the host's permission-checked `pluginMenuRegistry`
+// rather than the SDK's stub, otherwise our menu items would
+// silently bypass the `context-menu` grant check.
+export { setHost } from '@swallow-note/plugin-sdk'
+
+// ─── Icon ─────────────────────────────────────────────────────────────────────
+
+function MenuIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="8" />
+      <line x1="12" y1="12" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12" y2="16" />
+    </svg>
+  )
+}
+
+// ─── Item registration (module-level, executed in onLoad) ─────────────────────
+
+// We use module-level state to track registrations so onUnload can
+// reverse them without depending on a closure that captures the
+// context object.
+const REGISTERED_IDS = [
+  'context-demo:copy-path',
+  'context-demo:reveal',
+  'context-demo:word-count',
+  'context-demo:open-in-new-tab',
+]
+
+// Internal pub/sub so menu onClick handlers can wake up the panel.
+// Keyed by item id; payload is whatever the click handler produced.
+type InternalEvent = 'copied' | 'counted'
+type InternalHandler = (event: InternalEvent, data: unknown) => void
+const internalHandlers = new Set<InternalHandler>()
+function emitInternal(event: InternalEvent, data: unknown): void {
+  for (const h of internalHandlers) {
+    try {
+      h(event, data)
+    } catch (err) {
+      console.error('[context-menu] internal handler threw:', err)
+    }
+  }
+}
+
+function onLoad(ctx: PluginContext): void {
+  // Item 1: copy path to clipboard
+  registerContextMenu(ctx.pluginId, {
+    id: 'context-demo:copy-path',
+    label: 'Copy path to clipboard',
+    iconName: 'Copy',
+    locations: ['fileTree', 'tab'],
+    onClick: async (mctx) => {
+      if (!mctx.path) return
+      try {
+        await navigator.clipboard.writeText(mctx.path)
+        emitInternal('copied', mctx.path)
+      } catch (err) {
+        console.error('clipboard write failed', err)
+      }
+    },
+  })
+
+  // Item 2: reveal in editor (open the file in a new tab)
+  registerContextMenu(ctx.pluginId, {
+    id: 'context-demo:reveal',
+    label: 'Open in editor',
+    iconName: 'ExternalLink',
+    locations: ['fileTree', 'tab'],
+    when: (mctx) => !!mctx.path && !mctx.isDirectory,
+    onClick: (mctx) => {
+      if (!mctx.path) return
+      // We don't have a direct Tauri command to add a tab from the
+      // host, so we just log. In a real plugin you'd expose a
+      // `panel.invokeBackend` call to do this.
+      console.log('reveal in editor:', mctx.path)
+    },
+  })
+
+  // Item 3: word count of current selection (editor only)
+  registerContextMenu(ctx.pluginId, {
+    id: 'context-demo:word-count',
+    label: 'Count words in selection',
+    iconName: 'FileText',
+    locations: ['editor'],
+    when: (mctx) => !!mctx.selection && mctx.selection.length > 0,
+    onClick: (mctx) => {
+      if (!mctx.selection) return
+      const words = mctx.selection.trim().split(/\s+/).filter(Boolean).length
+      const chars = mctx.selection.length
+      emitInternal('counted', { words, chars })
+      console.log(`[${words} words / ${chars} chars]`)
+    },
+  })
+
+  // Item 4: open path in new tab (only for files inside the workspace)
+  registerContextMenu(ctx.pluginId, {
+    id: 'context-demo:open-in-new-tab',
+    label: 'Open in new tab',
+    iconName: 'FilePlus',
+    locations: ['fileTree'],
+    when: (mctx) => !!mctx.path && !mctx.isDirectory,
+    onClick: (mctx) => {
+      console.log('open in new tab:', mctx.path)
+    },
+  })
+}
+
+const onUnload: PluginLifecycleHook = (ctx) => {
+  for (const id of REGISTERED_IDS) {
+    unregisterContextMenu(ctx.pluginId, id)
+  }
+}
+
+// ─── Panel (mostly informational) ─────────────────────────────────────────────
+
+function MainPanel(panel: PluginPanelProps) {
+  const [lastCopied, setLastCopied] = usePluginStorage<string>(panel, 'lastCopiedPath', '')
+  const [lastCount, setLastCount] = usePluginStorage<{ words: number; chars: number } | null>(
+    panel,
+    'lastWordCount',
+    null
+  )
+  // Bump to force re-render when the host clears contributions.
+  // 改为按需刷新（点击按钮），避免每秒 setInterval 导致的无意义重渲染。
+  const [, setRefresh] = useState(0)
+
+  useEffect(() => {
+    const handler: InternalHandler = (event, data) => {
+      if (event === 'copied') {
+        const path = data as string
+        setLastCopied(path)
+      } else if (event === 'counted') {
+        setLastCount(data as { words: number; chars: number })
+      }
+    }
+    internalHandlers.add(handler)
+    return () => {
+      internalHandlers.delete(handler)
+    }
+  }, [setLastCopied, setLastCount])
+
+  return (
+    <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <h2 style={{ fontSize: 14, fontWeight: 600 }}>Context Menu Demo</h2>
+      <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+        This plugin has no panel trigger in the sidebar – its surface is
+        the right-click menu. Try right-clicking a file in the file tree
+        or a tab.
+      </p>
+      <div style={{ fontSize: 11, padding: 8, background: 'var(--bg-secondary)', borderRadius: 4 }}>
+        <div>Last copied path: {lastCopied || '(none)'}</div>
+        <div>
+          Last word count:{' '}
+          {lastCount ? `${lastCount.words} words / ${lastCount.chars} chars` : '(none)'}
+        </div>
+        {/* 使用 getContextMenuItems 而非 getStubMenuRegistry，
+            在 host 模式下会路由到宿主的权限校验 registry，返回真实注册的菜单项 */}
+        <div>Active items (fileTree): {getContextMenuItems('fileTree', { location: 'fileTree' }).length}</div>
+        <button
+          style={{ marginTop: 4, padding: '2px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 3, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}
+          onClick={() => setRefresh((n) => n + 1)}
+        >
+          刷新计数
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Manifest ─────────────────────────────────────────────────────────────────
+
+// 贡献右键菜单需要 context-menu 权限；面板读写自身命名空间需要 storage
+// 权限（均见 ../manifest.json）。缺权限时宿主会静默丢弃 registerContextMenu。
+export default definePlugin(manifestJson, {
+  icon: MenuIcon,
+  panel: MainPanel,
+  onLoad,
+  onUnload,
+})

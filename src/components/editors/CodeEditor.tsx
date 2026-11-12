@@ -253,15 +253,20 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
   // Insert text at cursor position
   useEffect(() => {
     const handler = (e: Event) => {
-      const { text } = (e as CustomEvent).detail
+      const { text, __reply } = (e as CustomEvent).detail
       const view = viewRef.current
-      if (!view) return
+      if (!view || !text) {
+        // __reply 为可选回执回调（插件编辑器写 API 派发时携带，旧派发方自动兼容）
+        __reply?.(false)
+        return
+      }
       const cursor = view.state.selection.main.head
       view.dispatch({
         changes: { from: cursor, insert: text },
         selection: { anchor: cursor + text.length },
       })
       view.focus()
+      __reply?.(true)
     }
     window.addEventListener('insert-at-cursor', handler)
     return () => window.removeEventListener('insert-at-cursor', handler)
@@ -291,6 +296,73 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
     }
     window.addEventListener('replace-content', handler)
     return () => window.removeEventListener('replace-content', handler)
+  }, [])
+
+  // 替换当前选区（插件 editor.replaceSelection 专用）：无选区时拒绝并回执 false，
+  // 避免误触发整文替换（replace-content 在无选区时为整文替换，数据破坏风险高）。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { text, __reply } = (e as CustomEvent).detail
+      const view = viewRef.current
+      if (!view || !text) {
+        __reply?.(false)
+        return
+      }
+      const { from, to } = view.state.selection.main
+      if (from === to) {
+        // 无选区：拒绝（SDK 约定 replaceSelection 无选区返回 false）
+        __reply?.(false)
+        return
+      }
+      view.dispatch({
+        changes: { from, to, insert: text },
+        selection: { anchor: from + text.length },
+      })
+      view.focus()
+      __reply?.(true)
+    }
+    window.addEventListener('replace-selection', handler)
+    return () => window.removeEventListener('replace-selection', handler)
+  }, [])
+
+  // 查询当前选区（插件 editor.getSelection 专用，P1.3）：回执 { text, lineRange }，
+  // 无选区/编辑器未挂载回执 null；行号与右键菜单 getSelectionLineRange 同算法（1-based）。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { __reply } = (e as CustomEvent).detail
+      const view = viewRef.current
+      if (!view) {
+        __reply?.(null)
+        return
+      }
+      const { from, to } = view.state.selection.main
+      if (from === to) {
+        __reply?.(null)
+        return
+      }
+      __reply?.({
+        text: view.state.sliceDoc(from, to),
+        lineRange: [view.state.doc.lineAt(from).number, view.state.doc.lineAt(to).number],
+      })
+    }
+    window.addEventListener('query-selection', handler)
+    return () => window.removeEventListener('query-selection', handler)
+  }, [])
+
+  // 查询当前笔记全文（插件 editor.getActiveContent 专用，P2.5）：回执 markdown 源码，
+  // 无编辑器实例回执 null（CodeMirror doc 即源码，直接 toString）。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { __reply } = (e as CustomEvent).detail
+      const view = viewRef.current
+      if (!view) {
+        __reply?.(null)
+        return
+      }
+      __reply?.(view.state.doc.toString())
+    }
+    window.addEventListener('query-content', handler)
+    return () => window.removeEventListener('query-content', handler)
   }, [])
 
   useEffect(() => {
@@ -371,26 +443,8 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
     return view.state.sliceDoc(from, to)
   }, [])
 
-  const getSelectionLineRange = useCallback((): [number, number] | null => {
-    const view = viewRef.current
-    if (!view) return null
-    const { from, to } = view.state.selection.main
-    if (from === to) return null // No selection
-    const startLine = view.state.doc.lineAt(from).number
-    const endLine = view.state.doc.lineAt(to).number
-    return [startLine, endLine]
-  }, [])
-
-  const getFullContent = useCallback(() => {
-    return viewRef.current?.state.doc.toString() || ''
-  }, [])
-
   return (
-    <EditorContextMenu
-      getSelectedText={getSelectedText}
-      getSelectionLineRange={getSelectionLineRange}
-      getFullContent={getFullContent}
-    >
+    <EditorContextMenu getSelectedText={getSelectedText}>
       <ScrollArea className={`h-full ${className}`}>
         <div
           ref={editorRef}

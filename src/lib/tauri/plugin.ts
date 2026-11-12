@@ -21,6 +21,10 @@ export interface PluginMetadataRust {
   has_settings_schema: boolean
   /** 安装来源 repo URL，本地 zip 为空 */
   source: string
+  /** 插件要求的最低宿主版本，未声明为 null */
+  min_host_version: string | null
+  /** 宿主是否满足 min_host_version（由 Rust 计算返回） */
+  host_compatible: boolean
 }
 
 /** 扫描插件目录返回元数据 */

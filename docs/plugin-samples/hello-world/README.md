@@ -7,7 +7,7 @@
 ## 文件
 
 - [manifest.json](./manifest.json) — Rust 端读取的元数据
-- [index.tsx](./index.tsx) — JS 端入口
+- [src/index.tsx](./src/index.tsx) — JS 端入口（`definePlugin`）
 
 ## 预期效果
 

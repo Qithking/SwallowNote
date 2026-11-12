@@ -7,10 +7,10 @@
 | `location` | 触发场景 | 注入位置 |
 | --- | --- | --- |
 | `fileTree` | 在文件树节点上右键 | `FileTreeContextMenu` 末尾 |
-| `fileTreeEmpty` | 在文件树空白区右键 | （未接入，预留） |
+| `fileTreeEmpty` | 在文件树空白区右键 | 已接入：`FileTreeView.tsx` 空状态区 |
 | `editor` | 在编辑器内右键 | `EditorContextMenu` 末尾 |
 | `tab` | 在 tab 上右键 | `TabBar` 末尾 |
-| `tabBarEmpty` | 在 tab bar 空白处右键 | （未接入，预留） |
+| `tabBarEmpty` | 在 tab bar 空白处右键 | 已接入：`TabBar.tsx` 空栏（无 tab 时） |
 
 ## API
 
@@ -143,5 +143,6 @@ onClick: async (ctx) => {
 - 卸载清理：[src/stores/plugin.ts](../../src/stores/plugin.ts) `unregisterPlugin`
 - 注入点：
   - [src/components/FileTree/FileTreeContextMenu.tsx](../../src/components/FileTree/FileTreeContextMenu.tsx)
-  - [src/components/TabBar.tsx](../../src/components/TabBar.tsx)
+  - [src/components/FileTree/FileTreeView.tsx](../../src/components/FileTree/FileTreeView.tsx)（`fileTreeEmpty` 空状态区）
+  - [src/components/TabBar.tsx](../../src/components/TabBar.tsx)（`tab` 与 `tabBarEmpty`）
   - [src/components/editors/EditorContextMenu.tsx](../../src/components/editors/EditorContextMenu.tsx)

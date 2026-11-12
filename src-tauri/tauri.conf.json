@@ -13,11 +13,11 @@
     "withGlobalTauri": true,
     "macOSPrivateApi": true,
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob: https:; connect-src 'self' http://127.0.0.1:* http://localhost:* https: ws: wss:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' blob:",
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob: https:; connect-src 'self' https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' blob:",
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": ["/**/*"],
+          "allow": ["$APPDATA/**"],
           "deny": [
             "$HOME/.ssh/**",
             "$HOME/.gnupg/**",

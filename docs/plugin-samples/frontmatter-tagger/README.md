@@ -7,7 +7,7 @@
 ## 文件
 
 - [manifest.json](./manifest.json) — 元数据
-- [index.tsx](./index.tsx) — 标签管理面板
+- [src/index.tsx](./src/index.tsx) — 标签管理面板（`definePlugin` 入口）
 
 ## Frontmatter API
 

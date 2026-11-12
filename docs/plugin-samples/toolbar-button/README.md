@@ -18,7 +18,7 @@
 ## 文件
 
 - [manifest.json](./manifest.json) — `iconPosition: "editorToolbar"`、`contentPosition: "editorArea"`
-- [index.tsx](./index.tsx) — `toolbarButton` 组件 + 面板
+- [src/index.tsx](./src/index.tsx) — `toolbarButton` 组件 + 面板（`definePlugin` 入口）
 
 ## ToolbarButtonProps 字段
 

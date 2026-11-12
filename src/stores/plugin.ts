@@ -25,6 +25,8 @@ import { clearPluginMetrics, recordPluginConflict } from '@/lib/plugin-telemetry
 import { dropSettingsCache } from '@/lib/plugin-settings'
 import { resetPluginCrashCount } from '@/lib/plugin-health'
 import { dropPluginBlobUrl } from '@/lib/plugin-loader'
+// B5：编辑器生命周期由宿主接管——启用补注册 / 禁用与卸载注销
+import { registerEditorsFromManifest, unregisterEditor } from './pluginEditor'
 
 /** localStorage 键前缀，严格 opt-in。 */
 export const PLUGIN_AUTO_UPDATE_KEY_PREFIX = 'plugin_auto_update_'
@@ -73,6 +75,14 @@ export interface PluginState {
   unregisterPlugin: (id: string) => void
   /** Enable/disable a plugin */
   setPluginEnabled: (id: string, enabled: boolean) => void
+  /**
+   * 权限首次授予后的补偿重放（onLoad / 编辑器清单注册 / host takeover）。
+   * 安装流程中 onLoad 先于权限弹窗执行，经权限守卫的注册（右键菜单、
+   * 编辑器扩展）被拒且 SDK 静默吞错；由权限弹窗在授权后调用补偿。
+   * 仅应在「授权前插件无任何已授权权限」时调用，避免对已运行插件
+   * 重复注入 onLoad 副作用。
+   */
+  replayPluginRegistration: (id: string) => void
   /** Replace the entire plugin list (e.g. after re-scan) */
   setPlugins: (plugins: PluginDefinition[]) => void
   /** Mark plugins as loaded */
@@ -381,6 +391,10 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     clearPluginMenuItems(id)
     // 清理命令面板条目。
     clearPluginCommands(id)
+    // B5：注销该插件注册的所有编辑器扩展（旧式插件可能在 onUnload 中
+    // 自行注销，unregister 幂等无副作用；此处保证新式仅靠清单声明的
+    // 插件卸载后不再占用扩展）。
+    unregisterEditor(id)
     // 清除权限授予缓存。
     clearGranted(id)
     void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
@@ -441,12 +455,29 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         clearPluginTripped(id)
         // 禁用期间 host takeover 被卸载（见 setPlugins），重新启用时重新安装
         installHostTakeover(target)
+        // B5：按清单声明补注册编辑器（loader 阶段仅对 enabled 插件注册，
+        // 冷启动禁用的插件跳过了注册）。同插件同扩展为替换语义，重复调用幂等。
+        registerEditorsFromManifest(id, target.editorFileExtensions, target.editorComponent)
         void runPluginLifecycleHook(target, target.hooks?.onLoad, buildPluginContext(target), 'onLoad')
+      } else if (!enabled && wasEnabled) {
+        // B5：禁用时注销该插件注册的全部编辑器扩展，打开的文件立即回退
+        // 内建编辑器；先于 onDisable 钩子执行，保证钩子运行期间派发已回退。
+        unregisterEditor(id)
       }
       const hook = enabled ? target.hooks?.onEnable : target.hooks?.onDisable
       const hookName = enabled ? 'onEnable' : 'onDisable'
       void runPluginLifecycleHook(target, hook, buildPluginContext(target), hookName)
     }
+  },
+
+  replayPluginRegistration: (id) => {
+    const target = get().plugins.find((p) => p.id === id)
+    // 未注册或持久化为禁用的插件不重放（与 setPlugins added 分支语义一致）
+    if (!target || target.enabled === false) return
+    installHostTakeover(target)
+    // B5：按清单声明补注册编辑器扩展（替换语义，重复调用幂等）
+    registerEditorsFromManifest(id, target.editorFileExtensions, target.editorComponent)
+    void runPluginLifecycleHook(target, target.hooks?.onLoad, buildPluginContext(target), 'onLoad')
   },
 
   setPlugins: (plugins) => {
@@ -473,6 +504,23 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     const newIds = new Set(deduped.map((p) => p.id))
     const removed = state.plugins.filter((p) => !newIds.has(p.id))
     const added = deduped.filter((p) => !oldIds.has(p.id))
+    // 同 id 重载（重装/更新 → 新 bundle → module 引用变化）：旧实例必须
+    // 触发 onUnload（有限清理），新实例必须触发 onLoad。否则新 bundle 的
+    // 注册逻辑（菜单/命令等）被跳过，而旧注册残留显示（fileTree 菜单缺失根因）。
+    // 判据用 __pluginModule 引用：未变化的插件重扫时 blob URL 复用，引用相同 → 幂等。
+    const reloadedOld: PluginDefinition[] = []
+    const reloadedNew: PluginDefinition[] = []
+    for (const p of deduped) {
+      const old = state.plugins.find((q) => q.id === p.id)
+      if (
+        old &&
+        (old as PluginWithModule).__pluginModule !==
+          (p as PluginWithModule).__pluginModule
+      ) {
+        reloadedOld.push(old)
+        reloadedNew.push(p)
+      }
+    }
 
     // 为被移除的插件构建 active-state 更新（同 unregisterPlugin）
     const activeUpdates: Partial<PluginState> = {}
@@ -567,6 +615,8 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       clearPluginMenuItems(target.id)
       // 清理命令面板条目（同 clearPluginMenuItems 理由）
       clearPluginCommands(target.id)
+      // B5：注销被移除插件注册的所有编辑器扩展（同 unregisterPlugin）
+      unregisterEditor(target.id)
       // 同步丢弃内存权限缓存（clearGranted 是安全边界，磁盘删除异步）
       clearGranted(target.id)
       void import('@/lib/plugin-permissions').then(({ dropPluginPermissions }) => {
@@ -583,9 +633,32 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       // 清理移除插件的遥测缓冲。
       clearPluginMetrics(target.id)
     }
+    // 同 id 重载的旧实例：有限清理。触发 onUnload 并清掉运行期注册的
+    // 资源（菜单/命令/编辑器扩展/事件/接管/熔断/设置缓存/崩溃计数/旧 blob），
+    // 但保留：权限授权（onLoad 重跑注册时仍可通过门禁）、插件 storage
+    // （更新不丢用户数据）、自动更新 opt-in 与健康记录。
+    for (const target of reloadedOld) {
+      void runPluginLifecycleHook(
+        target,
+        target.hooks?.onUnload,
+        buildPluginContext(target),
+        'onUnload'
+      )
+      // 卸载持久化 host takeover（onUnload 之后）
+      uninstallHostTakeover(target.id)
+      dropPluginBlobUrl(target.pluginPath)
+      clearPluginHostState(target.id)
+      dropSettingsCache(target.id)
+      resetPluginCrashCount(target.id)
+      pluginEventBus.removeAllListenersForPlugin(target.id)
+      clearPluginMenuItems(target.id)
+      clearPluginCommands(target.id)
+      unregisterEditor(target.id)
+      clearPluginMetrics(target.id)
+    }
     // 清理已移除插件的命令快捷键绑定（用 post-set valid-id 集）
     useUIStore.getState().prunePluginCommandShortcuts(newIds)
-    for (const target of added) {
+    for (const target of [...added, ...reloadedNew]) {
       // 对新增插件触发 onLoad，跳过持久化为禁用的插件。
       if (target.enabled === false) {
         continue

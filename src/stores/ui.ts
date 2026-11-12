@@ -5,40 +5,23 @@ import { create } from 'zustand'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import i18n from '@/i18n'
-import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, isAutoStartEnabled, encryptApiKey, decryptApiKey, restartAiProxy, getBuiltinAiModels, restartApp } from '@/lib/tauri'
+import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, isAutoStartEnabled, restartApp } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
-import { AiModelConfig, generateModelId } from '@/lib/ai'
 import { useFileTreeStore } from './filetree'
 import { emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
+import type { PluginPanelRequest } from '@/types/plugin'
 
 export type Theme = 'light' | 'dark' | 'system'
-export type SidebarView = 'explorer' | 'search' | 'categories' | 'git' | 'ai' | 'settings' | `plugin:${string}`
+export type SidebarView = 'explorer' | 'search' | 'categories' | 'git' | 'settings' | `plugin:${string}`
 export type EditorViewMode = 'edit' | 'preview' | 'split'
-export type RightPanelType = 'ai' | 'directory' | 'history' | 'editorSettings' | 'noteProperties' | `plugin:${string}` | null
+export type RightPanelType = 'directory' | 'history' | 'editorSettings' | 'noteProperties' | `plugin:${string}` | null
 /**
  * Section IDs inside the Settings panel. Mirrors the
  * `SettingsSection` type in `Settings/SettingsView.tsx`.
  * `null` means "no specific section requested" (default first paint).
  */
-export type SettingsSection = 'general' | 'sync' | 'appearance' | 'ai' | 'shortcuts' | 'plugins' | 'development' | null
+export type SettingsSection = 'general' | 'sync' | 'appearance' | 'shortcuts' | 'plugins' | 'development' | null
 
-/** Request from editor context menu to trigger an AI action */
-export interface AiContextMenuRequest {
-  /** Unique ID for this request (timestamp-based) to prevent duplicate processing */
-  id: string
-  /** The AI role key (e.g. 'continue_writing', 'polish') */
-  roleKey: string
-  /** The role display name */
-  roleName: string
-  /** Whether the user had selected text in the editor */
-  hasSelection: boolean
-  /** The selected text content (if hasSelection) or full file content */
-  content: string
-  /** For selected content: the line range [startLine, endLine] (1-based) */
-  lineRange?: [number, number]
-  /** The file path relative to rootPath */
-  filePath: string
-}
 export type WorkspaceMode = 'folder' | 'workspace'
 export type NoteWidth = 'normal' | 'wide'
 /** 更新下载渠道：github=官方直连，ghproxy=gh-proxy 加速 */
@@ -421,12 +404,10 @@ export interface UIState {
   logViewerVisible: boolean
   /**
    * Section to focus when the Settings panel opens.
-   * Set by callers (e.g. AIView's settings button) so the panel
-   * jumps directly to the requested section. Cleared after the
-   * SettingsView consumes it.
+   * Set by callers so the panel jumps directly to the requested
+   * section. Cleared after the SettingsView consumes it.
    */
   settingsSection: SettingsSection
-  aiPanelVisible: boolean
   rightPanelType: RightPanelType
   clipboardFiles: string[]
   clipboardIsCut: boolean
@@ -458,17 +439,11 @@ export interface UIState {
   idleAutoPushDelay: number
   uploadPath: string
   showConflictBadge: boolean
-  aiProvider: string
-  aiApiKey: string
-  aiApiKeyDecrypted: string
-  aiBaseUrl: string
-  aiModel: string
-  aiPort: number
-  aiModels: AiModelConfig[]
-  activeAiModelId: string
-  defaultAiModelId: string
-  aiAttachedFiles: string[]
-  aiContextMenuRequest: AiContextMenuRequest | null
+  /**
+   * 面板一次性请求（P1.4）：openPluginPanel 写入，插件面板挂载消费
+   * （props 送达）后清空；连续触发以最新请求覆盖。
+   */
+  pendingPluginRequest: PluginPanelRequest | null
   customThemes: CustomTheme[]
   activeLightCustomThemeId: string
   activeDarkCustomThemeId: string
@@ -485,7 +460,6 @@ export interface UIState {
   setSettingsPanelVisible: (visible: boolean) => void
   setSettingsSection: (section: SettingsSection) => void
   toggleSettingsPanel: () => void
-  toggleAIPanel: () => void
   setRightPanelType: (type: RightPanelType) => void
   setRightPanelWidth: (width: number) => void
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void
@@ -507,20 +481,7 @@ export interface UIState {
   setIdleAutoPushDelay: (seconds: number) => void
   setUploadPath: (path: string) => void
   setShowConflictBadge: (value: boolean) => void
-  setAiProvider: (provider: string) => void
-  setAiApiKey: (key: string) => Promise<void>
-  setAiBaseUrl: (url: string) => void
-  setAiModel: (model: string) => void
-  setAiPort: (port: number) => void
-  addAiModel: (model: Omit<AiModelConfig, 'id'>) => void
-  removeAiModel: (id: string) => void
-  setActiveAiModel: (id: string) => void
-  setDefaultAiModel: (id: string) => void
-  addAiAttachedFile: (filePath: string) => void
-  removeAiAttachedFile: (index: number) => void
-  clearAiAttachedFiles: () => void
-  setAiContextMenuRequest: (request: AiContextMenuRequest | null) => void
-  updateAiModelApiKey: (id: string, key: string) => Promise<void>
+  setPendingPluginRequest: (request: PluginPanelRequest | null) => void
   setShortcut: (key: ShortcutKey, value: string) => void
   resetShortcut: (key: ShortcutKey) => void
   resetAllShortcuts: () => void
@@ -557,7 +518,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   settingsPanelVisible: false,
   logViewerVisible: false,
   settingsSection: null,
-  aiPanelVisible: false,
   rightPanelType: null,
   clipboardFiles: [],
   clipboardIsCut: false,
@@ -578,17 +538,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   idleAutoPushDelay: 60,
   uploadPath: '',
   showConflictBadge: true,
-  aiProvider: '',
-  aiApiKey: '',
-  aiApiKeyDecrypted: '',
-  aiBaseUrl: '',
-  aiModel: '',
-  aiPort: 4017,
-  aiModels: [],
-  activeAiModelId: '',
-  defaultAiModelId: '',
-  aiAttachedFiles: [],
-  aiContextMenuRequest: null,
+  pendingPluginRequest: null,
   customThemes: [...BUILT_IN_THEMES],
   activeLightCustomThemeId: 'builtin-light',
   activeDarkCustomThemeId: 'builtin-dark',
@@ -623,8 +573,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSettingsSection: (section: SettingsSection) => set({ settingsSection: section }),
   toggleSettingsPanel: () =>
     set((state) => ({ settingsPanelVisible: !state.settingsPanelVisible })),
-  toggleAIPanel: () =>
-    set((state) => ({ aiPanelVisible: !state.aiPanelVisible })),
   setRightPanelType: (type) => set({ rightPanelType: type }),
   showToast: (message, type = 'info') => {
     switch (type) {
@@ -742,106 +690,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     saveAppSettings({ showConflictBadge: String(value) })
     queueMicrotask(() => emitSettingChanged('showConflictBadge', value))
   },
-  setAiProvider: (provider: string) => {
-    set({ aiProvider: provider })
-    saveAppSettings({ aiProvider: provider })
-  },
-  setAiApiKey: async (key: string) => {
-    try {
-      const encrypted = key ? await encryptApiKey(key) : ''
-      set({ aiApiKey: encrypted, aiApiKeyDecrypted: key })
-      saveAppSettings({ aiApiKey: encrypted })
-      const { aiProvider, aiBaseUrl, aiModel, aiPort } = useUIStore.getState()
-      if (aiProvider) {
-        // 重启失败：新 key 已持久化但代理仍用旧配置，需提示
-        restartAiProxy(aiProvider, key, aiBaseUrl, aiModel, aiPort).catch((err) => {
-          logger.error('ui-store', 'restartAiProxy failed', err)
-          toast.error(i18n.t('settings.ai.restartFailed'), { description: String(err) })
-        })
-      }
-    } catch (e) {
-      logger.error('ui-store', 'setAiApiKey encryption failed', e)
-      toast.error(i18n.t('settings.ai.encryptFailed'))
-    }
-  },
-  setAiBaseUrl: (url: string) => {
-    set({ aiBaseUrl: url })
-    saveAppSettings({ aiBaseUrl: url })
-  },
-  setAiModel: (model: string) => {
-    set({ aiModel: model })
-    saveAppSettings({ aiModel: model })
-  },
-  setAiPort: (port: number) => {
-    set({ aiPort: port })
-    saveAppSettings({ aiPort: String(port) })
-  },
-  addAiModel: (model) => {
-    const newModel: AiModelConfig = { ...model, id: generateModelId() }
-    set((state) => {
-      const aiModels = [...state.aiModels, newModel]
-      saveAppSettings({ aiModels: JSON.stringify(aiModels) })
-      const updates: Partial<UIState> = { aiModels }
-      if (!state.activeAiModelId) {
-        updates.activeAiModelId = newModel.id
-        saveAppSettings({ activeAiModelId: newModel.id })
-      }
-      return updates
-    })
-  },
-  removeAiModel: (id: string) => {
-    set((state) => {
-      const model = state.aiModels.find((m) => m.id === id)
-      if (model?.isBuiltIn) return state
-      const aiModels = state.aiModels.filter((m) => m.id !== id)
-      saveAppSettings({ aiModels: JSON.stringify(aiModels) })
-      const updates: Partial<UIState> = { aiModels }
-      if (state.activeAiModelId === id) {
-        const nextActive = aiModels.length > 0 ? aiModels[0].id : ''
-        updates.activeAiModelId = nextActive
-        saveAppSettings({ activeAiModelId: nextActive })
-      }
-      return updates
-    })
-  },
-  setActiveAiModel: (id: string) => {
-    set({ activeAiModelId: id })
-    saveAppSettings({ activeAiModelId: id })
-  },
-  setDefaultAiModel: (id: string) => {
-    set({ defaultAiModelId: id })
-    saveAppSettings({ defaultAiModelId: id })
-  },
-  addAiAttachedFile: (filePath: string) => {
-    set((state) => {
-      if (state.aiAttachedFiles.includes(filePath)) return state
-      return { aiAttachedFiles: [...state.aiAttachedFiles, filePath] }
-    })
-  },
-  removeAiAttachedFile: (index: number) => {
-    set((state) => {
-      const files = [...state.aiAttachedFiles]
-      files.splice(index, 1)
-      return { aiAttachedFiles: files }
-    })
-  },
-  clearAiAttachedFiles: () => set({ aiAttachedFiles: [] }),
-  setAiContextMenuRequest: (request) => set({ aiContextMenuRequest: request }),
-  updateAiModelApiKey: async (id: string, key: string) => {
-    try {
-      const encrypted = key ? await encryptApiKey(key) : ''
-      set((state) => {
-        const aiModels = state.aiModels.map((m) =>
-          m.id === id ? { ...m, apiKey: encrypted, _decryptedApiKey: key } : m
-        )
-        saveAppSettings({ aiModels: JSON.stringify(aiModels) })
-        return { aiModels }
-      })
-    } catch (e) {
-      logger.error('ui-store', 'updateAiModelApiKey encryption failed', e)
-      toast.error(i18n.t('settings.ai.encryptFailed'))
-    }
-  },
+  setPendingPluginRequest: (request) => set({ pendingPluginRequest: request }),
   setShortcut: (key, value) => {
     set((state) => ({
       customShortcuts: { ...state.customShortcuts, [key]: value },
@@ -1039,76 +888,6 @@ export const useUIStore = create<UIState>((set, get) => ({
           customThemes = [...BUILT_IN_THEMES, ...userThemes]
         } catch (e) { logger.warn('ui-store', 'custom theme JSON.parse failed', e) }
       }
-      let aiModels: AiModelConfig[] = []
-      if (s.aiModels) {
-        try {
-          aiModels = JSON.parse(s.aiModels) as AiModelConfig[]
-        } catch {
-          aiModels = []
-        }
-      }
-      if (aiModels.length === 0 && s.aiProvider && s.aiModel) {
-        aiModels = [{
-          id: generateModelId(),
-          name: s.aiModel,
-          category: s.aiProvider === 'ollama' ? 'local' as const : 'api' as const,
-          provider: s.aiProvider,
-          apiKey: s.aiApiKey || '',
-          baseUrl: s.aiBaseUrl || '',
-          model: s.aiModel,
-        }]
-      }
-      try {
-        const builtinModels = await getBuiltinAiModels()
-        const builtinIds = new Set(builtinModels.map((bm) => bm.id))
-        // Prune stale `builtin-*` entries that no longer exist in the
-        // current built-in list (e.g. GLM-Z1-9B removed in 2026-06-17).
-        // User-added custom models are untouched.
-        aiModels = aiModels.filter((m) => !(m.isBuiltIn && !builtinIds.has(m.id)))
-        const existingIds = new Set(aiModels.map((m) => m.id))
-        const missing = builtinModels
-          .filter((bm) => !existingIds.has(bm.id))
-          .map((bm): AiModelConfig => ({
-            id: bm.id,
-            name: bm.name,
-            category: bm.category as AiModelConfig['category'],
-            provider: bm.provider as AiModelConfig['provider'],
-            apiKey: bm.api_key,
-            baseUrl: bm.base_url,
-            model: bm.model,
-            isBuiltIn: bm.is_built_in,
-          }))
-        aiModels = [...missing, ...aiModels]
-        // Persist the pruned list so the change survives restarts.
-        saveAppSettings({ aiModels: JSON.stringify(aiModels) })
-      } catch { /* ignore */ }
-      // Batch decrypt all API keys concurrently BEFORE setting state,
-      // so that models are available with decrypted keys in a single set() call.
-      // This avoids a window where components read empty _decryptedApiKey.
-      const decryptEntries = aiModels
-        .filter((m) => m.apiKey)
-        .map((m) => decryptApiKey(m.apiKey!).then((decrypted) => ({ id: m.id, decrypted })).catch(() => null))
-      const decryptResults = await Promise.all(decryptEntries)
-      const decryptedMap = new Map<string, string>()
-      for (const result of decryptResults) {
-        if (result) decryptedMap.set(result.id, result.decrypted)
-      }
-      // Apply decrypted keys to models
-      const aiModelsWithDecrypted = decryptedMap.size > 0
-        ? aiModels.map((am) =>
-            decryptedMap.has(am.id) ? { ...am, _decryptedApiKey: decryptedMap.get(am.id) } : am
-          )
-        : aiModels
-
-      // Decrypt legacy single-model API key
-      let aiApiKeyDecrypted = ''
-      if (s.aiApiKey && s.aiProvider) {
-        try {
-          aiApiKeyDecrypted = await decryptApiKey(s.aiApiKey)
-        } catch {
-          aiApiKeyDecrypted = ''
-        }
-      }
 
       // 启动时检查 OS 实际自启状态，与设置同步
       // 用户可能在 Task Manager 或系统设置中手动关闭了自启
@@ -1142,15 +921,6 @@ export const useUIStore = create<UIState>((set, get) => ({
         idleAutoPushDelay: s.idleAutoPushDelay ? Number(s.idleAutoPushDelay) : 60,
         uploadPath: s.uploadPath || '',
         showConflictBadge: s.showConflictBadge !== 'false', // default true
-        aiProvider: s.aiProvider || '',
-        aiApiKey: s.aiApiKey || '',
-        aiApiKeyDecrypted,
-        aiBaseUrl: s.aiBaseUrl || '',
-        aiModel: s.aiModel || '',
-        aiPort: s.aiPort ? Number(s.aiPort) : 4017,
-        aiModels: aiModelsWithDecrypted,
-        activeAiModelId: s.activeAiModelId || (aiModelsWithDecrypted.length > 0 ? aiModelsWithDecrypted[0].id : ''),
-        defaultAiModelId: s.defaultAiModelId || '',
         customThemes,
         activeLightCustomThemeId: s.activeLightCustomThemeId || 'builtin-light',
         activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',

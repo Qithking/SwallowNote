@@ -3,16 +3,38 @@
  */
 import { type ComponentType, type ReactNode } from 'react'
 import type { SidebarView, RightPanelType } from '@/stores'
-import type { ContentPosition, PluginPanelProps, ToolbarButtonProps } from '@/types/plugin'
+import type {
+  ContentPosition,
+  PluginPanelProps,
+  PluginPanelRequest,
+  ToolbarButtonProps,
+  InvokeBackendStreamOptions,
+} from '@/types/plugin'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
+import { useUIStore, usePluginStore } from '@/stores'
 import { getPluginStorage, createPluginEventBus } from './plugin-host'
-import { assertPermission } from './plugin-permission-guard'
+import { assertPermission, hasPermission } from './plugin-permission-guard'
+import { invokePluginBackendStream } from './plugin-stream'
 import { loadSettings, readSetting } from './plugin-settings'
-import { writePluginSettings } from './tauri'
 import {
-  emitPluginSettingsChanged,
-  onSettingsChange as sdkOnSettingsChange,
-} from '@swallow-note/plugin-sdk'
+  writePluginSettings,
+  readSecureStorage,
+  writeSecureStorage,
+  deleteSecureStorage,
+  listSecureStorageKeys,
+} from './tauri'
+import { logger } from './logger'
+import {
+  pluginEditorInsertAtCursor,
+  pluginEditorGetSelection,
+  pluginEditorGetActiveContent,
+  pluginEditorReplaceSelection,
+  pluginEditorReplaceContent,
+  pluginFilesCreateNote,
+  pluginFilesListWorkspace,
+  pluginFilesRead,
+} from './plugin-write-api'
+import { emitPluginSettingsChanged, PluginError } from '@swallow-note/plugin-sdk'
 import { useEditorStore } from '@/stores/editor'
 
 /**
@@ -60,6 +82,74 @@ export function pluginSidebarView(pluginId: string): SidebarView {
  */
 export function pluginRightPanelType(pluginId: string): RightPanelType {
   return `plugin:${pluginId}` as RightPanelType
+}
+
+// ─── Backend error normalization (P2 B4) ─────────────────────────────────────
+
+/**
+ * 后端结构化错误帧的 wire format：Rust `PluginError::JsonRpcWithCode` 经
+ * `From<PluginError> for InvokeError` 序列化为带 `__pluginError` 标记的 JSON
+ * 对象；Tauri 原样 reject 该对象（字符串错误仍是原始字符串）。
+ */
+interface PluginErrorWire {
+  __pluginError: true
+  code?: number
+  message?: string
+  data?: unknown
+}
+
+/**
+ * 规范化后端调用错误（B4）：带 `__pluginError` 标记的对象 → SDK `PluginError`
+ * 实例（携带 code/data，供插件按业务错误码分支）；其余（字符串 / 普通 Error，
+ * 传输层错误与既有测试 mock）原样返回，既有契约不变。
+ */
+export function normalizePluginBackendError(err: unknown): unknown {
+  if (
+    err !== null &&
+    typeof err === 'object' &&
+    (err as { __pluginError?: unknown }).__pluginError === true
+  ) {
+    const frame = err as PluginErrorWire
+    return new PluginError(frame.message ?? String(err), {
+      code: frame.code,
+      data: frame.data,
+    })
+  }
+  return err
+}
+
+// ─── Panel request pipeline (P1.4) ───────────────────────────────────────────
+
+/**
+ * 预热插件后端进程：调用 Rust `prewarm_plugin`（仅拉起进程，不发送 JSON-RPC
+ * 请求）。失败静默——面板打开不因预热受阻，首次 invoke 会自然兜底拉起。
+ */
+async function prewarmPluginBackend(pluginId: string): Promise<void> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('prewarm_plugin', { pluginId })
+  } catch (err) {
+    logger.debug('plugin-utils', `prewarm_plugin failed (pluginId=${pluginId})`, err)
+  }
+}
+
+/**
+ * 打开插件右侧面板（P1.4 面板请求管道入口）。
+ *
+ * ① 写入 `rightPanelType('plugin:<id>')` 并激活插件；② payload 存入
+ * UIStore `pendingPluginRequest` 供面板 props `pendingRequest` 一次性消费
+ * （面板挂载后宿主自动清空，连续触发以最新覆盖；无 payload 时清空残留）；
+ * ③ 拥有 backend 权限的插件同时预热后端进程，消除首请求冷启动延迟。
+ */
+export function openPluginPanel(pluginId: string, payload?: unknown): void {
+  useUIStore.getState().setRightPanelType(pluginRightPanelType(pluginId))
+  usePluginStore.getState().setActivePlugin(pluginId, 'rightPanel')
+  useUIStore
+    .getState()
+    .setPendingPluginRequest(payload === undefined ? null : { pluginId, payload })
+  if (hasPermission(pluginId, 'backend')) {
+    void prewarmPluginBackend(pluginId)
+  }
 }
 
 /**
@@ -153,6 +243,9 @@ export function createPluginPanelProps(
   close: () => void,
   activeNoteContent: string = '',
   activeNotePath: string = '',
+  // 一次性请求状态（P1.4）：由已订阅 UIStore 的调用方显式传入，面板已挂载时
+  // 连续 openPluginPanel 也能随重渲染送达；缺省回退 store 快照（未订阅调用点的原有行为）。
+  pendingRequestState: PluginPanelRequest | null = useUIStore.getState().pendingPluginRequest,
 ): PluginPanelProps {
   // Import lazily to avoid pulling the Tauri-side bridge into the
   // bundle for non-Tauri code paths (tests, Storybook).
@@ -160,6 +253,12 @@ export function createPluginPanelProps(
     pluginId,
     isActive,
     close,
+    // 一次性请求管道（P1.4）：仅当请求归属本插件时透出 payload，
+    // 面板挂载后由 PluginPanelHost 清空宿主状态，下次打开不再重复收到。
+    pendingRequest:
+      pendingRequestState && pendingRequestState.pluginId === pluginId
+        ? pendingRequestState.payload
+        : null,
     // The Rust host spawns a per-plugin backend subprocess on the
     // first call and keeps it alive for subsequent calls. Wire
     // protocol: line-delimited JSON-RPC 2.0 over stdin/stdout. See
@@ -169,7 +268,7 @@ export function createPluginPanelProps(
     // "plugin backend not found" which the panel can catch and treat
     // as a graceful-degradation path (e.g. show "backend unavailable"
     // UI) rather than crashing.
-    invokeBackend: async (command: string, args?: Record<string, unknown>) => {
+    invokeBackend: async <T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> => {
       // Backend IPC is opt-in. The Rust host would happily spawn a
       // subprocess for any plugin that calls this, but we cut the
       // call short here so a plugin without the `backend` grant
@@ -181,11 +280,14 @@ export function createPluginPanelProps(
       let success = true
       let errorMsg: string | undefined
       try {
-        return await invoke('invoke_plugin', { pluginId, command, args })
+        return (await invoke('invoke_plugin', { pluginId, command, args })) as T
       } catch (err) {
         success = false
-        errorMsg = String(err)
-        throw err
+        // B4：结构化错误帧（__pluginError）→ SDK PluginError，其余原样透传；
+        // PluginError.toString() 输出纯 message，遥测格式与旧字符串路径一致。
+        const normalized = normalizePluginBackendError(err)
+        errorMsg = String(normalized)
+        throw normalized
       } finally {
         // Record backend metrics for the diagnostics panel. Lazy-import
         // the telemetry module so this file stays free of a hard
@@ -196,6 +298,14 @@ export function createPluginPanelProps(
         })
       }
     },
+    // 流式调用：权限检查与遥测已内聚在共享桥接函数中。
+    invokeBackendStream: <T = unknown, R = unknown>(
+      command: string,
+      args: Record<string, unknown> | undefined,
+      onChunk: (chunk: T) => void,
+      options?: InvokeBackendStreamOptions
+    ): Promise<R> =>
+      invokePluginBackendStream<T, R>(pluginId, command, args, onChunk, options),
     // Per-plugin persistent storage. `getPluginStorage` already caches
     // one PluginStorage per pluginId internally, so no extra cache is
     // needed here. `dropPluginStorage` (called on plugin unload)
@@ -228,7 +338,13 @@ export function createPluginPanelProps(
       const view = await loadSettings(pluginId, true)
       return { ...view.values }
     },
-    onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
+    // 宿主实例上 SDK stub 订阅表无通知来源（setHost 层只装在插件 bundle 副本），
+    // 直接订阅宿主事件总线并按 pluginId 过滤，语义与 SDK override 分支一致。
+    onSettingsChange: (handler) =>
+      createPluginEventBus(pluginId).on('plugin-settings:change', (payload) => {
+        if (payload.pluginId !== pluginId) return
+        handler(payload.values)
+      }),
     // Frontmatter API – reads from / writes to the editor store.
     getActiveNoteFrontmatter: (): Record<string, unknown> | null => {
       const tab = useEditorStore.getState().getActiveTab()
@@ -256,6 +372,39 @@ export function createPluginPanelProps(
           callback(nextFm ?? {})
         }
       })
+    },
+    // 编辑器写 / 文件 API：闭包 pluginId 显式正确（面板场景不走模块级隐式解析），权限检查内聚在桥接。
+    editor: {
+      insertAtCursor: (text: string) => pluginEditorInsertAtCursor(pluginId, text),
+      replaceSelection: (text: string) => pluginEditorReplaceSelection(pluginId, text),
+      replaceContent: (text: string) => pluginEditorReplaceContent(pluginId, text),
+      getSelection: () => pluginEditorGetSelection(pluginId),
+      getActiveContent: () => pluginEditorGetActiveContent(pluginId),
+    },
+    files: {
+      createNote: (relPath: string, content: string) => pluginFilesCreateNote(pluginId, relPath, content),
+      listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
+      read: (relPath: string) => pluginFilesRead(pluginId, relPath),
+    },
+    // 安全存储（P1.5 / ADR-0003）：加密落盘，独立 'secure-storage' 权限门控，
+    // 加解密内聚在 Rust 侧，此处仅权限检查 + IPC 转发。
+    secureStorage: {
+      get: (key: string) => {
+        assertPermission(pluginId, 'secure-storage', `read secure storage key "${key}"`)
+        return readSecureStorage(pluginId, key)
+      },
+      set: async (key: string, value: string) => {
+        assertPermission(pluginId, 'secure-storage', `write secure storage key "${key}"`)
+        await writeSecureStorage(pluginId, key, value)
+      },
+      delete: (key: string) => {
+        assertPermission(pluginId, 'secure-storage', `delete secure storage key "${key}"`)
+        return deleteSecureStorage(pluginId, key)
+      },
+      keys: () => {
+        assertPermission(pluginId, 'secure-storage', `list secure storage keys`)
+        return listSecureStorageKeys(pluginId)
+      },
     },
   }
 }
@@ -307,18 +456,21 @@ export function createToolbarButtonProps(
     size,
     isActive,
     pluginId,
-    invokeBackend: async (command: string, args?: Record<string, unknown>) => {
+    invokeBackend: async <T = unknown>(command: string, args?: Record<string, unknown>): Promise<T> => {
       assertPermission(pluginId, 'backend', `invoke backend command "${command}"`)
       const { invoke } = await import('@tauri-apps/api/core')
       const start = performance.now()
       let success = true
       let errorMsg: string | undefined
       try {
-        return await invoke('invoke_plugin', { pluginId, command, args })
+        return (await invoke('invoke_plugin', { pluginId, command, args })) as T
       } catch (err) {
         success = false
-        errorMsg = String(err)
-        throw err
+        // B4：结构化错误帧（__pluginError）→ SDK PluginError，其余原样透传；
+        // PluginError.toString() 输出纯 message，遥测格式与旧字符串路径一致。
+        const normalized = normalizePluginBackendError(err)
+        errorMsg = String(normalized)
+        throw normalized
       } finally {
         const durationMs = performance.now() - start
         void import('./plugin-telemetry').then(({ recordBackendMetric }) => {
@@ -326,6 +478,14 @@ export function createToolbarButtonProps(
         })
       }
     },
+    // 流式调用：与面板版本一致，委托共享桥接函数。
+    invokeBackendStream: <T = unknown, R = unknown>(
+      command: string,
+      args: Record<string, unknown> | undefined,
+      onChunk: (chunk: T) => void,
+      options?: InvokeBackendStreamOptions
+    ): Promise<R> =>
+      invokePluginBackendStream<T, R>(pluginId, command, args, onChunk, options),
     store: getPluginStorage(pluginId),
     events: createPluginEventBus(pluginId),
     activate,
@@ -357,7 +517,13 @@ export function createToolbarButtonProps(
       const view = await loadSettings(pluginId, true)
       return { ...view.values }
     },
-    onSettingsChange: (handler) => sdkOnSettingsChange(pluginId, handler),
+    // 宿主实例上 SDK stub 订阅表无通知来源（setHost 层只装在插件 bundle 副本），
+    // 直接订阅宿主事件总线并按 pluginId 过滤，语义与 SDK override 分支一致。
+    onSettingsChange: (handler) =>
+      createPluginEventBus(pluginId).on('plugin-settings:change', (payload) => {
+        if (payload.pluginId !== pluginId) return
+        handler(payload.values)
+      }),
     // Frontmatter API – same implementation as the panel version.
     getActiveNoteFrontmatter: (): Record<string, unknown> | null => {
       const tab = useEditorStore.getState().getActiveTab()
@@ -385,6 +551,38 @@ export function createToolbarButtonProps(
           callback(nextFm ?? {})
         }
       })
+    },
+    // 编辑器写 / 文件 API：同面板版本，闭包 pluginId 显式正确。
+    editor: {
+      insertAtCursor: (text: string) => pluginEditorInsertAtCursor(pluginId, text),
+      replaceSelection: (text: string) => pluginEditorReplaceSelection(pluginId, text),
+      replaceContent: (text: string) => pluginEditorReplaceContent(pluginId, text),
+      getSelection: () => pluginEditorGetSelection(pluginId),
+      getActiveContent: () => pluginEditorGetActiveContent(pluginId),
+    },
+    files: {
+      createNote: (relPath: string, content: string) => pluginFilesCreateNote(pluginId, relPath, content),
+      listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
+      read: (relPath: string) => pluginFilesRead(pluginId, relPath),
+    },
+    // 安全存储：同面板版本，独立 'secure-storage' 权限门控。
+    secureStorage: {
+      get: (key: string) => {
+        assertPermission(pluginId, 'secure-storage', `read secure storage key "${key}"`)
+        return readSecureStorage(pluginId, key)
+      },
+      set: async (key: string, value: string) => {
+        assertPermission(pluginId, 'secure-storage', `write secure storage key "${key}"`)
+        await writeSecureStorage(pluginId, key, value)
+      },
+      delete: (key: string) => {
+        assertPermission(pluginId, 'secure-storage', `delete secure storage key "${key}"`)
+        return deleteSecureStorage(pluginId, key)
+      },
+      keys: () => {
+        assertPermission(pluginId, 'secure-storage', `list secure storage keys`)
+        return listSecureStorageKeys(pluginId)
+      },
     },
   }
 }

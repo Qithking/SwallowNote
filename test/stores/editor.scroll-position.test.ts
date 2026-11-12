@@ -116,8 +116,8 @@ describe('setActiveTab saves scrollTop before switching', () => {
     setEditorContainerEl(null)
   })
 
-  it('does not save scrollTop=0', () => {
-    const tab1 = makeTab({ id: 'tab-1', path: '/tmp/a.md' })
+  it('saves scrollTop=0 (顶部是合法位置，不保存会残留旧值导致恢复偏移)', () => {
+    const tab1 = makeTab({ id: 'tab-1', path: '/tmp/a.md', scrollTop: 500 })
     const tab2 = makeTab({ id: 'tab-2', path: '/tmp/b.md' })
     useEditorStore.getState().addTab(tab1)
     useEditorStore.getState().addTab(tab2)
@@ -133,7 +133,7 @@ describe('setActiveTab saves scrollTop before switching', () => {
     useEditorStore.getState().setActiveTab('tab-2')
 
     const stored = useEditorStore.getState().tabs.find(t => t.id === 'tab-1')
-    expect(stored?.scrollTop).toBeUndefined()
+    expect(stored?.scrollTop).toBe(0)
 
     setEditorContainerEl(null)
   })

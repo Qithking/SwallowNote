@@ -20,7 +20,6 @@ import {
   Edit3,
   Trash2,
   GitBranch,
-  MessageSquare,
   GitFork,
 } from 'lucide-react'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGitStore } from '@/stores'
@@ -84,7 +83,6 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
   const clipboardIsCut = useUIStore((s) => s.clipboardIsCut)
   const setClipboardFiles = useUIStore((s) => s.setClipboardFiles)
   const showToast = useUIStore((s) => s.showToast)
-  const addAiAttachedFile = useUIStore((s) => s.addAiAttachedFile)
   const repositories = useGitStore((s) => s.repositories)
   const { t } = useTranslation()
 
@@ -202,12 +200,6 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       logger.error('file-tree-menu', 'Failed to copy path:', e)
       showToast(t('contextMenu.copied', { name: 'path' }))
     }
-  }
-
-  const handleAddToChat = () => {
-    addAiAttachedFile(node.path)
-    useUIStore.getState().setRightPanelType('ai')
-    showToast(t('contextMenu.addedToChat', { name: node.name }))
   }
 
   const handleCopy = () => {
@@ -436,15 +428,6 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           <FileText size={12} />
           <span>{t('contextMenu.copyRelativePath')}</span>
         </ContextMenuItem>
-
-        <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />
-
-        {!node.isDirectory && (
-          <ContextMenuItem onClick={handleAddToChat} style={{ color: 'var(--text-secondary)' }} className="cursor-pointer">
-            <MessageSquare size={12} />
-            <span>{t('contextMenu.addToChat')}</span>
-          </ContextMenuItem>
-        )}
 
         {canPaste && (
           <ContextMenuSeparator style={{ backgroundColor: 'var(--border-color)' }} />

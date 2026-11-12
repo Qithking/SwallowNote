@@ -7,11 +7,11 @@
  *
  * This file is for development only. The bundled plugin never
  * imports `Preview`; the `vite build` library entry point is
- * `src/plugin/index.tsx` instead.
+ * `src/index.tsx` instead.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, CSSProperties } from 'react'
-import manifest from './plugin'
+import manifest from './index'
 import {
   type ContextMenuItem,
   type ContextMenuLocation,
@@ -373,18 +373,45 @@ export function Preview() {
     pluginId: manifest.id,
     isActive: active,
     close: () => setActive(false),
-    invokeBackend: async (cmd, args) => {
+    // 独立预览无后端：对齐 SDK invokeBackend 签名，运行时返回 null 兜底
+    invokeBackend: async <T,>(cmd: string, args?: Record<string, unknown>) => {
       console.log('[preview] invokeBackend', cmd, args)
-      return null
+      return null as T
+    },
+    pendingRequest: null,
+    // 流式后端在独立预览中同样不可用：打印日志后以 undefined 终结
+    invokeBackendStream: async <_T, R>(cmd: string, args?: Record<string, unknown>) => {
+      console.log('[preview] invokeBackendStream', cmd, args)
+      return undefined as R
+    },
+    // editor / files / secureStorage 均需宿主环境：stub 走「未挂载/无权限」空值语义
+    editor: {
+      insertAtCursor: async () => false,
+      replaceSelection: async () => false,
+      replaceContent: async () => {},
+      getSelection: async () => null,
+      getActiveContent: async () => null,
+    },
+    files: {
+      createNote: async () => console.warn('[preview] files API 不可用（无宿主）'),
+      listWorkspace: async () => [],
+      read: async () => '',
+    },
+    secureStorage: {
+      get: async () => null,
+      set: async () => {},
+      delete: async () => {},
+      keys: async () => [],
     },
     store: getPluginStorage(manifest.id),
     events: pluginEventBus,
     activeNoteContent: '',
     activeNotePath: notePath,
-    getSetting: (key: string) => getSetting(manifest.id, key),
-    setSetting: (key: string, value: unknown) => setSetting(manifest.id, key, value),
-    getAllSettings: () => getAllSettings(manifest.id),
-    onSettingsChange: (handler) => onSettingsChange(manifest.id, handler),
+    // 模块级 settings API 已隐式绑定当前插件（standalone 预览用 stub 缓存兜底）
+    getSetting: (key: string) => getSetting(key),
+    setSetting: (key: string, value: unknown) => setSetting(key, value),
+    getAllSettings: () => getAllSettings(),
+    onSettingsChange: (handler) => onSettingsChange(handler),
     // 预览模式用 mockFrontmatterRef 模拟活动笔记的 frontmatter
     getActiveNoteFrontmatter: () => mockFrontmatterRef.current,
     setActiveNoteFrontmatter: (data) => {

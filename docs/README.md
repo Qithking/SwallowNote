@@ -18,6 +18,7 @@
 | [plugin-system/settings.md](plugin-system/settings.md) | 设置面板 |
 | [plugin-system/context-menu.md](plugin-system/context-menu.md) | 右键菜单贡献 |
 | [plugin-system/backend.md](plugin-system/backend.md) | Rust 后端（可选） |
+| [plugin-system/standalone-development.md](plugin-system/standalone-development.md) | 独立开发指南（不 clone 源码） |
 
 ### 示例插件
 
@@ -45,6 +46,8 @@
 | 工具 | 简介 |
 | --- | --- |
 | [plugin-sdk](plugin-sdk) | `@swallow-note/plugin-sdk` — 零依赖 SDK，无需 clone SwallowNote 源码 |
+| [plugin-kit](plugin-kit) | `@swallow-note/plugin-kit` — `swallow-plugin` CLI（create/build/package）与 `definePluginViteConfig` 构建配置 |
+| [plugin-rpc](plugin-rpc) | 插件后端共享 RPC crate — `PluginBackend` trait + `run()` + 标准错误码，Rust 后端直接依赖 |
 | [plugin-template](plugin-template) | Vite + React 起步项目，开箱即用 dev preview |
 
 ---
@@ -53,6 +56,8 @@
 
 - **我想独立开发一个插件** → [plugin-template](plugin-template)（推荐先看这个）
 - **我想看 SDK API 文档** → [plugin-sdk/README.md](plugin-sdk/README.md)
+- **我想用 kit 脚手架/构建/打包** → [plugin-kit/README.md](plugin-kit/README.md)
+- **我要写插件 Rust 后端** → [plugin-rpc/README.md](plugin-rpc/README.md)
 - **我想写一个插件（项目内开发）** → [quickstart.md](plugin-system/quickstart.md)
 - **我想看一个能跑的插件** → [plugin-samples/hello-world](plugin-samples/hello-world)
 - **我想知道 manifest 怎么写** → [manifest.md](plugin-system/manifest.md)

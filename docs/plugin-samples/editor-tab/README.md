@@ -7,7 +7,7 @@
 ## 文件
 
 - [manifest.json](./manifest.json) — 元数据
-- [index.tsx](./index.tsx) — 打开/关闭 tab 的面板
+- [src/index.tsx](./src/index.tsx) — 打开/关闭 tab 的面板（`definePlugin` 入口）
 
 ## OpenEditorTabProps
 

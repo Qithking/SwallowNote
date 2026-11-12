@@ -51,14 +51,12 @@
 
 ```
 plugins/export/
-├── manifest.json           # 插件清单（Rust 端读取）
+├── manifest.json           # 插件清单（静态字段唯一来源，Rust 端读取）
 ├── package.json            # npm 配置（前端构建依赖）
 ├── tsconfig.json           # TypeScript 配置
-├── vite.config.ts          # Vite 构建配置（IIFE 输出）
-├── build.sh                # 后端构建脚本
-├── package.sh              # 完整打包脚本（前端+后端→zip）
+├── vite.config.ts          # Vite 配置（plugin-kit 工厂 definePluginViteConfig）
 ├── src/
-│   └── index.tsx           # 前端入口
+│   └── index.tsx           # 前端入口（definePlugin(manifestJson, {...})）
 └── src-tauri/              # Rust 后端源码
     ├── Cargo.toml          # Rust 依赖配置
     └── src/
@@ -124,9 +122,8 @@ com.swallownote.export.zip  # 最终可安装的插件包
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:backend": "bash build.sh release",
-    "package": "bash package.sh",
+    "build": "swallow-plugin build",
+    "package": "swallow-plugin package",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -755,28 +752,21 @@ npm run build
 
 **关键 Vite 配置**（见 [`vite.config.ts`](file:///Users/thking/code/codeBuddy/SwallowNote/plugins/export/vite.config.ts)）：
 
+配置由 plugin-kit 工厂 `definePluginViteConfig` 统一提供：
+
 | 配置 | 值 | 原因 |
 |---|---|---|
 | `formats` | `['es']` | 宿主通过 `import()` 动态加载，期望 ES module |
 | `inlineDynamicImports` | `true` | 宿主用 blob URL 加载，不能解析相对 chunk 引用 |
-| `external` | `['react', 'react-dom', 'sonner', '@tauri-apps/api', '@tauri-apps/plugin-dialog', '@swallow-note/plugin-sdk']` | 共享宿主实例，避免多 React dispatcher 崩溃 |
-| 头部 manifest 注释 | `// @swallow-manifest {...}` | 注入插件元信息到 bundle 头部 |
+| `external`（kit 默认） | react 全家桶 + blocknote + codemirror | 共享宿主实例，避免多 React dispatcher 崩溃 |
+| `externals`（本插件增量） | `['sonner', 'react-i18next', 'i18next']` | 宿主提供同名模块，经 window.* 共享，避免重复打包 |
+| 头部 manifest 注释 | `// @swallow-manifest {...}` | kit 在产物头部注入插件元信息，供 Rust 端解析 |
 
 ### 6.2 后端构建
 
-```bash
-cd plugins/export
+`npm run build`（即 `swallow-plugin build`）在 vite 之后自动完成，无需手动执行：
 
-# Debug 模式
-bash build.sh
-
-# Release 模式（推荐，体积更小）
-bash build.sh release
-```
-
-`build.sh` 做了什么：
-
-1. `cargo build --release --manifest-path src-tauri/Cargo.toml`
+1. 检测工程含 `src-tauri/` 时执行 `cargo build --release --manifest-path src-tauri/Cargo.toml`
 2. 复制 `src-tauri/target/release/plugin_com_swallownote_export` → `backend/plugin_com.swallownote.export`
 3. 设置可执行权限
 
@@ -784,31 +774,31 @@ bash build.sh release
 
 | 阶段 | 文件名 | 说明 |
 |---|---|---|
-| Cargo 编译产物 | `plugin_com_swallownote_export` | `_` 替代 `.` |
-| 宿主期望的文件名 | `plugin_com.swallownote.export` | 保留 `.` |
+| Cargo 编译产物 | `plugin_com_swallownote_export` | `_` 替代 `.`（Cargo 不允许 bin 名含点） |
+| 宿主期望的文件名 | `plugin_com.swallownote.export` | 保留 `.`，kit 复制时自动重命名 |
 | Windows | `plugin_com.swallownote.export.exe` | 自动加 `.exe` |
 
 宿主查找路径：`<plugin_path>/backend/plugin_<plugin_id>` 或 `<plugin_path>/backend/<plugin_id>`
 
-### 6.3 完整打包
+### 6.3 完整打包（签名 + 市场索引）
 
 ```bash
 cd plugins/export
 
-# 一键打包（前端 + 后端 + zip）
+# 一键打包（前端 + 后端 + 确定性 zip + ed25519 签名 + repo.json 同步 + 版本 bump）
 npm run package
-# 或
-bash package.sh release
 ```
 
-`package.sh` 做了什么：
+`swallow-plugin package` 做了什么：
 
-1. `npx vite build` — 构建前端（ES module bundle + manifest 头部注释）
-2. `cargo build --release` — 构建后端
-3. 复制后端二进制到 `dist/backend/plugin_com.swallownote.export`
-4. `zip -r com.swallownote.export-${version}.zip index.js manifest.json backend/`
+1. `vite build` — 构建前端（ESM bundle + manifest 头部注释）
+2. `cargo build --release` — 构建后端并复制到 `dist/backend/`
+3. 版本号 bump — `manifest.json`、`package.json`、`src-tauri/Cargo.toml` 三处同步 patch+1，并刷新 `publishedAt`
+4. 确定性 zip — 固定条目 mtime 后打包为 `com.swallownote.export-<version>.zip`
+5. ed25519 签名 — 复用仓库 `plugins/.signing-key` 调宿主 `sign_plugin` 签名
+6. `repo.json` 同步 — sha256 / version / signature_b64 / pubkey_b64 回写市场索引
 
-最终产物：`plugins/export/com.swallownote.export-0.1.0.zip`（版本号来自 `manifest.json`）
+只构建不发布用 `npm run build`；`package` 会真实 bump 版本与签名，发布前再执行。
 
 ### 6.4 跨平台构建
 

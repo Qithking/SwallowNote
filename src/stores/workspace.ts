@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand'
 import { logger } from '@/lib/logger'
-import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory, getSessionState } from '@/lib/tauri'
+import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory, getSessionState, registerAssetScope } from '@/lib/tauri'
 import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
@@ -60,6 +60,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       saveFolderHistory(path).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
       watchDirectory(path).catch(err => logger.warn('workspace-store', `Failed to watch directory ${path}:`, err))
       triggerFrontmatterScan(path).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${path}:`, err))
+      // B4：asset protocol 静态白名单已收敛为 $APPDATA，工作区目录需运行期注册（本地图片显示）
+      registerAssetScope(path).catch(err => logger.warn('workspace-store', `Failed to register asset scope for ${path}:`, err))
     } catch (err) {
       logger.error('workspace-store', 'Failed to open folder:', err)
       set({ error: `Failed to open folder: ${err}`, isLoading: false, rootPath: null })
@@ -142,8 +144,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     
     const fileTreeStore = useFileTreeStore.getState()
     await fileTreeStore.addRoot(path)
-    
+
     await watchDirectory(path).catch(err => logger.warn('workspace-store', `Failed to watch directory ${path}:`, err))
+    // B4：多根工作区同样需运行期注册 asset scope
+    registerAssetScope(path).catch(err => logger.warn('workspace-store', `Failed to register asset scope for ${path}:`, err))
 
     // 触发 frontmatter 索引扫描
     triggerFrontmatterScan(path)
@@ -204,6 +208,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         // Verify file tree loaded successfully
         if (!loadSuccess) {
           throw new Error('File tree failed to load')
+        }
+
+        // B4：.swallow-workspace 多根场景逐个运行期注册 asset scope
+        for (const folder of workspace.folders) {
+          registerAssetScope(folder).catch(err =>
+            logger.warn('workspace-store', `Failed to register asset scope for ${folder}:`, err)
+          )
         }
 
         fileTreeStore.clearExpanded()

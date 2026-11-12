@@ -1,0 +1,10 @@
+[package]
+name = "swallow-plugin-rpc"
+version = "0.1.0"
+description = "SwallowNote 插件后端共享 RPC 层 — JSON-RPC 2.0 over stdin/stdout 协议骨架"
+authors = ["SwallowNote"]
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

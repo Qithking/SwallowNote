@@ -10,5 +10,6 @@
   "order": 100,
   "enabled": true,
   "hasBackend": true,
-  "entry": "index.tsx"
+  "entry": "index.tsx",
+  "permissions": ["backend"]
 }

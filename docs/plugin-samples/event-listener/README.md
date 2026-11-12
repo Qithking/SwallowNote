@@ -5,13 +5,13 @@
 **学习目标**：
 - `usePluginEvent` 订阅单一事件
 - `usePluginEvents` 订阅多事件
-- 模块级订阅（`pluginEventBus.on`）+ onLoad/onUnload 生命周期
+- 面板内订阅（`usePluginEvents`，面板组件内推荐方式；模块级 `events.on` 仍可用）
 - 显示 payload 完整结构
 
 ## 文件
 
 - [manifest.json](./manifest.json)
-- [index.tsx](./index.tsx)
+- [index.tsx](./src/index.tsx)
 
 ## 预期效果
 
@@ -27,7 +27,7 @@
 | --- | --- |
 | `usePluginEvent(panel, event, handler)` | panel 内单一事件 |
 | `usePluginEvents(panel, events, handler)` | panel 内多事件 + event 名 |
-| `pluginEventBus.on(event, handler)` | onLoad/onUnload 中的模块级订阅 |
+| `pluginEventBus.on(event, handler)` | 模块级订阅（面板组件内推荐 `usePluginEvents`） |
 
 ## 完整 API
 

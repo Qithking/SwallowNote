@@ -7,9 +7,9 @@
 ## 文件
 
 - [manifest.json](./manifest.json) — `hasBackend: true`
-- [index.tsx](./index.tsx) — 前端调用 `invokeBackend`
-- [backend/Cargo.toml](./backend/Cargo.toml) — Rust 包配置
-- [backend/src/main.rs](./backend/src/main.rs) — JSON-RPC 子进程实现
+- [src/index.tsx](./src/index.tsx) — 前端调用 `invokeBackend`（`definePlugin` 入口）
+- [src-tauri/Cargo.toml](./src-tauri/Cargo.toml) — Rust 包配置（kit 约定：Rust 源码放 `src-tauri/`）
+- [src-tauri/src/main.rs](./src-tauri/src/main.rs) — JSON-RPC 子进程实现
 
 ## 通信架构
 
@@ -55,11 +55,22 @@
 
 ## 编译步骤
 
-后端产物是可执行二进制（不是动态库），需为目标平台编译：
+后端产物是可执行二进制（不是动态库），需为目标平台编译。
+
+**目录约定**：Rust 源码在 `src-tauri/`（kit 约定，以该目录存在判定含后端）；宿主运行期查找的产物目录是 `backend/`，由 kit 构建时自动创建。
+
+推荐用 kit 一条龙（自动复制重命名到宿主查找位置）：
 
 ```bash
-# 进入 backend 目录
-cd backend
+# 工程根目录执行：vite build + cargo build --release + 复制二进制到 backend/
+swallow-plugin build
+```
+
+手动编译（等价，可选）：
+
+```bash
+# 进入 src-tauri 目录
+cd src-tauri
 
 # 编译 release（默认目标）
 cargo build --release
@@ -70,13 +81,17 @@ cargo build --release --target x86_64-unknown-linux-gnu
 cargo build --release --target x86_64-pc-windows-msvc
 ```
 
-产物路径：`backend/target/release/plugin_com.example.rust-backend`
+手动产物路径：`src-tauri/target/release/plugin_com_example_rust_backend`；
+需复制为 `backend/plugin_com.example.rust-backend`（宿主查找名，见下）。
 
 ## 二进制命名约定
 
-- **主命名**：`plugin_<id>`（与 `manifest.json` 的 `id` 一致）
-- 本示例 id 为 `com.example.rust-backend`，二进制名为 `plugin_com.example.rust-backend`
-- Windows 上是 `plugin_com.example.rust-backend.exe`
+- **宿主查找**：`<plugin_path>/backend/plugin_<id>`，id 原样拼接（含 `.`）——
+  本示例即 `backend/plugin_com.example.rust-backend`
+- **Cargo.toml `[[bin]] name`**：cargo 不允许二进制名含 `.`，因此写作
+  `plugin_com_example_rust_backend`（`.` → `_`）；kit `swallow-plugin build`
+  会在复制到 `backend/` 时自动重命名为宿主查找名
+- Windows 上查找名是 `plugin_com.example.rust-backend.exe`
 - 兜底：宿主也会尝试 `<id>`（无 `plugin_` 前缀），但建议统一用主命名
 
 把编译后的二进制放到插件包的 `backend/` 目录下，宿主通过 `manifest.json` 的 `hasBackend: true`（或 `backend/` 目录存在）检测后端。

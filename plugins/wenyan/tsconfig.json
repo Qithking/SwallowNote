@@ -9,13 +9,15 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "noEmit": true,
     "baseUrl": ".",
     "paths": {
       "@/lib/*": ["../../src/lib/*"],
       "@/components/CodeEditor": ["../../src/components/CodeEditor/index.ts"],
       "@/components/CodeEditor/*": ["../../src/components/CodeEditor/*"],
-      "@/components/Plugin/useDebounce": ["../../src/components/Plugin/useDebounce.ts"]
+      "@/components/Plugin/useDebounce": ["../../src/components/Plugin/useDebounce.ts"],
+      "@/components/ui/*": ["../../src/components/ui/*"]
     }
   },
-  "include": ["src", "../../docs/plugin-sdk/src"]
+  "include": ["src"]
 }

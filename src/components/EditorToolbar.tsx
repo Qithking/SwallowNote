@@ -11,7 +11,7 @@ import type { ConflictRepoRecord } from '@/lib/tauri'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
-import { pluginRightPanelType, renderPluginIcon, pluginSidebarView, createToolbarButtonProps, renderPluginToolbarButton } from '@/lib/plugin-utils'
+import { pluginRightPanelType, renderPluginIcon, pluginSidebarView, createToolbarButtonProps, renderPluginToolbarButton, openPluginPanel } from '@/lib/plugin-utils'
 import { PluginErrorBoundary } from '@/components/Plugin/PluginErrorBoundary'
 import { downloadCoordinator } from '@/lib/download-coordinator'
 import { logger } from '@/lib/logger'
@@ -276,8 +276,8 @@ function EditorToolbar() {
   const getPluginActivateCallbacks = (pluginId: string, contentPosition: string | undefined) => {
     const activate = () => {
       if (contentPosition === 'rightPanel') {
-        setRightPanelType(pluginRightPanelType(pluginId))
-        usePluginStore.getState().setActivePlugin(pluginId, 'rightPanel')
+        // P1.4：统一走 openPluginPanel（打开面板 + 一次性请求管道 + 后端预热）
+        openPluginPanel(pluginId)
       } else if (contentPosition === 'leftPanel') {
         const pluginViewId = pluginSidebarView(pluginId)
         const uiState = useUIStore.getState()

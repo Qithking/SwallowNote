@@ -16,6 +16,11 @@ export function updateNodesWithChildren(list: FileNode[], path: string, children
       const oldChildrenMap = new Map((n.children || []).map(c => [c.path, c]))
       const mergedChildren = children.map(c => {
         const old = oldChildrenMap.get(c.path)
+        // 后端列表接口不返回孙辈（children 为 undefined）：旧子节点已有已加载子树时
+        // 保留旧子树，避免重写后「箭头展开但 0 子行」（reveal 链路断裂根因）
+        if (old && c.children === undefined && old.children) {
+          return old.isExpanded ? { ...c, children: old.children, isExpanded: true } : { ...c, children: old.children }
+        }
         return old?.isExpanded ? { ...c, isExpanded: true } : c
       })
       return { ...n, children: mergedChildren, isLoading: false }

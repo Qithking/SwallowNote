@@ -36,6 +36,8 @@ import { usePluginStore } from './plugin'
 import { useUIStore } from './ui'
 import { pluginEventBus } from '@/lib/plugin-host'
 import { assertPermission } from '@/lib/plugin-permission-guard'
+import { logger } from '@/lib/logger'
+import type { PluginDefinition } from '@/types/plugin'
 
 /**
  * Resolved shape of a registered editor. The component is
@@ -208,6 +210,40 @@ export function getEditorForExtension(
 /** Convenience: snapshot every active extension. */
 export function getActivePluginExtensions(): Set<string> {
   return pluginEditorRegistry.getActivePluginExtensions()
+}
+
+/**
+ * B5（manifest 驱动注册）：按插件清单声明的 `editorFileExtensions` +
+ * `editorComponent` 自动逐扩展注册编辑器。供两处共用：
+ * - plugin-loader（模块加载完成即注册，仅 enabled 插件，紧随
+ *   installHostTakeover 之后）；
+ * - plugin store 的启用路径（setPluginEnabled(true) 补注册）。
+ *
+ * 幂等性：`pluginEditorRegistry.register` 对「同插件同扩展」是替换
+ * 语义（仅不同插件抢注同一扩展才抛冲突），因此 loader 重扫 /
+ * store enable 重放导致的重复调用不会产生重复注册，只会以相同
+ * 组件覆盖。单扩展注册失败（权限未授予 / 扩展被他插件占用）仅记录
+ * 告警，不中断其余扩展与其余插件的加载。
+ */
+export function registerEditorsFromManifest(
+  pluginId: string,
+  extensions: readonly string[] | undefined,
+  component: PluginDefinition['editorComponent'],
+): void {
+  if (!extensions || extensions.length === 0 || !component) return
+  for (const ext of extensions) {
+    try {
+      // PluginDefinition.editorComponent 镜像字段宽化为 ReactNode，
+      // 清单来源（PluginManifest.editorComponent）实为组件，收窄安全。
+      registerEditor(pluginId, ext, component as PluginEditorEntry['component'])
+    } catch (err) {
+      logger.warn(
+        'plugin-editor',
+        `auto-register editor failed for plugin "${pluginId}" extension "${ext}":`,
+        err,
+      )
+    }
+  }
 }
 
 /**

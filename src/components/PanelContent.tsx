@@ -13,7 +13,7 @@
  * re-renders during editing.
  *
  * Key optimisation: content / path subscriptions are split into child
- * components so that built-in panels (AI, Directory, History, EditorSettings)
+ * components so that built-in panels (Directory, History, EditorSettings)
  * don't re-render when the user types — only plugin panels and the note-
  * properties panel subscribe to the fields they actually need.
  */
@@ -29,7 +29,6 @@ import {
 } from '@/lib/plugin-utils'
 import type { PluginDefinition } from '@/types/plugin'
 
-const AIView = lazy(() => import('@/components/AI/AIView').then(m => ({ default: m.AIView })))
 const DirectoryView = lazy(() => import('@/components/Directory/DirectoryView').then(m => ({ default: m.DirectoryView })))
 const HistoryView = lazy(() => import('@/components/History/HistoryView').then(m => ({ default: m.HistoryView })))
 const EditorSettings = lazy(() => import('@/components/EditorSettings/EditorSettings').then(m => ({ default: m.EditorSettings })))
@@ -49,8 +48,6 @@ export function RightPanelContent() {
 
   // --- Built-in right panels ---
   switch (rightPanelType) {
-    case 'ai':
-      return <Suspense fallback={null}><AIView /></Suspense>
     case 'directory':
       return <Suspense fallback={null}><DirectoryView /></Suspense>
     case 'history':
@@ -65,8 +62,9 @@ export function RightPanelContent() {
 }
 
 /**
- * Plugin right panel.  Subscribes to `plugins` and the active tab's
- * content / path — re-renders only when those change.
+ * Plugin right panel.  Subscribes to `plugins`, the active tab's
+ * content / path and the pending one-shot panel request — re-renders
+ * when those change.
  */
 function PluginRightPanelContent({ rightPanelType }: { rightPanelType: string }) {
   const allPlugins = usePluginStore((s) => s.plugins)
@@ -78,6 +76,10 @@ function PluginRightPanelContent({ rightPanelType }: { rightPanelType: string })
   const activeTabPath = useEditorStore(
     (s) => s.tabs.find((t) => t.id === s.activeTabId)?.path ?? '',
   )
+
+  // 一次性面板请求（P1.4）：payload 到达时触发本组件重渲染，重建 panelProps
+  // 把最新 payload 传下去——面板已挂载时连续 openPluginPanel 也能送达。
+  const pendingPluginRequest = useUIStore((s) => s.pendingPluginRequest)
 
   const pluginId = extractPluginId(rightPanelType)
   const plugin = allPlugins.find((p) => p.id === pluginId)
@@ -95,6 +97,7 @@ function PluginRightPanelContent({ rightPanelType }: { rightPanelType: string })
     },
     activeTabContent,
     activeTabPath,
+    pendingPluginRequest,
   )
 
   return (

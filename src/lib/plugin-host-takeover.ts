@@ -33,7 +33,25 @@ import {
 } from '@/stores/pluginEditor'
 import { useEditorStore, registerPluginTabRuntime } from '@/stores/editor'
 import { assertPermission } from './plugin-permission-guard'
-import { writePluginSettings } from './tauri'
+import { invokePluginBackendStream } from './plugin-stream'
+import {
+  writePluginSettings,
+  readSecureStorage,
+  writeSecureStorage,
+  deleteSecureStorage,
+  listSecureStorageKeys,
+} from './tauri'
+import {
+  pluginEditorInsertAtCursor,
+  pluginEditorGetSelection,
+  pluginEditorGetActiveContent,
+  pluginEditorReplaceSelection,
+  pluginEditorReplaceContent,
+  pluginFilesCreateNote,
+  pluginFilesListWorkspace,
+  pluginFilesRead,
+} from './plugin-write-api'
+import { normalizePluginBackendError, openPluginPanel } from './plugin-utils'
 import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
 import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
 import { logger } from './logger'
@@ -43,8 +61,10 @@ export const DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS = 5000
 
 /** 动态导入的插件模块引用；inline 插件为 undefined。 */
 export interface PluginWithModule extends PluginDefinition {
-  /** 动态导入结果，仅磁盘插件有 */
-  __pluginModule?: { setHost?: (overrides: HostOverrides) => () => void }
+  /** 动态导入结果，仅磁盘插件有；setHost 第二参用于把当前插件 ID 绑定到 SDK override 层 */
+  __pluginModule?: {
+    setHost?: (overrides: HostOverrides, pluginId?: string) => () => void
+  }
 }
 
 /** 插件持久化的 setHost restore 函数映射。 */
@@ -56,7 +76,8 @@ export function installHostTakeover(plugin: PluginDefinition): void {
   if (!mod?.setHost) return
   // 避免重复安装
   if (hostTakeoverRestoreMap.has(plugin.id)) return
-  const restore = mod.setHost(buildOverridesForPlugin(plugin))
+  // 第二参绑定插件 ID：模块级 settings API 靠它隐式解析目标插件
+  const restore = mod.setHost(buildOverridesForPlugin(plugin), plugin.id)
   hostTakeoverRestoreMap.set(plugin.id, restore)
 }
 
@@ -90,8 +111,8 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       assertPermission(pluginId, 'events', `emit "${e}"`)
       pluginEventBus.emit(e, p)
     },
-    // invokeBackend 经 SDK 路径调用。
-    invokeBackend: async (cmd, args) => {
+    // invokeBackend 经 SDK 路径调用；B1 泛型化与 SDK 签名保持一致。
+    invokeBackend: async <T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
       // 熔断插件拒绝 IPC，防超时后后台钩子副作用
       if (isPluginTripped(pluginId)) {
         throw new Error(
@@ -104,11 +125,13 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       let success = true
       let errorMsg: string | undefined
       try {
-        return await invoke('invoke_plugin', { pluginId, command: cmd, args })
+        return (await invoke('invoke_plugin', { pluginId, command: cmd, args })) as T
       } catch (err) {
         success = false
-        errorMsg = String(err)
-        throw err
+        // B4：结构化错误帧（__pluginError）→ SDK PluginError，其余原样透传。
+        const normalized = normalizePluginBackendError(err)
+        errorMsg = String(normalized)
+        throw normalized
       } finally {
         const durationMs = performance.now() - start
         void import('./plugin-telemetry').then(({ recordBackendMetric }) => {
@@ -116,6 +139,27 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
         })
       }
     },
+    // 流式调用 override：权限检查与遥测已内聚在共享桥接函数中，此处仅保留熔断拦截。
+    invokeBackendStream: (cmd, args, onChunk, options) => {
+      if (isPluginTripped(pluginId)) {
+        throw new Error(
+          `[plugin-host-takeover] invokeBackendStream refused: plugin "${pluginId}" is tripped (lifecycle hook timed out)`
+        )
+      }
+      return invokePluginBackendStream(pluginId, cmd, args, onChunk, options)
+    },
+    // 编辑器写 / 文件 API：权限检查与实现内聚在共享桥接，此处按插件 ID 转发。
+    __editor_insertAtCursor: (text: string) => pluginEditorInsertAtCursor(pluginId, text),
+    __editor_replaceSelection: (text: string) => pluginEditorReplaceSelection(pluginId, text),
+    __editor_replaceContent: (text: string) => pluginEditorReplaceContent(pluginId, text),
+    __editor_getSelection: () => pluginEditorGetSelection(pluginId),
+    __editor_getActiveContent: () => pluginEditorGetActiveContent(pluginId),
+    __files_createNote: (relPath: string, content: string) =>
+      pluginFilesCreateNote(pluginId, relPath, content),
+    __files_listWorkspace: (query?: string) => pluginFilesListWorkspace(pluginId, query),
+    __files_read: (relPath: string) => pluginFilesRead(pluginId, relPath),
+    /** 打开面板管道（P1.4/P2.5）：模块级 openPluginPanel 强制绑定当前插件，payload 结构宿主不解析。 */
+    __openPluginPanel: (payload: unknown) => openPluginPanel(pluginId, payload),
     /** 插件设置桥接（SQLite-backed），复用 storage 权限。 */
     __pluginSettings_get: async (id, key) => {
       // 设置复用 storage 权限。
@@ -143,6 +187,24 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
       return pluginEvents.on('plugin-settings:change', (payload) => {
         handler(payload)
       })
+    },
+    // 安全存储桥接（P1.5 / ADR-0003）：独立 'secure-storage' 权限细目，
+    // 加解密内聚在 Rust 侧（密钥按插件派生），此处仅权限门控 + IPC 转发。
+    __pluginSecureStorage_get: async (id, key) => {
+      assertPermission(id, 'secure-storage', `read secure storage key "${key}"`)
+      return readSecureStorage(id, key)
+    },
+    __pluginSecureStorage_set: async (id, key, value) => {
+      assertPermission(id, 'secure-storage', `write secure storage key "${key}"`)
+      await writeSecureStorage(id, key, value)
+    },
+    __pluginSecureStorage_delete: async (id, key) => {
+      assertPermission(id, 'secure-storage', `delete secure storage key "${key}"`)
+      await deleteSecureStorage(id, key)
+    },
+    __pluginSecureStorage_keys: async (id) => {
+      assertPermission(id, 'secure-storage', `list secure storage keys`)
+      return listSecureStorageKeys(id)
     },
     /** 桥接到宿主 registerEditor，做权限校验与去重。 */
     registerEditor: (id, extension, component) => {
@@ -226,7 +288,8 @@ export async function runPluginLifecycleHook(
   const mod = (plugin as PluginWithModule).__pluginModule
   let restoreHost: (() => void) | undefined
   if (mod?.setHost) {
-    restoreHost = mod.setHost(buildOverridesForPlugin(plugin))
+    // 第二参绑定插件 ID，hook 执行期间模块级 settings API 才能解析当前插件
+    restoreHost = mod.setHost(buildOverridesForPlugin(plugin), plugin.id)
   }
   // 不在每轮钩子前清熔断标志，避免旧 hookPromise 绕过检查
   const timeoutMs = options.timeoutMs ?? DEFAULT_LIFECYCLE_HOOK_TIMEOUT_MS

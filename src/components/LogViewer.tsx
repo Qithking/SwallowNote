@@ -97,7 +97,8 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
     })
     if (!filePath) return // 用户取消
     try {
-      await invoke('write_file', { path: filePath, content: jsonl })
+      // export_text_file：后端唯一放行工作区外写入的导出命令
+      await invoke('export_text_file', { path: filePath, content: jsonl })
     } catch (e) {
       console.error('[LogViewer] export failed', e)
     }

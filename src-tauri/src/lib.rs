@@ -1,6 +1,6 @@
 #![allow(unexpected_cfgs)] // objc macro generates cfg(cargo-clippy) internally
-mod ai_proxy;
 mod commands;
+mod crypto;
 mod db;
 mod i18n;
 mod plugins;
@@ -154,6 +154,8 @@ pub fn run() {
             commands::file::delete_file,
             commands::file::rename_file,
             commands::file::copy_file,
+            commands::file::export_text_file,
+            commands::file::register_asset_scope,
             commands::file::copy_file_to_clipboard,
             commands::file::read_clipboard_file_paths,
             commands::file::open_in_finder,
@@ -225,23 +227,6 @@ pub fn run() {
             mac_rounded_corners::reposition_traffic_lights,
             set_dock_icon_visibility,
             i18n::set_app_locale,
-            commands::ai::encrypt_api_key,
-            commands::ai::decrypt_api_key,
-            commands::ai::start_ai_proxy_cmd,
-            commands::ai::stop_ai_proxy,
-            commands::ai::restart_ai_proxy_cmd,
-            commands::ai::test_ai_model_cmd,
-            commands::ai_chat::save_ai_message,
-            commands::ai_chat::load_ai_messages,
-            commands::ai_chat::clear_ai_messages,
-            commands::ai_role_prompts::load_ai_role_prompts,
-            commands::ai_role_prompts::get_ai_role_prompt,
-            commands::ai_role_prompts::update_ai_role_prompt,
-            commands::ai_role_prompts::add_ai_role_prompt,
-            commands::ai_role_prompts::delete_ai_role_prompt,
-            commands::ai_role_prompts::update_ai_role_prompt_name,
-            commands::ai_role_prompts::reset_ai_role_prompt,
-            commands::ai_builtin_models::get_builtin_ai_models,
             commands::plugin::scan_plugins,
             commands::plugin::install_plugin,
             commands::plugin::uninstall_plugin,
@@ -258,9 +243,15 @@ pub fn run() {
             commands::plugin::export_plugin_configs,
             commands::plugin::import_plugin_configs,
             commands::plugin_invoke::invoke_plugin,
+            commands::plugin_invoke::invoke_plugin_stream,
+            commands::plugin_invoke::prewarm_plugin,
             commands::plugin_settings::read_plugin_settings,
             commands::plugin_settings::write_plugin_settings,
             commands::plugin_settings::delete_plugin_settings,
+            commands::plugin_secure_storage::secure_storage_set,
+            commands::plugin_secure_storage::secure_storage_get,
+            commands::plugin_secure_storage::secure_storage_delete,
+            commands::plugin_secure_storage::secure_storage_keys,
             commands::market_sources::list_market_sources,
             commands::market_sources::add_market_source,
             commands::market_sources::remove_market_source,
@@ -374,15 +365,12 @@ pub fn run() {
             info!("[STARTUP-TIME] file_watcher_ready t={}", startup_t0.elapsed().as_millis());
 
             app.handle().manage(commands::git::new_clone_pid_state());
-            app.handle().manage(commands::ai::new_shared_ai_proxy_state());
             // 每插件后端子进程状态；启动为空，首次 invoke_plugin 时懒加载。
             let plugin_process_state = commands::plugin_invoke::new_shared_plugin_process_state();
             // 启动空闲回收定时器：每 5 分钟扫描，kill 超过 10 分钟未用的插件后端进程
             commands::plugin_invoke::start_idle_reaper(plugin_process_state.clone());
             app.handle().manage(plugin_process_state);
             info!("[STARTUP-TIME] plugin_state_ready t={}", startup_t0.elapsed().as_millis());
-
-            // AI 代理按需启动以节省内存
 
             let show_item = MenuItemBuilder::with_id("show", crate::i18n::t("tray.showWindow")).build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", crate::i18n::t("tray.quit")).build(app)?;
@@ -493,18 +481,6 @@ pub fn run() {
                         if let Err(e) = conn.execute_batch("PRAGMA optimize;") {
                             error!("[lib] PRAGMA optimize failed: {}", e);
                         }
-                    }
-                }
-                // 发送 shutdown 信号停止 AI 代理
-                if let Some(holder) =
-                    app_handle.try_state::<commands::ai::SharedAiProxyState>()
-                {
-                    let mut guard = holder
-                        .server
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner());
-                    if let Some(server) = guard.take() {
-                        let _ = server.shutdown_tx.send(());
                     }
                 }
             }
