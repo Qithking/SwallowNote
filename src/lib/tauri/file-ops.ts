@@ -95,8 +95,11 @@ export async function listDirectoriesBatch(
   })
 }
 
-export async function readFile(path: string): Promise<string> {
-  return await invoke('read_file', { path, workspaceRoot: workspaceRoot() })
+export async function readFile(path: string, workspaceRootOverride?: string | null): Promise<string> {
+  return await invoke('read_file', {
+    path,
+    workspaceRoot: workspaceRootOverride !== undefined ? workspaceRootOverride : workspaceRoot(),
+  })
 }
 
 export async function writeFile(path: string, content: string): Promise<void> {

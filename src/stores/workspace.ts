@@ -28,7 +28,7 @@ export interface WorkspaceState {
   removeWorkspaceFolder: (path: string) => Promise<void>
   saveWorkspaceFile: (autoSave?: boolean) => Promise<void>
   loadWorkspaceFile: (workspacePath: string) => Promise<void>
-  switchMode: (mode: WorkspaceMode) => Promise<void>
+  switchMode: (mode: WorkspaceMode, targetPath?: string) => Promise<void>
   initMode: () => Promise<void>
   startBackgroundServices: () => void
 }
@@ -195,7 +195,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const { readFile } = await import('@/lib/tauri')
-      const content = await readFile(workspacePath)
+      // workspace 文件的允许根：rootPath 仅 folder 模式设置（workspace 模式为 null），
+      // 不传覆盖会被 ensure_path_allowed 只允许 app_data → 工作区 .swallow-workspace 被误拒。
+      // 以 workspace 文件所在目录作为允许根读取（根因 C）。
+      const sep = Math.max(workspacePath.lastIndexOf('/'), workspacePath.lastIndexOf('\\'))
+      const workspaceDir = sep > 0 ? workspacePath.slice(0, sep) : workspacePath
+      const content = await readFile(workspacePath, workspaceDir)
       const workspace = JSON.parse(content)
 
       if (workspace.folders && Array.isArray(workspace.folders)) {
@@ -240,12 +245,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       fileTreeStore.clearAll()
     }
   },
-  switchMode: async (mode: WorkspaceMode) => {
+  switchMode: async (mode: WorkspaceMode, targetPath?: string) => {
     const { workspaceMode } = useUIStore.getState()
     if (mode === workspaceMode) return
 
     useUIStore.getState().setWorkspaceMode(mode)
-    await get().loadLatestByMode()
+    if (targetPath) {
+      // 直接加载调用方指定的目标路径（如从最近记录点击某项），
+      // 跳过 loadLatestByMode 的 sessionContextPath/history 预加载（根因 A：双重加载 + 失效重试放大）
+      if (mode === 'workspace') {
+        await get().loadWorkspaceFile(targetPath)
+      } else {
+        await get().openFolder(targetPath)
+      }
+    } else {
+      await get().loadLatestByMode()
+    }
 
     // 过滤不匹配的 tab
     const { filterTabs, activeTabId, tabs } = useEditorStore.getState()

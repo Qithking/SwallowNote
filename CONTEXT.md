@@ -22,4 +22,8 @@
 | idleAutoPush | 「保存后空闲自动推送」设置开关,默认 true(开箱即用) | 保存文件后经 `idleAutoPushDelay` 无新保存,即对涉及仓库自动 commit+push;关闭时已排期计时器一并取消 |
 | idleAutoPushDelay | 空闲推送等待间隔(秒),默认 60,可选 30/60/120/300 | 每次保存重置计时;间隔修改对下一次保存生效 |
 | file-saved | 文件保存完成事件:`{ detail: { path } }` | 手动保存(Ctrl+S)与 saveTab 均派发;useIdleAutoPush/CategoryView/HistoryView/FileTreeView 消费 |
+| KnowledgeBase（知识库） | 插件管理的可检索文档集合:工作区文件自动建档 + 手动导入外部文件 | 独立插件 `com.swallownote.knowledge-base` 的 v1 核心实体;检索为关键词全文(FTS5),与 ai 插件的无缝集成在 v2(宿主跨插件桥) |
+| Document.source | 文档来源分类:`workspace`(工作区文件树) / `imported`(手动导入,复制入插件数据目录) | 区分建档管道与索引生命周期;imported 文件从插件数据目录读,不依赖原始路径 |
+| Chunk | 文档分块单元(段落/固定窗口),全文检索的命中粒度 | 中文分词 + SQLite FTS5 按 chunk 索引;问答引用溯源到 chunk 级 |
+| FullTextIndex | 知识库的 SQLite FTS5 索引库,位于插件数据目录,由插件后端子进程维护 | 宿主无全文索引设施(搜索为逐行正则扫描);插件间无通信通道、secureStorage 按 plugin_id 隔离是知识库插件 v1 自包含架构的硬约束 |
 

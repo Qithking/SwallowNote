@@ -140,14 +140,17 @@ export function TitleBarRecentPopover() {
 
     if (item.isWorkspace) {
       if (workspaceMode !== 'workspace') {
-        switchMode('workspace')
+        // 直接加载点击的目标，避免 switchMode 内部先预加载 sessionContextPath/history（根因 A：双重加载+重试放大）
+        await switchMode('workspace', item.path)
+      } else {
+        await loadWorkspaceFile(item.path)
       }
-      await loadWorkspaceFile(item.path)
     } else {
       if (workspaceMode !== 'folder') {
-        switchMode('folder')
+        await switchMode('folder', item.path)
+      } else {
+        await openFolder(item.path)
       }
-      await openFolder(item.path)
     }
   }
 
