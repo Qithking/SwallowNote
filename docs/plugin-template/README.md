@@ -31,27 +31,32 @@ npm run build
 
 ```
 dist/
-├── index.js           # ES module bundle（gzip 后约 12 kB）
-└── manifest.json      # 从 src/plugin/manifest.json 拷贝
+├── index.js           # ES module bundle（gzip 后约 12 kB，头部注入 // @swallow-manifest 元数据注释）
+└── manifest.json      # 工程根 manifest.json（静态字段唯一来源）的拷贝
 ```
 
-在 SwallowNote 中：**Settings → Plugins → Upload** 整个 `dist/` 目录（也可先打包成 zip）。
+`npm run build` 底层是 [plugin-kit](../plugin-kit) 的 `swallow-plugin build`（kit 已作为 devDependency 内置）——`definePluginViteConfig` 工厂内置 library mode 与 manifest 注入。打包发布用：
+
+```bash
+npx swallow-plugin package   # 构建 dist/ 并打包为 zip
+```
+
+在 SwallowNote 中：**Settings → Plugins → Upload** 上传 zip。
 
 ## 项目结构
 
 ```
 plugin-template/
 ├── index.html                 # vite dev 入口
-├── vite.config.ts             # dev（preview）+ build（library）双模式
+├── manifest.json              # 插件静态字段唯一来源（工程根，kit 约定）
+├── vite.config.ts             # kit 工厂 definePluginViteConfig（dev 预览 + 生产 library 双模式）
 ├── tsconfig.json              # 严格模式，include ../plugin-sdk/src
 ├── package.json
 ├── src/
 │   ├── main.tsx               # dev 入口：挂载 <Preview />
 │   ├── preview.tsx            # dev 框架，带事件按钮
 │   ├── styles.css
-│   └── plugin/
-│       ├── index.tsx          # <-- 你的代码写在这里
-│       └── manifest.json
+│   └── index.tsx              # <-- 你的代码写在这里（definePlugin 入口）
 └── dist/                      # 构建产物（gitignore）
 ```
 
@@ -75,7 +80,7 @@ plugin-template/
 
 ## 需要编辑什么
 
-只需要改 `src/plugin/index.tsx` 和 `src/plugin/manifest.json`。其余都是 dev 基础设施，可以保持不动。
+工程根的 `manifest.json` 是插件静态字段（id / name / permissions / ...）的**唯一来源**；`src/index.tsx` 通过 `definePlugin(manifestJson, { icon, panel, ... })` 聚合运行时对象，在其中实现组件与 hooks。其余都是 dev 基础设施，可以保持不动。
 
 如果想加新的 dev 工具按钮（比如带表单输入的自定义事件），编辑 `src/preview.tsx`。
 
@@ -83,7 +88,7 @@ plugin-template/
 
 如果你之前在 `SwallowNote/src/` 内部开发，迁移步骤如下：
 
-1. 把 `index.tsx` 移到 `src/plugin/index.tsx`
+1. 把 `index.tsx` 移到 `src/index.tsx`
 2. 替换 import：
 
    ```typescript
@@ -92,12 +97,27 @@ plugin-template/
    import { usePluginStorage } from '@/lib/plugin-hooks'
 
    // 改后
-   import { type PluginManifest, usePluginStorage } from '@swallow-note/plugin-sdk'
+   import { definePlugin, type PluginPanelProps, usePluginStorage } from '@swallow-note/plugin-sdk'
    // 必须 re-export setHost，宿主通过它注入真实实现
    export { setHost } from '@swallow-note/plugin-sdk'
    ```
 
 3. 把 `@/lib/...` 运行时 import 替换为 SDK 的 re-export
-4. 把 `manifest.json` 移到 `index.tsx` 同级目录
+4. 把 `manifest.json` 移到工程根目录（与 `vite.config.ts` 同级）
+5. 入口改用 `definePlugin` 聚合：manifest.json 只保留静态字段（组件字段与生命周期钩子由 runtime 参数注入，钩子为顶层平铺字段），TS 内不再手写 manifest 对象：
+
+   ```typescript
+   import { definePlugin } from '@swallow-note/plugin-sdk'
+   import manifestJson from '../manifest.json'
+
+   export default definePlugin(manifestJson, {
+     icon: MyIcon,
+     panel: MyPanel,
+     toolbarButton: MyToolbarButton,   // 按需注入
+     settings: SettingsComponent,      // 按需注入
+     editorComponent: MyEditor,        // 按需注入
+     onLoad: () => registerActions(),  // 生命周期钩子同样是顶层平铺字段
+   })
+   ```
 
 类型形状完全一致，迁移基本是 sed 替换。

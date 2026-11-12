@@ -15,5 +15,5 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["index.tsx", "../../plugin-sdk/src"]
+  "include": ["src/index.tsx", "../../plugin-sdk/src"]
 }

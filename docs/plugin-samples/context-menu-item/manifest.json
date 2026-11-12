@@ -10,5 +10,6 @@
   "order": 60,
   "enabled": true,
   "hasBackend": false,
-  "entry": "index.tsx"
+  "entry": "src/index.tsx",
+  "permissions": ["context-menu", "storage"]
 }

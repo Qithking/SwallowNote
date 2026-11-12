@@ -15,6 +15,8 @@
 | `onUnmount` | panel 组件卸载 | 取消订阅、清理 timer |
 | `onUnload` | 插件完全卸载 | 释放资源、清理全局副作用 |
 
+> 所有钩子均为**可选**：未声明 `onLoad`（或声明为空壳）的插件宿主照常加载——宿主在模块加载完成后、首个 API 调用前就完成 SDK 接管（`setHost`），不依赖钩子触发。只有确需一次性初始化时才声明 `onLoad`。
+
 ## 触发顺序
 
 ### 首次加载启用
@@ -55,7 +57,7 @@ tauri://close-requested
 interface PluginContext {
   pluginId: string              // 插件 id，可用于存储命名空间
   pluginPath: string            // 插件包在磁盘上的绝对路径
-  invokeBackend(cmd, args?): Promise<unknown>  // 调用 Rust 后端
+  invokeBackend<T>(command: string, args?: Record<string, unknown>): Promise<T>  // 调用 Rust 后端
 }
 ```
 
@@ -75,7 +77,7 @@ const result = await ctx.invokeBackend('count_words', { text: 'hi' })
 // host 未注入时：打印 warn，result === null
 ```
 
-> 因此生命周期钩子里调用 `invokeBackend` 时应处理 `null` 兜底（standalone 模式）。如果钩子需要调用后端，建议在 `onMount`/`onActivate` 中调用（此时面板已挂载，可通过 `panel.invokeBackend` 调用），而非在 `onLoad` 中。详见 [backend.md](./backend.md)。
+> 因此生命周期钩子里调用 `invokeBackend` 时应处理 `null` 兜底（standalone 模式）。宿主模式下，`setHost` 接管已前移到**模块加载完成后、首个 API 调用之前**，因此 `onLoad` 内可以直接调用 `invokeBackend`，模块级 API 在整个生命周期全程可用。`onLoad` 仍适合做一次性初始化（种子数据、全局注册）；依赖面板挂载状态、按可见性刷新的逻辑留在 `onMount`/`onActivate`。详见 [backend.md](./backend.md)。
 
 ## 完整示例
 
@@ -179,11 +181,11 @@ async function runLifecycleHook(hook, ctx) {
 | store.get/set | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | events.on | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | getSetting/setSetting | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| ctx.invokeBackend | ⚠️ host 可用 | ⚠️ host 可用 | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
+| ctx.invokeBackend | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | panel.invokeBackend | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | React state (useState) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
-> ⚠️ = host 模式可用但 standalone 模式返回 null；❌ = 不可用或无意义
+> ✅ = host 模式可用；standalone 模式下 `ctx.invokeBackend` 返回 null 兜底（见上文）；❌ = 不可用或无意义
 
 ## React 集成
 

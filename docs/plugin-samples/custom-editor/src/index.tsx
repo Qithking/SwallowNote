@@ -1,33 +1,20 @@
 /**
  * Custom Editor — 为 .smm 文件注册自定义编辑器
  *
- * 展示三层机制：
- *  1. manifest 声明 `editorFileExtensions: ['.smm']` —— 静态声明能渲染的扩展名
- *  2. manifest 声明 `editorComponent: SmmEditor` —— 匹配扩展名时挂载的组件
- *  3. onLoad 中 `registerEditor(pluginId, '.smm', SmmEditor)` —— 运行时注册到宿主注册表
- *
- * 三层关系：
- *  - manifest 的静态字段供宿主在加载前做权限/冲突预检；
- *  - registerEditor 把组件写入运行时注册表，宿主打开文件时按扩展名查表；
- *  - editorComponent 是实际渲染组件，接收 { content, onChange }。
+ * 声明式机制：manifest.json 声明 `editorFileExtensions: ['.smm']`，入口经
+ * definePlugin 注入 `editorComponent`，宿主在启用插件时自动注册编辑器并广播
+ * `editor:registered` 事件，卸载/禁用时自动清理——无需手动配对
+ * registerEditor/unregisterEditor。
  *
  * 本示例把 .smm 格式当作 JSON 展示与编辑：左侧原始文本，右侧格式化预览。
  */
 import { useEffect, useMemo, useState } from 'react'
-import type {
-  PluginContext,
-  PluginManifest,
-  PluginPanelProps,
-} from '@swallow-note/plugin-sdk'
-import {
-  getActivePluginExtensions,
-  registerEditor,
-  unregisterEditor,
-} from '@swallow-note/plugin-sdk'
-// 重新导出 setHost，让宿主在触发生命周期钩子前注入真实实现
+import manifestJson from '../manifest.json'
+import type { PluginPanelProps } from '@swallow-note/plugin-sdk'
+import { definePlugin, getActivePluginExtensions } from '@swallow-note/plugin-sdk'
+// 保留！宿主需要从 bundle 上调用 setHost 完成接管，SDK 要求 entry 必须 re-export
 export { setHost } from '@swallow-note/plugin-sdk'
 
-const PLUGIN_ID = 'com.example.custom-editor'
 const TARGET_EXT = '.smm'
 
 // ─── 自定义编辑器组件 ──────────────────────────────────────────────────────────
@@ -125,7 +112,7 @@ function EditorIcon({ size = 18 }: { size?: number }) {
 // ─── 面板：展示编辑器注册状态 ──────────────────────────────────────────────────
 
 function EditorPanel(panel: PluginPanelProps) {
-  // 读取当前运行时注册表快照，展示 .smm 是否已注册
+  // 读取当前运行时注册表快照（宿主依据 manifest 自动注册），展示 .smm 是否已注册
   const extensions = Array.from(getActivePluginExtensions())
   const registered = extensions.includes(TARGET_EXT)
 
@@ -167,47 +154,11 @@ function EditorPanel(panel: PluginPanelProps) {
   )
 }
 
-// ─── 生命周期钩子 ──────────────────────────────────────────────────────────────
-
-function onLoad(ctx: PluginContext): void {
-  // 运行时把 SmmEditor 注册到宿主编辑器注册表。
-  // 宿主会校验 'editor' 权限，并检测扩展名冲突（同一扩展名不能被两个插件注册）。
-  registerEditor(ctx.pluginId, TARGET_EXT, SmmEditor)
-}
-
-function onUnload(ctx: PluginContext): void {
-  // 卸载时清理本插件注册的所有编辑器，避免遗留无效组件
-  unregisterEditor(ctx.pluginId)
-}
-
-// ─── Manifest ─────────────────────────────────────────────────────────────────
-
-const manifest: PluginManifest = {
-  id: PLUGIN_ID,
-  name: 'Custom Editor Demo',
-  description: 'Demonstrates registering a custom file editor for .smm files',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-07-10',
-
-  iconPosition: 'sidebar',
-  contentPosition: 'fullPanel',
-  order: 100,
-  enabled: true,
-
+// ─── 入口 ─────────────────────────────────────────────────────────────────────
+// 静态字段（id/version/permissions/editorFileExtensions 等）唯一来源是 manifest.json；
+// 入口只经 definePlugin 注入运行时组件，宿主加载启用后自动注册 .smm 编辑器。
+export default definePlugin(manifestJson, {
   icon: EditorIcon,
   panel: EditorPanel,
-
-  // 静态声明：本插件能渲染 .smm 文件
-  editorFileExtensions: [TARGET_EXT],
-  // 匹配扩展名时挂载的组件
   editorComponent: SmmEditor,
-
-  // editor 权限：注册文件编辑器必须声明
-  permissions: ['editor'],
-
-  onLoad,
-  onUnload,
-}
-
-export default manifest
+})

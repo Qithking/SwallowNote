@@ -44,7 +44,8 @@ interface PluginPanelProps {
   pluginId: string
   isActive: boolean           // 对 settings 而言始终为 false
   close: () => void            // 关闭 dialog
-  invokeBackend: (cmd, args?) => Promise<unknown>
+  invokeBackend<T>(cmd: string, args?): Promise<T>       // 调用插件 Rust 后端命令
+  invokeBackendStream<T, R>(cmd, args, onChunk, options?): Promise<R>  // 流式调用（详见 backend.md）
   store: PluginStorage
   events: PluginEventBus
   activeNoteContent: string   // 当前活动笔记内容，无笔记时为空
@@ -58,6 +59,12 @@ interface PluginPanelProps {
   getActiveNoteFrontmatter(): Record<string, unknown> | null
   setActiveNoteFrontmatter(data: Record<string, unknown>): void
   onNoteFrontmatterChanged(callback): () => void
+  // 编辑器写 API（PluginEditorApi：insertAtCursor / replaceSelection / replaceContent / getSelection / getActiveContent，需 editor-write 权限）
+  editor: PluginEditorApi
+  // 工作区文件 API（PluginFilesApi：createNote / listWorkspace / read，需 files 权限）
+  files: PluginFilesApi
+  // 安全存储 API（PluginSecureStorage：get / set / delete / keys，需 secure-storage 权限）
+  secureStorage: PluginSecureStorage
 }
 ```
 

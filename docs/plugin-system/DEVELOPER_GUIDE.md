@@ -17,6 +17,7 @@
    - [自定义文件编辑器](#自定义文件编辑器)
    - [编辑器 Tab API](#编辑器-tab-api)
    - [设置面板](#设置面板)
+   - [编辑器写 / 工作区文件 / 安全存储 API](#编辑器写--工作区文件--安全存储-api)
    - [Rust 后端](#rust-后端)
 5. [8 个生命周期钩子](#8-个生命周期钩子)
 6. [权限系统](#权限系统)
@@ -202,7 +203,8 @@ interface PluginPanelProps {
   close: () => void                          // 关闭面板
   isActive: boolean                          // 面板当前是否可见/活跃
   pluginId: string                           // 插件 id
-  invokeBackend: (cmd, args?) => Promise<unknown>  // 调用 Rust 后端
+  invokeBackend<T>(cmd, args?): Promise<T>   // 调用 Rust 后端
+  invokeBackendStream<T, R>(cmd, args, onChunk, options?): Promise<R>  // 流式调用（见 [Rust 后端](#rust-后端)）
   store: PluginStorage                       // 持久化键值
   events: PluginEventBus                     // 事件订阅
   activeNoteContent: string                  // 当前活跃笔记的 markdown 内容（宿主提供）
@@ -404,10 +406,10 @@ emitPluginSettingsChanged('com.example.my-plugin', { apiKey: 'xxx' })
 | Location | 触发场景 | 是否已接入 |
 | --- | --- | :---: |
 | `fileTree` | 文件树节点右键 | ✅ |
-| `fileTreeEmpty` | 文件树空白区右键 | ⚠️ 预留 |
+| `fileTreeEmpty` | 文件树空白区右键 | ✅ |
 | `editor` | 编辑器内右键 | ✅ |
 | `tab` | tab 上右键 | ✅ |
-| `tabBarEmpty` | tab bar 空白处右键 | ⚠️ 预留 |
+| `tabBarEmpty` | tab bar 空白处右键 | ✅ |
 
 #### API
 
@@ -579,13 +581,17 @@ interface PluginEditorComponent {
 }
 ```
 
-#### 三层机制
+#### 声明式注册机制
 
-1. **清单声明**：`editorFileExtensions` + `editorComponent` 在 manifest 中声明
-2. **运行时注册**：插件 `onLoad` 时由宿主自动调用 `registerEditor(pluginId, extension, component)`，或插件主动调用
+注册是**声明式**的：manifest 声明 `editorFileExtensions` + `editorComponent`，宿主自动完成注册与清理，插件**不应**手动 `registerEditor` / `unregisterEditor` 配对：
+
+1. **清单声明**：`editorFileExtensions` + `editorComponent` 在 manifest 中声明（组件经 `definePlugin` 第二参注入）
+2. **宿主自动注册**：`loadAllPlugins` 在插件模块加载完成后调用 `registerEditorsFromManifest`，对声明的每个扩展名自动 `registerEditor`（幂等——同插件同扩展是替换语义，重复加载不会重复注册）；加载时被禁用、随后被用户启用的插件，由插件 store 的启用路径补注册。禁用与卸载时宿主自动 `unregisterEditor` 清理
 3. **分发查询**：用户打开文件时，`Editor.tsx` 调用 `getEditorForExtension(ext)` 查找匹配的插件组件，找不到则回退到内置编辑器
 
 #### API
+
+`registerEditor` / `unregisterEditor` 是宿主内部 API（声明式注册与自动清理路径在用），插件不要在生命周期钩子里手动调用它们做配对；插件侧一般只用查询 API：
 
 ```typescript
 import {
@@ -599,14 +605,14 @@ import {
 
 | 函数 | 说明 |
 | --- | --- |
-| `registerEditor(pluginId, extension, component)` | 注册编辑器（需 `editor` 权限，扩展名冲突抛错） |
-| `unregisterEditor(pluginId)` | 注销该插件全部编辑器（卸载时宿主自动调用） |
+| `registerEditor(pluginId, extension, component)` | 注册编辑器（需 `editor` 权限）。**宿主内部调用**：`loadAllPlugins` 自动注册与启用补注册路径 |
+| `unregisterEditor(pluginId)` | 注销该插件全部编辑器。**宿主内部调用**：禁用/卸载时自动清理 |
 | `getEditorForExtension(ext)` | 查询扩展名对应的编辑器，无则返回 `null` |
 | `getActivePluginExtensions()` | 当前已注册扩展名只读快照（`Set<string>`） |
 
-> **冲突处理**：同一扩展名仅允许一个插件注册。第二个插件注册时抛 `Error` 并 toast 提示。扩展名会规范化为带点小写（`SMM` → `.smm`）。
+> **冲突处理**：同一扩展名仅允许一个插件注册，第二个插件注册时抛 `Error` 并 toast 提示（声明式自动注册路径下仅记录 warning，不中断其余扩展与其余插件加载）。扩展名会规范化为带点小写（`SMM` → `.smm`）。
 
-> **事件**：注册/注销时会派发 `editor:registered` / `editor:unregistered` 事件（见 [事件总线](#事件总线)）。
+> **事件**：手动注册与宿主自动注册两条路径均会派发 `editor:registered` / `editor:unregistered` 事件（见 [事件总线](#事件总线)）。
 
 ---
 
@@ -868,6 +874,49 @@ function MyPanel(panel: PluginPanelProps) {
 
 ---
 
+### 编辑器写 / 工作区文件 / 安全存储 API
+
+三类受限访问 API 均有独立权限细目（`editor-write` / `files` / `secure-storage`），模块级与 props 通道皆可用。完整类型定义见 [SDK index.ts](../plugin-sdk/src/index.ts)。
+
+#### 编辑器写 API（`editor-write`）
+
+```typescript
+interface PluginEditorApi {
+  insertAtCursor(text: string): Promise<boolean>   // 光标处插入 markdown；编辑器未挂载/解析失败为 false
+  replaceSelection(text: string): Promise<boolean> // 替换选区；无选区拒绝并返回 false（绝不整文替换，防数据破坏）
+  replaceContent(text: string): Promise<void>      // 整文替换当前笔记内容
+  getSelection(): Promise<PluginEditorSelection | null>  // 查询选区（text + 1-based lineRange）
+  getActiveContent(): Promise<string | null>       // 查询当前笔记全文（markdown 源码）
+}
+```
+
+#### 工作区文件 API（`files`）
+
+```typescript
+interface PluginFilesApi {
+  createNote(relPath: string, content: string): Promise<void>  // 工作区内创建笔记；已存在抛错，缺失父目录自动创建
+  listWorkspace(query?: string): Promise<string[]>             // 递归列出全部 Markdown 文件；query 大小写不敏感子串过滤
+  read(relPath: string): Promise<string>                       // 按相对路径读文本（UTF-8），超长截断并附加截断标记
+}
+```
+
+路径严格限定在工作区根内（相对路径、正斜杠分隔）。
+
+#### 安全存储 API（`secure-storage`，ADR-0003）
+
+```typescript
+interface PluginSecureStorage {
+  get(key: string): Promise<string | null>   // 解密读取；未存储返回 null，密文不可解（换机/损坏）抛错
+  set(key: string, value: string): Promise<void>  // AES-256-GCM 加密写入，同 key 覆盖
+  delete(key: string): Promise<void>         // 删除单个键，幂等
+  keys(): Promise<string[]>                  // 全部键名（不含值），字典序
+}
+```
+
+值为 string（API 密钥等敏感数据；结构化数据自行 `JSON.stringify`）。加密密钥按 machine_id + pluginId 派生：防磁盘明文泄露，不防同 webview 内插件互读；换机器后旧密文不可解（`get` 抛错，区别于"未存储"返回 null）。
+
+---
+
 ### Rust 后端
 
 需要时携带 Tauri command 作为后端（解析大文件、跑复杂计算、调用系统 API）。
@@ -930,7 +979,7 @@ fn main() {
 }
 ```
 
-> 错误处理：返回 JSON-RPC `error` 对象（如 `{"code": -32603, "message": "..."}`）即可，宿主会把 `message` 转成 `PluginError` 抛给前端。完整示例见 [backend.md](./backend.md)。
+> 错误处理：返回 JSON-RPC `error` 对象即可，宿主会把 error 的 `code`/`message`/`data` 原样透传，前端抛出 SDK 的 `PluginError` 实例（可按 `err.code`/`err.data` 做业务分支）。完整示例见 [backend.md](./backend.md)。
 
 #### 前端调用
 
@@ -944,12 +993,39 @@ function MyPanel(panel: PluginPanelProps) {
 }
 ```
 
+#### 流式调用与取消（invokeBackendStream）
+
+长耗时 / 增量产出场景用 `panel.invokeBackendStream`（生命周期钩子内为 `ctx.invokeBackendStream`）：
+
+```typescript
+let requestId: number | undefined
+const total = await panel.invokeBackendStream<{ index: number; line: string }, number>(
+  'my_plugin_stream_lines',
+  { path: '/path/to/big.txt' },
+  (chunk) => console.log('收到行', chunk.index, chunk.line),
+  {
+    // 可选：流式首块超时秒数（默认 90s，最小 1s，适配推理模型首 token 延迟）
+    firstChunkTimeoutSecs: 120,
+    // 可选：通道建立时回调，携带宿主生成的 requestId
+    onStart: (info) => { requestId = info.requestId },
+  },
+)
+```
+
+- `onChunk` 逐块回调增量，Promise 以**最终响应帧**的结果终结（通知帧只负责逐块回调）。
+- 第四参 `InvokeBackendStreamOptions` 的 `onStart` 回传宿主生成的 `requestId`，插件据此调用**后端自身的取消命令**实现流式中断——前提是后端实现了对应逻辑（如 AI 插件的 `stopStream`）：
+
+```typescript
+// 用户点停止时：
+await panel.invokeBackend('stopStream', { requestId })
+```
+
 #### 协议细节（**必读**）
 
 实际 IPC 走的是 **JSON-RPC over stdin/stdout**，但**TS 端的 `panel.invokeBackend` 已经封装好**：
 
 ```
-TS panel ─invoke('plugin_<id>_<cmd>', args)─▶ Rust host (plugin_invoke)
+TS panel ─invoke('invoke_plugin', { pluginId, command, args })─▶ Rust host (plugin_invoke)
                                                        │
                                                        ▼
                                               spawn <id>/backend/plugin_<id>
@@ -999,7 +1075,8 @@ panel deactivated─► onDeactivate    (blur)
 interface PluginContext {
   pluginId: string              // 插件 id
   pluginPath: string            // 插件包绝对路径
-  invokeBackend(cmd, args?): Promise<unknown>  // 调用 Rust 后端
+  invokeBackend<T>(command: string, args?: Record<string, unknown>): Promise<T>  // 调用 Rust 后端
+  invokeBackendStream<T, R>(cmd, args, onChunk, options?): Promise<R>  // 流式调用（见 [Rust 后端](#rust-后端)）
 }
 ```
 
@@ -1007,7 +1084,7 @@ interface PluginContext {
 > - **host 模式**：正常调用 Rust 后端（通过 `invoke_plugin` command）
 > - **standalone 模式**：打印 `console.warn` 并返回 `null`（无 Tauri runtime）
 >
-> 因此，如果钩子需要调用后端，建议在 `onMount`/`onActivate` 中调用（此时面板已挂载，可通过 `panel.invokeBackend` 调用），而非在 `onLoad` 中。
+> host 模式下 `setHost` 接管发生在模块加载完成后、首个 API 调用之前，`onLoad` 内可直接调用 `invokeBackend`；`onLoad` 仍适合做一次性初始化，依赖面板挂载状态的调用留在 `onMount`/`onActivate`。
 
 #### 异常隔离
 
@@ -1089,6 +1166,8 @@ const manifest: PluginManifest = {
 | `context-menu` | `registerContextMenu(...)` | [plugin-menu.ts:47](../../src/lib/plugin-menu.ts#L47) |
 | `backend` | `panel.invokeBackend(...)` | [plugin-host-takeover.ts:100](../../src/lib/plugin-host-takeover.ts#L100) |
 | `editor` | `registerEditor(...)` | [pluginEditor.ts:91](../../src/stores/pluginEditor.ts#L91) |
+| `editor-write` | `editor.insertAtCursor / replaceSelection / replaceContent / getSelection / getActiveContent` | [plugin-write-api.ts:79-105](../../src/lib/plugin-write-api.ts#L79-L105) |
+| `files` | `files.createNote / listWorkspace / read` | [plugin-write-api.ts:111-143](../../src/lib/plugin-write-api.ts#L111-L143) |
 | `filesystem-read` | 未来 FS API | — |
 | `filesystem-write` | 未来 FS API | — |
 | `network` | 未来 net API | — |
@@ -1172,21 +1251,17 @@ my-plugin/
 
 ### 打包
 
-```bash
-# 1) 编译后端（如果有）
-cd my-plugin/backend
-cargo build --release
-cp target/release/libmy_plugin.so ../backend/plugin_com.example.my-plugin
-cd ..
+使用 `@swallow-note/plugin-kit` 提供的 `swallow-plugin` CLI 打包（模板经 `file:` 协议引入 kit）：
 
-# 2) 打包 JS
-zip -r my-plugin-v0.1.0.zip my-plugin/ \
-  -x 'my-plugin/backend/target/*' \
-  -x 'my-plugin/backend/Cargo.lock' \
-  -x 'my-plugin/node_modules/*'
+```bash
+# 在插件工程根（含 manifest.json）执行
+npx swallow-plugin package
+# = 版本 bump → vite 构建 → 确定性 zip → ed25519 签名 → 同步 repo.json
 ```
 
-> **重要**：打包时**必须**包含 `manifest.json`（在插件根目录）和 `index.tsx`（`manifest.json` 的 `entry` 字段指向它）。`backend/` 是可选的。
+CLI 仅提供三个子命令：`create`（从模板生成新插件工程）、`build`（只构建 JS 产物）、`package`（上述完整发布链路）。签名链路不变：`package` 末尾自动完成 ed25519 签名，并把 `sha256` / `signature_b64` / 仓库级 `pubkey_b64` 写入 repo.json（见 [签名验证](#签名验证市场安装)）。
+
+> **重要**：`manifest.json` 必须位于插件工程根目录（`swallow-plugin` 的构建约定），入口约定 `src/index.tsx`、产物 `dist/index.js`。`backend/` 是可选的，后端可执行文件放 `backend/plugin_<id>`（Linux/macOS）或 `backend/plugin_<id>.exe`（Windows）。
 
 ### 验证清单（发布前）
 
@@ -1213,49 +1288,55 @@ npm run dev         # http://localhost:5173
 npm run build       # → dist/index.js + dist/manifest.json
 ```
 
+### definePlugin 入口模式
+
+`definePlugin` 让 **manifest.json 成为静态字段的唯一来源**（id / version / permissions / editorFileExtensions 等）：静态字段直接从工程根 `manifest.json` import，React 组件与生命周期钩子由第二参注入，无需 `as PluginManifest` 断言：
+
+```typescript
+// src/index.tsx
+import { definePlugin, type PluginPanelProps } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'   // Vite JSON import，单一来源
+
+function Icon({ size = 18 }: { size?: number }) { /* … */ }
+function Panel(panel: PluginPanelProps) { /* … */ }
+
+export default definePlugin(manifestJson, {
+  icon: Icon,
+  panel: Panel,
+  // editorComponent: MyEditor,   // 带编辑器的插件在此注入组件
+  onLoad: async () => { /* 钩子均可选，空壳可省略 */ },
+})
+
+// 必须 re-export setHost，否则 tree-shaker 会丢弃该符号，
+// 宿主无法通过 setHost 注入真实实现
+export { setHost } from '@swallow-note/plugin-sdk'
+```
+
+要点：
+
+- 第一参类型为 `PluginManifestJson`（`PluginManifest` 去掉组件字段与钩子后的形状；`iconPosition` / `contentPosition` / `permissions` 放宽为 string，适配 resolveJsonModule 的 JSON 字面量宽化）。版本、权限等静态字段只维护 manifest.json 一处。
+- 生命周期钩子均可选。宿主在插件模块加载完成、首个 API 调用之前即通过 `setHost` 安装宿主接管，SDK API 在钩子内外全程可用。
+- `export { setHost }` 必须保留。
+
 ### 构建配置（vite.config.ts）
 
-独立开发使用 Vite library mode 构建，产物为 **ES 模块**（`formats: ['es']`），与官方模板和示例一致：
+独立开发使用 `@swallow-note/plugin-kit` 提供的 `definePluginViteConfig`，三行完成配置（内置 library mode / `// @swallow-manifest` 注释注入 / external 合并 / `inlineDynamicImports`）：
 
 ```typescript
 // vite.config.ts
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { resolve } from 'node:path'
+import { definePluginViteConfig } from '@swallow-note/plugin-kit'
 
-export default defineConfig(({ mode }) => {
-  if (mode === 'production') {
-    return {
-      plugins: [react()],
-      define: { 'process.env.NODE_ENV': JSON.stringify('production') },
-      build: {
-        outDir: 'dist',
-        emptyOutDir: true,
-        lib: {
-          entry: resolve(__dirname, 'src/MyPlugin.tsx'),
-          formats: ['es'],
-          fileName: () => 'index.js',
-        },
-        rollupOptions: {
-          external: [
-            'react', 'react-dom', 'react-dom/client',
-            'react/jsx-runtime', 'react/jsx-dev-runtime',
-            'sonner', 'react-i18next', 'i18next',
-          ],
-          output: {
-            inlineDynamicImports: true,  // 禁用代码分割，blob URL 无法解析分块导入
-          },
-        },
-      },
-    }
-  }
-  return { plugins: [react()], server: { port: 5173, open: true } }
+export default definePluginViteConfig({
+  externals: ['some-host-provided-lib'],  // 可选：追加宿主提供的 external 依赖
+  port: 5177,                             // 可选：dev server 端口（默认 5177）
 })
 ```
 
-> **external 说明**：`react` / `react-dom` / `react/jsx-runtime` 由宿主通过 `window.React` / `window.ReactDOM` 提供；`sonner` 由宿主通过 `window.SonnerToast` 提供；`react-i18next` / `i18next` 由宿主通过 `window.ReactI18Next` 提供。这些依赖不需要打包进插件产物，否则会导致体积膨胀或运行时冲突。
+约定：入口 `src/index.tsx`、`manifest.json` 位于工程根、产物 `dist/index.js`。`definePluginViteConfig` 内部已完成：
 
-> **`inlineDynamicImports` 说明**：插件加载器使用 blob URL 加载插件代码，blob URL 无法解析相对路径的 chunk 文件导入。因此必须设置 `inlineDynamicImports: true` 禁用代码分割，确保所有代码输出到单个 `index.js` 文件中。
+- **`// @swallow-manifest` 注释注入**：构建时把工程根 `manifest.json` 转换为 snake_case 注释写入 `dist/index.js` 头部，供 Rust 端 `serde::Deserialize` 解析——开发者只维护 camelCase 的 `manifest.json`，无需关心 snake_case 转换；
+- **external 合并**：`react` / `react-dom` / `react/jsx-runtime` / `sonner` / `react-i18next` / `i18next` 等宿主提供依赖默认 external（经 `window.React` / `window.ReactDOM` / `window.SonnerToast` / `window.ReactI18Next` 全局注入），`externals` 参数追加插件特有依赖，避免体积膨胀或运行时多实例冲突；
+- **`inlineDynamicImports: true`**：插件加载器使用 blob URL 加载插件代码，blob URL 无法解析相对路径的 chunk 文件导入，必须禁用代码分割，确保所有代码输出到单个 `dist/index.js` 文件中。
 
 ### SDK 双模式
 
@@ -1417,7 +1498,7 @@ localStorage.getItem('plugin_permissions_com.example.my-plugin')
 | `PluginPermissionDeniedError` | 用了 API 但未声明 | `manifest.permissions` 加对应权限 |
 | 卸载后菜单残留 | 忘了 `onUnload` 里 `unregisterContextMenu` | host 会自动清理，但显式清理是好习惯 |
 | `usePluginEvents` 反复重订 | 数组字面量作为依赖 | module-scope 常量 |
-| `panel.invokeBackend` 在 hook 里调用 | host 模式可用但 standalone 模式返回 null | 优先在 `onMount`/`onActivate` 中通过 `panel.invokeBackend` 调用 |
+| 钩子里调 `invokeBackend` 返回 null | standalone 模式无 Tauri runtime（host 模式下 `onLoad` 内已可用，见 [生命周期钩子](#8-个生命周期钩子)） | 在宿主中安装插件测试后端；standalone 下属预期行为 |
 | 后端超时（30s） | 子进程卡死 | 优化后端逻辑；或 catch `err.message === '... timeout ...'` 重试 |
 
 ---
@@ -1473,7 +1554,7 @@ function MyPanel(panel: PluginPanelProps) {
 
 ```typescript
 try {
-  const result = await panel.invokeBackend('my_command', args)
+  const result = await panel.invokeBackend<string>('my_command', args)
 } catch (err) {
   // invokeBackend 错误：超时、子进程崩溃、命令不存在
   console.error('后端调用失败:', err)
@@ -1486,6 +1567,24 @@ try {
 } catch (err) {
   // 存储失败：磁盘满、权限问题
   console.error('存储失败:', err)
+}
+```
+
+### PluginError：后端业务错误分支
+
+后端调用（`invokeBackend` / `invokeBackendStream`）失败时，宿主把后端 JSON-RPC 错误的 `code` 与附加 `data` 一并透传（Rust 端以带 `__pluginError` 标记的错误帧回传，前端规范化为 SDK 的 `PluginError`）。`catch` 后 `err instanceof PluginError` 读 `err.code` / `err.data` 做业务分支：
+
+```typescript
+import { PluginError } from '@swallow-note/plugin-sdk'
+
+try {
+  await panel.invokeBackend<MyStruct>('my_plugin_parse', { data: '...' })
+} catch (err) {
+  if (err instanceof PluginError) {
+    console.error('parse failed:', err.code, err.data)  // 业务错误码分支
+  } else {
+    throw err  // 传输层错误等，原样上抛
+  }
 }
 ```
 
@@ -1527,10 +1626,9 @@ const result = await panel.invokeBackend('count_words', { text })
 
 ### 发布流程
 
-1. **Bump 版本**：`manifest.json` 和 `index.tsx` 的 `version` 字段同步 +1
-2. **打包**：`zip -r my-plugin-v0.1.0.zip my-plugin/`
-3. **上传**：SwallowNote → Settings → Plugins → Upload
-4. **更新**：用户点击 "Update" → `update_plugin` 命令解压到新版本目录、保留 storage
+1. **Bump 版本 + 打包**：`npx swallow-plugin package`（自动 bump `manifest.json` 版本 → 构建 → 确定性 zip → ed25519 签名 → 同步 repo.json）
+2. **上传**：SwallowNote → Settings → Plugins → Upload（本地上传不走签名校验）；走市场分发则发布 repo.json（见下）
+3. **更新**：用户点击 "Update" → `update_plugin` 命令解压到新版本目录、保留 storage
 
 ### 版本管理（host 行为）
 
@@ -1567,7 +1665,7 @@ host 自 Phase 9.2 起**对每个插件做版本管理**：
 
 任一拒绝路径都会抛 `PluginError::Security(...)` 且**无文件落盘**。本地上传（拖拽 zip）不走签名校验，仍可安装——签名是**市场分发路径**的准入防线，不是本机开发门槛。
 
-**发布插件必须走签名流程**：`plugins/<name>/package.sh` 在打包末尾自动用 `plugins/sign-common.sh` 完成签名，并把 `sha256` / `signature_b64` / 仓库级 `pubkey_b64` 写入 [docs/plugin-marketplace/repo.json](../plugin-marketplace/repo.json)。**注意**：签名绑定 zip 字节，任何一次重打包都会使旧签名失效——重新打包后必须再次运行 package.sh 更新 repo.json，否则市场安装会因旧签名不匹配被拒。
+**发布插件必须走签名流程**：`swallow-plugin package`（`@swallow-note/plugin-kit` CLI）在打包末尾自动完成 ed25519 签名（与原 `package.sh` 签名链路一致），并把 `sha256` / `signature_b64` / 仓库级 `pubkey_b64` 写入 [docs/plugin-marketplace/repo.json](../plugin-marketplace/repo.json)。**注意**：签名绑定 zip 字节，任何一次重打包都会使旧签名失效——重新打包后必须再次运行 `swallow-plugin package` 更新 repo.json，否则市场安装会因旧签名不匹配被拒。
 
 如果你的插件要走市场分发，需要发布到 [docs/plugin-marketplace/repo.json](../plugin-marketplace/repo.json) 索引（见 [marketplace/README.md](../plugin-marketplace/README.md)）。
 
@@ -1653,24 +1751,22 @@ function MyPanel() {
 
 ## 附录：完整代码模板
 
-把以下代码作为新插件的起始模板：
+把以下代码作为新插件的起始模板（静态字段唯一来源是工程根 `manifest.json`，入口 `src/index.tsx` 经 `definePlugin` 注入组件与钩子）：
 
 ```tsx
 import { useState, useEffect, type ReactNode } from 'react'
-import type {
-  PluginManifest,
-  PluginContext,
-  PluginPanelProps,
-} from '@swallow-note/plugin-sdk'
-import { getPluginStorage, pluginEventBus } from '@/lib/plugin-host'
 import {
+  definePlugin,
+  getPluginStorage,
+  pluginEventBus,
   registerContextMenu,
   unregisterContextMenu,
-} from '@/lib/plugin-menu'
-import {
   usePluginStorage,
   usePluginEvent,
-} from '@/lib/plugin-hooks'
+  type PluginContext,
+  type PluginPanelProps,
+} from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'   // Vite JSON import：静态字段单一来源
 
 // ─── Icon ────────────────────────────────────────────────────
 function MyIcon({ size = 18 }: { size?: number }): ReactNode {
@@ -1766,24 +1862,27 @@ function onDeactivate(ctx: PluginContext): void {
   console.debug(`[my-plugin] deactivated (${ctx.pluginId})`)
 }
 
-// ─── Manifest ────────────────────────────────────────────────
-const manifest: PluginManifest = {
-  id: 'com.example.my-plugin',
-  name: 'My Plugin',
-  description: 'Does one thing well',
-  version: '0.1.0',
-  author: 'You',
-  publishedAt: '2026-06-10',
-  iconPosition: 'sidebar',
-  contentPosition: 'leftPanel',
-  order: 50,
-  enabled: true,
+// ─── Entry（definePlugin 入口模式）────────────────────────────
+// 静态字段唯一来源是工程根 manifest.json：
+// {
+//   "id": "com.example.my-plugin",
+//   "name": "My Plugin",
+//   "description": "Does one thing well",
+//   "version": "0.1.0",
+//   "author": "You",
+//   "publishedAt": "2026-06-10",
+//   "iconPosition": "sidebar",
+//   "contentPosition": "leftPanel",
+//   "order": 50,
+//   "enabled": true,
+//   // 仅声明实际用到的权限：命令面板复用 events；自定义编辑器需 editor
+//   "permissions": ["storage", "events", "context-menu"]
+// }
+export default definePlugin(manifestJson, {
   icon: MyIcon,
   panel: MyPanel,
   settings: MySettings,
-  // 仅声明实际用到的权限：命令面板复用 events；自定义编辑器需 editor
-  permissions: ['storage', 'events', 'context-menu'],
-  // 生命周期钩子为扁平字段（非 hooks 对象）
+  // 生命周期钩子为扁平字段（非 hooks 对象），均可选、空壳可省略
   onLoad,
   onUnload,
   onEnable,
@@ -1792,9 +1891,7 @@ const manifest: PluginManifest = {
   onUnmount,
   onActivate,
   onDeactivate,
-}
-
-export default manifest
+})
 
 // 必须 re-export setHost，否则 tree-shaker 会丢弃该符号，
 // 宿主无法通过 setHost 注入真实实现

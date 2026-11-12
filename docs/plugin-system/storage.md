@@ -154,9 +154,28 @@ function CounterWithHistory(panel: PluginPanelProps) {
 - 存储值非 JSON → `get` 抛解析异常
 - 插件卸载后 `getPluginStorage` 仍可用（缓存已 drop，会重新读盘）；但已卸载的插件 `panel.store` 不可用
 
+## 安全存储 secureStorage
+
+`panel.secureStorage`（`PluginSecureStorage`）提供按插件隔离的加密键值存储，适合保存 API 密钥等敏感数据：
+
+| 方法 | 行为 |
+| --- | --- |
+| `get(key)` | 读取并解密；未存储返回 `null`，密文不可解（换机/损坏）时抛错 |
+| `set(key, value)` | AES-256-GCM 加密写入，同 key 覆盖 |
+| `delete(key)` | 删除单个键，幂等 |
+| `keys()` | 列出当前插件全部键名（不含值），按字典序 |
+
+要点：
+
+- 值为 string（API 密钥等；结构化数据请自行 `JSON.stringify`）
+- 加解密在 Rust 侧完成，密钥按插件派生，落盘为密文；威胁模型是防磁盘明文泄露，不防同 webview 内插件互读
+- 需要 manifest 声明 `'secure-storage'` 权限
+- 换机器后旧密文不可解，`get` 抛错（区别于「未存储」返回 `null`）
+
 ## 源码引用
 
 - 类型定义：[src/types/plugin.ts](../../src/types/plugin.ts) `PluginStorage`
 - React hook：[src/lib/plugin-hooks.ts](../../src/lib/plugin-hooks.ts) `usePluginStorage`
 - 运行时实现：[src/lib/plugin-host.ts](../../src/lib/plugin-host.ts) `getPluginStorage` / `PluginStorageImpl`
 - Rust 端命令：[src-tauri/src/commands/plugin.rs](../../src-tauri/src/commands/plugin.rs)
+- 安全存储 Rust 端：[src-tauri/src/commands/plugin_secure_storage.rs](../../src-tauri/src/commands/plugin_secure_storage.rs)

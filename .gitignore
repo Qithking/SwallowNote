@@ -66,4 +66,5 @@ scripts/
 docs/*
 !docs/plugin-kit/
 !docs/plugin-rpc/
+!docs/plugin-samples/
 GLOSSARY.md

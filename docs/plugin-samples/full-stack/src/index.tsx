@@ -9,9 +9,11 @@
  *  5. Lifecycle hooks (onLoad / onUnload)     → set up & tear down cleanly
  *
  * Key design decisions:
- *  - Lifecycle hooks are **flat top-level fields** on the manifest
- *    (not wrapped in a `hooks` object). The host's plugin-loader
- *    copies them onto the runtime PluginDefinition.hooks.
+ *  - Lifecycle hooks are injected as **flat top-level fields** through
+ *    `definePlugin`'s runtime parameter (still not wrapped in a
+ *    `hooks` object). The merged default export carries them flat,
+ *    and the host's plugin-loader reads them from the default export
+ *    onto the runtime PluginDefinition.hooks.
  *  - Plugin authors should NOT call `pluginEventBus.emit` to talk
  *    to themselves. The host event bus is one-way (host → plugin)
  *    and the SDK type PluginEventBus doesn't expose `emit`. Use a
@@ -21,18 +23,17 @@
  *    the list, 'installedAt' for read-only metadata.
  */
 import { useEffect, useRef, useState } from 'react'
-import type {
-  PluginContext,
-  PluginManifest,
-  PluginPanelProps,
-} from '@swallow-note/plugin-sdk'
+import type { PluginContext, PluginPanelProps } from '@swallow-note/plugin-sdk'
 import {
+  definePlugin,
   getPluginStorage,
   usePluginStorage,
   usePluginEvents,
   registerContextMenu,
   unregisterContextMenu,
 } from '@swallow-note/plugin-sdk'
+// 静态字段（版本/权限等）单一来源：见 ../manifest.json
+import manifestJson from '../manifest.json'
 // Re-export `setHost` so the host can install its real
 // implementations on this bundle before firing lifecycle hooks.
 // This sample exercises every protected call (storage, events,
@@ -54,8 +55,6 @@ interface PluginConfig {
 }
 
 const defaultConfig: PluginConfig = { maxEntries: 20, viewMode: 'list' }
-
-const PLUGIN_ID = 'com.example.full-stack'
 
 // ─── Internal bus (plugin-internal pub/sub) ────────────────────────────────────
 //
@@ -317,30 +316,13 @@ function onUnload(ctx: PluginContext): void {
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
-const manifest: PluginManifest = {
-  id: PLUGIN_ID,
-  name: 'Recent Notes (Full Stack)',
-  description:
-    'A full-featured plugin using all 5 host APIs: storage, events, settings, context menu, and lifecycle hooks.',
-  version: '1.0.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-10',
-  iconPosition: 'sidebar',
-  contentPosition: 'leftPanel',
-  order: 50,
-  enabled: true,
+// 本示例是 kitchen-sink 插件，声明了插件可用权限的全集
+// （storage / events / context-menu，见 ../manifest.json）。
+// 真实插件应只保留面板实际用到的最小权限集合。
+export default definePlugin(manifestJson, {
   icon: RecentIcon,
   panel: RecentPanel,
   settings: RecentSettings,
   onLoad,
   onUnload,
-
-  // This sample is the kitchen-sink plugin. It needs every
-  // permission a plugin can ask for: storage for the recent-notes
-  // list, events for live note:change, context-menu for the
-  // right-click entries, and so on. In a real plugin you'd
-  // minimize this set to only what the panel actually uses.
-  permissions: ['storage', 'events', 'context-menu'],
-}
-
-export default manifest
+})

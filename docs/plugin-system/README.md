@@ -8,6 +8,7 @@ SwallowNote 插件系统允许第三方代码扩展编辑器面板、订阅宿�
 
 | 能力 | 入口 | 文档 |
 | --- | --- | --- |
+| 插件入口（manifest 单一来源） | `definePlugin(manifestJson, { icon, panel, ... })` | [manifest.md](./manifest.md) |
 | 注册面板 / 图标 | `manifest.panel` / `manifest.icon` | [manifest.md](./manifest.md) |
 | 生命周期钩子 | `manifest.onLoad` / `onMount` / ... | [lifecycle.md](./lifecycle.md) |
 | 事件订阅 | `panel.events.on(event, handler)` | [events.md](./events.md) |
@@ -15,11 +16,12 @@ SwallowNote 插件系统允许第三方代码扩展编辑器面板、订阅宿�
 | 设置面板 | `manifest.settings` | [settings.md](./settings.md) |
 | 右键菜单贡献 | `registerContextMenu(pluginId, item)` | [context-menu.md](./context-menu.md) |
 | **命令面板贡献** | `registerCommand(pluginId, command)` | [DEVELOPER_GUIDE.md#命令面板贡献](./DEVELOPER_GUIDE.md#命令面板贡献) |
-| **自定义文件编辑器** | `registerEditor(pluginId, extension, component)` | [DEVELOPER_GUIDE.md#自定义文件编辑器](./DEVELOPER_GUIDE.md#自定义文件编辑器) |
+| **自定义文件编辑器** | manifest 声明 `editorFileExtensions` + `editorComponent`（宿主自动注册） | [DEVELOPER_GUIDE.md#自定义文件编辑器](./DEVELOPER_GUIDE.md#自定义文件编辑器) |
 | **编辑器 Tab API** | `openEditorTab(pluginId, props)` | [DEVELOPER_GUIDE.md#编辑器-tab-api](./DEVELOPER_GUIDE.md#编辑器-tab-api) |
 | **设置 API** | `panel.getSetting / setSetting` | [DEVELOPER_GUIDE.md#设置-api](./DEVELOPER_GUIDE.md#设置-api) |
 | **Frontmatter API** | `panel.getActiveNoteFrontmatter / setActiveNoteFrontmatter` | [DEVELOPER_GUIDE.md#frontmatter-api](./DEVELOPER_GUIDE.md#frontmatter-api) |
-| Rust 后端 | `panel.invokeBackend(cmd, args)` | [backend.md](./backend.md) |
+| Rust 后端 | `panel.invokeBackend<T>(cmd, args?)` | [backend.md](./backend.md) |
+| **流式后端调用** | `panel.invokeBackendStream(cmd, args, onChunk, options?)` | [backend.md#流式调用](./backend.md#流式调用) |
 | **权限声明与授权** | `manifest.permissions` | [manifest.md#权限字段permissions](./manifest.md#权限字段permissions) |
 | **独立开发** | `@swallow-note/plugin-sdk` | [standalone-development.md](./standalone-development.md) |
 
@@ -62,9 +64,12 @@ SwallowNote 插件系统允许第三方代码扩展编辑器面板、订阅宿�
 2. 宿主解压到 `<app_data>/plugins/<plugin-id>/`
 3. 宿主从 Rust 端读取插件元数据（id / name / hasBackend）
 4. JS 端通过 `import()` 动态加载 `index.js` / `index.tsx`
-5. 解析 manifest，渲染 icon → 触发 `onLoad` → 渲染 panel
-6. 用户切换到面板时触发 `onActivate` / `onMount`，离开时触发 `onDeactivate` / `onUnmount`
-7. 卸载时按顺序 `onUnload` → `clearPluginMenuItems` → `clear storage cache`
+5. 模块加载完成后宿主立即执行 `installHostTakeover`（`setHost` 接管 SDK stub，**早于任何插件 API 调用与 `onLoad`**，模块级 API 全程可用）；enabled 且 manifest 声明 `editorFileExtensions` + `editorComponent` 时，同步完成编辑器自动注册
+6. 解析 manifest，渲染 icon → 触发 `onLoad` → 渲染 panel
+7. 用户切换到面板时触发 `onActivate` / `onMount`，离开时触发 `onDeactivate` / `onUnmount`
+8. 卸载时按顺序 `onUnload` → `clearPluginMenuItems` → `clear storage cache`
+
+> **加载失败可见化**：manifest 缺失、模块损坏或 `onLoad` 抛错时，插件在管理页显示占位面板；若在插件管理界面发生批量加载失败，顶部横幅会通过 `PluginLoadFailuresDialog` 列出失败插件与原因（见 `src/components/Plugin/PluginManagerView.tsx`）。
 
 ## 沙箱边界
 
@@ -82,6 +87,8 @@ SwallowNote 插件系统允许第三方代码扩展编辑器面板、订阅宿�
 ```
 docs/
 ├── plugin-sdk/         # 零依赖 SDK（types + stub + hooks）
+├── plugin-kit/         # @swallow-note/plugin-kit：swallow-plugin CLI（create/build/package）+ definePluginViteConfig
+├── plugin-rpc/         # 插件后端共享 RPC crate（PluginBackend trait + run() + 标准错误码）
 ├── plugin-template/    # Vite + React 起步项目
 └── plugin-system/      # 本目录（API 文档）
 ```

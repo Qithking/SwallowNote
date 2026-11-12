@@ -11,7 +11,7 @@
 ## 文件
 
 - [manifest.json](./manifest.json)
-- [index.tsx](./index.tsx)
+- [src/index.tsx](./src/index.tsx)
 
 ## 预期效果
 

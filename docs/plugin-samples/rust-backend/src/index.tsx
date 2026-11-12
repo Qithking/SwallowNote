@@ -2,9 +2,10 @@
  * Rust Backend — 调用 Rust 后端子进程
  *
  * 展示：
- *  - panel.invokeBackend<T>(command, args) —— 调用后端 JSON-RPC 命令
+ *  - panel.invokeBackend<T>(command, args) —— 泛型调用后端 JSON-RPC 命令，T 声明返回结构
  *  - 后端通过 stdin/stdout JSON-RPC 2.0 与宿主通信
- *  - 错误处理：try/catch 捕获后端返回的 JSON-RPC error
+ *  - 错误处理：后端 JSON-RPC error 被 reject 为 PluginError，可读取 code / data
+ *    按业务错误码分支；传输层错误（超时/进程退出等）仍是普通字符串或 Error
  *  - 30s 超时：单次调用超过 30 秒宿主会拒绝并抛错
  *
  * 后端命令（见 backend/src/main.rs）：
@@ -15,8 +16,10 @@
  * 真实调用需在宿主中加载本插件并编译 Rust 后端二进制。
  */
 import { useState } from 'react'
-import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
-// 重新导出 setHost，让宿主在触发生命周期钩子前注入真实实现
+import manifestJson from '../manifest.json'
+import type { PluginPanelProps } from '@swallow-note/plugin-sdk'
+import { definePlugin, PluginError } from '@swallow-note/plugin-sdk'
+// 保留！宿主需要从 bundle 上调用 setHost 完成接管，SDK 要求 entry 必须 re-export
 export { setHost } from '@swallow-note/plugin-sdk'
 
 // ─── 侧边栏图标 ───────────────────────────────────────────────────────────────
@@ -47,24 +50,23 @@ function BackendPanel(panel: PluginPanelProps) {
   const [result, setResult] = useState<CallResult | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // 通用调用封装：try/catch 捕获后端错误，统一写入 result 展示
-  const runCall = async (
+  // 通用调用封装：泛型 T 声明后端返回结构；try/catch 捕获后端错误，统一写入 result 展示
+  const runCall = async <T,>(
     command: string,
     args: Record<string, unknown>,
     label: string
   ): Promise<void> => {
     setLoading(true)
     try {
-      const data = await panel.invokeBackend(command, args)
+      const data = await panel.invokeBackend<T>(command, args)
       setResult({ command: label, status: 'success', data, at: new Date().toISOString() })
     } catch (err) {
-      // 宿主把 JSON-RPC error.message 转成字符串抛出
-      setResult({
-        command: label,
-        status: 'error',
-        data: err instanceof Error ? err.message : String(err),
-        at: new Date().toISOString(),
-      })
+      // 宿主把后端 JSON-RPC error 抛为 PluginError：code 为错误码、data 为附加载荷；
+      // 其余（传输层错误）按普通 Error/字符串回退，与 SDK PluginError 注释用法一致
+      const data = err instanceof PluginError
+        ? { code: err.code, message: err.message, detail: err.data }
+        : err instanceof Error ? err.message : String(err)
+      setResult({ command: label, status: 'error', data, at: new Date().toISOString() })
     } finally {
       setLoading(false)
     }
@@ -72,17 +74,17 @@ function BackendPanel(panel: PluginPanelProps) {
 
   // Count Words：统计单词数，返回 number
   const handleCountWords = () => {
-    void runCall('count_words', { text: 'hello world from rust' }, 'count_words')
+    void runCall<number>('count_words', { text: 'hello world from rust' }, 'count_words')
   }
 
-  // Parse JSON：解析 JSON 字符串，返回对象
+  // Parse JSON：解析 JSON 字符串，返回解析后的对象（结构由后端数据决定，用 unknown）
   const handleParseJson = () => {
-    void runCall('parse_json', { data: '{"key":"value"}' }, 'parse_json')
+    void runCall<unknown>('parse_json', { data: '{"key":"value"}' }, 'parse_json')
   }
 
-  // 故意触发错误：传入非法 JSON，演示错误处理
+  // 故意触发错误：传入非法 JSON，后端回 JSON-RPC error（-32603），宿主抛 PluginError
   const handleParseInvalidJson = () => {
-    void runCall('parse_json', { data: '{not valid json' }, 'parse_json (invalid)')
+    void runCall<unknown>('parse_json', { data: '{not valid json' }, 'parse_json (invalid)')
   }
 
   return (
@@ -190,27 +192,11 @@ const buttonStyle: React.CSSProperties = {
   fontSize: 12,
 }
 
-// ─── Manifest ─────────────────────────────────────────────────────────────────
-// hasBackend: true（在 manifest.json 中声明，JS manifest 不含此字段）
-// permissions 声明 'backend'：invokeBackend 需要 backend 权限。
+// ─── 入口 ─────────────────────────────────────────────────────────────────────
+// 静态字段（id/version/permissions/hasBackend 等）唯一来源是 manifest.json，
+// 入口只经 definePlugin 注入运行时组件。
 
-const manifest: PluginManifest = {
-  id: 'com.example.rust-backend',
-  name: 'Rust Backend Demo',
-  description: 'Demonstrates a plugin with a Rust backend using stdin/stdout JSON-RPC',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-07-10',
-
-  iconPosition: 'sidebar',
-  contentPosition: 'fullPanel',
-  order: 100,
-  enabled: true,
-
+export default definePlugin(manifestJson, {
   icon: BackendIcon,
   panel: BackendPanel,
-
-  permissions: ['backend'],
-}
-
-export default manifest
+})

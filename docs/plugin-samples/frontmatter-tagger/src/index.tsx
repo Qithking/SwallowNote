@@ -10,7 +10,9 @@
  * setActiveNoteFrontmatter 为合并写入：只更新传入字段，保留其他字段。
  */
 import { useEffect, useState } from 'react'
-import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'
+import { definePlugin } from '@swallow-note/plugin-sdk'
+import type { PluginPanelProps } from '@swallow-note/plugin-sdk'
 // 重新导出 setHost，让宿主在触发生命周期钩子前注入真实实现
 export { setHost } from '@swallow-note/plugin-sdk'
 
@@ -220,25 +222,10 @@ const buttonStyle: React.CSSProperties = {
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
-// permissions 声明 'storage'：frontmatter 读写涉及笔记元数据持久化。
 
-const manifest: PluginManifest = {
-  id: 'com.example.frontmatter-tagger',
-  name: 'Frontmatter Tagger',
-  description: 'Demonstrates reading and writing note frontmatter',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-07-10',
-
-  iconPosition: 'sidebar',
-  contentPosition: 'fullPanel',
-  order: 100,
-  enabled: true,
-
+// manifest 静态字段单一来源是 ../manifest.json（permissions: ["storage"]：
+// frontmatter 读写涉及笔记元数据持久化）；icon/panel 组件由 runtime 注入。
+export default definePlugin(manifestJson, {
   icon: TagIcon,
   panel: TaggerPanel,
-
-  permissions: ['storage'],
-}
-
-export default manifest
+})

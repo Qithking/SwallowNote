@@ -8,12 +8,10 @@
  *  - Cap the log at 50 entries to avoid unbounded growth
  */
 import { useState } from 'react'
-import type {
-  PluginManifest,
-  PluginEvent,
-  PluginPanelProps,
-} from '@swallow-note/plugin-sdk'
-import { usePluginEvents } from '@swallow-note/plugin-sdk'
+import type { PluginEvent, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import { definePlugin, usePluginEvents } from '@swallow-note/plugin-sdk'
+// 静态字段（版本/权限等）单一来源：见 ../manifest.json
+import manifestJson from '../manifest.json'
 // Re-export `setHost` so the host can install its real
 // implementations on this bundle before firing lifecycle hooks.
 // See `hello-world` for the rationale.
@@ -160,23 +158,9 @@ const buttonStyle: React.CSSProperties = {
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
-const manifest: PluginManifest = {
-  id: 'com.example.event-listener',
-  name: 'Event Listener',
-  description: 'Live event stream viewer – subscribes to every host event.',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-10',
-  iconPosition: 'sidebar',
-  contentPosition: 'rightPanel',
-  order: 80,
-  enabled: true,
+// 订阅宿主事件需要 events 权限（见 ../manifest.json）；
+// 缺权限时 panel.events.on() 首次订阅即抛错。
+export default definePlugin(manifestJson, {
   icon: EventIcon,
   panel: EventListenerPanel,
-
-  // Subscribing to host events requires the `events` permission;
-  // without it `panel.events.on()` would throw on first subscribe.
-  permissions: ['events'],
-}
-
-export default manifest
+})

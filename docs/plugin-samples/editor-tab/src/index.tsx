@@ -12,21 +12,20 @@
  * onChange 回调把新内容传回插件，插件负责持久化。
  */
 import { useState } from 'react'
+import manifestJson from '../manifest.json'
 import type {
   EditorToolbarConfig,
   OpenEditorTabProps,
-  PluginManifest,
   PluginPanelProps,
 } from '@swallow-note/plugin-sdk'
 import {
   closeEditorTab,
   closePluginTabs,
+  definePlugin,
   openEditorTab,
 } from '@swallow-note/plugin-sdk'
 // 重新导出 setHost，让宿主在触发生命周期钩子前注入真实实现
 export { setHost } from '@swallow-note/plugin-sdk'
-
-const PLUGIN_ID = 'com.example.editor-tab'
 
 // 默认 tab 内容（Markdown 演示文本）
 const DEFAULT_CONTENT = '# Plugin Tab Demo\n\n这是由插件打开的 tab 内容。\n\n编辑后内容会通过 onChange 回传给插件。\n'
@@ -203,26 +202,10 @@ const primaryButtonStyle: React.CSSProperties = {
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
-// permissions 为空：openEditorTab/closeEditorTab/closePluginTabs
-// 不属于受保护能力，无需声明权限。
 
-const manifest: PluginManifest = {
-  id: PLUGIN_ID,
-  name: 'Editor Tab Demo',
-  description: 'Demonstrates opening and managing custom editor tabs',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-07-10',
-
-  iconPosition: 'sidebar',
-  contentPosition: 'fullPanel',
-  order: 100,
-  enabled: true,
-
+// manifest 静态字段单一来源是 ../manifest.json（"permissions": []：openEditorTab
+// 等不属于受保护能力）；icon/panel 组件由 runtime 第二参注入。
+export default definePlugin(manifestJson, {
   icon: TabIcon,
   panel: EditorTabPanel,
-
-  permissions: [],
-}
-
-export default manifest
+})

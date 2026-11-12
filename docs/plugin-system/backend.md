@@ -60,7 +60,60 @@ my-plugin/
 
 ## Rust 端实现
 
-后端是一个**不依赖 Tauri** 的纯 Rust 程序，只需实现一个 stdin/stdout 的 JSON-RPC 循环。下面是一个最小可运行的示例：
+后端是一个**不依赖 Tauri** 的纯 Rust 程序，实现一个 stdin/stdout 的 JSON-RPC 循环。**推荐使用共享 crate `swallow-plugin-rpc`**：协议骨架由 `run()` 收敛，插件只需实现 `PluginBackend` trait，main.rs 收敛为 ~30 行：
+
+```rust
+// backend/src/main.rs
+use serde_json::{json, Value};
+use swallow_plugin_rpc::{run, PluginBackend, RpcError, PLUGIN_ERROR};
+
+struct MyBackend;
+
+impl PluginBackend for MyBackend {
+    fn handle(&mut self, method: &str, params: &Value) -> Result<Value, RpcError> {
+        match method {
+            "count_words" => {
+                let text = params.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                Ok(json!(text.split_whitespace().count()))
+            }
+            // 未知方法：-32000（插件通用错误），message 会被宿主透传给前端
+            _ => Err(RpcError::plugin(PLUGIN_ERROR, format!("未知方法: {}", method))),
+        }
+    }
+}
+
+fn main() {
+    run(MyBackend);
+}
+```
+
+`run()` 的主循环行为：stdin 逐行 → trim 跳空行 → 解析失败回 `-32700`（`id:null`）→ `dispatch` → 成功帧 `{"jsonrpc":"2.0","id","result"}` / 错误帧 `{"jsonrpc":"2.0","id","error":{code,message}}` → 每行一帧写出并 flush；`id`（数字/字符串/null）原样回显。需要流式命令时覆写 `dispatch`（登记 `StreamRegistry`、spawn worker、用 `make_emit` 写 `swallow/stream` 通知帧），完整示例见 crate 的 [README](../plugin-rpc/README.md) 与 `examples/echo.rs`。
+
+> 用 kit 的 `swallow-plugin create --backend` 可直接生成含 echo 示例命令的后端骨架（Rust 源码目录 + `swallow-plugin-rpc` path 依赖），`swallow-plugin build` 会把编译产物复制到 `backend/plugin_<id>`。
+
+### Cargo.toml
+
+```toml
+[package]
+name = "my-plugin-backend"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+# 产物名必须是 plugin_<id>，与 manifest.json 的 id 字段一致
+name = "plugin_my-plugin"
+path = "src/main.rs"
+
+[dependencies]
+# path 依赖，与 SDK 的 file: 模式一致，不引入 workspace
+swallow-plugin-rpc = { path = "../../docs/plugin-rpc" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
+
+### 不使用 crate 的裸实现（了解用）
+
+不想引入 crate 时，也可以手写同等行为的 JSON-RPC 循环（~80 行，协议需与上述主循环逐字节等价）：按行读 stdin、解析失败回 `-32700`（`id` 为 null）、未知方法回 `-32601`、成功帧/错误帧按 JSON-RPC 2.0 形态每行一帧写出并 flush、无 `id` 的通知忽略：
 
 ```rust
 // backend/src/main.rs
@@ -130,23 +183,7 @@ fn main() {
 }
 ```
 
-### Cargo.toml
-
-```toml
-[package]
-name = "my-plugin-backend"
-version = "0.1.0"
-edition = "2021"
-
-[[bin]]
-# 产物名必须是 plugin_<id>，与 manifest.json 的 id 字段一致
-name = "plugin_my-plugin"
-path = "src/main.rs"
-
-[dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-```
+Cargo.toml 同上，去掉 `swallow-plugin-rpc` 依赖即可。
 
 ### 日志
 
@@ -281,36 +318,34 @@ panel.invokeBackend('my_plugin_count_words', { text: '...' })
 
 ## 错误处理
 
-返回 JSON-RPC error 对象即可，宿主会把 `message` 转成 `PluginError` 抛给前端：
+后端返回 JSON-RPC error 对象即可，宿主会把 error 的 `code`/`message`/`data` **原样透传**，前端抛出的是 SDK 的 `PluginError` 实例（`err.code` / `err.data` 可直接读取，供按业务错误码分支），不再是裸字符串。crate 方式下用 `RpcError::plugin` 构造：
 
 ```rust
+// crate 方式：handle 返回 Err(RpcError)，run() 负责序列化为错误帧
 "my_plugin_parse" => {
     let data = params.get("data").and_then(|t| t.as_str()).unwrap_or("");
     match serde_json::from_str::<MyStruct>(data) {
-        Ok(v) => serde_json::json!(v),
-        Err(e) => {
-            let err = serde_json::json!({
-                "code": -32603,
-                "message": format!("parse failed: {}", e)
-            });
-            let resp = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": err
-            });
-            writeln!(out, "{}", resp).unwrap();
-            continue;
-        }
+        Ok(v) => Ok(json!(v)),
+        Err(e) => Err(RpcError::plugin(PLUGIN_ERROR, format!("parse failed: {}", e))),
     }
 }
 ```
 
+前端最小 catch 示例：
+
 ```typescript
+import { PluginError } from '@swallow-note/plugin-sdk'
+
 try {
   const parsed = await panel.invokeBackend<MyStruct>('my_plugin_parse', { data: '...' })
 } catch (err) {
-  // err 是宿主转发的 JSON-RPC error.message 字符串
-  console.error('parse failed:', err)
+  // 宿主透传的结构化错误：err 是 SDK PluginError 实例，code/data 随帧携带
+  if (err instanceof PluginError) {
+    console.error(`parse failed (code=${err.code}):`, err.message, err.data)
+  } else {
+    // 传输层错误（超时、进程被回收等）保持原有字符串形态
+    console.error('transport error:', err)
+  }
 }
 ```
 
@@ -323,6 +358,9 @@ JSON-RPC 常用错误码：
 | -32601    | method not found |
 | -32602    | invalid params  |
 | -32603    | internal error  |
+| -32000    | `PLUGIN_ERROR`——插件通用错误（`swallow-plugin-rpc` 保留常量） |
+
+**错误码约定**（与 `swallow-plugin-rpc` 一致）：`-32000` 保留为通用插件错误码；插件自定义应用错误码建议通过 `error.data` 携带结构化信息（crate 中即 `RpcError::plugin(1001, "…").with_data(json!({ ... }))`，`data` 为 `None` 时序列化不输出该键），不要占用 JSON-RPC 保留段（-32700 ~ -32603）。
 
 ## 编译/分发
 
@@ -355,6 +393,7 @@ cargo build --release --target x86_64-pc-windows-msvc
 
 ## 源码引用
 
+- 后端 RPC crate：[docs/plugin-rpc](../plugin-rpc/README.md)（`PluginBackend` trait / `run` / `RpcError` / `StreamRegistry`，协议等价性断言见 `tests/protocol.rs`）
 - 调用入口与子进程管理：[src-tauri/src/commands/plugin_invoke.rs](../../src-tauri/src/commands/plugin_invoke.rs)（`invoke_plugin` / `invoke_plugin_stream` 命令、`PluginProcess`、`idle_reaper`、流路由表）
 - 前端上下文：[src/lib/plugin-host.ts](../../src/lib/plugin-host.ts) `buildPluginContext`（`invokeBackend` 最终调用 `@tauri-apps/api/core` 的 `invoke('invoke_plugin', ...)`）
 - 前端流式桥接：[src/lib/plugin-stream.ts](../../src/lib/plugin-stream.ts)（Tauri `Channel` 组装 + `invoke('invoke_plugin_stream', ...)`）

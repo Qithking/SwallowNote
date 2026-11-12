@@ -50,6 +50,8 @@
 | `commandPalette` | `string[]` | ❌ | 贡献给命令面板的命令 id 列表。命令通过 SDK 的 `registerCommand` 注册，此处仅做声明性索引，供冲突检测使用。 |
 | `autoUpdate` | `boolean` | ❌ | 用户 opt-in 的自动更新标志，持久化在 localStorage。宿主 store 持有权威值，清单字段仅作初始镜像。 |
 
+> **编辑器声明式注册**：同时声明 `editorFileExtensions` + `editorComponent` 的插件，由宿主在加载/启用时**自动注册**编辑器（同插件同扩展为幂等替换语义），禁用/卸载时自动清理。插件**无需手动调用 `registerEditor` 配对**——只要把两个字段写进 manifest 并通过 `definePlugin` 注入组件即可。
+
 ### PluginDependency
 
 ```typescript
@@ -199,7 +201,8 @@ export default manifest
 | `close` | `() => void` | 关闭当前插件面板 |
 | `isActive` | `boolean` | 当前面板是否处于激活/可见状态 |
 | `pluginId` | `string` | 插件 ID |
-| `invokeBackend` | `(command: string, args?: Record<string, unknown>) => Promise<unknown>` | 调用插件后端命令 |
+| `invokeBackend` | `<T = unknown>(command: string, args?: Record<string, unknown>) => Promise<T>` | 调用插件后端命令，返回值类型由泛型指定 |
+| `invokeBackendStream` | `<T = unknown, R = unknown>(command: string, args: Record<string, unknown> \| undefined, onChunk: (chunk: T) => void, options?: InvokeBackendStreamOptions) => Promise<R>` | 流式调用后端命令：`onChunk` 逐块回调增量，Promise 以最终响应帧结果终结。`options` 支持 `firstChunkTimeoutSecs`（首块超时秒数）与 `onStart`（回调携带宿主 `requestId`，用于调用后端取消命令中断流） |
 | `store` | `PluginStorage` | 插件作用域的持久化键值存储 |
 | `events` | `PluginEventBus` | 宿主事件总线，可订阅主题/笔记/语言/设置变更 |
 | `activeNoteContent` | `string` | 当前活动笔记的内容（Markdown 字符串）。无活动笔记时为空字符串 |
@@ -211,6 +214,9 @@ export default manifest
 | `getActiveNoteFrontmatter` | `() => Record<string, unknown> \| null` | 获取当前笔记的 frontmatter 对象，无活动笔记时返回 `null` |
 | `setActiveNoteFrontmatter` | `(data: Record<string, unknown>) => void` | 合并更新当前笔记的 frontmatter，无活动笔记时为空操作 |
 | `onNoteFrontmatterChanged` | `(callback: (data: Record<string, unknown>) => void) => () => void` | 监听 frontmatter 变更事件，返回取消订阅函数 |
+| `editor` | `PluginEditorApi` | 编辑器写 API（要求 `'editor-write'` 权限）：`insertAtCursor` / `replaceSelection` / `replaceContent` / `getSelection` / `getActiveContent` |
+| `files` | `PluginFilesApi` | 工作区文件 API（要求 `'files'` 权限，路径限定在工作区根内）：`createNote` / `listWorkspace` / `read` |
+| `secureStorage` | `PluginSecureStorage` | AES-256-GCM 加密落盘的键值存储（要求 `'secure-storage'` 权限），值为 string：`get` / `set` / `delete` / `keys` |
 
 ### ToolbarButtonProps
 
@@ -219,7 +225,8 @@ export default manifest
 | `size` | `number` | 当前工具栏上下文推荐的图标尺寸（`editorToolbar`/`titleBar` 为 14px，`sidebar` 为 18px） |
 | `isActive` | `boolean` | 插件面板是否处于激活状态 |
 | `pluginId` | `string` | 插件 ID |
-| `invokeBackend` | `(command: string, args?: Record<string, unknown>) => Promise<unknown>` | 调用插件后端命令 |
+| `invokeBackend` | `<T = unknown>(command: string, args?: Record<string, unknown>) => Promise<T>` | 调用插件后端命令，返回值类型由泛型指定 |
+| `invokeBackendStream` | `<T = unknown, R = unknown>(command: string, args: Record<string, unknown> \| undefined, onChunk: (chunk: T) => void, options?: InvokeBackendStreamOptions) => Promise<R>` | 流式调用后端命令，行为与 `PluginPanelProps.invokeBackendStream` 一致 |
 | `store` | `PluginStorage` | 插件作用域的持久化键值存储 |
 | `events` | `PluginEventBus` | 宿主事件总线 |
 | `activate` | `() => void` | 激活插件（根据 `contentPosition` 显示面板） |
@@ -236,6 +243,9 @@ export default manifest
 | `getActiveNoteFrontmatter` | `() => Record<string, unknown> \| null` | 获取活动笔记 frontmatter |
 | `setActiveNoteFrontmatter` | `(data: Record<string, unknown>) => void` | 合并更新活动笔记 frontmatter |
 | `onNoteFrontmatterChanged` | `(callback: (data: Record<string, unknown>) => void) => () => void` | 监听 frontmatter 变更 |
+| `editor` | `PluginEditorApi` | 编辑器写 API（要求 `'editor-write'` 权限），详见 [PluginPanelProps](#pluginpanelprops) |
+| `files` | `PluginFilesApi` | 工作区文件 API（要求 `'files'` 权限），详见 [PluginPanelProps](#pluginpanelprops) |
+| `secureStorage` | `PluginSecureStorage` | 加密键值存储（要求 `'secure-storage'` 权限），详见 [PluginPanelProps](#pluginpanelprops) |
 
 > **提示**：`activeNoteContent` 和 `activeNotePath` 是宿主实时注入的只读字段，插件无需订阅事件即可获取当前笔记信息。当用户切换笔记时，宿主会自动更新这些值并触发组件重渲染。`ToolbarButtonProps` 额外提供 `activeNoteName` / `activeNoteExt` / `isActiveNoteMarkdown`，便于工具栏按钮按文件类型切换行为（如仅在 `.md` 文件上高亮）。
 

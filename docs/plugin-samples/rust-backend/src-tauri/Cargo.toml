@@ -1,0 +1,17 @@
+[package]
+name = "rust-backend-demo"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+# 二进制名须为合法 crate 名（`.`/`-` 非法）：按 kit deriveBinName 约定把
+# 插件 id com.example.rust-backend 的非字母数字替换为下划线；
+# 构建产物由 kit 复制为 backend/plugin_com.example.rust-backend 供宿主查找
+name = "plugin_com_example_rust_backend"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 共享 RPC 层：统一提供 stdin/stdout JSON-RPC 主循环，插件只实现 PluginBackend trait
+swallow-plugin-rpc = { path = "../../../plugin-rpc" }

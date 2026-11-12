@@ -7,8 +7,10 @@
  *  - panel.close() dismisses the dialog
  *  - Settings also go through onMount / onUnmount lifecycle
  */
-import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'
+import { definePlugin } from '@swallow-note/plugin-sdk'
 import { usePluginStorage } from '@swallow-note/plugin-sdk'
+import type { PluginPanelProps } from '@swallow-note/plugin-sdk'
 // Re-export `setHost` so the host can install its real
 // implementations on this bundle before firing lifecycle hooks.
 // See `hello-world` for the rationale.
@@ -142,27 +144,10 @@ function MainPanel(panel: PluginPanelProps) {
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
-const manifest: PluginManifest = {
-  id: 'com.example.settings-dialog',
-  name: 'Settings Dialog',
-  description: 'Plugin with a configurable settings dialog opened from the plugin manager.',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-10',
-  iconPosition: 'sidebar',
-  contentPosition: 'leftPanel',
-  order: 70,
-  enabled: true,
+// manifest 静态字段单一来源是 ../manifest.json（permissions: ["storage"]：
+// 设置项经插件 storage 持久化）；icon/panel/settings 组件由 runtime 注入。
+export default definePlugin(manifestJson, {
   icon: SettingsIconTrigger,
   panel: MainPanel,
-  // Settings component. When present, the plugin manager card
-  // shows a gear button. Clicking it opens a modal hosting this
-  // component with the same props as the main panel.
   settings: SettingsDialog,
-
-  // The settings dialog persists user choices through plugin
-  // storage; the host gates the store behind the `storage` grant.
-  permissions: ['storage'],
-}
-
-export default manifest
+})

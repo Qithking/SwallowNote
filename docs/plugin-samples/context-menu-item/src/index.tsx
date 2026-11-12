@@ -19,16 +19,18 @@
 import { useEffect, useState } from 'react'
 import type {
   PluginContext,
-  PluginManifest,
   PluginLifecycleHook,
   PluginPanelProps,
 } from '@swallow-note/plugin-sdk'
 import {
+  definePlugin,
   registerContextMenu,
   unregisterContextMenu,
   getContextMenuItems,
   usePluginStorage,
 } from '@swallow-note/plugin-sdk'
+// 静态字段（版本/权限等）单一来源：见 ../manifest.json
+import manifestJson from '../manifest.json'
 // Re-export `setHost` so the host can install its real
 // implementations on this bundle before firing lifecycle hooks.
 // This is critical for this sample: `registerContextMenu` must
@@ -51,8 +53,6 @@ function MenuIcon({ size = 18 }: { size?: number }) {
 }
 
 // ─── Item registration (module-level, executed in onLoad) ─────────────────────
-
-const PLUGIN_ID = 'com.example.context-menu-item'
 
 // We use module-level state to track registrations so onUnload can
 // reverse them without depending on a closure that captures the
@@ -206,28 +206,11 @@ function MainPanel(panel: PluginPanelProps) {
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
-const manifest: PluginManifest = {
-  id: PLUGIN_ID,
-  name: 'Context Menu Items',
-  description: 'Contributes custom entries to file tree, tab, and editor right-click menus.',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-10',
-  iconPosition: 'titleBar',
-  contentPosition: 'leftPanel',
-  order: 60,
-  enabled: true,
+// 贡献右键菜单需要 context-menu 权限；面板读写自身命名空间需要 storage
+// 权限（均见 ../manifest.json）。缺权限时宿主会静默丢弃 registerContextMenu。
+export default definePlugin(manifestJson, {
   icon: MenuIcon,
   panel: MainPanel,
   onLoad,
   onUnload,
-
-  // Contributing context menu items requires the `context-menu`
-  // permission; without it the host would silently drop
-  // `registerContextMenu` calls or render the items disabled.
-  // `storage` is needed because the panel reads from / writes to
-  // its own key/value namespace.
-  permissions: ['context-menu', 'storage'],
-}
-
-export default manifest
+})

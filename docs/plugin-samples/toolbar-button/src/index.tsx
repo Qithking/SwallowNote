@@ -12,8 +12,9 @@
  * 用户点击按钮调用 activate() 后，panel 在编辑器区域显示。
  */
 import { useState } from 'react'
+import manifestJson from '../manifest.json'
+import { definePlugin } from '@swallow-note/plugin-sdk'
 import type {
-  PluginManifest,
   PluginPanelProps,
   ToolbarButtonProps,
 } from '@swallow-note/plugin-sdk'
@@ -172,27 +173,11 @@ const buttonStyle: React.CSSProperties = {
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
-// iconPosition 为 editorToolbar：不渲染侧边栏图标，改用 toolbarButton。
-// permissions 为空：仅做 UI 展示，不调用 store / events / backend 等受保护能力。
 
-const manifest: PluginManifest = {
-  id: 'com.example.toolbar-button',
-  name: 'Toolbar Button Demo',
-  description:
-    'Demonstrates editorToolbar iconPosition with custom toolbarButton component',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-07-10',
-
-  iconPosition: 'editorToolbar',
-  contentPosition: 'editorArea',
-  order: 100,
-  enabled: true,
-
+// manifest 静态字段单一来源是 ../manifest.json（"permissions": []：仅做 UI
+// 展示，不调用受保护能力）；toolbarButton/panel 组件由 runtime 注入，
+// 本插件无 icon 字段（不出现在侧边栏）。
+export default definePlugin(manifestJson, {
   toolbarButton: ToolbarButtonDemo,
   panel: ToolbarButtonPanel,
-
-  permissions: [],
-}
-
-export default manifest
+})

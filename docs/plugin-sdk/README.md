@@ -34,8 +34,6 @@ import {
   type PluginPanelProps,
   pluginEventBus,
   registerContextMenu,
-  registerEditor,   // ← SDK 把组件推入 host 的 editor 注册表
-  unregisterEditor, // ← 配套的清理 API
   usePluginStorage,
 } from '@swallow-note/plugin-sdk'
 
@@ -56,13 +54,9 @@ function Panel(panel: PluginPanelProps) {
 /**
  * 接管 .smm 文件的编辑器组件。
  *
- * ⚠️ 注意：声明 `editorFileExtensions` + `editorComponent` **本身不会**让
- * host 把 .smm 文件的渲染权交给你 —— host 的 Editor.tsx 在渲染一个
- * 文件时会去查 `pluginEditorRegistry`，但这个注册表是空的，直到你
- * 从生命周期钩子调用 `registerEditor` 把它填进去。
- *
- * 因此带 editor 的插件必须实现 `onLoad` / `onUnload`（或 `onEnable` /
- * `onDisable`）钩子来注册/反注册。
+ * 声明式注册：manifest 声明 `editorFileExtensions` + `editorComponent` 后，
+ * 宿主在插件加载时自动完成 registerEditor（幂等），禁用/卸载时自动清理
+ * ——无需在生命周期钩子里手动 registerEditor/unregisterEditor 配对。
  */
 function MindMapEditorView({ content, onChange }) {
   // ... 完整的 .smm 编辑器实现
@@ -83,29 +77,13 @@ const manifest: PluginManifest = {
   icon: Icon,
   panel: Panel,
 
-  // ① 静态声明：让 host 在安装时知道这个插件"想要"处理哪些扩展名
+  // ① 静态声明：宿主 loadAllPlugins 加载时按这两个字段自动 registerEditor
+  //    （幂等），禁用/卸载时自动 unregisterEditor，插件侧无需手动维护
   editorFileExtensions: ['.smm'],
   editorComponent: MindMapEditorView,
 
-  // ② 权限：必须包含 'editor'，否则 registerEditor 调用会被拒绝
+  // ② 权限：必须包含 'editor'，否则自动注册会被拒绝
   permissions: ['editor', 'events', 'storage'],
-
-  // ③ 运行时注入：必须从生命周期钩子调用 registerEditor，host 才
-  //    会在 Editor.tsx 的查表路径中真正找到你的组件
-  onLoad: ({ pluginId }) => {
-    registerEditor(pluginId, '.smm', MindMapEditorView)
-  },
-  onUnload: ({ pluginId }) => {
-    unregisterEditor(pluginId)
-  },
-  // 启用/禁用切换时同样需要维护注册表，否则用户在禁用→启用
-  // 之间打开 .smm 会看到兼容垫片
-  onEnable: ({ pluginId }) => {
-    registerEditor(pluginId, '.smm', MindMapEditorView)
-  },
-  onDisable: ({ pluginId }) => {
-    unregisterEditor(pluginId)
-  },
 }
 
 export default manifest
@@ -114,50 +92,77 @@ export default manifest
 export { setHost } from '@swallow-note/plugin-sdk'
 ```
 
+## definePlugin 入口模式
+
+`definePlugin` 让 **manifest.json 成为静态字段的唯一来源**（id / version / permissions / editorFileExtensions 等）：静态字段直接从 `manifest.json` import，React 组件与生命周期钩子由第二参注入，入口收敛为十来行且无需 `as PluginManifest` 断言。
+
+```typescript
+// src/index.tsx
+import { definePlugin } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'   // Vite JSON import，单一来源
+
+function Icon({ size = 18 }: { size?: number }) { /* … */ }
+function Panel(panel: PluginPanelProps) { /* … */ }
+
+export default definePlugin(manifestJson, {
+  icon: Icon,
+  panel: Panel,
+  // editorComponent: MindMapEditorView,   // 带编辑器的插件在此注入组件
+  onLoad: async () => { /* 钩子均可选，空壳可省略 */ },
+})
+
+// 必须保留：宿主从插件 bundle 调用 setHost 完成接管；打包器
+// tree-shake 不得移除该导出，否则宿主无法安装 override 层。
+export { setHost } from '@swallow-note/plugin-sdk'
+```
+
+要点：
+
+- **manifest.json 单一来源** — 第一参类型为 `PluginManifestJson`（`PluginManifest` 去掉组件字段与钩子后的形状；`iconPosition` / `contentPosition` / `permissions` 放宽为 string，适配 resolveJsonModule 的 JSON 字面量宽化）。版本、权限等静态字段只维护 manifest.json 一处。
+- **生命周期钩子均可选** — 空壳钩子直接省略。宿主在插件模块加载完成、首个 API 调用之前即安装宿主接管（`setHost`），SDK API 在钩子内外全程可用。
+
 ## 导出清单
 
 | 类别 | 名称 |
 | --- | --- |
-| **类型** | `PluginManifest`, `PluginDefinition`, `PluginDependency`, `PluginContext`, `PluginPanelProps`, `PluginPanelRequest`, `PluginStorage`, `PluginEventBus`, `PluginEvent`, `PluginEventPayloadMap`, `PluginEventHandler`, `PluginLifecycleHook`, `IconPosition`, `ContentPosition`, `ContextMenuItem`, `ContextMenuContext`, `ContextMenuLocation`, `ContextMenuRegistry`, `PluginCommand`, `PluginPermission`, `EditorToolbarConfig`, `OpenEditorTabProps`, `ToolbarButtonProps`, `PluginEditorApi`, `PluginEditorSelection`, `PluginFilesApi`, `HostOverrides`, `RunLifecycleHookOptions` |
+| **类型** | `PluginManifest`, `PluginManifestJson`, `PluginDefinition`, `PluginDependency`, `PluginContext`, `PluginPanelProps`, `PluginPanelRequest`, `PluginStorage`, `PluginEventBus`, `PluginEvent`, `PluginEventPayloadMap`, `PluginEventHandler`, `PluginLifecycleHook`, `IconPosition`, `ContentPosition`, `ContextMenuItem`, `ContextMenuContext`, `ContextMenuLocation`, `ContextMenuRegistry`, `PluginCommand`, `PluginPermission`, `EditorToolbarConfig`, `OpenEditorTabProps`, `ToolbarButtonProps`, `PluginEditorApi`, `PluginEditorSelection`, `PluginFilesApi`, `PluginSecureStorage`, `InvokeBackendStreamOptions`, `HostOverrides`, `RunLifecycleHookOptions` |
 | **运行时** | `pluginEventBus`, `getPluginStorage`, `dropPluginStorage`, `SETTINGS_CACHE_KEY`, `getSetting`, `setSetting`, `getAllSettings`, `onSettingsChange`, `dropPluginSettings`, `registerContextMenu`, `unregisterContextMenu`, `clearPluginMenuItems`, `getContextMenuItems`, `getStubMenuRegistry`, `registerCommand`, `unregisterCommand`, `clearPluginCommands`, `listPluginCommands`, `subscribePluginCommands`, `getStubCommandRegistry`, `registerEditor`, `unregisterEditor`, `getEditorForExtension`, `getActivePluginExtensions`, `openEditorTab`, `closeEditorTab`, `closePluginTabs`, `getSecure`, `setSecure`, `deleteSecure`, `listSecureKeys`, `editor`, `files`, `buildPluginContext`, `runLifecycleHook`, `setHost`, `clearHost` |
 | **React hooks** | `usePluginStorage`, `usePluginServices`, `usePluginCommands`, `usePluginEvent`, `usePluginEvents` |
 | **Emit 助手** | `emitNoteOpened`, `emitNoteClosed`, `emitNoteSaved`, `emitNoteChanged`, `emitThemeChanged`, `emitLocaleChanged`, `emitSettingChanged`, `emitAppReady`, `emitAppExit`, `emitPluginSettingsChanged` |
-| **错误类** | `PluginPermissionDeniedError`, `PluginLifecycleTimeoutError` |
+| **错误类** | `PluginError`, `PluginPermissionDeniedError`, `PluginLifecycleTimeoutError` |
 | **版本** | `SDK_VERSION`（当前 `'0.1.0'`） |
 
 ## 注册文件编辑器
 
 插件可以**接管一种或多种文件扩展名的渲染**——让 host 在打开 `.smm` / `.drawio` / `.excalidraw` 等"非 Markdown 文件"时，把渲染权交给你而不是内置的 markdown / 代码编辑器。
 
-整套机制分三层，**三层必须齐备** host 才会真正调用你的组件：
+整套机制是**声明式**的：manifest 声明 `editorFileExtensions` + `editorComponent`，宿主自动完成注册与清理。插件侧**不需要**（也不应）手动 `registerEditor` / `unregisterEditor` 配对。
 
 ### 1. 静态声明（在 `manifest` 上）
 
 ```typescript
-const manifest: PluginManifest = {
-  // … 其他字段 …
-  editorFileExtensions: ['.smm'],
+// manifest.json（单一来源）：扩展名清单与权限
+// "editorFileExtensions": [".smm"],
+// "permissions": ["editor", ...]
+
+// src/index.tsx：组件无法放进 JSON，经 definePlugin 第二参注入
+export default definePlugin(manifestJson, {
   editorComponent: MindMapEditorView,
-  permissions: ['editor'],   // ← 必须有 'editor' 权限
-}
+})
 ```
 
 - `editorFileExtensions`：扩展名清单，**带点、全部小写**（如 `.smm` / `.drawio`）。host 在解析 manifest 时会静态检查。
 - `editorComponent`：你的 React 组件，签名固定为 `{ content: string; onChange: (content: string) => void } => JSX.Element`。`onChange` 把新内容推回 host，host 负责落盘。
-- `permissions`：必须包含 `'editor'`。未声明的插件即使写了上面两个字段，host 也会在安装时打 warning，并拒绝 `registerEditor` 注入。
+- `permissions`：必须包含 `'editor'`。未声明的插件自动注册会失败——host 记录 warning，不中断其余扩展与其余插件的加载。
 
-### 2. 运行时注入（必须从生命周期钩子）
+### 2. 宿主自动注册
 
-```typescript
-onLoad:    ({ pluginId }) => registerEditor(pluginId, '.smm', MindMapEditorView),
-onUnload:  ({ pluginId }) => unregisterEditor(pluginId),
-onEnable:  ({ pluginId }) => registerEditor(pluginId, '.smm', MindMapEditorView),
-onDisable: ({ pluginId }) => unregisterEditor(pluginId),
-```
+宿主 `loadAllPlugins` 在插件模块加载完成后调用 `registerEditorsFromManifest`，对声明的每个扩展名自动 `registerEditor`。两条路径保证启用状态正确：
 
-⚠️ **关键约束**：必须从生命周期钩子调 `registerEditor`，**不能**在顶层 `manifest` 字面量中副作用调用。原因：`registerEditor` 走 `setHost(overrides).registerEditor` 桥接到 host 的注册表，host 只能在 `onLoad` / `onEnable` 调用前后通过 `setHost` 装上 hostOverrides。顶层调用会落到 SDK 的本地 stub，host 的 `Editor.tsx` 看不到。
+- 加载时已启用的插件，模块加载完成即注册；
+- 加载时被禁用、随后被用户启用的插件，由插件 store 的启用路径补注册。
 
-`unregisterEditor` 不带扩展名参数——插件卸载时一次性清空该插件注册的所有扩展名。
+幂等性：`registerEditor` 对「同插件同扩展」是替换语义，加载重扫 / 启用重放导致的重复调用不会产生重复注册，只会以相同组件覆盖（仅不同插件抢注同一扩展才抛冲突）。禁用与卸载时宿主自动 `unregisterEditor` 清理，该插件注册的所有扩展名一次性清空。
 
 ### 3. host 侧分发
 
@@ -350,6 +355,51 @@ function Panel(panel: PluginPanelProps) {
 
 > 携带 payload 的 `backend` 权限插件同时会预热后端进程（仅拉起子进程，无 JSON-RPC 请求），消除首请求冷启动延迟。
 
+## 后端调用 API
+
+插件通过 Rust 后端执行重计算 / 本地工具类命令时，使用 `invokeBackend`（非流式）与 `invokeBackendStream`（流式）。两个方法在生命周期钩子的 `context` 与面板 / 工具栏组件的 props（`panel` / `toolbar`）上均可用。**权限要求**：manifest 必须声明 `'backend'`。
+
+IPC 形态：宿主统一经 `invoke('invoke_plugin', { pluginId, command, args })` 调到 Tauri 命令，插件侧不感知。
+
+### invokeBackend（泛型）
+
+```typescript
+const count = await panel.invokeBackend<number>('count_words', { text: 'hello world' })
+```
+
+签名 `invokeBackend<T>(command, args?): Promise<T>`：第一参为后端命令名（JSON-RPC method），第二参为可选参数对象，Promise 以后端响应帧的 `result` 兑现，泛型参数标注返回类型。
+
+### invokeBackendStream（流式 + 取消）
+
+```typescript
+const total = await panel.invokeBackendStream<{ index: number; line: string }, number>(
+  'my_plugin_stream_lines',
+  { path: '/path/to/big.txt' },
+  (chunk) => console.log('收到行', chunk.index, chunk.line),
+  {
+    // 可选：流式首块超时秒数（默认 90s，最小 1s，适配推理模型首 token 延迟）
+    firstChunkTimeoutSecs: 120,
+    // 可选：通道建立时回调，携带宿主生成的 requestId
+    onStart: (info) => { requestId = info.requestId },
+  },
+)
+```
+
+- `onChunk` 逐块回调增量，Promise 以**最终响应帧**的结果终结（通知帧只负责逐块回调）。
+- 第四参 `InvokeBackendStreamOptions`：`firstChunkTimeoutSecs` 覆盖首块超时；`onStart` 在通道建立时回传宿主生成的 `requestId`，插件据此调用**后端自身的取消命令**实现流式中断——前提是后端实现了对应逻辑（如 AI 插件的 `stopStream`）：
+
+```typescript
+let requestId: number | undefined
+const result = await panel.invokeBackendStream<Chunk, Result>(
+  'my_plugin_stream',
+  args,
+  (chunk) => render(chunk),
+  { onStart: (info) => { requestId = info.requestId } },
+)
+// 用户点停止时：
+await panel.invokeBackend('stopStream', { requestId })
+```
+
 ## 编辑器写 API 与工作区文件 API
 
 插件可向当前编辑器写入内容、在工作区内创建/列出笔记。**两条通路**：面板/工具栏组件用 props 上注入的 `panel.editor` / `panel.files`（pluginId 显式绑定）；生命周期钩子内用模块级 `editor` / `files`（override 闭包自持 pluginId）。
@@ -424,8 +474,27 @@ onLoad: async () => {
 
 ### 错误类
 
+- **`PluginError`** — 后端调用（`invokeBackend` / `invokeBackendStream`）失败时抛出。宿主把后端 JSON-RPC 错误的 `code` 与附加 `data` 一并透传（Rust 侧 `JsonRpcWithCode` 经 `__pluginError` 标记的错误帧传回，前端规范化为 `PluginError`），供插件按业务错误码分支。
 - **`PluginPermissionDeniedError`** — 插件尝试执行未授权操作时抛出。携带 `pluginId`、`permission`、`operation` 字段。SDK 不依赖宿主的类（无法 `instanceof`），按 `name` 字段匹配。`registerEditor` 在 host 模式下会先走宿主的权限断言。
 - **`PluginLifecycleTimeoutError`** — `runLifecycleHook` 在 `timeoutMs` 内未完成时抛出。携带 `elapsedMs`、`timeoutMs` 字段。宿主默认 5s 超时，用于标记插件为不健康状态。
+
+`PluginError` 的典型用法——catch 后判型读取 `code` / `data`：
+
+```typescript
+import { PluginError } from '@swallow-note/plugin-sdk'
+
+try {
+  await panel.invokeBackend<MyStruct>('my_plugin_parse', { data: '...' })
+} catch (err) {
+  if (err instanceof PluginError) {
+    // err.code：后端 JSON-RPC error 的 code（未透传时 undefined）
+    // err.data：后端 JSON-RPC error 的附加载荷（未携带时 undefined）
+    console.error('parse failed:', err.code, err.data)
+  } else {
+    throw err  // 传输层错误等，原样上抛
+  }
+}
+```
 
 ```typescript
 import {
@@ -493,6 +562,7 @@ export default defineConfig(({ mode }) => {
 打包后 `index.js` + `manifest.json` 上传至 SwallowNote。宿主加载时：
 
 ```typescript
+import { invoke } from '@tauri-apps/api/core'
 import { setHost } from '@swallow-note/plugin-sdk'
 import { getPluginStorage, pluginEventBus, pluginMenuRegistry } from '@/lib/...'
 
@@ -505,7 +575,9 @@ setHost({
   unregisterContextMenu: (id, itemId) => pluginMenuRegistry.unregister(id, itemId),
   clearPluginMenuItems: (id) => pluginMenuRegistry.clearPlugin(id),
   getContextMenuItems: (loc, ctx) => pluginMenuRegistry.query(loc, ctx),
-  invokeBackend: async (cmd, args) => invoke('plugin_' + cmd, args),
+  // 统一 IPC 形态：invoke_plugin 命令 + { pluginId, command, args }
+  invokeBackend: async <T>(cmd, args) =>
+    invoke<T>('invoke_plugin', { pluginId, command: cmd, args }),
 })
 ```
 

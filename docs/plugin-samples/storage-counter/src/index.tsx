@@ -7,8 +7,10 @@
  *  - "null" setter deletes the key
  *  - Mixing stored + derived UI state
  */
-import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'
+import { definePlugin } from '@swallow-note/plugin-sdk'
 import { usePluginStorage } from '@swallow-note/plugin-sdk'
+import type { PluginPanelProps } from '@swallow-note/plugin-sdk'
 // Re-export `setHost` so the host can install its real
 // implementations on this bundle before firing lifecycle hooks.
 // See `hello-world` for the rationale.
@@ -117,24 +119,9 @@ const buttonStyle: React.CSSProperties = {
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
-const manifest: PluginManifest = {
-  id: 'com.example.storage-counter',
-  name: 'Storage Counter',
-  description: 'Counter with persistent history stored in the plugin JSON file.',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-10',
-  iconPosition: 'sidebar',
-  contentPosition: 'rightPanel',
-  order: 90,
-  enabled: true,
+// manifest 静态字段单一来源是 ../manifest.json（permissions: ["storage"]：
+// 计数器状态经插件 storage 持久化）；icon/panel 组件由 runtime 注入。
+export default definePlugin(manifestJson, {
   icon: CounterIcon,
   panel: CounterPanel,
-
-  // Storage is the only host capability this sample needs; the
-  // `storage` permission is what the user will be asked to grant at
-  // install time.
-  permissions: ['storage'],
-}
-
-export default manifest
+})

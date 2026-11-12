@@ -14,18 +14,18 @@ import { useEffect, useState } from 'react'
 import type {
   PluginCommand,
   PluginContext,
-  PluginManifest,
   PluginPanelProps,
 } from '@swallow-note/plugin-sdk'
 import {
   clearPluginCommands,
+  definePlugin,
   registerCommand,
   usePluginCommands,
 } from '@swallow-note/plugin-sdk'
+// 静态字段（版本/权限等）单一来源：见 ../manifest.json
+import manifestJson from '../manifest.json'
 // 重新导出 setHost，让宿主在触发生命周期钩子前注入真实实现
 export { setHost } from '@swallow-note/plugin-sdk'
-
-const PLUGIN_ID = 'com.example.command-palette'
 
 // ─── 模块级内部总线 ────────────────────────────────────────────────────────────
 // 命令的 onTrigger 在命令面板上下文中执行（不在 React 内），
@@ -205,26 +205,10 @@ function onUnload(ctx: PluginContext): void {
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
-const manifest: PluginManifest = {
-  id: PLUGIN_ID,
-  name: 'Command Palette Demo',
-  description: 'Demonstrates contributing commands to the palette',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-07-10',
-
-  iconPosition: 'sidebar',
-  contentPosition: 'fullPanel',
-  order: 100,
-  enabled: true,
-
+// 纯命令面板贡献无需额外权限（permissions: [] 见 ../manifest.json）
+export default definePlugin(manifestJson, {
   icon: CommandIcon,
   panel: CommandPanel,
-
-  permissions: [],
-
   onLoad,
   onUnload,
-}
-
-export default manifest
+})

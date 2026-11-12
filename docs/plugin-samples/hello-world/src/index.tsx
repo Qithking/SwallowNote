@@ -13,7 +13,9 @@
  * the bundler inlines these types from a published SDK or this same
  * source tree at build time.
  */
-import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'
+import { definePlugin } from '@swallow-note/plugin-sdk'
+import type { PluginPanelProps } from '@swallow-note/plugin-sdk'
 // Re-export `setHost` so the host can install its real
 // implementations (with permission checks) before firing our
 // lifecycle hooks. Without this re-export the bundler's
@@ -69,28 +71,9 @@ function HelloPanel({ pluginId }: PluginPanelProps) {
 
 // ─── Manifest ─────────────────────────────────────────────────────────────────
 
-// No `permissions` field is declared on purpose — hello-world only
-// renders a static panel and never touches the SDK's `store` /
-// `events` / `context-menu` / `backend` surfaces, so it needs no
-// runtime grants. This is the "minimum permission" baseline that
-// every plugin should aim for. See ../../plugin-system/manifest.md
-// for the full permission catalogue.
-
-const manifest: PluginManifest = {
-  id: 'com.example.hello-world',
-  name: 'Hello World',
-  description: 'A minimal example plugin that shows a single greeting panel.',
-  version: '0.1.0',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-10',
-
-  iconPosition: 'sidebar',
-  contentPosition: 'fullPanel',
-  order: 100,
-  enabled: true,
-
+// manifest 静态字段单一来源是 ../manifest.json；"permissions": [] 声明不申请
+// 任何运行时权限（最小权限基线），icon/panel 组件由 runtime 第二参注入。
+export default definePlugin(manifestJson, {
   icon: HelloIcon,
   panel: HelloPanel,
-}
-
-export default manifest
+})
