@@ -26,23 +26,13 @@
  * pushes new content back through `onChange`).
  */
 /* eslint-disable react-refresh/only-export-components */
-import type { PluginManifest } from '@swallow-note/plugin-sdk'
+import { definePlugin, type PluginManifest } from '@swallow-note/plugin-sdk'
 export { setHost } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'
 import { MindMapEditorView } from './MindMapEditorView'
 
-const manifest: PluginManifest = {
-  id: 'com.swallownote.mindmap',
-  name: '思维导图',
-  description:
-    '基于 simple-mind-map 的独立 .smm 文件编辑器，提供逻辑结构图/思维导图/组织结构/时间轴/鱼骨图等多种布局',
-  version: '0.2.2',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-18T06:59:47Z',
-  order: 50,
-  enabled: true,
-  editorFileExtensions: ['.smm'],
+// manifest 静态字段（id / editorFileExtensions / permissions / ...）单一来源
+// 是工程根的 ../manifest.json；editorComponent 组件由 definePlugin 注入。
+export default definePlugin(manifestJson, {
   editorComponent: MindMapEditorView as PluginManifest['editorComponent'],
-  permissions: ['editor', 'events', 'storage'],
-}
-
-export default manifest
+})

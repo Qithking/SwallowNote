@@ -25,14 +25,14 @@ if [ ! -f "$SOURCE_DIR/dist/index.js" ]; then
 fi
 if [ ! -f "$SOURCE_DIR/backend/plugin_com.swallownote.secret-disk" ]; then
   echo "[错误] 后端二进制不存在: $SOURCE_DIR/backend/plugin_com.swallownote.secret-disk"
-  echo "请先在插件目录执行: bash build.sh release"
+  echo "请先在插件目录执行: npm run build（swallow-plugin build，含后端）"
   exit 1
 fi
 
 # 创建目标目录
 mkdir -p "$PLUGIN_DIR/backend"
 
-# 复制前端产物（settings.json 可选，与 package.sh 语义一致）
+# 复制前端产物（settings.json 可选，与 swallow-plugin package 语义一致）
 cp "$SOURCE_DIR/dist/index.js" "$PLUGIN_DIR/"
 cp "$SOURCE_DIR/manifest.json" "$PLUGIN_DIR/"
 if [ -f "$SOURCE_DIR/settings.json" ]; then

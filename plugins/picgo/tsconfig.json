@@ -9,10 +9,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "baseUrl": ".",
-    "paths": {
-      "@swallow-note/plugin-sdk": ["../../docs/plugin-sdk/src/index.ts"]
-    }
+    "noEmit": true
   },
-  "include": ["src", "../../docs/plugin-sdk/src"]
+  "include": ["src"]
 }

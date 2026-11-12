@@ -14,10 +14,11 @@
  */
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
-import type { PluginManifest, PluginPanelProps, ToolbarButtonProps } from '@swallow-note/plugin-sdk'
-import { PluginError } from '@swallow-note/plugin-sdk'
+import type { PluginPanelProps, ToolbarButtonProps } from '@swallow-note/plugin-sdk'
+import { definePlugin, PluginError } from '@swallow-note/plugin-sdk'
 // 导出 setHost 供宿主运行时安装 SDK overrides
 export { setHost } from '@swallow-note/plugin-sdk'
+import manifestJson from '../manifest.json'
 import { save } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -1116,25 +1117,13 @@ function ExportPanel(_props: PluginPanelProps): ReactNode {
 }
 
 // ─── Manifest ─────────────────────────────────────────────────────────────
-
-const manifest: PluginManifest = {
-  id: 'com.swallownote.export',
-  name: '文档导出',
-  description: '将 Markdown 文档导出为 Word (.docx) / PDF / HTML 格式',
-  version: '0.2.4',
-  author: 'SwallowNote',
-  publishedAt: '2026-06-13',
-  iconPosition: 'editorToolbar',
-  contentPosition: 'editorArea',
-  order: 50,
-  enabled: true,
-  // `hasBackend` is not part of `PluginManifest`; the host fills it
-  // in on `PluginDefinition` from the presence of `backend/` in the
-  // installed zip. See SDK docs.
+//
+// manifest 静态字段（id / name / permissions / ...）单一来源是工程根的
+// ../manifest.json；icon/panel/toolbarButton 组件由 definePlugin 注入。
+// `hasBackend` 不属于 PluginManifest：宿主安装 zip 时按 backend/ 是否存在
+// 自动填充到 PluginDefinition（见 SDK 文档）。
+export default definePlugin(manifestJson, {
   icon: ExportIcon,
   panel: ExportPanel,
   toolbarButton: ExportToolbarButton,
-  permissions: ['backend'],
-}
-
-export default manifest
+})

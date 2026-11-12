@@ -1,6 +1,6 @@
-/** AI 助手插件入口：manifest 静态字段 + 运行时字段组装 */
+/** AI 助手插件入口：manifest 静态字段单一来源是工程根 manifest.json */
 /* eslint-disable react-refresh/only-export-components */
-import type { PluginManifest, PluginPanelProps } from '@swallow-note/plugin-sdk'
+import { definePlugin, type PluginPanelProps } from '@swallow-note/plugin-sdk'
 export { setHost } from '@swallow-note/plugin-sdk'
 import { useMemo } from 'react'
 import { Sparkles } from 'lucide-react'
@@ -31,8 +31,7 @@ function AiPanel(props: PluginPanelProps) {
   return <ChatPanel services={services} pendingRequest={props.pendingRequest} />
 }
 
-const manifest = {
-  ...manifestJson,
+export default definePlugin(manifestJson, {
   icon: AiIcon,
   panel: AiPanel,
   // onLoad hook（flat 结构，不是嵌套在 hooks 里）：
@@ -43,6 +42,4 @@ const manifest = {
     registerRoleActions()
     registerFileTreeAction()
   },
-} as PluginManifest
-
-export default manifest
+})

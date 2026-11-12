@@ -28,6 +28,11 @@ export const DEFAULT_EXTERNALS = [
 export interface PluginViteConfigOptions {
   /** 在默认 external 列表之外追加的自定义 external（合并去重） */
   externals?: string[]
+  /** 从默认 external 列表中移除的包（外部包将打进 bundle；适用于插件引用的
+   * 主项目源码依赖了宿主 loader 未共享的模块，如 codemirror 系） */
+  excludeExternals?: string[]
+  /** 路径别名（resolve.alias），如 { '@': '../../src' } 需传绝对路径 */
+  alias?: Record<string, string>
   /** dev server 端口（默认 5177） */
   port?: number
 }
@@ -41,8 +46,12 @@ export interface PluginViteConfigOptions {
 export function definePluginViteConfig(options: PluginViteConfigOptions = {}): UserConfigExport {
   // 插件工程根目录 = 运行 vite 的 cwd（原各插件内联配置用 __dirname，kit 化后统一为 cwd）
   const root = process.cwd()
-  // 默认 external + 自定义 external 合并去重，保持首见顺序
-  const externals = [...new Set([...DEFAULT_EXTERNALS, ...(options.externals ?? [])])]
+  // 默认 external + 自定义 external 合并去重、再按需剔除，保持首见顺序
+  const externals = [...new Set([...DEFAULT_EXTERNALS, ...(options.externals ?? [])])].filter(
+    (name) => !(options.excludeExternals ?? []).includes(name)
+  )
+  // 别名仅在有配置时注入（保持配置对象精简）
+  const resolveConfig = options.alias ? { alias: options.alias } : undefined
 
   return defineConfig(({ mode }) => {
     if (mode === 'production') {
@@ -85,6 +94,7 @@ export function definePluginViteConfig(options: PluginViteConfigOptions = {}): U
             },
           },
         ],
+        resolve: resolveConfig,
         define: {
           'process.env.NODE_ENV': JSON.stringify('production'),
         },
@@ -107,6 +117,7 @@ export function definePluginViteConfig(options: PluginViteConfigOptions = {}): U
     }
     return {
       plugins: [react()],
+      resolve: resolveConfig,
       server: { port: options.port ?? 5177, open: true },
     }
   })
