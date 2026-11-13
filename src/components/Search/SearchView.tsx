@@ -209,8 +209,6 @@ const SearchView = memo(function SearchView() {
           case_sensitive: caseSensitive,
           whole_word: wholeWord,
           use_regex: useRegex,
-          include_files: null,
-          exclude_files: null,
         }).catch(() => [])
       )
 

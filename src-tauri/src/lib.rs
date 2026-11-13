@@ -309,17 +309,17 @@ pub fn run() {
                         // B3：secureStorage 旧派生（machine_id）密文 → keyring 主密钥派生（v2）。
                         // 幂等 best-effort：失败/跳过不阻塞启动（读路径双试兜底）。
                         {
-                            let conn = db.conn.lock();
-                            if let Ok(conn) = conn {
-                                match commands::plugin_secure_storage::migrate_secure_storage_to_keyring(&conn)
-                                {
-                                    Ok((migrated, skipped)) if migrated > 0 => info!(
-                                        "[crypto-migrate] secure_storage migrated {} rows, skipped {} (already v2 or undecryptable)",
-                                        migrated, skipped
-                                    ),
-                                    Ok(_) => {}
-                                    Err(e) => warn!("[crypto-migrate] secure_storage migration failed: {}", e),
-                                }
+                            // 中毒恢复（项目惯例）：迁移幂等（读路径双试兜底），
+                            // panic 残留锁重入执行仍安全，不静默跳过迁移
+                            let conn = db.conn.lock().unwrap_or_else(|p| p.into_inner());
+                            match commands::plugin_secure_storage::migrate_secure_storage_to_keyring(&conn)
+                            {
+                                Ok((migrated, skipped)) if migrated > 0 => info!(
+                                    "[crypto-migrate] secure_storage migrated {} rows, skipped {} (already v2 or undecryptable)",
+                                    migrated, skipped
+                                ),
+                                Ok(_) => {}
+                                Err(e) => warn!("[crypto-migrate] secure_storage migration failed: {}", e),
                             }
                         }
 

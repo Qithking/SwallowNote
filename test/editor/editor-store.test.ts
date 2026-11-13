@@ -305,8 +305,9 @@ describe('B9 回归: addTab 复用不得命中 diff tab', () => {
     })
 
     const { tabs, activeTabId } = useEditorStore.getState()
-    expect(tabs).toHaveLength(2) // RED：现状复用命中 diff tab，仍为 1
-    expect(activeTabId).toBe('tab-body') // RED：现状激活的是 diff tab
+    // 回归断言：修复前 addTab 按 path 复用会误命中 diff tab（tabs 为 1 且激活 diff）
+    expect(tabs).toHaveLength(2)
+    expect(activeTabId).toBe('tab-body')
     // diff tab 不应被正文打开逻辑覆盖内容字段
     const diffTab = tabs.find(t => t.type === 'diff')
     expect(diffTab?.diffContent).toBe('+ diff line')

@@ -77,8 +77,11 @@ impl Database {
         let sql = format!("PRAGMA rekey = '{}';", escape_sql_string(new_password));
         self.conn
             .execute_batch(&sql)
-            // C31：固定措辞，不透传底层错误（可能含内部 SQL/实现细节）
-            .map_err(|_| "更换密码失败".to_string())
+            // C31：固定措辞不透传底层错误；本地经 log_error 脱敏留痕便于排查
+            .map_err(|e| {
+                security::log_error("rekey", &e.to_string());
+                "更换密码失败".to_string()
+            })
     }
 }
 
@@ -101,8 +104,11 @@ fn apply_pragmas(conn: &Connection, password: &str) -> Result<(), String> {
     let key_sql = format!("PRAGMA key = '{}';", escape_sql_string(password));
     conn.execute_batch(&key_sql)
         // C31：PRAGMA key 本身几乎不因密码错误失败（密码错误的权威判定在下方 schema 校验），
-        // 固定措辞且不透传底层错误细节。
-        .map_err(|_| "密钥设置失败".to_string())?;
+        // 固定措辞不透传底层错误细节；本地经 log_error 脱敏留痕便于排查。
+        .map_err(|e| {
+            security::log_error("PRAGMA key", &e.to_string());
+            "密钥设置失败".to_string()
+        })?;
 
     // 验证密码正确性：执行一个简单查询，密码错误时会报错。
     conn.execute_batch("SELECT count(*) FROM sqlite_master;")

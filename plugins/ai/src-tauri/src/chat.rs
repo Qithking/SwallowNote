@@ -252,12 +252,8 @@ fn attempt_stream(
             // 要求 end of stream 时非空 data buffer 仍需派发）
             Ok(0) => {
                 for item in parser.finish() {
-                    let SseItem::Data(data) = item;
-                    match parse_sse_data(provider_name, &data) {
-                        StreamTick::Delta(text) => emit("chunk", json!({ "text": text })),
-                        StreamTick::Finish => return Attempt::Success(()),
-                        StreamTick::Error(m) => return Attempt::Fatal(m),
-                        StreamTick::Ignore => {}
+                    if let Some(result) = dispatch_sse_item(item, provider_name, emit) {
+                        return result;
                     }
                 }
                 return Attempt::Success(());
@@ -265,12 +261,8 @@ fn attempt_stream(
             Ok(n) => match parser.feed(&buf[..n]) {
                 Ok(items) => {
                     for item in items {
-                        let SseItem::Data(data) = item;
-                        match parse_sse_data(provider_name, &data) {
-                            StreamTick::Delta(text) => emit("chunk", json!({ "text": text })),
-                            StreamTick::Finish => return Attempt::Success(()),
-                            StreamTick::Error(m) => return Attempt::Fatal(m),
-                            StreamTick::Ignore => {}
+                        if let Some(result) = dispatch_sse_item(item, provider_name, emit) {
+                            return result;
                         }
                     }
                     // 有数据到达说明流活跃：此处检查停止标志使停止即时生效，
@@ -296,6 +288,26 @@ fn attempt_stream(
             }
             Err(e) => return Attempt::Fatal(format!("读取上游响应失败: {}", e)),
         }
+    }
+}
+
+/// 统一派发单个 SSE 事件（EOF 残余与常规读取两分支共用）：
+/// Delta 转发 chunk，Finish/Error 决定流结局，Ignore 丢弃。
+/// 返回 Some 时调用方立即透传该结局返回。
+fn dispatch_sse_item(
+    item: SseItem,
+    provider_name: &str,
+    emit: &mut dyn FnMut(&str, Value),
+) -> Option<Attempt<()>> {
+    let SseItem::Data(data) = item;
+    match parse_sse_data(provider_name, &data) {
+        StreamTick::Delta(text) => {
+            emit("chunk", json!({ "text": text }));
+            None
+        }
+        StreamTick::Finish => Some(Attempt::Success(())),
+        StreamTick::Error(m) => Some(Attempt::Fatal(m)),
+        StreamTick::Ignore => None,
     }
 }
 
