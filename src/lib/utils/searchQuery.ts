@@ -99,10 +99,11 @@ export function getFrontmatterFromContent(content: string): NoteFrontmatter {
 /**
  * 通知后端重新索引指定文件。
  * 替代原有的 invalidateFrontmatterCache，因为不再有内存缓存需要失效。
+ * @param workspaceRoot 已打开的工作区根（后端 fs_guard 白名单校验用，候选 2 fail-closed）
  */
-export async function invalidateFrontmatterCache(filePath: string): Promise<void> {
+export async function invalidateFrontmatterCache(filePath: string, workspaceRoot: string | null): Promise<void> {
   try {
-    await invoke('trigger_frontmatter_scan', { path: filePath })
+    await invoke('trigger_frontmatter_scan', { path: filePath, workspaceRoot })
   } catch {
     // 静默失败，索引线程会通过文件监听器自动处理
   }
@@ -110,10 +111,11 @@ export async function invalidateFrontmatterCache(filePath: string): Promise<void
 
 /**
  * 触发指定目录的 frontmatter 扫描。
+ * @param workspaceRoot 已打开的工作区根（后端 fs_guard 白名单校验用，候选 2 fail-closed）
  */
-export async function triggerFrontmatterScan(path: string): Promise<void> {
+export async function triggerFrontmatterScan(path: string, workspaceRoot: string | null): Promise<void> {
   try {
-    await invoke('trigger_frontmatter_scan', { path })
+    await invoke('trigger_frontmatter_scan', { path, workspaceRoot })
   } catch {
     // 静默失败
   }

@@ -25,7 +25,7 @@ import {
 import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGitStore } from '@/stores'
 import type { GitRepository } from '@/stores/git'
 import { loadFileContent, loadDirectory } from '@/lib/api'
-import { deleteFile } from '@/lib/tauri'
+import { deleteFile, openInFinder, workspaceRootFor } from '@/lib/tauri'
 import { isImageFile } from '@/lib/utils/fileTypeUtils'
 import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
@@ -162,7 +162,8 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
 
   const handleShowInFinder = async () => {
     try {
-      await invoke('open_in_finder', { path: node.path })
+      // 统一走 file-ops 包装：workspaceRoot 按目标路径所属的工作区根选（旧全局 rootPath 语义在 workspace 模式恒为 null，会被后端 fs_guard 误拒）
+      await openInFinder(node.path)
     } catch (e) {
       logger.error('file-tree-menu', 'Failed to open in finder:', e)
     }
@@ -229,6 +230,8 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
             old_path: sourcePath,
             new_path: destPath,
           },
+          // workspaceRoot 按源路径所属的工作区根选（漏传会被后端 fs_guard 误拒）
+          workspaceRoot: workspaceRootFor(sourcePath),
         })
         successCount++
 
@@ -237,7 +240,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           await deleteFile(sourcePath)
           // 源文件已删除，使其 frontmatter 缓存失效
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          invalidateFrontmatterCache(sourcePath)
+          invalidateFrontmatterCache(sourcePath, useWorkspaceStore.getState().rootPath)
           // Update tabs: move from source path to destination path
           const editorStore = useEditorStore.getState()
           const destName = getFileName(destPath)
@@ -275,7 +278,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
 
       // 删除文件后使该路径的 frontmatter 缓存失效，避免残留
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-      invalidateFrontmatterCache(node.path)
+      invalidateFrontmatterCache(node.path, useWorkspaceStore.getState().rootPath)
 
       // Close any open tabs for the deleted file or files within the deleted directory
       const editorStore = useEditorStore.getState()

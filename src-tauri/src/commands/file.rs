@@ -4,6 +4,9 @@ use tauri::Manager;
 use uuid::Uuid;
 use log::{debug, error};
 
+// 路径白名单校验统一收编到 services::fs_guard（架构审计候选 2）
+use crate::services::fs_guard::ensure_path_allowed;
+
 #[derive(Serialize)]
 pub struct FileMetadata {
     pub modified_time: String,
@@ -11,7 +14,12 @@ pub struct FileMetadata {
 }
 
 #[tauri::command]
-pub async fn get_file_metadata(path: String) -> Result<FileMetadata, String> {
+pub async fn get_file_metadata(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    path: String,
+) -> Result<FileMetadata, String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let path = PathBuf::from(&path);
     if !path.exists() {
         return Err(format!("Path does not exist: {}", path.display()));
@@ -51,74 +59,6 @@ pub struct RenameFileRequest {
     pub new_path: String,
 }
 
-/// 校验目标路径位于允许的根目录内（工作区根或应用数据目录），
-/// 防止被注入脚本通过文件命令读写删任意路径（审计 B1）。
-/// - 已存在路径：canonicalize 穿透 symlink 后校验（拒绝 symlink 逃逸）；
-/// - 不存在路径（新建/重命名目标）：校验其存在的最近父目录后拼接剩余片段。
-fn ensure_path_allowed(
-    app: &tauri::AppHandle,
-    workspace_root: Option<&str>,
-    path: &Path,
-) -> Result<PathBuf, String> {
-    // 收集允许的根目录：工作区根（若已打开）+ 应用数据目录
-    let mut allowed_roots: Vec<PathBuf> = Vec::new();
-    if let Some(root) = workspace_root {
-        if !root.is_empty() {
-            if let Ok(canonical_root) = std::fs::canonicalize(root) {
-                allowed_roots.push(canonical_root);
-            }
-        }
-    }
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
-    // app_data 根可能尚未创建，退回原始路径参与前缀比较
-    let canonical_app_data = std::fs::canonicalize(&app_data).unwrap_or(app_data);
-    allowed_roots.push(canonical_app_data);
-
-    // 找到存在且可 canonicalize 的最近祖先（含自身），其余部分原样拼接
-    let (existing, tail) = existing_ancestor(path);
-    let canonical_existing = std::fs::canonicalize(&existing)
-        .map_err(|e| format!("Failed to resolve path {}: {}", existing.display(), e))?;
-    let canonical = if tail.as_os_str().is_empty() {
-        canonical_existing
-    } else {
-        canonical_existing.join(tail)
-    };
-
-    if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
-        Ok(canonical)
-    } else {
-        Err(format!(
-            "Path is outside allowed directories: {}",
-            path.display()
-        ))
-    }
-}
-
-/// 从 target 向上找第一个存在的祖先，返回 (存在的祖先, 其下未存在部分的相对片段)
-fn existing_ancestor(target: &Path) -> (PathBuf, PathBuf) {
-    let mut cur = target.to_path_buf();
-    let mut parts: Vec<std::ffi::OsString> = Vec::new();
-    loop {
-        if cur.exists() || cur.symlink_metadata().is_ok() {
-            let mut tail = PathBuf::new();
-            for part in parts.into_iter().rev() {
-                tail = tail.join(part);
-            }
-            return (cur, tail);
-        }
-        match (cur.parent(), cur.file_name()) {
-            (Some(parent), Some(name)) => {
-                parts.push(name.to_os_string());
-                cur = parent.to_path_buf();
-            }
-            _ => return (cur, PathBuf::new()),
-        }
-    }
-}
-
 #[derive(Deserialize)]
 pub struct SearchRequest {
     pub query: String,
@@ -147,6 +87,8 @@ pub struct LineMatch {
     pub end_col: usize,
 }
 
+/// 只读存在性探测，豁免 fs_guard 白名单校验（见 services/fs_guard.rs 豁免登记表）：
+/// 启动/最近记录流程需探测尚未打开的工作区路径是否存在。
 #[tauri::command]
 pub async fn path_exists(path: String) -> bool {
     PathBuf::from(&path).exists()
@@ -276,10 +218,13 @@ fn list_directory_inner(path: &Path, show_all_files: bool, markdown_only: bool) 
 
 #[tauri::command]
 pub async fn list_directory(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
     path: String,
     show_all_files: Option<bool>,
     markdown_only: Option<bool>,
 ) -> Result<Vec<FileNode>, String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let path = PathBuf::from(&path);
     let show_all_files = show_all_files.unwrap_or(false);
     let markdown_only = markdown_only.unwrap_or(false);
@@ -299,10 +244,16 @@ pub struct BatchDirResult {
 
 #[tauri::command]
 pub async fn list_directories_batch(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
     paths: Vec<String>,
     show_all_files: Option<bool>,
     markdown_only: Option<bool>,
 ) -> Result<Vec<BatchDirResult>, String> {
+    // 批量目录逐个过闸，任一路径越界即整体拒绝
+    for p in &paths {
+        ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(p))?;
+    }
     let show_all_files = show_all_files.unwrap_or(false);
     let markdown_only = markdown_only.unwrap_or(false);
 
@@ -332,6 +283,8 @@ pub async fn list_directories_batch(
 }
 
 /// 运行期把工作区目录加入 asset protocol 允许列表（笔记内本地图片显示需要）。
+/// 豁免 fs_guard 白名单校验（见 services/fs_guard.rs 豁免登记表）：
+/// 授权型命令，path 即新授权对象而非读写目标，调用点均为工作区打开流程。
 /// 配合 tauri.conf.json 中 assetProtocol 静态白名单收敛为 $APPDATA：
 /// 用户工作区路径运行期才确定，只能动态注册（审计 B4）。
 #[tauri::command]
@@ -342,8 +295,8 @@ pub fn register_asset_scope(app: tauri::AppHandle, path: String) -> Result<(), S
 }
 
 /// 导出文本（日志等）到用户经系统保存对话框选择的路径。
-/// 唯一不做工作区校验的写入命令：路径来自前端 save dialog，
-/// 供 LogViewer 导出日志等合法工作区外写场景使用（勿用于常规文件写）。
+/// 豁免 fs_guard 白名单校验（见 services/fs_guard.rs 豁免登记表）：
+/// 路径来自前端 save dialog，供 LogViewer 导出日志等合法工作区外写场景使用。
 #[tauri::command]
 pub async fn export_text_file(path: String, content: String) -> Result<(), String> {
     let path = PathBuf::from(&path);
@@ -596,7 +549,12 @@ async fn copy_dir_all(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
 }
 
 #[tauri::command]
-pub async fn copy_file_to_clipboard(path: String) -> Result<(), String> {
+pub async fn copy_file_to_clipboard(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    path: String,
+) -> Result<(), String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let path = PathBuf::from(&path);
 
     if !path.exists() {
@@ -865,7 +823,12 @@ if ($files) { $files -join '|' } else { '' }
 }
 
 #[tauri::command]
-pub async fn open_in_finder(path: String) -> Result<(), String> {
+pub async fn open_in_finder(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    path: String,
+) -> Result<(), String> {
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let path = PathBuf::from(&path);
 
     if !path.exists() {
@@ -942,12 +905,18 @@ pub async fn open_in_finder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn search_in_files(req: SearchRequest) -> Result<Vec<SearchResult>, String> {
+pub async fn search_in_files(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    req: SearchRequest,
+) -> Result<Vec<SearchResult>, String> {
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::io::BufRead;
     use std::io::BufReader;
 
+    // 校验搜索根在允许集内，防止被注入脚本扫描任意目录
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&req.root_path))?;
     let root = PathBuf::from(&req.root_path);
     if !root.exists() || !root.is_dir() {
         return Err(format!("Invalid root path: {}", root.display()));

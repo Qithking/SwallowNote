@@ -2,11 +2,10 @@ import { useEffect, useRef } from 'react'
 import { logger } from '@/lib/logger'
 import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
-import { openFolderDialog, openWorkspaceDialog, createFile, writeFile } from '@/lib/tauri'
+import { openFolderDialog, openWorkspaceDialog, createFile, writeFile, openInFinder } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
 import { injectDefaultFrontmatter } from '@/lib/utils/frontmatter'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
-import { invoke } from '@tauri-apps/api/core'
 import { emitLocaleChanged, emitNoteSaved } from '@/lib/plugin-host'
 import { listPluginCommands } from '@/lib/plugin-commands'
 import { toast } from 'sonner'
@@ -195,7 +194,11 @@ export async function handleSaveFile() {
     if (isMarkdown) {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
-        await invoke('index_saved_file', { path: activeTab.path })
+        // workspaceRoot 注入：后端 fs_guard 白名单校验（架构审计候选 2）
+        await invoke('index_saved_file', {
+          path: activeTab.path,
+          workspaceRoot: useWorkspaceStore.getState().rootPath || null,
+        })
       } catch (e) {
         // 索引线程会异步补偿，记录日志便于排查
         logger.error('keyboard', 'Failed to index saved file:', activeTab.path, e)
@@ -215,7 +218,7 @@ export async function handleSaveFile() {
     // 失效 frontmatter 缓存以刷新搜索/文件树
     if (isMarkdown) {
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-      invalidateFrontmatterCache(activeTab.path)
+      invalidateFrontmatterCache(activeTab.path, useWorkspaceStore.getState().rootPath)
     }
     window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
     const { gitAutoCommit } = await import('@/lib/tauri')
@@ -283,7 +286,8 @@ async function handleOpenExplorer() {
   if (!selectedPath) return
 
   try {
-    await invoke('open_in_finder', { path: selectedPath })
+    // 统一走 file-ops 包装：按选中路径所属的工作区根过 fs_guard 白名单
+    await openInFinder(selectedPath)
   } catch (e) {
     logger.error('keyboard', 'Failed to open in explorer:', e)
   }

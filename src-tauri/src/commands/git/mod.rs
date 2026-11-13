@@ -7,6 +7,8 @@ mod runner;
 pub use runner::*;
 mod askpass;
 pub use askpass::*;
+mod repo_lock;
+pub use repo_lock::with_repo_lock;
 mod credentials;
 pub use credentials::*;
 mod scan;

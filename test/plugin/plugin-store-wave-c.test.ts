@@ -35,7 +35,8 @@
  * stays focused on the store changes.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { usePluginStore, PLUGIN_AUTO_UPDATE_KEY_PREFIX } from '@/stores/plugin'
+import { usePluginStore } from '@/stores/plugin'
+import { PLUGIN_AUTO_UPDATE_KEY_PREFIX } from '@/lib/plugin-teardown'
 import { useUIStore } from '@/stores/ui'
 import {
   recordEventMetric,

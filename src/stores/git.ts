@@ -110,10 +110,16 @@ export const useGitStore = create<GitState>((set, get) => ({
   setRepositories: (repos) => set({ repositories: repos }),
   setCachedRepositories: (repos) => set({ cachedRepositories: repos }),
   setActiveRepository: (path) => set({ activeRepository: path }),
+  // P1#4 修复：状态更新必须同步写入两份副本（repositories / cachedRepositories）。
+  // cachedRepositories 是扫描合并时的状态回灌源（scanAndCacheRepos），只改 repositories
+  // 会让 cached 残留旧状态，导致冲突解决后状态经扫描回灌复活。
   updateRepository: (path, updates) => set((state) => ({
     repositories: state.repositories.map((repo) =>
       repo.path === path ? { ...repo, ...updates } : repo
-    )
+    ),
+    cachedRepositories: state.cachedRepositories.map((repo) =>
+      repo.path === path ? { ...repo, ...updates } : repo
+    ),
   })),
   setLoading: (loading) => set({ isGitLoading: loading }),
   setPulling: (pulling) => set({ isPulling: pulling }),
@@ -122,24 +128,30 @@ export const useGitStore = create<GitState>((set, get) => ({
   setSyncStatus: (status) => set((state) => ({
     syncStatus: { ...state.syncStatus, ...status }
   })),
+  // P1#3 修复：只更新本次 pull 实际参与的仓库；未参与的仓库（无 remote / 未选中）
+  // 保持原状态，避免把既有 conflict/error 误重置为 normal
+  // （与 GitView handlePull 调用点 "Don't reset all statuses" 注释意图一致）
   updateRepositoryStatuses: (pullResults) => set((state) => {
     const statusMap = new Map<string, RepoStatus>()
+    const pulledPaths = new Set<string>()
     for (const r of pullResults) {
+      pulledPaths.add(r.path)
       if (r.isConflict) {
         statusMap.set(r.path, 'conflict')
       } else if (!r.success) {
         statusMap.set(r.path, 'error')
+      } else {
+        statusMap.set(r.path, 'normal')
       }
     }
+    const applyStatus = (repo: GitRepository): GitRepository => {
+      if (!pulledPaths.has(repo.path)) return repo
+      const status = statusMap.get(repo.path)
+      return status && status !== repo.status ? { ...repo, status } : repo
+    }
     return {
-      repositories: state.repositories.map((repo) => ({
-        ...repo,
-        status: statusMap.get(repo.path) || 'normal',
-      })),
-      cachedRepositories: state.cachedRepositories.map((repo) => ({
-        ...repo,
-        status: statusMap.get(repo.path) || 'normal',
-      })),
+      repositories: state.repositories.map(applyStatus),
+      cachedRepositories: state.cachedRepositories.map(applyStatus),
     }
   }),
   resetRepositoryStatuses: () => set((state) => ({

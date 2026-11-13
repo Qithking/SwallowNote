@@ -8,11 +8,9 @@
  * caller 只需处理 needsCredential:true 决定弹 dialog 或 silent。
  */
 import {
-  gitPull, gitPullWithCredentials,
-  gitForcePush, gitForcePushWithCredentials,
-  gitForcePull, gitForcePullWithCredentials,
+  gitPull, gitPush, gitForcePush, gitForcePull,
   gitCredentialGet,
-  gitCommitAndPush, gitPushWithCredentials,
+  gitCommitAndPush,
 } from '@/lib/tauri'
 import { parseGitError, GitErrorCode } from '@/lib/git/errors'
 import { logger } from '@/lib/logger'
@@ -39,21 +37,13 @@ export interface GitOpResult {
   pushed?: boolean
 }
 
-/** 主操作函数 (lazy 引用, 避免 mock 不完整时模块加载失败) */
-function getPrimaryOp(op: GitOp): (path: string) => Promise<void> {
+/** 操作函数 (lazy 引用, 避免 mock 不完整时模块加载失败)。
+ * 对偶合并 Q8：无凭证调用时省略后两个可选参数 */
+function getOp(op: GitOp): (path: string, username?: string, password?: string) => Promise<void> {
   switch (op) {
     case 'pull': return gitPull
     case 'forcePush': return gitForcePush
     case 'forcePull': return gitForcePull
-  }
-}
-
-/** 带凭证操作函数 */
-function getCredOp(op: GitOp): (path: string, u: string, p: string) => Promise<void> {
-  switch (op) {
-    case 'pull': return gitPullWithCredentials
-    case 'forcePush': return gitForcePushWithCredentials
-    case 'forcePull': return gitForcePullWithCredentials
   }
 }
 
@@ -66,10 +56,9 @@ export async function withCredentialFallback(
   repo: RepoPath,
   op: GitOp,
 ): Promise<GitOpResult> {
-  const primary = getPrimaryOp(op)
-  const credOp = getCredOp(op)
+  const gitOp = getOp(op)
   try {
-    await primary(repo.path)
+    await gitOp(repo.path)
     return { success: true }
   } catch (e) {
     const errorMessage = String(e).trim()
@@ -80,17 +69,19 @@ export async function withCredentialFallback(
         const savedCred = await gitCredentialGet(repo.path)
         if (savedCred) {
           try {
-            await credOp(repo.path, savedCred.username, savedCred.password)
+            await gitOp(repo.path, savedCred.username, savedCred.password)
             return { success: true }
           } catch (credError) {
-            // 凭证操作失败:仍标 needsCredential,让 caller 弹 dialog 或 silent
+            // P1#5 修复：凭证重试失败不一定是凭证问题——凭证有效但 pull 遇冲突 /
+            // 网络异常时错误码已变为 RebaseConflict 等，一律标 needsCredential 会导致
+            // caller（GitView）跳过冲突处理误弹凭证框。仅错误仍为 AuthRequired 时才标记。
             const credErrorMessage = String(credError).trim()
             const credParsed = parseGitError(credErrorMessage)
             return {
               success: false,
               error: credErrorMessage,
               errorCode: credParsed.code,
-              needsCredential: true,
+              needsCredential: credParsed.code === GitErrorCode.AuthRequired,
             }
           }
         }
@@ -127,18 +118,19 @@ export async function commitAndPushRepo(
         if (savedCred) {
           try {
             // commit 可能已成功, 只需 pull+push with credentials
-            await gitPullWithCredentials(repo.path, savedCred.username, savedCred.password)
-            await gitPushWithCredentials(repo.path, savedCred.username, savedCred.password)
+            await gitPull(repo.path, savedCred.username, savedCred.password)
+            await gitPush(repo.path, savedCred.username, savedCred.password)
             return { success: true, committed: true, pushed: true }
           } catch (credError) {
-            // 凭证操作失败:仍标 needsCredential,让 caller 弹 dialog 或 silent
+            // P1#5 修复：同 runGitRepoWithCredential——仅错误仍为 AuthRequired 时才标记，
+            // 凭证有效但冲突/网络失败时让 caller 按 errorCode 处理而非误弹凭证框
             const credErrorMessage = String(credError).trim()
             const credParsed = parseGitError(credErrorMessage)
             return {
               success: false,
               error: credErrorMessage,
               errorCode: credParsed.code,
-              needsCredential: true,
+              needsCredential: credParsed.code === GitErrorCode.AuthRequired,
             }
           }
         }

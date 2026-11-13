@@ -81,6 +81,8 @@ vi.mock('react-i18next', () => ({
       return key
     },
   }),
+  // EditorToolbar 引入 @/lib/tauri 值导入后拉入 i18n 初始化链，需要此导出
+  initReactI18next: { type: '3rdParty', init: () => {} },
 }))
 
 // --- Mock Tooltip (avoid Radix Provider requirement) ---

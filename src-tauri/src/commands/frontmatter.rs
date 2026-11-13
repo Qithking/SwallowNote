@@ -1,6 +1,9 @@
 use crate::db::md_frontmatter::{self, CategoryNode, FrontmatterRecord};
 use crate::db::Database;
+// 扫描/索引目标统一过 fs_guard 白名单闸（架构审计候选 2）
+use crate::services::fs_guard::ensure_path_allowed;
 use std::collections::HashMap;
+use std::path::Path;
 use tauri::State;
 
 #[tauri::command]
@@ -31,8 +34,13 @@ pub fn query_frontmatter_by_prefix(
 }
 
 #[tauri::command]
-pub fn trigger_frontmatter_scan(path: String) -> Result<(), String> {
-    use std::path::Path;
+pub fn trigger_frontmatter_scan(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    path: String,
+) -> Result<(), String> {
+    // 防止被注入脚本扫描任意目录树（候选 2 fail-closed）
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let p = Path::new(&path);
     if p.is_file() {
         // 单文件：提交文件变更索引任务
@@ -47,8 +55,14 @@ pub fn trigger_frontmatter_scan(path: String) -> Result<(), String> {
 /// 保存 .md 文件后，同步解析 frontmatter 并更新 md_frontmatter 表
 /// 确保分类面板刷新时能立即查到最新的文件关联
 #[tauri::command]
-pub fn index_saved_file(db: State<Database>, path: String) -> Result<(), String> {
-    use std::path::Path;
+pub fn index_saved_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    db: State<Database>,
+    path: String,
+) -> Result<(), String> {
+    // 防止被注入脚本读取任意文件内容入库（候选 2 fail-closed）
+    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&path))?;
     let p = Path::new(&path);
     if !p.exists() || !p.is_file() {
         return Ok(());

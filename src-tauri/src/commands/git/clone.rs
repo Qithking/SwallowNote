@@ -56,28 +56,18 @@ pub fn git_clone_cancel(pid_state: State<'_, ClonePidState>) -> Result<bool, Str
     }
 }
 
-/// Clone a git repository to a local path
+/// Clone a git repository to a local path.
+/// username/password 同时提供时使用临时 GIT_ASKPASS 脚本提供凭证（私有仓库）。
 #[tauri::command]
 pub async fn git_clone(
     app: AppHandle,
     pid_state: State<'_, ClonePidState>,
     url: String,
     local_path: String,
+    username: Option<String>,
+    password: Option<String>,
 ) -> Result<String, String> {
-    do_git_clone(&app, &pid_state, &url, &local_path, None, None).await
-}
-
-/// Clone a private git repository with credentials
-#[tauri::command]
-pub async fn git_clone_with_credentials(
-    app: AppHandle,
-    pid_state: State<'_, ClonePidState>,
-    url: String,
-    local_path: String,
-    username: String,
-    password: String,
-) -> Result<String, String> {
-    do_git_clone(&app, &pid_state, &url, &local_path, Some(&username), Some(&password)).await
+    do_git_clone(&app, &pid_state, &url, &local_path, username.as_deref(), password.as_deref()).await
 }
 
 /// Query the current git clone status.

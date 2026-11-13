@@ -4,6 +4,8 @@ use super::runner::{run_git, run_git_no_trim};
 use super::paths::{to_git_path, unescape_git_path};
 use super::branch::is_rebase_scenario;
 use super::conflict_content::{fetch_stage_content, get_conflict_content, check_and_continue_rebase};
+// 冲突文件写入统一过 fs_guard 白名单闸（架构审计候选 2）
+use crate::services::fs_guard::ensure_path_allowed;
 use log::{debug, warn};
 
 /// Get list of conflicting files in a repository during a rebase or merge
@@ -198,7 +200,13 @@ pub async fn git_get_conflict_remote_content(repo_path: String, file_path: Strin
 /// Resolve a conflict by choosing a side for a specific file
 /// side: "local" or "remote"
 #[tauri::command]
-pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, side: String) -> Result<(), String> {
+pub async fn git_resolve_conflict_file(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    repo_path: String,
+    file_path: String,
+    side: String,
+) -> Result<(), String> {
     // strip_prefix 失败时用 canonicalize 规范化两个路径后再 strip，处理符号链接、相对路径等情况
     // 用 match + to_path_buf 取得所有权，避免 or_else 闭包返回引用局部变量导致的借用错误。
     let rel_path = match Path::new(&file_path).strip_prefix(Path::new(&repo_path)) {
@@ -233,6 +241,8 @@ pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, sid
     // "接受该侧"的语义即删除文件：移除工作区文件后由 git add stage 该删除。
     if side != "current" {
         let target_path = Path::new(&repo_path).join(&rel_path);
+        // fs_guard 白名单校验（候选 2）：写入目标必须位于工作区/应用数据目录内
+        ensure_path_allowed(&app, workspace_root.as_deref(), &target_path)?;
         match get_conflict_content(&repo_path, &git_path, &side)? {
             Some(content) => {
                 // 写入目标必须基于 repo_path + 相对路径，避免前端传入的 file_path
@@ -261,7 +271,13 @@ pub async fn git_resolve_conflict_file(repo_path: String, file_path: String, sid
 /// The conflict is NOT considered resolved until git_resolve_conflict_file is called,
 /// which stages the file and checks if rebase can continue.
 #[tauri::command]
-pub async fn git_save_conflict_file_content(repo_path: String, file_path: String, content: String) -> Result<(), String> {
+pub async fn git_save_conflict_file_content(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    repo_path: String,
+    file_path: String,
+    content: String,
+) -> Result<(), String> {
     let rel_path = Path::new(&file_path)
         .strip_prefix(Path::new(&repo_path))
         .map_err(|e| format!("Invalid relative path: {}", e))?;
@@ -279,6 +295,8 @@ pub async fn git_save_conflict_file_content(repo_path: String, file_path: String
     // Staging is done in `git_resolve_conflict_file` when the user explicitly resolves.
     // 写入目标基于 repo_path + 相对路径，避免前端传入的 file_path 指向仓库外（路径穿越）。
     let target_path = Path::new(&repo_path).join(rel_path);
+    // fs_guard 白名单校验（候选 2）：写入目标必须位于工作区/应用数据目录内
+    ensure_path_allowed(&app, workspace_root.as_deref(), &target_path)?;
     std::fs::write(&target_path, &content)
         .map_err(|e| format!("Failed to write file: {}", e))?;
 

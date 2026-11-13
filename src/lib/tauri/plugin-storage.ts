@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { logger } from '../logger'
+import { getFileMetadata } from './file-ops'
 
 // 返回插件 storage.json 的绝对路径
 export async function getPluginStoragePath(pluginId: string): Promise<string> {
@@ -140,7 +141,8 @@ export async function getStorageCap(): Promise<number | null> {
 export async function getPluginStorageSize(pluginId: string): Promise<number> {
   try {
     const path = await getPluginStoragePath(pluginId)
-    const meta = await invoke<{ file_size: number }>('get_file_metadata', { path })
+    // getFileMetadata 内部注入 workspaceRoot；插件存储位于 app data，恒在允许集内
+    const meta = await getFileMetadata(path)
     return meta?.file_size ?? 0
   } catch {
     // 插件可能已卸载或尚未写入

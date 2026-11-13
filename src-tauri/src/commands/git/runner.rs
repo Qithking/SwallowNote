@@ -12,6 +12,20 @@ pub fn run_git(path: &str, args: &[&str]) -> Result<String, String> {
     run_git_with_env(path, args, &[])
 }
 
+/// P1#2：把同步 git 命令体放入 blocking 线程池执行。
+/// run_git 内部为同步阻塞 IO（网络命令最长 120s 超时，期间轮询等待），
+/// async 命令直接执行会卡死 tokio worker 线程；统一走 spawn_blocking 隔离，
+/// per-repo 锁也随闭包一并持在 blocking 线程上，不阻塞异步侧等锁。
+pub async fn run_git_blocking<F, T>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("git command task join failed: {}", e))?
+}
+
 /// 不 trim 输出的 git 命令包装。
 /// 用于获取文件内容的命令（git show / git cat-file），保留原始末尾换行。
 /// G-16 修复：run_git 会对输出 trim()，导致 git show 获取的文件内容丢失末尾换行。

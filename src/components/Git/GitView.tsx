@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, PullResult } from '@/stores/git'
-import { gitPushWithCredentials, gitForcePushWithCredentials, gitForcePullWithCredentials, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitAttachBranchToHead, gitSwitchToLocalBranch } from '@/lib/tauri'
+import { gitPush, gitForcePush, gitForcePull, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitAttachBranchToHead, gitSwitchToLocalBranch } from '@/lib/tauri'
 import { withCredentialFallback, commitAndPushRepo } from '@/lib/git/service'
 import { GitErrorCode, parseDivergedInfo } from '@/lib/git/errors'
 import { DetachedHeadDivergedDialog } from '@/components/Git/DetachedHeadDivergedDialog'
@@ -223,7 +223,7 @@ function CommitSection({
   const handlePushWithCredentials = async (username: string, password: string) => {
     setIsPushingWithCredentials(true)
     try {
-      await gitPushWithCredentials(credentialDialog.repoPath, username, password)
+      await gitPush(credentialDialog.repoPath, username, password)
       setCredentialDialog({ open: false, repoPath: '', repoName: '' })
       showToast(`${credentialDialog.repoName}: ${t('git.syncSuccess', { count: 1 })}`, 'success')
       onRefresh()
@@ -236,6 +236,12 @@ function CommitSection({
   }
 
   const handleCommit = async () => {
+    // F3：与自动同步/手动拉取互斥——同步进行中不允许提交，
+    // 避免本操作结束时清掉对方仍持有的 isSyncing 互斥标志
+    if (useGitStore.getState().syncStatus.isSyncing) {
+      showToast(t('git.syncInProgress'), 'info')
+      return
+    }
     const reposToCommit = selectedRepos.length > 0
       ? allRepos.filter(r => selectedRepos.includes(r.path))
       : allRepos.filter(r => r.hasUncommittedChanges)
@@ -254,78 +260,84 @@ function CommitSection({
     const finalRepos = reposWithChanges.length > 0 ? reposWithChanges : reposToCommit
 
     setIsCommitting(true)
+    // F3：提交期间标记同步进行中，防止自动同步定时器并发触发
+    useGitStore.getState().setSyncStatus({ isSyncing: true })
     let successCount = 0
     let failCount = 0
     const errorDetails: string[] = []
     const conflictPaths: string[] = []
     const errorPaths: string[] = []
 
-    for (const repo of finalRepos) {
-      const r = await commitAndPushRepo(repo, commitMessage)
-      if (r.success) {
-        successCount++
-        continue
-      }
-      if (r.error) {
-        logger.error('git-view', 'Failed to commit and push:', repo.path, r.error)
-      }
-      if (r.needsCredential) {
-        // Show credential dialog for manual input
-        setCredentialDialog({
-          open: true,
-          repoPath: repo.path,
-          repoName: repo.name,
-        })
-        continue
-      }
-      const code = r.errorCode ?? GitErrorCode.Unknown
-      const errorMessage = r.error || ''
-      // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
-      if (code === GitErrorCode.DetachedHeadDiverged) {
-        // 分叉需用户决策，弹对话框让用户选择
-        const info = parseDivergedInfo(errorMessage)
-        failCount++
-        errorDetails.push(`${repo.name}: ${t('git.detachedHeadDiverged')}`)
-        errorPaths.push(repo.path)
-        if (info) {
-          setDivergedDialog({
+    try {
+      for (const repo of finalRepos) {
+        const r = await commitAndPushRepo(repo, commitMessage)
+        if (r.success) {
+          successCount++
+          continue
+        }
+        if (r.error) {
+          logger.error('git-view', 'Failed to commit and push:', repo.path, r.error)
+        }
+        if (r.needsCredential) {
+          // Show credential dialog for manual input
+          setCredentialDialog({
             open: true,
             repoPath: repo.path,
             repoName: repo.name,
-            branch: info.branch,
-            localCommits: info.localCommits,
-            remoteCommits: info.remoteCommits,
           })
+          continue
         }
-      } else if (code === GitErrorCode.DetachedHead) {
-        failCount++
-        errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
-        errorPaths.push(repo.path)
-      } else if (code === GitErrorCode.SubmoduleUncommitted) {
-        successCount++
-        errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
-        errorPaths.push(repo.path)
-      } else if (code === GitErrorCode.SubmoduleRefNeedsUpdate) {
-        successCount++
-        errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
-        errorPaths.push(repo.path)
-      } else if (code === GitErrorCode.RebaseConflict) {
-        failCount++
-        errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
-        conflictPaths.push(repo.path)
-      } else if (code === GitErrorCode.RebaseContinueFailed || code === GitErrorCode.MergeCommitFailed) {
-        // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
-        failCount++
-        errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { error: errorMessage })}`)
-        conflictPaths.push(repo.path)
-      } else {
-        failCount++
-        errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
-        errorPaths.push(repo.path)
+        const code = r.errorCode ?? GitErrorCode.Unknown
+        const errorMessage = r.error || ''
+        // G-06 修复：detached HEAD 返回特定错误码，提示用户手动处理
+        if (code === GitErrorCode.DetachedHeadDiverged) {
+          // 分叉需用户决策，弹对话框让用户选择
+          const info = parseDivergedInfo(errorMessage)
+          failCount++
+          errorDetails.push(`${repo.name}: ${t('git.detachedHeadDiverged')}`)
+          errorPaths.push(repo.path)
+          if (info) {
+            setDivergedDialog({
+              open: true,
+              repoPath: repo.path,
+              repoName: repo.name,
+              branch: info.branch,
+              localCommits: info.localCommits,
+              remoteCommits: info.remoteCommits,
+            })
+          }
+        } else if (code === GitErrorCode.DetachedHead) {
+          failCount++
+          errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
+          errorPaths.push(repo.path)
+        } else if (code === GitErrorCode.SubmoduleUncommitted) {
+          successCount++
+          errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
+          errorPaths.push(repo.path)
+        } else if (code === GitErrorCode.SubmoduleRefNeedsUpdate) {
+          successCount++
+          errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
+          errorPaths.push(repo.path)
+        } else if (code === GitErrorCode.RebaseConflict) {
+          failCount++
+          errorDetails.push(`${repo.name}: ${t('git.pullConflict', { repos: repo.name })}`)
+          conflictPaths.push(repo.path)
+        } else if (code === GitErrorCode.RebaseContinueFailed || code === GitErrorCode.MergeCommitFailed) {
+          // G-04 修复：rebase --continue 或 merge commit 失败，仓库仍处于冲突状态
+          failCount++
+          errorDetails.push(`${repo.name}: ${t('git.conflictResolveFailed', { error: errorMessage })}`)
+          conflictPaths.push(repo.path)
+        } else {
+          failCount++
+          errorDetails.push(`${repo.name}: ${errorMessage || t('git.unknownError')}`)
+          errorPaths.push(repo.path)
+        }
       }
+    } finally {
+      // F3：无论成功、失败还是异常都复位标志，避免标志卡死阻塞后续同步
+      setIsCommitting(false)
+      useGitStore.getState().setSyncStatus({ isSyncing: false })
     }
-
-    setIsCommitting(false)
 
     await onRefresh()
     
@@ -505,10 +517,10 @@ function RepositoryItem({
     setIsCredentialLoading(true)
     try {
       if (credentialDialog.action === 'forcePush') {
-        await gitForcePushWithCredentials(repo.path, username, password)
+        await gitForcePush(repo.path, username, password)
         showToast(t('git.forcePushSuccess', { repo: repo.name }), 'success')
       } else {
-        await gitForcePullWithCredentials(repo.path, username, password)
+        await gitForcePull(repo.path, username, password)
         showToast(t('git.forcePullSuccess', { repo: repo.name }), 'success')
       }
       setCredentialDialog({ open: false, action: 'forcePush' })
@@ -807,6 +819,13 @@ const GitView = memo(function GitView() {
 
   const handlePull = async () => {
     if (repositories.length === 0) return
+
+    // F4：与自动同步/手动提交互斥——同步进行中不允许拉取，
+    // 避免本操作结束时清掉对方仍持有的 isSyncing 互斥标志
+    if (useGitStore.getState().syncStatus.isSyncing) {
+      showToast(t('git.syncInProgress'), 'info')
+      return
+    }
 
     const reposToPull = selectedRepos.length > 0
       ? repositories.filter((r: GitRepository) => selectedRepos.includes(r.path))

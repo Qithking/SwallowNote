@@ -7,8 +7,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useEditorStore, useUIStore, useWorkspaceStore, useGitStore, usePluginStore } from '@/stores'
 import type { EditorToolbarConfig } from '@/stores/editor'
 import { useShallow } from 'zustand/react/shallow'
+import { openInFinder } from '@/lib/tauri'
 import type { ConflictRepoRecord } from '@/lib/tauri'
-import { invoke } from '@tauri-apps/api/core'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
 import { pluginRightPanelType, renderPluginIcon, pluginSidebarView, createToolbarButtonProps, renderPluginToolbarButton, openPluginPanel } from '@/lib/plugin-utils'
@@ -249,7 +249,8 @@ function EditorToolbar() {
 
   const handleOpenFolder = async () => {
     try {
-      await invoke('open_in_finder', { path })
+      // 统一走 file-ops 包装：按文件路径所属的工作区根过 fs_guard 白名单
+      await openInFinder(path)
     } catch (err) {
       logger.error('editor-toolbar', 'Failed to open folder:', err)
     }

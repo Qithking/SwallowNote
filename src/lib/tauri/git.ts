@@ -28,12 +28,10 @@ export async function gitCommit(path: string, message: string): Promise<boolean>
   return await invoke('git_commit', { path, message })
 }
 
-export async function gitPush(path: string): Promise<void> {
-  await invoke('git_push', { path })
-}
-
-export async function gitPushWithCredentials(path: string, username: string, password: string): Promise<void> {
-  await invoke('git_push_with_credentials', { path, username, password })
+// 凭证可选（对偶合并 Q8）：username/password 同时提供时后端走 GIT_ASKPASS，
+// 省略时后端 Option 参数为 None（同原无凭证命令）
+export async function gitPush(path: string, username?: string, password?: string): Promise<void> {
+  await invoke('git_push', { path, username, password })
 }
 
 // G-02 修复：返回 CommitPushResult 让前端区分"无改动"/"已提交"/"已推送"
@@ -41,28 +39,16 @@ export async function gitCommitAndPush(path: string, message: string): Promise<C
   return await invoke('git_commit_and_push', { path, message })
 }
 
-export async function gitPull(path: string): Promise<void> {
-  await invoke('git_pull', { path })
+export async function gitPull(path: string, username?: string, password?: string): Promise<void> {
+  await invoke('git_pull', { path, username, password })
 }
 
-export async function gitPullWithCredentials(path: string, username: string, password: string): Promise<void> {
-  await invoke('git_pull_with_credentials', { path, username, password })
+export async function gitForcePush(path: string, username?: string, password?: string): Promise<void> {
+  await invoke('git_force_push', { path, username, password })
 }
 
-export async function gitForcePush(path: string): Promise<void> {
-  await invoke('git_force_push', { path })
-}
-
-export async function gitForcePushWithCredentials(path: string, username: string, password: string): Promise<void> {
-  await invoke('git_force_push_with_credentials', { path, username, password })
-}
-
-export async function gitForcePull(path: string): Promise<void> {
-  await invoke('git_force_pull', { path })
-}
-
-export async function gitForcePullWithCredentials(path: string, username: string, password: string): Promise<void> {
-  await invoke('git_force_pull_with_credentials', { path, username, password })
+export async function gitForcePull(path: string, username?: string, password?: string): Promise<void> {
+  await invoke('git_force_pull', { path, username, password })
 }
 
 // 以当前 HEAD 重置本地分支（丢弃分支独有提交）
@@ -105,12 +91,8 @@ export async function gitLog(path: string, maxCount: number = 50): Promise<strin
   return await invoke('git_log', { path, maxCount })
 }
 
-export async function gitClone(url: string, localPath: string): Promise<string> {
-  return await invoke('git_clone', { url, localPath })
-}
-
-export async function gitCloneWithCredentials(url: string, localPath: string, username: string, password: string): Promise<string> {
-  return await invoke('git_clone_with_credentials', { url, localPath, username, password })
+export async function gitClone(url: string, localPath: string, username?: string, password?: string): Promise<string> {
+  return await invoke('git_clone', { url, localPath, username, password })
 }
 
 export async function gitCloneCancel(): Promise<boolean> {

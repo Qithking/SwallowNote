@@ -1,13 +1,33 @@
-use super::runner::{run_git, run_git_with_env};
+use super::with_repo_lock;
+use super::runner::{run_git, run_git_with_env, run_git_blocking};
 use super::branch::{should_use_rebase, is_detached_head, fix_detached_head, get_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::get_remote_url;
 use super::askpass::{create_askpass_script, build_askpass_env};
 use super::errors::{is_conflict_error, is_auth_error};
 use log::warn;
 
-/// Pull changes from remote with rebase by default
+/// Pull changes from remote with rebase by default.
+/// username/password 同时提供时使用临时 GIT_ASKPASS 脚本提供凭证。
 #[tauri::command]
-pub async fn git_pull(path: String) -> Result<(), String> {
+pub async fn git_pull(
+    path: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
+    // P1#2：run_git 同步阻塞（网络命令最长 120s），移入 blocking 线程池避免卡死 tokio worker
+    run_git_blocking(move || {
+        // F2 per-repo 互斥：同一仓库的同步类命令串行执行（先克隆锁键，规避借用与 move 冲突）
+        let lock_key = path.clone();
+        with_repo_lock(&lock_key, || git_pull_impl(path, username, password))
+    })
+    .await
+}
+
+fn git_pull_impl(
+    path: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
     // G-05 修复：区分"无远程配置"（Ok(None)）和"远程读取失败"（Err）
     let remote_url = get_remote_url(&path)?;
     if remote_url.is_none() {
@@ -36,8 +56,9 @@ pub async fn git_pull(path: String) -> Result<(), String> {
             if is_diverged_error(&e) {
                 return Err(e);
             }
-            warn!("[WARN] git_pull: fix_detached_head failed ({}), skipping pull", e);
-            return Ok(());
+            // P1#1 修复：非分叉失败也必须上抛——detached HEAD 未修复时 pull 必然
+            // 报 "not currently on a branch"，静默 return Ok 会让前端误报同步成功
+            return Err(format!("Failed to fix detached HEAD before pull: {}", e));
         }
     }
 
@@ -48,15 +69,35 @@ pub async fn git_pull(path: String) -> Result<(), String> {
     } else {
         vec!["pull"]
     };
-    let result = run_git(&path, &pull_args);
+
+    // 凭证可选：同时提供时创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 读环境变量）
+    let creds = username.as_deref().zip(password.as_deref());
+    let result = match creds {
+        Some((u, p)) => {
+            let (askpass_path, _askpass_guard) = create_askpass_script("pull", u, p)?;
+            let env_vars = build_askpass_env(&askpass_path, u, p);
+            let r = run_git_with_env(&path, &pull_args, &env_vars);
+            // Clean up the askpass script immediately
+            let _ = std::fs::remove_file(&askpass_path);
+            r
+        }
+        None => run_git(&path, &pull_args),
+    };
+
     match result {
         Ok(_) => {
             // Fix detached HEAD if it occurred during pull
-            let _ = fix_detached_head(&path); // cleanup failure is non-fatal; continue best-effort
+            // P1#1 修复：pull 已成功，此处为 best-effort 清理，失败不影响结果，
+            // 但需留 warn 日志避免静默吞掉（下次同步可能因残留 detached HEAD 失败）
+            if let Err(e) = fix_detached_head(&path) {
+                warn!("[WARN] git_pull: post-pull fix_detached_head failed ({}), will retry on next sync", e);
+            }
             Ok(())
         },
         Err(e) => {
+            // 错误判断顺序统一为 auth 先、conflict 后（对偶版本归一）
             if is_auth_error(&e) {
+                cleanup_stale_rebase_state(&path);
                 Err(format!("AUTH_REQUIRED:{}", e))
             } else if is_conflict_error(&e) {
                 // Do NOT abort the rebase - preserve the conflict state for the UI to resolve.
@@ -72,124 +113,27 @@ pub async fn git_pull(path: String) -> Result<(), String> {
     }
 }
 
-/// Pull changes from remote with provided credentials
-#[tauri::command]
-pub async fn git_pull_with_credentials(path: String, username: String, password: String) -> Result<(), String> {
-    // G-05 修复：区分"无远程配置"和"远程读取失败"
-    let remote_url = get_remote_url(&path)?;
-    if remote_url.is_none() {
-        return Ok(());
-    }
-
-    // 清理 stale rebase/merge 状态（必须在 is_detached_head 之前执行，
-    // 否则 stale state 文件导致 is_detached_head 返回 false，fix_detached_head 被跳过）
-    if is_rebase_or_merge_in_progress(&path) {
-        if has_real_conflicts(&path) {
-            return Err("REBASE_CONFLICT:Already in a conflict state. Please resolve conflicts first.".to_string());
-        } else {
-            cleanup_stale_rebase_state(&path);
-        }
-    }
-
-    // G-06 修复：detached HEAD 时 pull 会报 "You are not currently on a branch"。
-    // 必须在 cleanup_stale_rebase_state 之后检查。
-    if is_detached_head(&path) {
-        if let Err(e) = fix_detached_head(&path) {
-            // 分叉需用户决策，上抛前端弹框
-            if is_diverged_error(&e) {
-                return Err(e);
-            }
-            warn!("[WARN] git_pull_with_credentials: fix_detached_head failed ({}), skipping pull", e);
-            return Ok(());
-        }
-    }
-
-    // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
-    let (askpass_path, _askpass_guard) = create_askpass_script("pull", &username, &password)?;
-    let env_vars = build_askpass_env(&askpass_path, &username, &password);
-
-    // G-13 修复：尊重用户 git 配置 pull.rebase
-    let use_rebase = should_use_rebase(&path);
-    let pull_args: Vec<&str> = if use_rebase {
-        vec!["pull", "--rebase"]
-    } else {
-        vec!["pull"]
-    };
-    let result = run_git_with_env(&path, &pull_args, &env_vars);
-
-    // Clean up the askpass script immediately
-    let _ = std::fs::remove_file(&askpass_path);
-
-    match result {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            if is_conflict_error(&e) {
-                // Do NOT abort the rebase - preserve the conflict state for the UI to resolve.
-                // Keep conflict markers in the working tree so the user must resolve them in ConflictResolver.
-                Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers preserved in working tree. Use ConflictResolver to resolve.]", e))
-            } else if is_auth_error(&e) {
-                // Auth failure — let the frontend prompt for credentials
-                cleanup_stale_rebase_state(&path);
-                Err(format!("AUTH_REQUIRED:{}", e))
-            } else {
-                // Non-conflict error: clean up stale rebase state that pull --rebase may have left
-                cleanup_stale_rebase_state(&path);
-                Err(format!("Failed to pull: {}", e))
-            }
-        }
-    }
-}
-
 /// Force pull from remote (discard local changes and reset to remote)
 /// This performs: git fetch + git reset --hard origin/<branch> + git clean -fd
 #[tauri::command]
-pub async fn git_force_pull(path: String) -> Result<(), String> {
-    // G-05 修复：区分"无远程配置"和"远程读取失败"
-    let remote_url = get_remote_url(&path)?;
-    if remote_url.is_none() {
-        return Ok(()); // No remote, nothing to pull
-    }
-
-    // Fix detached HEAD before proceeding
-    // 如果修复失败，后续 get_branch 可能返回 "HEAD" 导致 reset --hard origin/HEAD 失败
-    if let Err(e) = fix_detached_head(&path) {
-        // 分叉需用户决策，上抛前端弹框
-        if is_diverged_error(&e) {
-            return Err(e);
-        }
-        warn!("[WARN] git_force_pull: fix_detached_head failed ({}), skipping force pull", e);
-        return Ok(());
-    }
-
-    // Get current branch
-    let branch = get_branch(&path)?;
-
-    // Fetch from remote
-    let fetch_result = run_git(&path, &["fetch", "origin"]);
-    if let Err(e) = fetch_result {
-        if is_auth_error(&e) {
-            return Err(format!("AUTH_REQUIRED:{}", e));
-        }
-        return Err(format!("Failed to fetch: {}", e));
-    }
-
-    // Reset to remote branch, discarding all local changes
-    let remote_ref = format!("origin/{}", branch);
-    run_git(&path, &["reset", "--hard", &remote_ref])
-        .map_err(|e| format!("Failed to reset: {}", e))?;
-
-    // Clean untracked files and directories
-    run_git(&path, &["clean", "-fd"]).map_err(|e| format!("Failed to clean: {}", e))?;
-
-    Ok(())
+pub async fn git_force_pull(
+    path: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
+    // P1#2：移入 blocking 线程池（同 git_pull）
+    run_git_blocking(move || {
+        // F2 per-repo 互斥：同一仓库的同步类命令串行执行（先克隆锁键，规避借用与 move 冲突）
+        let lock_key = path.clone();
+        with_repo_lock(&lock_key, || git_force_pull_impl(path, username, password))
+    })
+    .await
 }
 
-/// Force pull (reset to remote) with provided credentials
-#[tauri::command]
-pub async fn git_force_pull_with_credentials(
+fn git_force_pull_impl(
     path: String,
-    username: String,
-    password: String,
+    username: Option<String>,
+    password: Option<String>,
 ) -> Result<(), String> {
     // G-05 修复：区分"无远程配置"和"远程读取失败"
     let remote_url = get_remote_url(&path)?;
@@ -204,21 +148,26 @@ pub async fn git_force_pull_with_credentials(
         if is_diverged_error(&e) {
             return Err(e);
         }
-        warn!("[WARN] git_force_pull_with_credentials: fix_detached_head failed ({}), skipping force pull", e);
-        return Ok(());
+        // P1#1 修复：修复失败时 get_branch 可能返回 "HEAD" 导致 reset 失败，
+        // 上抛错误而非静默假成功
+        return Err(format!("Failed to fix detached HEAD before force pull: {}", e));
     }
 
     // Get current branch
     let branch = get_branch(&path)?;
 
-    // 创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 通用脚本读环境变量）
-    let (askpass_path, _askpass_guard) = create_askpass_script("force_pull", &username, &password)?;
-    let env_vars = build_askpass_env(&askpass_path, &username, &password);
-
-    // Fetch from remote with credentials
-    let fetch_result = run_git_with_env(&path, &["fetch", "origin"], &env_vars);
-    let _ = std::fs::remove_file(&askpass_path);
-
+    // Fetch from remote（凭证可选：同时提供时创建临时 askpass 脚本）
+    let creds = username.as_deref().zip(password.as_deref());
+    let fetch_result = match creds {
+        Some((u, p)) => {
+            let (askpass_path, _askpass_guard) = create_askpass_script("force_pull", u, p)?;
+            let env_vars = build_askpass_env(&askpass_path, u, p);
+            let r = run_git_with_env(&path, &["fetch", "origin"], &env_vars);
+            let _ = std::fs::remove_file(&askpass_path);
+            r
+        }
+        None => run_git(&path, &["fetch", "origin"]),
+    };
     if let Err(e) = fetch_result {
         if is_auth_error(&e) {
             return Err(format!("AUTH_REQUIRED:{}", e));
@@ -285,7 +234,7 @@ mod tests {
         std::fs::write(rebase_merge_dir.join("head-name"), "refs/heads/main\n").unwrap();
 
         // Call git_pull
-        let result = git_pull(work_str.to_string()).await;
+        let result = git_pull(work_str.to_string(), None, None).await;
 
         // Assert: no "not currently on a branch" error
         match result {

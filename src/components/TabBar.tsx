@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/context-menu'
 import { useEditorStore, useFileTreeStore, useWorkspaceStore, useUIStore } from '@/stores'
 import { getPluginTabRuntime } from '@/stores/editor'
-import { invoke } from '@tauri-apps/api/core'
+import { openInFinder } from '@/lib/tauri'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
@@ -156,7 +156,8 @@ function TabBar() {
 
   const handleShowInFinder = async (tab: TabBarItem) => {
     try {
-      await invoke('open_in_finder', { path: tab.path })
+      // 统一走 file-ops 包装：按 tab 路径所属的工作区根过 fs_guard 白名单
+      await openInFinder(tab.path)
     } catch {
       showToast(t('tabBar.openFailed'))
     }

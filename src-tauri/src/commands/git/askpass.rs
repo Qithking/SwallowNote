@@ -50,7 +50,7 @@ pub fn cleanup_stale_askpass_scripts() {
 }
 
 /// 创建临时 askpass 脚本并返回路径与 RAII 守卫。
-/// - Unix: 脚本内嵌凭证，权限 0600，RAII 自动清理。
+/// - Unix: 脚本内嵌凭证，权限 0700（需 x 位供 git 作为 GIT_ASKPASS 执行；0600 会导致 git exec 失败），RAII 自动清理。
 /// - Windows: 脚本不含凭证，从环境变量 GIT_USERNAME/GIT_PASSWORD 读取，RAII 自动清理。
 ///   即使脚本残留也不会泄露凭证。
 #[allow(unused_variables)]
@@ -80,13 +80,15 @@ pub fn create_askpass_script(
 
     #[cfg(not(target_os = "windows"))]
     {
-        // 原子创建：以 0600 权限一次性创建，避免"先 0644 落盘再收紧"的可读窗口
+        // 原子创建：以 0700 权限一次性创建，避免"先宽权限落盘再收紧"的可读窗口。
+        // 必须含执行位（x）：GIT_ASKPASS 指向的脚本需要被 git exec，0600 会导致
+        // "Permission denied"，进而被误判为 AUTH_REQUIRED。
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
         std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o600)
+            .mode(0o700)
             .open(&askpass_script)
             .and_then(|mut f| f.write_all(script_content.as_bytes()))
             .map_err(|e| format!("Failed to create askpass script: {}", e))?;
@@ -130,4 +132,24 @@ pub fn build_askpass_env<'a>(
 #[tauri::command]
 pub fn cleanup_askpass_scripts() {
     cleanup_stale_askpass_scripts();
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn askpass_script_should_be_owner_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let (path, guard) = create_askpass_script("test", "user", "pass").unwrap();
+
+        // 权限必须为 0700：0600 缺执行位会导致 git exec GIT_ASKPASS 失败
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+
+        // RAII 守卫 drop 后脚本应被清理，不残留明文凭证
+        let path_buf = guard.0.clone();
+        drop(guard);
+        assert!(!path_buf.exists());
+    }
 }

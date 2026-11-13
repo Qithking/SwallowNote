@@ -72,7 +72,7 @@ pub async fn export_logs(dest: String) -> Result<usize, String> {
 /// 薄封装：解析日志目录 → 目录不存在时先创建（首次使用/尚无日志）→ 复用 open_in_finder。
 /// Source: spec AC-2
 #[tauri::command]
-pub async fn open_log_dir() -> Result<(), String> {
+pub async fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
     let log_dir = crate::resolve_log_dir(
         std::env::current_exe().ok().as_deref(),
         std::env::var("SWALLOWNOTE_LOG_DIR").ok().as_deref(),
@@ -80,7 +80,8 @@ pub async fn open_log_dir() -> Result<(), String> {
     if !log_dir.exists() {
         std::fs::create_dir_all(&log_dir).map_err(|e| format!("创建日志目录失败: {}", e))?;
     }
-    crate::commands::file::open_in_finder(log_dir.to_string_lossy().to_string()).await
+    // open_in_finder 已接 fs_guard 闸：日志目录（app data）在允许集内，workspace_root 传 None
+    crate::commands::file::open_in_finder(app, None, log_dir.to_string_lossy().to_string()).await
 }
 
 #[cfg(test)]

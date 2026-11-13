@@ -28,7 +28,7 @@ export interface WorkspaceState {
   removeWorkspaceFolder: (path: string) => Promise<void>
   saveWorkspaceFile: (autoSave?: boolean) => Promise<void>
   loadWorkspaceFile: (workspacePath: string) => Promise<void>
-  switchMode: (mode: WorkspaceMode) => Promise<void>
+  switchMode: (mode: WorkspaceMode, targetPath?: string) => Promise<void>
   initMode: () => Promise<void>
   startBackgroundServices: () => void
 }
@@ -59,7 +59,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       // 非阻塞：保存历史、启动文件监听和frontmatter扫描
       saveFolderHistory(path).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
       watchDirectory(path).catch(err => logger.warn('workspace-store', `Failed to watch directory ${path}:`, err))
-      triggerFrontmatterScan(path).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${path}:`, err))
+      triggerFrontmatterScan(path, path).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${path}:`, err))
       // B4：asset protocol 静态白名单已收敛为 $APPDATA，工作区目录需运行期注册（本地图片显示）
       registerAssetScope(path).catch(err => logger.warn('workspace-store', `Failed to register asset scope for ${path}:`, err))
     } catch (err) {
@@ -149,8 +149,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // B4：多根工作区同样需运行期注册 asset scope
     registerAssetScope(path).catch(err => logger.warn('workspace-store', `Failed to register asset scope for ${path}:`, err))
 
-    // 触发 frontmatter 索引扫描
-    triggerFrontmatterScan(path)
+    // 触发 frontmatter 索引扫描（多根附加 folder 若在主根外，与 read_file 同一白名单模型）
+    triggerFrontmatterScan(path, get().rootPath)
     
     await get().saveWorkspaceFile(true)
   },
@@ -183,7 +183,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     
     try {
       const { writeFile } = await import('@/lib/tauri')
-      await writeFile(pathToSave, content)
+      // .swallow-workspace 通常位于 folder 外（如工作区父目录），显式传其所在目录过闸
+      const sep = Math.max(pathToSave.lastIndexOf('/'), pathToSave.lastIndexOf('\\'))
+      await writeFile(pathToSave, content, sep > 0 ? pathToSave.slice(0, sep) : null)
       
       await saveFolderHistory(pathToSave)
       set({ currentWorkspacePath: pathToSave })
@@ -195,7 +197,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const { readFile } = await import('@/lib/tauri')
-      const content = await readFile(workspacePath)
+      // workspace 文件的允许根：rootPath 仅 folder 模式设置（workspace 模式为 null），
+      // 不传覆盖会被 ensure_path_allowed 只允许 app_data → 工作区 .swallow-workspace 被误拒。
+      // 以 workspace 文件所在目录作为允许根读取（根因 C）。
+      const sep = Math.max(workspacePath.lastIndexOf('/'), workspacePath.lastIndexOf('\\'))
+      const workspaceDir = sep > 0 ? workspacePath.slice(0, sep) : workspacePath
+      const content = await readFile(workspacePath, workspaceDir)
       const workspace = JSON.parse(content)
 
       if (workspace.folders && Array.isArray(workspace.folders)) {
@@ -229,7 +236,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         saveFolderHistory(workspacePath).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
         for (const folder of workspace.folders) {
           watchDirectory(folder).catch(err => logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err))
-          triggerFrontmatterScan(folder).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
+          // workspace 多根：folder 自身即其允许根（workspace 文件目录无法覆盖全部 folders）
+          triggerFrontmatterScan(folder, folder).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
         }
       }
     } catch (err) {
@@ -240,12 +248,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       fileTreeStore.clearAll()
     }
   },
-  switchMode: async (mode: WorkspaceMode) => {
+  switchMode: async (mode: WorkspaceMode, targetPath?: string) => {
     const { workspaceMode } = useUIStore.getState()
     if (mode === workspaceMode) return
 
     useUIStore.getState().setWorkspaceMode(mode)
-    await get().loadLatestByMode()
+    if (targetPath) {
+      // 直接加载调用方指定的目标路径（如从最近记录点击某项），
+      // 跳过 loadLatestByMode 的 sessionContextPath/history 预加载（根因 A：双重加载 + 失效重试放大）
+      if (mode === 'workspace') {
+        await get().loadWorkspaceFile(targetPath)
+      } else {
+        await get().openFolder(targetPath)
+      }
+    } else {
+      await get().loadLatestByMode()
+    }
 
     // 过滤不匹配的 tab
     const { filterTabs, activeTabId, tabs } = useEditorStore.getState()
@@ -325,7 +343,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         watchDirectory(folder).catch((err) => {
           logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err)
         })
-        triggerFrontmatterScan(folder).catch((err) => {
+        triggerFrontmatterScan(folder, get().rootPath).catch((err) => {
           logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err)
         })
       }, index * 200)
