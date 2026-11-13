@@ -19,16 +19,14 @@ export async function gitGetConflictRemoteContent(repoPath: string, filePath: st
 }
 
 // 工作区根注入：后端 fs_guard 白名单校验用（架构审计候选 2）
-import { useWorkspaceStore } from '@/stores/workspace'
-
-const workspaceRoot = () => useWorkspaceStore.getState().rootPath || null
+import { workspaceRootFor } from './file-ops'
 
 export async function gitResolveConflictFile(repoPath: string, filePath: string, side: string): Promise<void> {
-  await invoke('git_resolve_conflict_file', { repoPath, filePath, side, workspaceRoot: workspaceRoot() })
+  await invoke('git_resolve_conflict_file', { repoPath, filePath, side, workspaceRoot: workspaceRootFor(filePath) })
 }
 
 export async function gitSaveConflictFileContent(repoPath: string, filePath: string, content: string): Promise<void> {
-  await invoke('git_save_conflict_file_content', { repoPath, filePath, content, workspaceRoot: workspaceRoot() })
+  await invoke('git_save_conflict_file_content', { repoPath, filePath, content, workspaceRoot: workspaceRootFor(filePath) })
 }
 
 export async function gitAbortConflict(repoPath: string): Promise<void> {

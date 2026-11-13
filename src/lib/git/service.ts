@@ -72,14 +72,16 @@ export async function withCredentialFallback(
             await gitOp(repo.path, savedCred.username, savedCred.password)
             return { success: true }
           } catch (credError) {
-            // 凭证操作失败:仍标 needsCredential,让 caller 弹 dialog 或 silent
+            // P1#5 修复：凭证重试失败不一定是凭证问题——凭证有效但 pull 遇冲突 /
+            // 网络异常时错误码已变为 RebaseConflict 等，一律标 needsCredential 会导致
+            // caller（GitView）跳过冲突处理误弹凭证框。仅错误仍为 AuthRequired 时才标记。
             const credErrorMessage = String(credError).trim()
             const credParsed = parseGitError(credErrorMessage)
             return {
               success: false,
               error: credErrorMessage,
               errorCode: credParsed.code,
-              needsCredential: true,
+              needsCredential: credParsed.code === GitErrorCode.AuthRequired,
             }
           }
         }
@@ -120,14 +122,15 @@ export async function commitAndPushRepo(
             await gitPush(repo.path, savedCred.username, savedCred.password)
             return { success: true, committed: true, pushed: true }
           } catch (credError) {
-            // 凭证操作失败:仍标 needsCredential,让 caller 弹 dialog 或 silent
+            // P1#5 修复：同 runGitRepoWithCredential——仅错误仍为 AuthRequired 时才标记，
+            // 凭证有效但冲突/网络失败时让 caller 按 errorCode 处理而非误弹凭证框
             const credErrorMessage = String(credError).trim()
             const credParsed = parseGitError(credErrorMessage)
             return {
               success: false,
               error: credErrorMessage,
               errorCode: credParsed.code,
-              needsCredential: true,
+              needsCredential: credParsed.code === GitErrorCode.AuthRequired,
             }
           }
         }

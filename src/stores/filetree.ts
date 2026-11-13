@@ -156,7 +156,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     
     const tryLoadDirectory = async (currentRetry = retryCount): Promise<FileNode[]> => {
       try {
-        return await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
+        return await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly, rootPath)
       } catch (e) {
         if (currentRetry < maxRetries) {
           logger.warn('filetree-store', `Failed to load root directory, retrying (${currentRetry + 1}/${maxRetries}):`, rootPath)
@@ -194,7 +194,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (existingNode) return
 
     try {
-      const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly)
+      // 打开流程：目标目录自身即新授权根（folder 未入 store 前需直接过闸）
+      const data = await loadDirectory(rootPath, getFilterParams().showAllFiles, getFilterParams().markdownOnly, rootPath)
       const newNode: FileNode = {
         id: `root-${rootPath}`,
         name: rootPath.split(/[\\/]/).pop() || rootPath,
@@ -225,7 +226,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const results = await Promise.all(
       pathsToLoad.map(async (rootPath) => {
         try {
-          const data = await loadDirectory(rootPath, filterParams.showAllFiles, filterParams.markdownOnly)
+          // 打开流程：folder 自身即新授权根（workspace 多根加载，folder 未入 workspaceFolders 前）
+          const data = await loadDirectory(rootPath, filterParams.showAllFiles, filterParams.markdownOnly, rootPath)
           return {
             node: {
               id: `root-${rootPath}`,
@@ -431,7 +433,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (dirsToLoad.length > 0) {
       const filterParams = getFilterParams()
       try {
-        const results = await loadDirectoriesBatch(dirsToLoad, filterParams.showAllFiles, filterParams.markdownOnly)
+        const results = await loadDirectoriesBatch(dirsToLoad, filterParams.showAllFiles, filterParams.markdownOnly, rootPath)
         for (const result of results) {
           // 用 get().nodes 取最新状态，避免覆盖并发修改
           const latestNodes = get().nodes

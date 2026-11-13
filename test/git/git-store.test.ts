@@ -290,6 +290,69 @@ describe('TC-032: 冲突解决测试', () => {
     const result2 = useGitStore.getState().isConflictFile('/workspace/repo1/normal.md')
     expect(result2).toBeNull()
   })
+
+  it('TC-032-05: updateRepositoryStatuses 不重置未参与 pull 仓库的状态（P1#3）', () => {
+    const repos = [
+      {
+        name: 'repo1',
+        path: '/workspace/repo1',
+        remoteUrl: 'https://github.com/test/repo1.git',
+        hasUncommittedChanges: false,
+        uncommittedCount: 0,
+        currentBranch: 'main',
+        isSubmodule: false,
+        parentPath: null,
+        status: 'conflict' as RepoStatus,
+      },
+      {
+        name: 'repo2',
+        path: '/workspace/repo2',
+        remoteUrl: null, // 无 remote，不参与 pull
+        hasUncommittedChanges: false,
+        uncommittedCount: 0,
+        currentBranch: 'main',
+        isSubmodule: false,
+        parentPath: null,
+        status: 'conflict' as RepoStatus,
+      },
+    ]
+    useGitStore.getState().setRepositories(repos)
+
+    // 仅 repo1 参与 pull 且成功
+    const pullResults = [{ path: '/workspace/repo1', name: 'repo1', success: true }]
+    useGitStore.getState().updateRepositoryStatuses(pullResults)
+
+    const state = useGitStore.getState()
+    // 参与且成功的仓库重置为 normal
+    expect(state.repositories[0].status).toBe('normal')
+    // 未参与的仓库保持原状态，不被误重置
+    expect(state.repositories[1].status).toBe('conflict')
+  })
+
+  it('TC-032-06: updateRepository 同步更新 cachedRepositories（P1#4 防回灌复活）', () => {
+    const repos = [{
+      name: 'repo1',
+      path: '/workspace/repo1',
+      remoteUrl: 'https://github.com/test/repo1.git',
+      hasUncommittedChanges: false,
+      uncommittedCount: 0,
+      currentBranch: 'main',
+      isSubmodule: false,
+      parentPath: null,
+      status: 'conflict' as RepoStatus,
+    }]
+    // 两份副本都处于 conflict（模拟冲突场景）
+    useGitStore.setState({ repositories: repos, cachedRepositories: repos })
+
+    // 冲突解决后更新状态
+    useGitStore.getState().updateRepository('/workspace/repo1', { status: 'normal' })
+
+    const state = useGitStore.getState()
+    expect(state.repositories[0].status).toBe('normal')
+    // cachedRepositories 必须同步更新：它是 scanAndCacheRepos 的状态回灌源，
+    // 残留旧 conflict 状态会导致已解决的冲突在下次扫描时复活
+    expect(state.cachedRepositories[0].status).toBe('normal')
+  })
 })
 
 describe('TC-033: pullAllRepos 并发限流与防重入测试', () => {

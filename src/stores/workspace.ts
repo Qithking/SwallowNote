@@ -183,7 +183,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     
     try {
       const { writeFile } = await import('@/lib/tauri')
-      await writeFile(pathToSave, content)
+      // .swallow-workspace 通常位于 folder 外（如工作区父目录），显式传其所在目录过闸
+      const sep = Math.max(pathToSave.lastIndexOf('/'), pathToSave.lastIndexOf('\\'))
+      await writeFile(pathToSave, content, sep > 0 ? pathToSave.slice(0, sep) : null)
       
       await saveFolderHistory(pathToSave)
       set({ currentWorkspacePath: pathToSave })
@@ -234,7 +236,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         saveFolderHistory(workspacePath).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
         for (const folder of workspace.folders) {
           watchDirectory(folder).catch(err => logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err))
-          triggerFrontmatterScan(folder, workspacePath).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
+          // workspace 多根：folder 自身即其允许根（workspace 文件目录无法覆盖全部 folders）
+          triggerFrontmatterScan(folder, folder).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
         }
       }
     } catch (err) {

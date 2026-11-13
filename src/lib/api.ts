@@ -27,8 +27,9 @@ export async function loadDirectory(
   path: string,
   showAllFiles?: boolean,
   markdownOnly?: boolean,
+  workspaceRootOverride?: string | null,
 ): Promise<FileNode[]> {
-  const nodes = await listDirectory(path, showAllFiles, markdownOnly)
+  const nodes = await listDirectory(path, showAllFiles, markdownOnly, workspaceRootOverride)
   return nodes.map(convertFileNode)
 }
 
@@ -41,8 +42,9 @@ export async function loadDirectoriesBatch(
   paths: string[],
   showAllFiles?: boolean,
   markdownOnly?: boolean,
+  workspaceRootOverride?: string | null,
 ): Promise<BatchDirResult[]> {
-  const results = await listDirectoriesBatch(paths, showAllFiles, markdownOnly)
+  const results = await listDirectoriesBatch(paths, showAllFiles, markdownOnly, workspaceRootOverride)
   return results.map((r: BackendBatchDirResult) => ({
     path: r.path,
     children: r.children.map(convertFileNode),

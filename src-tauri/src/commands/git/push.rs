@@ -1,8 +1,9 @@
-use super::runner::{run_git, run_git_with_env};
+use super::with_repo_lock;
+use super::runner::{run_git, run_git_with_env, run_git_blocking};
 use super::branch::{is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, fix_detached_head, resolve_push_target_branch, is_diverged_error};
 use super::askpass::{create_askpass_script, build_askpass_env};
 use super::errors::is_auth_error;
-use log::{debug, warn};
+use log::debug;
 
 /// detached HEAD 重试共享 helper（Q9）：
 /// `git push` 在 detached HEAD 下没有上游分支，会报
@@ -77,6 +78,20 @@ pub async fn git_push(
     username: Option<String>,
     password: Option<String>,
 ) -> Result<(), String> {
+    // P1#2：run_git 同步阻塞（网络命令最长 120s），移入 blocking 线程池避免卡死 tokio worker
+    run_git_blocking(move || {
+        // F2 per-repo 互斥：同一仓库的同步类命令串行执行（先克隆锁键，规避借用与 move 冲突）
+        let lock_key = path.clone();
+        with_repo_lock(&lock_key, || git_push_impl(path, username, password))
+    })
+    .await
+}
+
+fn git_push_impl(
+    path: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
     // Check if we're in a rebase/merge state
     if is_rebase_or_merge_in_progress(&path) {
         if has_real_conflicts(&path) {
@@ -124,14 +139,29 @@ pub async fn git_force_push(
     username: Option<String>,
     password: Option<String>,
 ) -> Result<(), String> {
+    // P1#2：移入 blocking 线程池（同 git_push）
+    run_git_blocking(move || {
+        // F2 per-repo 互斥：同一仓库的同步类命令串行执行（先克隆锁键，规避借用与 move 冲突）
+        let lock_key = path.clone();
+        with_repo_lock(&lock_key, || git_force_push_impl(path, username, password))
+    })
+    .await
+}
+
+fn git_force_push_impl(
+    path: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
     // 修复 detached HEAD（必须在 commit 之前，否则 commit 可能失败）
     if let Err(e) = fix_detached_head(&path) {
         // 分叉需用户决策，上抛前端弹框
         if is_diverged_error(&e) {
             return Err(e);
         }
-        warn!("[WARN] git_force_push: fix_detached_head failed ({}), skipping", e);
-        return Ok(());
+        // P1#1 修复：修复失败时继续执行会把提交挂在 detached HEAD 上（切回分支即丢失），
+        // 必须上抛错误而非静默假成功
+        return Err(format!("Failed to fix detached HEAD before force push: {}", e));
     }
 
     // 检查是否有未提交的改动，有则先 commit

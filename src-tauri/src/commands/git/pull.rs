@@ -1,4 +1,5 @@
-use super::runner::{run_git, run_git_with_env};
+use super::with_repo_lock;
+use super::runner::{run_git, run_git_with_env, run_git_blocking};
 use super::branch::{should_use_rebase, is_detached_head, fix_detached_head, get_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::get_remote_url;
 use super::askpass::{create_askpass_script, build_askpass_env};
@@ -9,6 +10,20 @@ use log::warn;
 /// username/password 同时提供时使用临时 GIT_ASKPASS 脚本提供凭证。
 #[tauri::command]
 pub async fn git_pull(
+    path: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
+    // P1#2：run_git 同步阻塞（网络命令最长 120s），移入 blocking 线程池避免卡死 tokio worker
+    run_git_blocking(move || {
+        // F2 per-repo 互斥：同一仓库的同步类命令串行执行（先克隆锁键，规避借用与 move 冲突）
+        let lock_key = path.clone();
+        with_repo_lock(&lock_key, || git_pull_impl(path, username, password))
+    })
+    .await
+}
+
+fn git_pull_impl(
     path: String,
     username: Option<String>,
     password: Option<String>,
@@ -41,8 +56,9 @@ pub async fn git_pull(
             if is_diverged_error(&e) {
                 return Err(e);
             }
-            warn!("[WARN] git_pull: fix_detached_head failed ({}), skipping pull", e);
-            return Ok(());
+            // P1#1 修复：非分叉失败也必须上抛——detached HEAD 未修复时 pull 必然
+            // 报 "not currently on a branch"，静默 return Ok 会让前端误报同步成功
+            return Err(format!("Failed to fix detached HEAD before pull: {}", e));
         }
     }
 
@@ -71,7 +87,11 @@ pub async fn git_pull(
     match result {
         Ok(_) => {
             // Fix detached HEAD if it occurred during pull
-            let _ = fix_detached_head(&path); // cleanup failure is non-fatal; continue best-effort
+            // P1#1 修复：pull 已成功，此处为 best-effort 清理，失败不影响结果，
+            // 但需留 warn 日志避免静默吞掉（下次同步可能因残留 detached HEAD 失败）
+            if let Err(e) = fix_detached_head(&path) {
+                warn!("[WARN] git_pull: post-pull fix_detached_head failed ({}), will retry on next sync", e);
+            }
             Ok(())
         },
         Err(e) => {
@@ -101,6 +121,20 @@ pub async fn git_force_pull(
     username: Option<String>,
     password: Option<String>,
 ) -> Result<(), String> {
+    // P1#2：移入 blocking 线程池（同 git_pull）
+    run_git_blocking(move || {
+        // F2 per-repo 互斥：同一仓库的同步类命令串行执行（先克隆锁键，规避借用与 move 冲突）
+        let lock_key = path.clone();
+        with_repo_lock(&lock_key, || git_force_pull_impl(path, username, password))
+    })
+    .await
+}
+
+fn git_force_pull_impl(
+    path: String,
+    username: Option<String>,
+    password: Option<String>,
+) -> Result<(), String> {
     // G-05 修复：区分"无远程配置"和"远程读取失败"
     let remote_url = get_remote_url(&path)?;
     if remote_url.is_none() {
@@ -114,8 +148,9 @@ pub async fn git_force_pull(
         if is_diverged_error(&e) {
             return Err(e);
         }
-        warn!("[WARN] git_force_pull: fix_detached_head failed ({}), skipping force pull", e);
-        return Ok(());
+        // P1#1 修复：修复失败时 get_branch 可能返回 "HEAD" 导致 reset 失败，
+        // 上抛错误而非静默假成功
+        return Err(format!("Failed to fix detached HEAD before force pull: {}", e));
     }
 
     // Get current branch

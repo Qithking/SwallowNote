@@ -1,4 +1,5 @@
 use std::path::Path;
+use super::with_repo_lock;
 use super::runner::run_git;
 use log::{debug, warn};
 
@@ -162,6 +163,16 @@ pub fn has_real_conflicts(repo_path: &str) -> bool {
 /// Clean up stale rebase/merge state files (when state files exist but no real conflicts).
 /// This happens when an operation (pull --rebase, etc.) was interrupted (network error, crash)
 /// but left behind .git/rebase-merge or .git/MERGE_HEAD files without actual unmerged files.
+///
+/// 适用边界（F6 保守方案）：
+/// - 应用内：全部写操作命令（git_pull/git_push/git_force_pull/git_force_push/
+///   git_commit_and_push/git_auto_commit/git_commit/git_switch_to_local_branch/
+///   git_force_upload_file）
+///   均已由 F2 per-repo 锁（repo_lock.rs）串行化，
+///   本函数不会与应用内其它 git 操作并发误杀进行中的 rebase。
+/// - 跨进程：用户在终端手动进行 rebase 且尚未产生冲突文件时，若恰好触发应用内同步，
+///   本函数可能中止该 rebase。此为已知边界——mtime 等启发式无法可靠区分
+///   "进行中"（可长时间停在冲突上等待用户）与 "stale"，权衡后接受此风险。
 pub fn cleanup_stale_rebase_state(repo_path: &str) {
     debug!("[INFO] Cleaning up stale rebase/merge state in {}", repo_path);
 
@@ -448,6 +459,13 @@ pub async fn git_attach_branch_to_head(path: String, branch: String) -> Result<(
 /// 分叉决策二：仅 stash + checkout 切回本地分支，不做 reset/merge。
 #[tauri::command]
 pub async fn git_switch_to_local_branch(path: String, branch: String) -> Result<(), String> {
+    // F2/F6 补充：per-repo 互斥——stash/checkout 与同步类命令串行执行
+    // （先克隆锁键，规避借用与 move 冲突）
+    let lock_key = path.clone();
+    with_repo_lock(&lock_key, || git_switch_to_local_branch_impl(path, branch))
+}
+
+fn git_switch_to_local_branch_impl(path: String, branch: String) -> Result<(), String> {
     let stashed = stash_create(&path);
     let res = run_git(&path, &["checkout", &branch]);
     if stashed {

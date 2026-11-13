@@ -25,7 +25,7 @@ import {
 import { useWorkspaceStore, useEditorStore, useFileTreeStore, useUIStore, useGitStore } from '@/stores'
 import type { GitRepository } from '@/stores/git'
 import { loadFileContent, loadDirectory } from '@/lib/api'
-import { deleteFile } from '@/lib/tauri'
+import { deleteFile, openInFinder, workspaceRootFor } from '@/lib/tauri'
 import { isImageFile } from '@/lib/utils/fileTypeUtils'
 import { invoke } from '@tauri-apps/api/core'
 import type { FileNode } from '@/stores/filetree'
@@ -162,11 +162,8 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
 
   const handleShowInFinder = async () => {
     try {
-      // workspaceRoot 注入：后端 fs_guard 白名单校验（架构审计候选 2）
-      await invoke('open_in_finder', {
-        path: node.path,
-        workspaceRoot: useWorkspaceStore.getState().rootPath || null,
-      })
+      // 统一走 file-ops 包装：workspaceRoot 按目标路径所属的工作区根选（旧全局 rootPath 语义在 workspace 模式恒为 null，会被后端 fs_guard 误拒）
+      await openInFinder(node.path)
     } catch (e) {
       logger.error('file-tree-menu', 'Failed to open in finder:', e)
     }
@@ -233,6 +230,8 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
             old_path: sourcePath,
             new_path: destPath,
           },
+          // workspaceRoot 按源路径所属的工作区根选（漏传会被后端 fs_guard 误拒）
+          workspaceRoot: workspaceRootFor(sourcePath),
         })
         successCount++
 

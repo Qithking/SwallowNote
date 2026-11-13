@@ -1,6 +1,7 @@
 use std::path::Path;
 use super::models::{CommitPushResult, GitFileLogEntry};
-use super::runner::{run_git, run_git_no_trim};
+use super::with_repo_lock;
+use super::runner::{run_git, run_git_no_trim, run_git_blocking};
 use super::paths::to_git_path;
 use super::branch::{is_detached_head, fix_detached_head, should_use_rebase, resolve_push_target_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::{get_remote_url, parse_gitmodules};
@@ -15,6 +16,13 @@ use log::{debug, error, warn};
 /// 让前端提示用户手动处理，避免分支切换丢失改动。
 #[tauri::command]
 pub async fn git_commit(path: String, message: String) -> Result<bool, String> {
+    // F2/F6 补充：per-repo 互斥——add/commit 与 pull/push/commit_and_push/auto_commit
+    // 等写操作命令串行执行，避免并发踩踏（先克隆锁键，规避借用与 move 冲突）
+    let lock_key = path.clone();
+    with_repo_lock(&lock_key, || git_commit_impl(path, message))
+}
+
+fn git_commit_impl(path: String, message: String) -> Result<bool, String> {
     // 清理 stale rebase/merge 状态（必须在 is_detached_head 之前执行），
     // 否则 stale state 文件掩盖 detached HEAD 检测，commit 会创建在 detached HEAD 上。
     if is_rebase_or_merge_in_progress(&path) {
@@ -62,6 +70,16 @@ pub async fn git_commit(path: String, message: String) -> Result<bool, String> {
 /// Commit and push in one command
 #[tauri::command]
 pub async fn git_commit_and_push(path: String, message: String) -> Result<CommitPushResult, String> {
+    // P1#2：内部执行 pull+push（网络命令最长 120s），移入 blocking 线程池避免卡死 tokio worker
+    run_git_blocking(move || {
+        // F2 per-repo 互斥：同一仓库的同步类命令串行执行（先克隆锁键，规避借用与 move 冲突）
+        let lock_key = path.clone();
+        with_repo_lock(&lock_key, || git_commit_and_push_impl(path, message))
+    })
+    .await
+}
+
+fn git_commit_and_push_impl(path: String, message: String) -> Result<CommitPushResult, String> {
     // 清理 stale rebase/merge 状态（必须在 is_detached_head 之前执行）。
     // stale state 文件存在时 is_detached_head 返回 false，fix_detached_head 被跳过，
     // commit 会创建在 detached HEAD 上，之后切回分支时 commit 被孤立丢失。
@@ -365,16 +383,31 @@ fn should_amend_last_auto_save(repo_path: &str, file_name: &str, git_path: &str)
 /// Auto commit a single file (local only, no push)
 #[tauri::command]
 pub async fn git_auto_commit(file_path: String) -> Result<(), String> {
-    debug!("[INFO] git_auto_commit called for: {}", file_path);
+    // P1#2：find_git_root 与后续 git 命令一并移入 blocking 线程池执行，
+    // 避免同步 IO 卡死 tokio worker（保存触发的高频命令，收益更明显）
+    run_git_blocking(move || {
+        debug!("[INFO] git_auto_commit called for: {}", file_path);
 
-    // Find the git root by walking up directories
-    let repo_root = match find_git_root(&file_path) {
-        Some(root) => root,
-        None => {
-            debug!("[INFO] git_auto_commit: not in a git repo, skipping");
-            return Ok(()); // Not in a git repo
-        }
-    };
+        // Find the git root by walking up directories
+        let repo_root = match find_git_root(&file_path) {
+            Some(root) => root,
+            None => {
+                debug!("[INFO] git_auto_commit: not in a git repo, skipping");
+                return Ok(()); // Not in a git repo
+            }
+        };
+
+        // F5：per-repo 互斥（复用 F2 锁）——手动保存/自动保存双入口并发、
+        // 或与 pull/commit_and_push 等同步类命令并发时排队串行，避免 add/commit/amend 踩踏。
+        // 排队而非跳过：后到的调用多半已无事可做（"nothing to commit" 静默成功），
+        // 未入库内容会在下次保存时补上。
+        let lock_key = repo_root.clone();
+        with_repo_lock(&lock_key, || git_auto_commit_locked(file_path, repo_root))
+    })
+    .await
+}
+
+fn git_auto_commit_locked(file_path: String, repo_root: String) -> Result<(), String> {
     let repo_path = repo_root.as_str();
     debug!("[INFO] git_auto_commit: repo_path={}", repo_path);
 
@@ -675,8 +708,20 @@ fn is_local_ahead_of_remote(repo_path: &str) -> Result<bool, String> {
 /// This overwrites the remote version with the local version.
 #[tauri::command]
 pub async fn git_force_upload_file(file_path: String) -> Result<(), String> {
-    // Find the git root by walking up directories
-    let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+    // P1#2：含 force push 网络命令，移入 blocking 线程池（同 git_commit_and_push）
+    run_git_blocking(move || {
+        // Find the git root by walking up directories
+        let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+        // F2 补充：per-repo 互斥（复用 F2 锁）——force push 与 pull/push/commit_and_push/
+        // auto_commit 等同步类写命令串行执行；锁键取仓库根，与其它命令一致
+        // （先克隆锁键，规避借用与 move 冲突）
+        let lock_key = repo_root.clone();
+        with_repo_lock(&lock_key, || git_force_upload_file_impl(file_path, repo_root))
+    })
+    .await
+}
+
+fn git_force_upload_file_impl(file_path: String, repo_root: String) -> Result<(), String> {
     let repo_path = repo_root.as_str();
     let relative_path = Path::new(&file_path)
         .strip_prefix(repo_path)

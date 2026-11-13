@@ -443,6 +443,7 @@
     "scanningPath": "扫描 {{path}}...",
     "pullSuccess": "已拉取 {{count}} 个仓库",
     "pullResult": "拉取完成：成功 {{success}} 个，失败 {{fail}} 个",
+    "syncInProgress": "同步正在进行中，请稍后再试",
     "pullConflict": "仓库 {{repos}} 存在合并冲突，请手动解决冲突后再同步",
     "pullDetachedHead": "{{repos}}: 仓库处于 detached HEAD 状态，请先切换到分支再拉取",
     "detachedHead": "仓库处于 detached HEAD 状态，请先切换到分支再提交",

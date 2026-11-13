@@ -443,6 +443,7 @@
     "scanningPath": "Scanning {{path}}...",
     "pullSuccess": "Pulled {{count}} repo(s)",
     "pullResult": "Pull completed: {{success}} succeeded, {{fail}} failed",
+    "syncInProgress": "A sync is already in progress, please try again later",
     "pullConflict": "Repos {{repos}} have merge conflicts. Please resolve conflicts manually before syncing",
     "pullDetachedHead": "{{repos}}: repository is in detached HEAD state, please checkout a branch first",
     "detachedHead": "Repository is in detached HEAD state, please switch to a branch before committing",

@@ -9,7 +9,7 @@ import { useUIStore } from '@/stores/ui'
 import { loadDirectory } from '@/lib/api'
 import type { FileNode } from '@/stores/filetree'
 import { useTranslation } from 'react-i18next'
-import { invoke } from '@tauri-apps/api/core'
+import { renameFile } from '@/lib/tauri'
 import { updateNodesWithChildren, findNodeByPath } from '@/lib/utils/treeUtils'
 
 export function useFileTreeDragDrop(nodes: FileNode[]) {
@@ -87,7 +87,8 @@ export function useFileTreeDragDrop(nodes: FileNode[]) {
       if (srcPath === destPath) continue
 
       try {
-        await invoke('rename_file', { req: { old_path: srcPath, new_path: destPath } })
+        // 统一走 file-ops 包装：按源路径所属的工作区根过 fs_guard 白名单（漏传会被后端误拒，拖拽移动全失效）
+        await renameFile(srcPath, destPath)
         const editorStore = useEditorStore.getState()
         editorStore.updateTabPath(srcPath, destPath, fileName)
         successCount++

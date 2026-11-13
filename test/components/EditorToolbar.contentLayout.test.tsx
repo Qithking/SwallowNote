@@ -66,6 +66,8 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
+  // EditorToolbar 引入 @/lib/tauri 值导入后拉入 i18n 初始化链，需要此导出
+  initReactI18next: { type: '3rdParty', init: () => {} },
 }))
 
 // 透传 Tooltip，避免 Radix Provider 依赖
