@@ -353,10 +353,6 @@ function PluginManagerView() {
     })
   }, [plugins, debouncedSearch, listFilter, updateIdSet])
 
-  // "Select all (visible)" — toggles the membership of every
-  // currently-visible plugin in the selection set. The
-  // "visible" anchor matches what the user actually sees on
-  // screen, so the toolbar checkbox stays in sync with the
   /**
    * Build the props passed to a plugin's settings component. The
    * settings dialog is not an "active panel", so `isActive` is

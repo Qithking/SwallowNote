@@ -15,6 +15,31 @@
 import type { LinkFormat } from '../types'
 import type { UploadResult } from '../types'
 
+/**
+ * C30：URL 中破坏 markdown/HTML 语法的字符做百分号编码。
+ * RFC 3986 下百分号编码与原字符语义等价，不影响取图；
+ * `%` 本身不再编码，已有 %xx 序列不被破坏。
+ * 注意 encodeURIComponent 不编码 `( ) '`（RFC 2396 保留字），需显式补码。
+ */
+const EXTRA_URL_ESCAPES: Record<string, string> = {
+  '(': '%28',
+  ')': '%29',
+  "'": '%27',
+}
+
+export function escapeMarkdownUrl(url: string): string {
+  return url.replace(/[()\s<>"'`]/g, (ch) => EXTRA_URL_ESCAPES[ch] ?? encodeURIComponent(ch))
+}
+
+/** C30：HTML 属性值转义（防 src/alt 提前闭合注入）。 */
+function escapeHtmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 /** Build the text that should land in the note body. */
 export function buildInsertText(
   result: UploadResult,
@@ -23,9 +48,9 @@ export function buildInsertText(
   const alt = (result.filename || 'image').replace(/[[\]]/g, '')
   switch (format) {
     case 'markdown':
-      return `![${alt}](${result.url})`
+      return `![${alt}](${escapeMarkdownUrl(result.url)})`
     case 'html':
-      return `<img src="${result.url}" alt="${alt}" />`
+      return `<img src="${escapeHtmlAttr(result.url)}" alt="${escapeHtmlAttr(alt)}" />`
     case 'url':
       return result.url
     default:

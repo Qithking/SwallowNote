@@ -3,7 +3,7 @@
 //! 所有密码处理必须经过 `SecretString`（基于 `Zeroizing<String>`），
 //! 密码缓冲区使用 `mlock` 锁定内存页防止被换出到 swap 文件。
 
-use std::fs::{set_permissions, File, Permissions};
+use std::fs::{set_permissions, Permissions};
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -114,18 +114,17 @@ fn sanitize_for_log(s: &str) -> String {
 fn redact_pragma(s: &str, name: &str) -> String {
     let pattern = format!("PRAGMA {} ", name);
     if let Some(pos) = s.find(&pattern) {
-        let (head, tail) = s.split_at(pos);
-        // 跳过 `PRAGMA <name> ` 部分到值结束（遇到分号或行尾）。
-        let value_start = pos + pattern.len();
-        let value_end = tail[value_start..]
+        // 统一在 tail（= &s[pos..]）坐标系内计算，避免 s 绝对索引误切 tail
+        // 造成越界 panic 或 value_end 坐标错乱（B6）
+        let tail = &s[pos..];
+        let value_end = tail[pattern.len()..]
             .find(|c: char| c == ';' || c == '\n')
-            .map(|e| value_start + e)
-            .unwrap_or(s.len());
-        let _ = head; // 占位，避免未使用警告
+            .map(|e| pattern.len() + e)
+            .unwrap_or(tail.len());
         let mut out = String::with_capacity(s.len());
-        out.push_str(&s[..value_start]);
+        out.push_str(&s[..pos + pattern.len()]); // 前缀 + "PRAGMA <name> "（pattern 完整落在 s 内，索引安全）
         out.push_str("***");
-        out.push_str(&s[value_end..]);
+        out.push_str(&tail[value_end..]);
         out
     } else {
         s.to_string()
@@ -139,10 +138,6 @@ pub fn ensure_swl_extension<P: AsRef<Path>>(path: P) -> Result<(), String> {
     }
     Ok(())
 }
-
-/// `File` 的便捷别名，避免在调用处导入 `std::fs::File`。
-#[allow(dead_code)]
-pub type FileHandle = File;
 
 #[cfg(test)]
 mod tests {
@@ -176,5 +171,31 @@ mod tests {
         assert!(validate_password_length("a1b2c3").is_err()); // 6 字符过短
         let max = "a1".repeat(128); // 恰好 256 字符
         assert!(validate_password_length(&max).is_ok());
+    }
+
+    #[test]
+    fn redact_pragma_replaces_value() {
+        let out = redact_pragma(
+            "db error: PRAGMA key = 'secret'; PRAGMA cipher_memory_security = ON",
+            "key",
+        );
+        assert_eq!(
+            out,
+            "db error: PRAGMA key ***; PRAGMA cipher_memory_security = ON"
+        );
+    }
+
+    #[test]
+    fn redact_pragma_no_match_returns_original() {
+        let s = "ordinary error message";
+        assert_eq!(redact_pragma(s, "key"), s);
+    }
+
+    #[test]
+    fn redact_pragma_no_panic_when_value_spans_past_pattern_end() {
+        // B6 回归：旧实现把 s 的绝对索引 value_start 用来切 tail，
+        // pos 较大时 tail[value_start..] 越界 panic（本例 pos=10、value_start=21 > tail.len()=12）
+        let s = "0123456789PRAGMA key x";
+        assert_eq!(redact_pragma(s, "key"), "0123456789PRAGMA key ***");
     }
 }

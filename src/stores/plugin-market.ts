@@ -34,10 +34,9 @@ import {
 } from '@/lib/tauri'
 import { usePluginStore } from './plugin'
 
-// Track in-flight index fetches so a new refresh aborts the previous one,
-// preventing slow responses from overwriting faster ones (R-M3).
-let indexFetchAbort: AbortController | null = null
-let indexProgressAbort: AbortController | null = null
+// C4：普通刷新与进度刷新共享同一 AbortController——任意一方发起新请求时，
+// 旧请求（无论哪种类型）一律取消，防止慢响应回来覆盖新状态（R-M3）。
+let indexAbort: AbortController | null = null
 
 /** 宿主版本缓存：undefined = 未取过，null = 取失败（过滤保守放行）。 */
 let cachedHostVersion: string | null | undefined
@@ -186,12 +185,10 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       set({ index: null, fetchError: null })
       return
     }
-    // Abort any in-flight fetch so a slow response can't overwrite a newer one (R-M3)
-    if (indexFetchAbort) {
-      indexFetchAbort.abort()
-    }
+    // Abort any in-flight fetch (any kind) so a slow response can't overwrite a newer one (R-M3 / C4)
+    indexAbort?.abort()
     const abort = new AbortController()
-    indexFetchAbort = abort
+    indexAbort = abort
     // If background refresh, don't clear isFetchingIndex to avoid UI flicker
     if (!options?.background) {
       set({ isFetchingIndex: true, fetchError: null, fetchProgress: 0 })
@@ -200,6 +197,8 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       const index = await fetchPluginIndexCached(url, abort.signal)
       if (abort.signal.aborted) return
       const compatible = await applyHostCompatibility(index)
+      // C4：兼容性过滤的 await 期间请求可能已被新请求取代，set 前复检
+      if (abort.signal.aborted) return
       set({ index: compatible, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
       if (e?.name === 'AbortError' || abort.signal.aborted) return
@@ -216,12 +215,10 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       set({ index: null, fetchError: null, fetchProgress: 0 })
       return
     }
-    // Abort any in-flight progress fetch (R-M3)
-    if (indexProgressAbort) {
-      indexProgressAbort.abort()
-    }
+    // Abort any in-flight fetch (any kind) so a slow response can't overwrite a newer one (R-M3 / C4)
+    indexAbort?.abort()
     const abort = new AbortController()
-    indexProgressAbort = abort
+    indexAbort = abort
     set({ isFetchingIndex: true, fetchError: null, fetchProgress: 0 })
     try {
       const text = await fetchWithProgress(url, (percent) => {
@@ -230,6 +227,8 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       if (abort.signal.aborted) return
       const raw = JSON.parse(text)
       const compatible = await applyHostCompatibility(normaliseIndex(raw))
+      // C4：兼容性过滤的 await 期间请求可能已被新请求取代，set 前复检
+      if (abort.signal.aborted) return
       set({ index: compatible, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
       if (e?.name === 'AbortError' || abort.signal.aborted) return

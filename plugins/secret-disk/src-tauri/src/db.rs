@@ -77,7 +77,8 @@ impl Database {
         let sql = format!("PRAGMA rekey = '{}';", escape_sql_string(new_password));
         self.conn
             .execute_batch(&sql)
-            .map_err(|e| format!("rekey 失败: {}", e))
+            // C31：固定措辞，不透传底层错误（可能含内部 SQL/实现细节）
+            .map_err(|_| "更换密码失败".to_string())
     }
 }
 
@@ -95,9 +96,13 @@ impl Drop for Database {
 /// 顺序很重要：先 `key` 解密/设置密钥，再设置其他安全 PRAGMA。
 fn apply_pragmas(conn: &Connection, password: &str) -> Result<(), String> {
     // PRAGMA key 接受原始密码，SQLCipher 内部用 PBKDF2-HMAC-SHA512 × 256000 轮派生。
+    // PRAGMA 无法参数绑定（SQLCipher 限制），x'...' raw-key 形式会跳过 PBKDF2 改变加密语义，
+    // 故沿用单引号转义（SQLite 字符串字面量语义下完备）。
     let key_sql = format!("PRAGMA key = '{}';", escape_sql_string(password));
     conn.execute_batch(&key_sql)
-        .map_err(|e| format!("PRAGMA key 失败（密码可能错误）: {}", e))?;
+        // C31：PRAGMA key 本身几乎不因密码错误失败（密码错误的权威判定在下方 schema 校验），
+        // 固定措辞且不透传底层错误细节。
+        .map_err(|_| "密钥设置失败".to_string())?;
 
     // 验证密码正确性：执行一个简单查询，密码错误时会报错。
     conn.execute_batch("SELECT count(*) FROM sqlite_master;")
@@ -140,4 +145,51 @@ fn create_schema(conn: &Connection) -> Result<(), String> {
         "#,
     )
     .map_err(|e| format!("建表失败: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// uuid 文件名避免并行冲突。
+    fn test_db_path() -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("secret-disk-db-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("创建测试目录失败");
+        (dir.join("secret.swl"), dir)
+    }
+
+    // C31 回归：含单引号的密码可正确创建/打开（escape_sql_string 完备性，注入面测试）
+    #[test]
+    fn password_with_quotes_roundtrip() {
+        let (path, dir) = test_db_path();
+        {
+            let db = Database::create(&path, "ab'cd'ef--'; DROP TABLE notes;--").expect("创建失败");
+            db.conn().execute_batch("INSERT INTO notes(id,title,type) VALUES('1','t','file');").expect("写入失败");
+        }
+        let db = Database::open(&path, "ab'cd'ef--'; DROP TABLE notes;--").expect("打开失败");
+        let count: i64 = db.conn().query_row("SELECT count(*) FROM notes;", [], |r| r.get(0)).expect("查询失败");
+        assert_eq!(count, 1, "表未被注入语句破坏，数据完整");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // C31 回归：错误密码必须返回固定措辞「密码错误」，不透传底层错误细节
+    #[test]
+    fn wrong_password_reports_fixed_message_without_internal_details() {
+        let (path, dir) = test_db_path();
+        Database::create(&path, "correct-password").expect("创建失败");
+        let err = Database::open(&path, "wrong-password").err().expect("预期打开失败");
+        assert_eq!(err, "密码错误");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // C31 回归：垃圾文件（非数据库）打开时返回固定措辞，不透传内部错误（如 "file is not a database"）
+    #[test]
+    fn garbage_file_reports_fixed_message_without_internal_details() {
+        let (path, dir) = test_db_path();
+        std::fs::write(&path, b"this is not a database").expect("写入垃圾文件失败");
+        let err = Database::open(&path, "any-password").err().expect("预期打开失败");
+        assert_eq!(err, "密码错误");
+        assert!(!err.contains("PRAGMA"), "错误信息不得包含内部 PRAGMA 细节");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

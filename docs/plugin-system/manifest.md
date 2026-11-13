@@ -97,7 +97,7 @@ const manifest: PluginManifest = {
 | 取值 | 含义 | 何时被检查 |
 | --- | --- | --- |
 | `'storage'` | 持久化键值存储 | `store.get / set / delete / clear / keys / entries` 全部调用 |
-| `'events'` | 订阅宿主事件 | `events.on('note:open', ...)` 等订阅时 |
+| `'events'` | 订阅宿主事件 | `events.on('note:open', ...)` 等订阅时；`onSettingsChange` 设置变更订阅同样走 events 门（内部是 `events.on('plugin-settings:change')`） |
 | `'context-menu'` | 贡献右键菜单项 | `registerContextMenu(...)` 注册时 |
 | `'backend'` | 调用 Rust 后端 | `invokeBackend('cmd', args)` 调用时 |
 | `'filesystem-read'` | 读文件 | 未来 FS API 启用时 |
@@ -120,7 +120,7 @@ const manifest: PluginManifest = {
 
 **最佳实践**：
 
-- **最小权限原则**：只声明实际用到的权限。一个只用 `usePluginStorage` 的插件不要声明 `events`。
+- **最小权限原则**：只声明实际用到的权限。一个只用 `usePluginStorage` / `getSetting` / `setSetting` 的插件不要声明 `events`。但注意：**订阅设置变更（`onSettingsChange`）需要 `events` 权限**——该订阅内部走 `events.on('plugin-settings:change')`，未声明 `events` 时回调静默收不到（宿主在订阅时抛 `PluginPermissionDeniedError`）。
 - **运行时检查**：宿主使用 `createPluginEventBus(pluginId)` 创建每个插件的事件总线实例，当插件调用 `events.on()` 时，宿主会自动为 handler 打上 `__pluginId` 标签并查询 `assertPermission(pluginId, 'events', ...)`，未授权时抛 `PluginPermissionDeniedError`。**插件作者无需手动为 handler 添加 `__pluginId`**。
 - **撤销即时生效**：用户在插件管理页撤销某条权限后，下一次 `store.get / events.on` 等调用立即报错，无需重启宿主。
 
@@ -207,10 +207,10 @@ export default manifest
 | `events` | `PluginEventBus` | 宿主事件总线，可订阅主题/笔记/语言/设置变更 |
 | `activeNoteContent` | `string` | 当前活动笔记的内容（Markdown 字符串）。无活动笔记时为空字符串 |
 | `activeNotePath` | `string` | 当前活动笔记的文件路径。无活动笔记时为空字符串 |
-| `getSetting` | `<T>(key: string) => Promise<T \| null>` | 按 schema 读取单个设置值，缺失时回退到 schema 默认值并返回 `null` |
-| `setSetting` | `<T>(key: string, value: T) => Promise<void>` | 持久化单个设置键（写穿 SQLite） |
-| `getAllSettings` | `() => Promise<Record<string, unknown>>` | 读取所有设置为扁平 key/value map，缺失键回退到 schema 默认值 |
-| `onSettingsChange` | `(handler: (settings: Record<string, unknown>) => void) => () => void` | 订阅设置变化，返回取消订阅函数 |
+| `getSetting` | `<T>(key: string) => Promise<T \| null>` | 按 schema 读取单个设置值，缺失时回退到 schema 默认值并返回 `null`（要求 `'storage'` 权限） |
+| `setSetting` | `<T>(key: string, value: T) => Promise<void>` | 持久化单个设置键（写穿 SQLite，要求 `'storage'` 权限） |
+| `getAllSettings` | `() => Promise<Record<string, unknown>>` | 读取所有设置为扁平 key/value map，缺失键回退到 schema 默认值（要求 `'storage'` 权限） |
+| `onSettingsChange` | `(handler: (settings: Record<string, unknown>) => void) => () => void` | 订阅设置变化，返回取消订阅函数（要求 `'events'` 权限：内部走 `events.on('plugin-settings:change')`） |
 | `getActiveNoteFrontmatter` | `() => Record<string, unknown> \| null` | 获取当前笔记的 frontmatter 对象，无活动笔记时返回 `null` |
 | `setActiveNoteFrontmatter` | `(data: Record<string, unknown>) => void` | 合并更新当前笔记的 frontmatter，无活动笔记时为空操作 |
 | `onNoteFrontmatterChanged` | `(callback: (data: Record<string, unknown>) => void) => () => void` | 监听 frontmatter 变更事件，返回取消订阅函数 |

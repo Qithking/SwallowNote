@@ -342,7 +342,6 @@ export async function handleRefreshFileTree() {
 }
 
 export function useKeyboardShortcuts() {
-  const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const toggleLogViewer = useUIStore((s) => s.toggleLogViewer)
 
@@ -378,10 +377,6 @@ export function useKeyboardShortcuts() {
       )
         return
       if (dispatchBuiltin(e, 'openExplorer', handleOpenExplorer)) return
-
-      // 用户可在设置中自定义的全局快捷键
-
-      if (dispatchBuiltin(e, 'commandPalette', toggleCommandPalette)) return
 
       // Ctrl+F → 编辑器查找/替换;Ctrl+Shift+F → 全局搜索侧边栏
       // CodeMirror editor 已获得焦点时由 CodeEditor 内部 keymap 处理,避免双重派发
@@ -444,22 +439,11 @@ export function useKeyboardShortcuts() {
         }
         return
       }
-
-      // Escape 关闭浮层；编辑器需要时不拦截
-      if (e.key === 'Escape') {
-        const { commandPaletteVisible } = useUIStore.getState()
-        if (commandPaletteVisible) {
-          toggleCommandPalette()
-          return
-        }
-        // 无浮层时不 preventDefault，交由编辑器处理
-      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
-    toggleCommandPalette,
     toggleSidebar,
     toggleLogViewer,
   ])

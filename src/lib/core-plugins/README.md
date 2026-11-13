@@ -21,7 +21,7 @@ export to the SDK first.
 
 ```
 core-plugins/
-├── index.ts                   # Re-exports all manifests as CORE_PLUGINS (SAMPLE_PLUGINS is deprecated)
+├── index.ts                   # Re-exports all manifests as CORE_PLUGINS
 ├── recent-notes-counter.tsx   # Baseline: storage + events + context-menu
 ├── word-counter.tsx           # editorToolbar + editorArea placement
 ├── theme-watcher.tsx          # Multi-event subscription + settings emit

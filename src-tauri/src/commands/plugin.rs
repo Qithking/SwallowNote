@@ -1404,6 +1404,25 @@ pub async fn install_plugin_from_bytes(
     Ok(meta)
 }
 
+/// C37②：更新检查的版本比较，语义与前端 isNewerVersion（plugin-market.ts:133）对齐：
+/// - 双方均为合法 semver → 数值比较（build 元数据剥离后比较：semver 规范
+///   规定 build 不参与优先级，npm semver.gt 同语义；rust semver crate 的
+///   derive(Ord) 会连 build 一起比较，需显式剥离，否则两路径结论不同）；
+/// - 任一非法 → 回退字典序 >（与前端一致；不等即报更新的旧语义会在
+///   本地版本比远端新（回滚）时误报）。
+fn is_remote_version_newer(local: &str, remote: &str) -> bool {
+    match (Version::parse(local), Version::parse(remote)) {
+        (Ok(l), Ok(r)) => {
+            let strip_build = |mut v: Version| {
+                v.build = semver::BuildMetadata::EMPTY;
+                v
+            };
+            strip_build(r) > strip_build(l)
+        }
+        _ => remote > local,
+    }
+}
+
 // 对比本地与远程索引，返回有更新的插件列表。
 #[tauri::command]
 pub async fn check_plugin_updates(
@@ -1518,15 +1537,9 @@ pub async fn check_plugin_updates(
             continue;
         }
         let local = local_versions.get(&entry.id).cloned().unwrap_or_default();
-        // 用 semver crate 做版本比较,避免字符串比较 semver 时的常见
-        // 陷阱(如 0.9.0 vs 0.10.0 字典序错乱,prerelease 0.10.0-rc.1 vs
-        // 0.10.0 被误判为不同版本但被 TS 端 isNewerVersion 拒绝导致 UI
-        // 显示 Update 但点了却降级)。任一 Version::parse 失败时回退
-        // 到字符串相等比较,与原行为兼容。
-        let is_newer = match (Version::parse(&local), Version::parse(&entry.version)) {
-            (Ok(l), Ok(r)) => r > l,
-            _ => local.as_str() != entry.version.as_str(),
-        };
+        // C37②：与前端 isNewerVersion 语义对齐（数值比较 + build 剥离 +
+        // 非法回退字典序 >），避免同一版本号两路径结论不同。
+        let is_newer = is_remote_version_newer(&local, &entry.version);
         if is_newer {
             updates.push(PluginUpdateInfo {
                 id: entry.id.clone(),
@@ -2572,6 +2585,31 @@ mod tests {
 
         // invalid 字符串:parse 应当失败,调用方回退到字符串 !=
         assert!(Version::parse("not-a-version").is_err());
+    }
+
+    /// C37②：更新检查的版本比较语义与前端 isNewerVersion（plugin-market.ts:133）
+    /// 对齐。验证：
+    /// 1. 合法 semver 数值比较（build 元数据剥离后比较，与 npm semver.gt 一致）；
+    /// 2. 任一非法 → 回退字典序 >（与前端一致；原 != 语义会在本地版本
+    ///    比远端新（回滚）时误报，且与前端同一非法版本号两路径结论不同）。
+    #[test]
+    fn test_is_remote_version_newer_aligns_with_frontend() {
+        // 合法 semver：数值比较
+        assert!(is_remote_version_newer("0.9.0", "0.10.0"));
+        assert!(!is_remote_version_newer("1.1.0", "1.0.9"), "远端回退不报更新");
+
+        // build 元数据按规范不参与优先级（npm semver.gt 同语义）
+        assert!(!is_remote_version_newer("1.0.0", "1.0.0+build.1"));
+
+        // 非法版本号回退字典序 >（与前端一致）
+        assert!(is_remote_version_newer("abc", "abd"));
+        assert!(
+            !is_remote_version_newer("abd", "abc"),
+            "本地字典序更大不报更新（原 != 会误报）"
+        );
+
+        // prerelease < release
+        assert!(!is_remote_version_newer("0.10.0", "0.10.0-rc.1"));
     }
 
     /// M1: install_plugin 重新安装时,目标 version_dir 必须先被清空,

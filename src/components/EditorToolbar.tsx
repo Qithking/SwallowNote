@@ -18,6 +18,7 @@ import { logger } from '@/lib/logger'
 import { FindReplacePanel } from '@/components/FindReplacePanel'
 import type { FindReplaceEditorType, FindReplaceMatchCount, FindReplaceOptions } from '@/components/FindReplacePanel'
 import { isImageFile } from '@/lib/utils/fileTypeUtils'
+import { useCopyFeedback } from '@/hooks'
 
 function EditorToolbar() {
   const toggleViewMode = useEditorStore((s) => s.toggleViewMode)
@@ -57,8 +58,8 @@ function EditorToolbar() {
       }
     })
   )
-  const [copied, setCopied] = useState(false)
-  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // C17：复制反馈（copied + 3s 复位定时器）统一走 useCopyFeedback
+  const { copied, markCopied } = useCopyFeedback(3000)
 
   // 查找/替换面板状态
   const [findReplaceVisible, setFindReplaceVisible] = useState(false)
@@ -74,9 +75,6 @@ function EditorToolbar() {
     regexp: false,
   })
 
-  useEffect(() => {
-    return () => clearTimeout(copyTimer.current)
-  }, [])
   // isWide 直接派生自 store，保持与 noteWidth 单一数据源同步
   const isWide = noteWidth === 'wide'
   const [downloading, setDownloading] = useState(false)
@@ -259,9 +257,7 @@ function EditorToolbar() {
   const handleCopyPath = async () => {
     try {
       await navigator.clipboard.writeText(path)
-      setCopied(true)
-      clearTimeout(copyTimer.current)
-      copyTimer.current = setTimeout(() => setCopied(false), 3000)
+      markCopied()
     } catch (err) {
       logger.error('editor-toolbar', 'Failed to copy path:', err)
     }

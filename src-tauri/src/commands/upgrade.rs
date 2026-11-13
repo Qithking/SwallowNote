@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-use log::{info, warn};
+use log::warn;
 // macOS 下用 pre_exec 调用 setsid() 让重启脚本脱离父进程会话
 #[cfg(target_os = "macos")]
 use std::os::unix::process::CommandExt;
@@ -81,6 +81,29 @@ fn get_default_download_dir() -> PathBuf {
     }
 }
 
+/// C18：更新检测用 semver 比较而非字符串不等。
+/// - 双方均可解析为严格 semver → `latest > current` 才算有更新
+///   （远端版本回退/prerelease 不误报）；
+/// - 任一解析失败 → 回退字符串不等比较，与原行为兼容。
+fn is_update_available(current_version: &str, latest_version: &str) -> bool {
+    match (
+        semver::Version::parse(current_version),
+        semver::Version::parse(latest_version),
+    ) {
+        (Ok(cur), Ok(latest)) => {
+            // semver crate 的 derive(Ord) 会连 build 元数据一起比较（与规范
+            // "build 不参与优先级"不符），显式清空后再比较，避免 tag 带
+            // +build.x 时误报有更新。
+            let strip_build = |mut v: semver::Version| {
+                v.build = semver::BuildMetadata::EMPTY;
+                v
+            };
+            strip_build(latest) > strip_build(cur)
+        }
+        _ => current_version != latest_version,
+    }
+}
+
 /// Check the latest release version from GitHub API.
 /// Returns (latest_version, has_update) or an error string.
 /// Uses a 10-second timeout to avoid hanging when GitHub is unreachable.
@@ -115,7 +138,7 @@ pub async fn check_latest_version(current_version: String) -> Result<(String, bo
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     let latest = release.tag_name.trim_start_matches('v').to_string();
-    let has_update = latest != current_version;
+    let has_update = is_update_available(&current_version, &latest);
     Ok((latest, has_update))
 }
 
@@ -254,31 +277,13 @@ async fn download_latest_release_inner(app: &AppHandle, channel: &str) -> Result
     file.sync_all()
         .map_err(|e| format!("Failed to sync file: {}", e))?;
 
-    // 校验 SHA-256：release 提供 digest 则比对，否则仅记录计算出的哈希
+    // 校验 SHA-256（fail-closed）：release 未提供 digest、格式无法解析或哈希不匹配时，
+    // 一律清理已下载文件并拒绝安装，避免经第三方渠道下载的安装包未经验证即被执行。
     let computed_hash = format!("{:x}", hasher.finalize());
-    if let Some(digest) = asset.digest.as_ref() {
-        // GitHub digest 格式："sha256:<hex>"
-        if let Some(expected) = digest.strip_prefix("sha256:") {
-            if !expected.eq_ignore_ascii_case(&computed_hash) {
-                // 哈希不匹配：文件可能损坏或被篡改，记录详情后清理已下载文件并中止，
-                // 避免向用户发出"下载完成"通知导致安装不可信的安装包。
-                warn!(
-                    "WARN: SHA-256 mismatch for {}: expected {}, got {}",
-                    asset.name, expected, computed_hash
-                );
-                let _ = std::fs::remove_file(&file_path);
-                return Err(format!(
-                    "SHA-256 mismatch for {}: expected {}, got {}",
-                    asset.name, expected, computed_hash
-                ));
-            }
-        }
-    } else {
-        // release 未提供 digest，无法校验完整性，仅记录计算出的哈希便于排查
-        info!(
-            "INFO: Downloaded {} SHA-256: {}",
-            asset.name, computed_hash
-        );
+    if let Err(err) = verify_asset_digest(&asset.name, asset.digest.as_deref(), &computed_hash) {
+        warn!("WARN: digest verification failed for {}: {}", asset.name, err);
+        let _ = std::fs::remove_file(&file_path);
+        return Err(err);
     }
 
     let _ = app.emit("download-complete", DownloadComplete {
@@ -286,6 +291,33 @@ async fn download_latest_release_inner(app: &AppHandle, channel: &str) -> Result
     });
 
     Ok(())
+}
+
+/// 校验下载产物的 SHA-256 摘要（fail-closed）。
+/// digest 缺失、格式非 "sha256:<hex>" 或哈希不匹配时均返回 Err，
+/// 调用方必须清理已下载文件并中止安装。
+fn verify_asset_digest(
+    asset_name: &str,
+    digest: Option<&str>,
+    computed_hash: &str,
+) -> Result<(), String> {
+    let digest = digest.ok_or_else(|| {
+        format!(
+            "Release asset {} has no digest, refusing to install unverified package",
+            asset_name
+        )
+    })?;
+    let expected = digest.strip_prefix("sha256:").ok_or_else(|| {
+        format!("Unsupported digest format for {}: {}", asset_name, digest)
+    })?;
+    if expected.eq_ignore_ascii_case(computed_hash) {
+        Ok(())
+    } else {
+        Err(format!(
+            "SHA-256 mismatch for {}: expected {}, got {}",
+            asset_name, expected, computed_hash
+        ))
+    }
 }
 
 /// Cancel the current download by resetting the lock.
@@ -749,5 +781,72 @@ mod tests {
     fn apply_update_channel_non_github_url_keeps_url() {
         let url = "https://gh-proxy.com/https://github.com/Qithking/SwallowNote/releases/download/v0.2.0/a.dmg";
         assert_eq!(apply_update_channel(url, "ghproxy"), url);
+    }
+
+    const VALID_HASH: &str =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    // C19 回归：release 未提供 digest 时必须拒绝安装（fail-closed），不得放行
+    #[test]
+    fn verify_asset_digest_missing_digest_rejects() {
+        let result = verify_asset_digest("app.dmg", None, VALID_HASH);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no digest"));
+    }
+
+    // C19 回归：digest 格式无法解析（缺 "sha256:" 前缀）时同样拒绝安装
+    #[test]
+    fn verify_asset_digest_unsupported_format_rejects() {
+        let result = verify_asset_digest("app.dmg", Some("md5:abc123"), VALID_HASH);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unsupported digest format"));
+    }
+
+    // digest 匹配（大小写不敏感）时放行
+    #[test]
+    fn verify_asset_digest_matching_accepts_case_insensitive() {
+        assert!(verify_asset_digest("app.dmg", Some("sha256:ABCDEF"), "abcdef").is_ok());
+        assert!(verify_asset_digest("app.dmg", Some(&format!("sha256:{}", VALID_HASH)), VALID_HASH).is_ok());
+    }
+
+    // 哈希不匹配时拒绝并给出 expected/got 详情
+    #[test]
+    fn verify_asset_digest_mismatch_rejects() {
+        let result = verify_asset_digest("app.dmg", Some("sha256:aa"), VALID_HASH);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("SHA-256 mismatch") && err.contains(VALID_HASH));
+    }
+
+    // C18 回归：更新检测用 semver 数值比较而非字典序（0.10.0 > 0.9.0）
+    #[test]
+    fn is_update_available_semver_compares_numerically() {
+        assert!(
+            is_update_available("0.9.0", "0.10.0"),
+            "semver 必须认为 0.10.0 > 0.9.0"
+        );
+    }
+
+    // C18 回归：tag 带 build 元数据（+build.1）时不得误报（semver 规范：build 元数据不参与优先级比较）
+    #[test]
+    fn is_update_available_build_metadata_not_newer() {
+        assert!(!is_update_available("0.2.0", "0.2.0+build.1"));
+    }
+
+    // C18 回归：远端版本回退（降级/prerelease）不误报有更新
+    #[test]
+    fn is_update_available_downgrade_not_reported() {
+        assert!(!is_update_available("0.2.0", "0.1.9"));
+        assert!(!is_update_available("0.2.0", "0.2.0-rc.1"));
+    }
+
+    // C18 回归：任一版本解析失败时回退字符串不等比较（与原行为兼容）
+    #[test]
+    fn is_update_available_fallback_to_string_compare() {
+        assert!(is_update_available("abc", "0.3.0"));
+        assert!(is_update_available("0.2.0", "abc"));
+        assert!(!is_update_available("abc", "abc"));
+        // 两段式（缺 PATCH）非严格 semver → 回退字符串比较
+        assert!(is_update_available("0.2", "0.3"));
     }
 }

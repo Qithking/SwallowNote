@@ -132,11 +132,11 @@ describe('TC-WaveB-M1: dispatchBuiltin toast description names the built-in acti
     // explicitly names the winning built-in.
     useUIStore.setState({
       pluginCommandShortcuts: {
-        'com.foo:m1-desc': 'Ctrl+P',
+        'com.foo:m1-desc': 'Ctrl+F',
       },
     })
-    const e = fakeKeyEvent('Ctrl+P')
-    dispatchBuiltin(e, 'commandPalette', () => {})
+    const e = fakeKeyEvent('Ctrl+F')
+    dispatchBuiltin(e, 'findReplace', () => {})
 
     expect(toast).toHaveBeenCalledTimes(1)
     const [, options] = vi.mocked(toast).mock.calls[0] as [
@@ -146,7 +146,7 @@ describe('TC-WaveB-M1: dispatchBuiltin toast description names the built-in acti
     // The description must name the action so the user
     // knows the palette (not the plugin) just opened.
     expect(options.description).toBeDefined()
-    expect(options.description).toContain('commandPalette')
+    expect(options.description).toContain('findReplace')
   })
 
   it('renders the description through i18n (zh-CN default)', () => {
@@ -174,11 +174,11 @@ describe('TC-WaveB-M1: dispatchBuiltin toast description names the built-in acti
     // duration to 3s.
     useUIStore.setState({
       pluginCommandShortcuts: {
-        'com.foo:m1-dur': 'Ctrl+P',
+        'com.foo:m1-dur': 'Ctrl+F',
       },
     })
-    const e = fakeKeyEvent('Ctrl+P')
-    dispatchBuiltin(e, 'commandPalette', () => {})
+    const e = fakeKeyEvent('Ctrl+F')
+    dispatchBuiltin(e, 'findReplace', () => {})
     const [, options] = vi.mocked(toast).mock.calls[0] as [
       string,
       { duration: number },
@@ -223,18 +223,18 @@ describe('TC-WaveB-M2: conflict-toast throttle', () => {
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     useUIStore.setState({
       pluginCommandShortcuts: {
-        'com.foo:m2-elapsed': 'Ctrl+P',
+        'com.foo:m2-elapsed': 'Ctrl+F',
       },
     })
-    dispatchBuiltin(fakeKeyEvent('Ctrl+P'), 'commandPalette', () => {})
+    dispatchBuiltin(fakeKeyEvent('Ctrl+F'), 'findReplace', () => {})
     expect(toast).toHaveBeenCalledTimes(1)
     // Advance 250ms — past the 200ms throttle window.
     vi.setSystemTime(new Date('2026-01-01T00:00:00.250Z'))
-    dispatchBuiltin(fakeKeyEvent('Ctrl+P'), 'commandPalette', () => {})
+    dispatchBuiltin(fakeKeyEvent('Ctrl+F'), 'findReplace', () => {})
     expect(toast).toHaveBeenCalledTimes(2)
   })
 
-  it('throttles per binding key (Ctrl+S and Ctrl+P are independent)', () => {
+  it('throttles per binding key (Ctrl+S and Ctrl+F are independent)', () => {
     // Two different plugins bound to two different keys:
     // each key's toast must show exactly once even when
     // both keys are pressed back-to-back in the same
@@ -243,11 +243,11 @@ describe('TC-WaveB-M2: conflict-toast throttle', () => {
     useUIStore.setState({
       pluginCommandShortcuts: {
         'com.foo:m2-save': 'Ctrl+S',
-        'com.bar:m2-pal': 'Ctrl+P',
+        'com.bar:m2-pal': 'Ctrl+F',
       },
     })
     dispatchBuiltin(fakeKeyEvent('Ctrl+S'), 'saveFile', () => {})
-    dispatchBuiltin(fakeKeyEvent('Ctrl+P'), 'commandPalette', () => {})
+    dispatchBuiltin(fakeKeyEvent('Ctrl+F'), 'findReplace', () => {})
     expect(toast).toHaveBeenCalledTimes(2)
   })
 })

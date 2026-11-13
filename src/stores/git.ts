@@ -166,14 +166,18 @@ export const useGitStore = create<GitState>((set, get) => ({
 
     set({ isGitLoading: true, scanProgress: { current: 0, total: paths.length, message: i18n.t('git.scanning') } })
     try {
-      const scanPromises = paths.map(async (path, index) => {
+      // C3 修复：进度按「已完成数」聚合，而非各并发任务用自身 index 覆盖 set（乱跳）
+      let completed = 0
+      const scanPromises = paths.map(async (path) => {
         try {
-          set({ scanProgress: { current: index, total: paths.length, message: i18n.t('git.scanningPath', { path }) } })
           const repos = await scanGitRepos(path)
           return repos
         } catch (e) {
           logger.error('git-store', `Failed to scan git repos in ${path}:`, e)
           return []
+        } finally {
+          completed += 1
+          set({ scanProgress: { current: completed, total: paths.length, message: i18n.t('git.scanningPath', { path }) } })
         }
       })
 

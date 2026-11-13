@@ -24,6 +24,8 @@ import {
   registerCommand,
   unregisterCommand,
   clearPluginCommands,
+  listPluginCommands,
+  subscribePluginCommands,
 } from './plugin-commands'
 import {
   registerEditor,
@@ -104,6 +106,9 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
     registerCommand: (id, command) => registerCommand(id, command),
     unregisterCommand: (id, commandId) => unregisterCommand(id, commandId),
     clearPluginCommands: (id) => clearPluginCommands(id),
+    // B8：读侧同样桥接宿主注册表，usePluginCommands/list/subscribe 不再回退空 stub
+    listPluginCommands: () => listPluginCommands(),
+    subscribePluginCommands: (listener) => subscribePluginCommands(listener),
     // emit 端权限检查：未授权不能 emit，授权的只能以自身 pluginId 归因。
     on: (e, h) => pluginEvents.on(e, h),
     off: (e, h) => pluginEvents.off(e, h),

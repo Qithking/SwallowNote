@@ -35,9 +35,8 @@ struct JsonRpcRequest {
     jsonrpc: String,
     id: Value,
     method: String,
-    // P2.2 起各命令会读取 params，骨架阶段暂未使用
+    // C34：params 已在各命令中读取，移除骨架阶段遗留的 allow(dead_code)
     #[serde(default)]
-    #[allow(dead_code)]
     params: Value,
 }
 

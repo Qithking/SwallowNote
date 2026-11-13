@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useGitStore, mapRepoInfoToRepository, mapRepoInfosToRepositories, type GitRepository, type GitRepositoryInfo, type RepoStatus } from '@/stores/git'
-import { gitPull, gitCredentialGet } from '@/lib/tauri'
+import { gitPull, gitCredentialGet, scanGitRepos } from '@/lib/tauri'
 
 vi.mock('@/lib/tauri', () => ({
   gitPull: vi.fn().mockResolvedValue(undefined),
@@ -12,6 +12,7 @@ vi.mock('@/lib/tauri', () => ({
   removeConflictRepoRecord: vi.fn().mockResolvedValue(undefined),
   syncConflictRepoRecords: vi.fn().mockResolvedValue([]),
   gitGetConflictFiles: vi.fn().mockResolvedValue([]),
+  scanGitRepos: vi.fn().mockResolvedValue([]),
 }))
 
 describe('TC-030: Git状态查看测试', () => {
@@ -596,5 +597,73 @@ describe('TC-034: isConflictFile 边界场景测试', () => {
     // 路径前缀相似但不是完整路径匹配
     expect(useGitStore.getState().isConflictFile('/workspace/repo1/file1.md.bak')).toBeNull()
     expect(useGitStore.getState().isConflictFile('/workspace/repo1/file1')).toBeNull()
+  })
+})
+
+describe('C3 回归: scanAndCacheRepos 扫描进度聚合', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useGitStore.setState({
+      repositories: [],
+      cachedRepositories: [],
+      activeRepository: null,
+      conflictRepos: [],
+      conflictFilesMap: {},
+      isGitLoading: false,
+      isPulling: false,
+      scanProgress: null,
+      syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 }
+    })
+  })
+
+  afterEach(() => {
+    vi.resetAllMocks()
+  })
+
+  it('进度按完成数单调递增，不随并发完成顺序乱跳', async () => {
+    // 三个路径并发扫描，完成顺序故意乱序：b(10ms) → c(30ms) → a(50ms)
+    const delays: Record<string, number> = { '/ws/a': 50, '/ws/b': 10, '/ws/c': 30 }
+    vi.mocked(scanGitRepos).mockImplementation(async (p) => {
+      await new Promise((resolve) => setTimeout(resolve, delays[p]))
+      return []
+    })
+
+    const snapshots: number[] = []
+    const unsub = useGitStore.subscribe((state) => {
+      if (state.scanProgress) snapshots.push(state.scanProgress.current)
+    })
+
+    await useGitStore.getState().scanAndCacheRepos(['/ws/a', '/ws/b', '/ws/c'])
+    unsub()
+
+    // 单调不减（不乱跳）；旧实现按各自 index set，完成顺序乱序时会回退（如 [1,2,0]）
+    expect(snapshots[0]).toBe(0)
+    for (let i = 1; i < snapshots.length; i++) {
+      expect(snapshots[i]).toBeGreaterThanOrEqual(snapshots[i - 1])
+    }
+    expect(snapshots).toContain(3)
+    expect(useGitStore.getState().scanProgress).toBeNull()
+  })
+
+  it('扫描失败的路径同样推进进度', async () => {
+    vi.mocked(scanGitRepos).mockImplementation(async (p) => {
+      if (p === '/ws/broken') throw new Error('boom')
+      return []
+    })
+
+    const snapshots: number[] = []
+    const unsub = useGitStore.subscribe((state) => {
+      if (state.scanProgress) snapshots.push(state.scanProgress.current)
+    })
+
+    await useGitStore.getState().scanAndCacheRepos(['/ws/ok', '/ws/broken'])
+    unsub()
+
+    // 失败路径不中断计数：进度仍单调推进到 total
+    expect(snapshots[0]).toBe(0)
+    for (let i = 1; i < snapshots.length; i++) {
+      expect(snapshots[i]).toBeGreaterThanOrEqual(snapshots[i - 1])
+    }
+    expect(snapshots).toContain(2)
   })
 })

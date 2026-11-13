@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -195,12 +195,14 @@ pub fn cmd_delete_item(state: &State, params: &Value) -> Result<Value, String> {
         .ok_or_else(|| "缺少 id 参数".to_string())?;
     state.with_db(|db| {
         // 递归 CTE 收集所有后代 id（含自身），单事务批量删除。
+        // 必须用 UNION 去重而非 UNION ALL：历史脏数据可能已含 parent_id 环，
+        // UNION ALL 遇环会无限递归（内存耗尽 + 持 State Mutex 阻塞全部密盘命令），UNION 遇环自动终止
         let tx = db.conn().unchecked_transaction()
             .map_err(|e| format!("开启事务失败: {}", e))?;
         let deleted = tx.execute(
             "WITH RECURSIVE descendants(id) AS (
                 SELECT id FROM notes WHERE id = ?1
-                UNION ALL
+                UNION
                 SELECT n.id FROM notes n
                 JOIN descendants d ON n.parent_id = d.id
             )
@@ -220,6 +222,12 @@ pub fn cmd_move_item(state: &State, params: &Value) -> Result<Value, String> {
         .ok_or_else(|| "缺少 id 参数".to_string())?;
     let new_parent_id = params.get("newParentId").and_then(|v| v.as_str());
     state.with_db(|db| {
+        // 环校验：目标父级若是自身或自身后代，移动会构造环（树渲染/递归删除等操作挂死），拒绝
+        if let Some(npid) = new_parent_id {
+            if move_would_create_cycle(db.conn(), id, npid)? {
+                return Err("不能移动到自身或其子级".to_string());
+            }
+        }
         let affected = db.conn().execute(
             "UPDATE notes SET parent_id = ?1, updated_at = datetime('now','localtime') WHERE id = ?2",
             params![new_parent_id, id],
@@ -229,6 +237,23 @@ pub fn cmd_move_item(state: &State, params: &Value) -> Result<Value, String> {
         }
         Ok(json!(true))
     })
+}
+
+/// 判断把 `id` 移到 `new_parent` 下是否会成环：new_parent 落在 id 的后代集合内（含自身）即成环。
+/// 同样用 UNION（去重）递归 CTE——即使历史脏数据已含环，校验本身也能正常终止
+fn move_would_create_cycle(conn: &Connection, id: &str, new_parent: &str) -> Result<bool, String> {
+    let count: i64 = conn.query_row(
+        "WITH RECURSIVE descendants(id) AS (
+            SELECT id FROM notes WHERE id = ?1
+            UNION
+            SELECT n.id FROM notes n
+            JOIN descendants d ON n.parent_id = d.id
+        )
+        SELECT COUNT(*) FROM descendants WHERE id = ?2",
+        params![id, new_parent],
+        |row| row.get(0),
+    ).map_err(|e| format!("查询失败: {}", e))?;
+    Ok(count > 0)
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -422,6 +447,66 @@ mod tests {
         cmd_init(&state, &json!({ "password": "abcd1234" })).expect("初始化失败");
         cmd_lock(&state, &json!({})).expect("锁定失败");
         assert!(cmd_unlock(&state, &json!({ "password": "abcd1234" })).is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn move_item_rejects_move_into_own_descendant() {
+        // B5：把项目移到自己或自己的后代下会成环（树渲染/递归操作挂死），必须拒绝
+        let (state, dir) = test_state();
+        cmd_init(&state, &json!({ "password": "abcd1234" })).expect("初始化失败");
+        let a_id = cmd_create_item(&state, &json!({ "title": "a", "type": "folder" }))
+            .expect("创建 a 失败")
+            .as_str()
+            .expect("返回 id")
+            .to_string();
+        let b_id = cmd_create_item(&state, &json!({ "title": "b", "type": "folder", "parentId": a_id }))
+            .expect("创建 b 失败")
+            .as_str()
+            .expect("返回 id")
+            .to_string();
+        // a 移到后代 b 下 → 成环，拒绝
+        let err = cmd_move_item(&state, &json!({ "id": a_id, "newParentId": b_id })).unwrap_err();
+        assert_eq!(err, "不能移动到自身或其子级");
+        // 自移到自己也拒绝
+        let err = cmd_move_item(&state, &json!({ "id": a_id, "newParentId": a_id })).unwrap_err();
+        assert_eq!(err, "不能移动到自身或其子级");
+        // 合法移动（b 移到根）不受影响
+        cmd_move_item(&state, &json!({ "id": b_id, "newParentId": null })).expect("合法移动不应被拒");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn delete_item_terminates_on_legacy_cycle() {
+        // B5：历史脏数据可能已含环（parent_id 互指）。递归 CTE 必须用 UNION 去重终止，
+        // UNION ALL 会无限递归挂死后端（持 State Mutex 阻塞全部密盘命令）
+        let (state, dir) = test_state();
+        cmd_init(&state, &json!({ "password": "abcd1234" })).expect("初始化失败");
+        // 绕过命令层直接写入环数据（a、b 互为父级），模拟旧版本产生的脏数据
+        state
+            .with_db(|db| {
+                db.conn().execute(
+                    "INSERT INTO notes (id, parent_id, title, type) VALUES ('a', 'b', 'a', 'folder')",
+                    [],
+                ).map_err(|e| e.to_string())?;
+                db.conn().execute(
+                    "INSERT INTO notes (id, parent_id, title, type) VALUES ('b', 'a', 'b', 'folder')",
+                    [],
+                ).map_err(|e| e.to_string())?;
+                Ok(json!(true))
+            })
+            .expect("造环数据失败");
+        cmd_delete_item(&state, &json!({ "id": "a" })).expect("删除环数据不应挂死或报错");
+        let remaining: i64 = state
+            .with_db(|db| {
+                Ok(db.conn().query_row(
+                    "SELECT COUNT(*) FROM notes WHERE id IN ('a','b')",
+                    [],
+                    |row| row.get(0),
+                ).map_err(|e| e.to_string())?)
+            })
+            .expect("查询残留失败");
+        assert_eq!(remaining, 0, "环中两条记录都应被删除");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

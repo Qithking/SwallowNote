@@ -1,6 +1,6 @@
 /** SplitDiffViewer — two-pane diff via @codemirror/merge. Remote (read-only) | Local (editable). */
 
-import { useEffect, useRef, useMemo, useState, useImperativeHandle, forwardRef, useCallback } from 'react'
+import { useEffect, useRef, useMemo, useImperativeHandle, forwardRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Lock, Pencil, Copy, Check } from 'lucide-react'
 
@@ -17,6 +17,7 @@ import { StreamLanguage } from '@codemirror/language'
 
 import { getCodeMirrorLanguage } from '@/lib/utils/fileTypeUtils'
 import { logger } from '@/lib/logger'
+import { useCopyFeedback } from '@/hooks'
 
 // ──────────────────────────────────────────────
 // Types
@@ -156,19 +157,9 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
   const prevLocalContentRef = useRef(localContent)
   const prevRemoteContentRef = useRef(remoteContent)
 
-  // Copy feedback state
-  const [remoteCopied, setRemoteCopied] = useState(false)
-  const [localCopied, setLocalCopied] = useState(false)
-  const remoteCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const localCopiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-
-  // Cleanup copy-feedback timers on unmount
-  useEffect(() => {
-    return () => {
-      clearTimeout(remoteCopiedTimer.current)
-      clearTimeout(localCopiedTimer.current)
-    }
-  }, [])
+  // C17：复制反馈（copied + 3s 复位定时器）统一走 useCopyFeedback，远端/本地各一份
+  const { copied: remoteCopied, markCopied: markRemoteCopied } = useCopyFeedback(3000)
+  const { copied: localCopied, markCopied: markLocalCopied } = useCopyFeedback(3000)
 
   // Expose getLocalContent via ref for parent components (e.g., ConflictResolver save logic)
   useImperativeHandle(ref, () => ({
@@ -179,18 +170,14 @@ const SplitDiffViewer = forwardRef<SplitDiffViewerHandle, SplitDiffViewerProps>(
 
   const handleCopyRemote = () => {
     navigator.clipboard.writeText(remoteContent)
-    setRemoteCopied(true)
-    clearTimeout(remoteCopiedTimer.current)
-    remoteCopiedTimer.current = setTimeout(() => setRemoteCopied(false), 3000)
+    markRemoteCopied()
   }
 
   const handleCopyLocal = () => {
     navigator.clipboard.writeText(
       mergeViewRef.current?.b.state.doc.toString() ?? localContent
     )
-    setLocalCopied(true)
-    clearTimeout(localCopiedTimer.current)
-    localCopiedTimer.current = setTimeout(() => setLocalCopied(false), 3000)
+    markLocalCopied()
   }
 
   // Copy entire remote content to local (overwrite)

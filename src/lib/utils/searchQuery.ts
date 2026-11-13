@@ -2,7 +2,6 @@
  * Frontmatter 查询工具 — 所有数据从后端 SQLite 查询，不维护内存缓存。
  */
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
-import { parseFrontmatter } from '@/lib/utils/frontmatter'
 import { invoke } from '@tauri-apps/api/core'
 
 /// 后端 FrontmatterRecord 类型（与 Rust 侧 FrontmatterRecord 对应）
@@ -88,15 +87,6 @@ function recordToFrontmatter(record: FrontmatterRecord): NoteFrontmatter {
 }
 
 /**
- * 从原始内容解析 frontmatter（同步版本，用于内容已可用的场景）。
- * 此函数不涉及数据库，仅做本地解析。
- */
-export function getFrontmatterFromContent(content: string): NoteFrontmatter {
-  const { data } = parseFrontmatter(content)
-  return data
-}
-
-/**
  * 通知后端重新索引指定文件。
  * 替代原有的 invalidateFrontmatterCache，因为不再有内存缓存需要失效。
  * @param workspaceRoot 已打开的工作区根（后端 fs_guard 白名单校验用，候选 2 fail-closed）
@@ -162,12 +152,4 @@ export async function queryFrontmatterByTag(tag: string): Promise<FrontmatterRec
   } catch {
     return []
   }
-}
-
-/**
- * 清除 frontmatter 缓存 — 不再需要，保留为空函数以兼容现有调用。
- * 切换工作区时不清除旧数据，后端保留所有历史记录。
- */
-export function clearFrontmatterCache(): void {
-  // 不再需要操作，数据持久化在 SQLite 中
 }

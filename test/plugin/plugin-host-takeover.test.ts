@@ -25,12 +25,18 @@ import {
   getPluginStorage as sdkGetPluginStorage,
   getStubMenuRegistry,
   emitNoteOpened as sdkEmitNoteOpened,
+  listPluginCommands as sdkListPluginCommands,
+  subscribePluginCommands as sdkSubscribePluginCommands,
 } from '@swallow-note/plugin-sdk'
 import type { HostOverrides } from '@swallow-note/plugin-sdk'
 import {
   registerContextMenu as hostRegisterContextMenu,
   pluginMenuRegistry,
 } from '@/lib/plugin-menu'
+import {
+  registerCommand as hostRegisterCommand,
+  pluginCommandRegistry,
+} from '@/lib/plugin-commands'
 import { PluginPermissionDeniedError } from '@/lib/plugin-permission-guard'
 import { setGranted as setGrantedSync, clearGranted, clearAll } from '@/lib/plugin-permission-guard'
 import { pluginEventBus } from '@/lib/plugin-host'
@@ -572,5 +578,99 @@ describe('TC-09.6-04: emit() is gated by the events permission (C1 fix)', () => 
       unsub()
     }
     expect(received).toEqual([])
+  })
+})
+
+// ─── Command palette query/subscribe takeover (B8 fix) ───────────────────────
+
+/**
+ * B8 修复回归测试：takeover 之前只安装了
+ * registerCommand/unregisterCommand/clearPluginCommands 三个写侧键，
+ * 漏装 listPluginCommands / subscribePluginCommands 两个读侧键。
+ * 宿主模式下插件调用 usePluginCommands()（内部即 list + subscribe）
+ * 恒回退 SDK 空 stub 注册表，与 README 承诺的宿主接管行为不符。
+ */
+describe('TC-09.6-05: listPluginCommands / subscribePluginCommands are taken over (B8)', () => {
+  beforeEach(() => {
+    sdkClearHost()
+    clearAll()
+    clearGranted('com.test.cmd-a')
+    clearGranted('com.test.cmd-b')
+    pluginCommandRegistry.clearPlugin('com.test.cmd-a')
+    pluginCommandRegistry.clearPlugin('com.test.cmd-b')
+  })
+  afterEach(() => {
+    sdkClearHost()
+    clearAll()
+    pluginCommandRegistry.clearPlugin('com.test.cmd-a')
+    pluginCommandRegistry.clearPlugin('com.test.cmd-b')
+  })
+
+  it('TC-09.6-05a: SDK listPluginCommands() sees commands registered through the host', async () => {
+    const mod = makeModule()
+    const plugin = makePlugin({
+      id: 'com.test.cmd-a',
+      permissions: ['events'],
+    })
+    // 宿主注册表 register 走 events 权限门，需同步授权
+    setGrantedSync('com.test.cmd-a', ['events'])
+
+    // runLifecycleHook 会吞掉 hook 内抛出的错误，故断言捕获到 hook 外执行
+    let listedInHook: Array<{ id: string }> = []
+    const hook = vi.fn(() => {
+      // 宿主侧直接注册（模拟宿主内部/其他插件写入宿主注册表）
+      hostRegisterCommand('com.test.cmd-a', {
+        id: 'demo-cmd',
+        label: 'Demo',
+        onTrigger: () => {},
+      })
+      // B8 修复点：插件经 SDK 读侧必须命中宿主注册表，而非空 stub
+      listedInHook = sdkListPluginCommands()
+    })
+
+    await runPluginLifecycleHook(
+      { ...plugin, __pluginModule: mod } as PluginDefinition,
+      hook,
+      ctx,
+      'onLoad'
+    )
+    expect(hook).toHaveBeenCalledTimes(1)
+    expect(listedInHook.some((c) => c.id === 'demo-cmd')).toBe(true)
+  })
+
+  it('TC-09.6-05b: subscriptions made in the hook track the host registry', async () => {
+    const mod = makeModule()
+    const plugin = makePlugin({
+      id: 'com.test.cmd-b',
+      permissions: ['events'],
+    })
+    setGrantedSync('com.test.cmd-b', ['events'])
+
+    let notified = 0
+    let unsub: (() => void) | undefined
+    const hook = vi.fn(() => {
+      // hook 期间订阅 → 应注册进宿主注册表（面板组件生命周期长于 hook）
+      unsub = sdkSubscribePluginCommands(() => {
+        notified++
+      })
+    })
+
+    try {
+      await runPluginLifecycleHook(
+        { ...plugin, __pluginModule: mod } as PluginDefinition,
+        hook,
+        ctx,
+        'onLoad'
+      )
+      // hook 结束（takeover restore）后宿主侧注册命令仍须通知订阅者
+      hostRegisterCommand('com.test.cmd-b', {
+        id: 'demo-cmd-2',
+        label: 'Demo 2',
+        onTrigger: () => {},
+      })
+      expect(notified).toBe(1)
+    } finally {
+      unsub?.()
+    }
   })
 })

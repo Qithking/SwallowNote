@@ -233,6 +233,12 @@ fn attempt_stream(
             let _ = r.into_string();
             return classify_status(code);
         }
+        // C29：InvalidUrl（BadUrl）是确定性配置错误（如 custom provider 空
+        // base_url 拼出相对 URL），重试无意义——Fatal 快速失败，避免白等退避
+        // 后报误导性「连接失败」
+        Err(ureq::Error::Transport(t)) if t.kind() == ureq::ErrorKind::InvalidUrl => {
+            return Attempt::Fatal(format!("请求地址无效: {}", t));
+        }
         Err(e) => return Attempt::Retryable(format!("连接失败: {}", e)),
     };
 
@@ -242,8 +248,20 @@ fn attempt_stream(
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
-            // 上游正常关流 = 流结束
-            Ok(0) => return Attempt::Success(()),
+            // 上游正常关流 = 流结束；EOF 时派发残余未终止事件（C28：SSE 规范
+            // 要求 end of stream 时非空 data buffer 仍需派发）
+            Ok(0) => {
+                for item in parser.finish() {
+                    let SseItem::Data(data) = item;
+                    match parse_sse_data(provider_name, &data) {
+                        StreamTick::Delta(text) => emit("chunk", json!({ "text": text })),
+                        StreamTick::Finish => return Attempt::Success(()),
+                        StreamTick::Error(m) => return Attempt::Fatal(m),
+                        StreamTick::Ignore => {}
+                    }
+                }
+                return Attempt::Success(());
+            }
             Ok(n) => match parser.feed(&buf[..n]) {
                 Ok(items) => {
                     for item in items {
@@ -428,5 +446,24 @@ mod tests {
             "慢 TTFB 不应导致流失败: {result:?}"
         );
         assert_eq!(chunks, vec!["早".to_string()]);
+    }
+
+    /// C29 回归：custom provider 空 base_url → 相对 URL → ureq BadUrl。
+    /// BadUrl 是确定性配置错误，必须 Fatal（原误分类为 Retryable：
+    /// 白等 500ms+2s 退避后报误导性「连接失败」）。
+    #[test]
+    fn bad_url_is_fatal_not_retryable() {
+        let cfg = ProviderConfig {
+            provider: "custom".into(),
+            model_id: "m".into(),
+            base_url: String::new(), // custom 无默认地址 → 空 base → 相对 URL
+            api_key: "k".into(),
+        };
+        let built = provider::build_request(&cfg, &[json!({"role": "user", "content": "hi"})]);
+        assert_eq!(built.url, "/chat/completions");
+        let mut emit = |_e: &str, _v: Value| {};
+        let cancel = AtomicBool::new(false);
+        let result = attempt_stream(&built, "custom", &mut emit, &cancel);
+        assert!(matches!(result, Attempt::Fatal(_)), "BadUrl 必须 Fatal: {result:?}");
     }
 }

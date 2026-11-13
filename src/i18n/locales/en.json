@@ -3,10 +3,6 @@
     "close": "Close",
     "closeOthers": "Close Others"
   },
-  "commandPalette": {
-    "placeholder": "Type a command or search...",
-    "noResults": "No commands found"
-  },
   "settings": {
     "general": "General",
     "appearance": "Appearance",
@@ -128,8 +124,6 @@
     "shortcuts.toggleLanguage.desc": "Switch interface language (Chinese/English)",
     "shortcuts.openExplorer": "Open File Explorer",
     "shortcuts.openExplorer.desc": "Open selected node in system file explorer",
-    "shortcuts.commandPalette": "Command Palette",
-    "shortcuts.commandPalette.desc": "Open command palette for quick actions",
     "shortcuts.searchPanel": "Global Search",
     "shortcuts.searchPanel.desc": "Toggle sidebar global search view",
     "shortcuts.findReplace": "Find/Replace",
@@ -297,7 +291,6 @@
   },
   "editor": {
     "untitled": "Untitled",
-    "loadFailed": "Failed to load file: {{error}}",
     "loading": "Loading...",
     "binaryFile": "Binary file cannot be displayed in editor",
     "cannotOpen": "Cannot open this file type",
@@ -344,7 +337,6 @@
     "cloneRepo": "Clone Repository",
     "recent": "Recent",
     "noRecent": "No recent folders",
-    "quickOpen": "Quick Open",
     "newFile": "New File",
     "save": "Save File",
     "settings": "Settings"
@@ -417,6 +409,7 @@
     "submodule": "Submodule",
     "noRemote": "No remote repository",
     "parentRepo": "Parent repo",
+    "defaultCommitMessage": "Sync changes",
     "noReposToSync": "No repos or changes to sync",
     "noChangesToSync": "No changes to sync",
     "submoduleHasChanges": "Submodule has uncommitted changes, please commit inside submodule first",
@@ -589,7 +582,11 @@
       "invalidPathEncoding": "Invalid path encoding",
       "invalidRelativePath": "Invalid relative path",
       "fetchFailed": "Failed to fetch",
-      "checkoutFileFailed": "Failed to checkout file"
+      "checkoutFileFailed": "Failed to checkout file",
+      "createDirFailed": "Failed to create directory",
+      "cloneSpawnFailed": "Failed to execute git clone",
+      "cloneWaitFailed": "Failed to wait for git clone",
+      "cloneTaskPanicked": "Clone task panicked"
     }
   },
   "tray": {
@@ -1014,8 +1011,6 @@
     "toggleLanguage.desc": "Switch interface language (Chinese/English)",
     "openExplorer": "Open File Explorer",
     "openExplorer.desc": "Open selected node in system file explorer",
-    "commandPalette": "Command Palette",
-    "commandPalette.desc": "Open command palette for quick actions",
     "searchPanel": "Global Search",
     "searchPanel.desc": "Toggle sidebar global search view",
     "findReplace": "Find/Replace",

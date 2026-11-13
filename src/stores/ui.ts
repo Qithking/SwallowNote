@@ -399,7 +399,6 @@ export interface UIState {
   rightPanelWidth: number
   statusBarVisible: boolean
   editorViewMode: EditorViewMode
-  commandPaletteVisible: boolean
   settingsPanelVisible: boolean
   logViewerVisible: boolean
   /**
@@ -455,7 +454,6 @@ export interface UIState {
   toggleSidebar: () => void
   toggleStatusBar: () => void
   setEditorViewMode: (mode: EditorViewMode) => void
-  toggleCommandPalette: () => void
   toggleLogViewer: () => void
   setSettingsPanelVisible: (visible: boolean) => void
   setSettingsSection: (section: SettingsSection) => void
@@ -514,7 +512,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   rightPanelWidth: 288,
   statusBarVisible: true,
   editorViewMode: 'split',
-  commandPaletteVisible: false,
   settingsPanelVisible: false,
   logViewerVisible: false,
   settingsSection: null,
@@ -565,8 +562,6 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ editorViewMode: mode })
     queueMicrotask(() => emitSettingChanged('editorViewMode', mode))
   },
-  toggleCommandPalette: () =>
-    set((state) => ({ commandPaletteVisible: !state.commandPaletteVisible })),
   toggleLogViewer: () =>
     set((state) => ({ logViewerVisible: !state.logViewerVisible })),
   setSettingsPanelVisible: (visible) => set({ settingsPanelVisible: visible }),

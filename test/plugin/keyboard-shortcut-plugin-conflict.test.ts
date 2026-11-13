@@ -144,12 +144,12 @@ describe('TC-WaveC-M16: dispatchBuiltin no-op path', () => {
   it('returns false and does not call preventDefault when the event does not match the built-in', () => {
     useUIStore.setState({
       pluginCommandShortcuts: {
-        'com.foo:cmd': 'Ctrl+P',
+        'com.foo:cmd': 'Ctrl+F',
       },
     })
-    const e = fakeKeyEvent('Ctrl+S') // built-in saveFile is Ctrl+S, not Ctrl+P
+    const e = fakeKeyEvent('Ctrl+S') // built-in findReplace is Ctrl+F, not Ctrl+S
     const action = vi.fn()
-    const result = dispatchBuiltin(e, 'commandPalette', action)
+    const result = dispatchBuiltin(e, 'findReplace', action)
     expect(result).toBe(false)
     expect(e.preventDefault).not.toHaveBeenCalled()
     expect(action).not.toHaveBeenCalled()
@@ -165,9 +165,9 @@ describe('TC-WaveC-M16: dispatchBuiltin built-in wins, no conflict', () => {
         'com.foo:cmd': 'Ctrl+Shift+X',
       },
     })
-    const e = fakeKeyEvent('Ctrl+P')
+    const e = fakeKeyEvent('Ctrl+F')
     const action = vi.fn()
-    const result = dispatchBuiltin(e, 'commandPalette', action)
+    const result = dispatchBuiltin(e, 'findReplace', action)
     expect(result).toBe(true)
     expect(e.preventDefault).toHaveBeenCalled()
     expect(action).toHaveBeenCalledTimes(1)
@@ -179,12 +179,12 @@ describe('TC-WaveC-M16: dispatchBuiltin built-in wins, plugin binding shadows it
   it('fires the toast AND runs the action when a plugin command is bound to the same key', () => {
     useUIStore.setState({
       pluginCommandShortcuts: {
-        'com.foo:bar': 'Ctrl+P',
+        'com.foo:bar': 'Ctrl+F',
       },
     })
-    const e = fakeKeyEvent('Ctrl+P')
+    const e = fakeKeyEvent('Ctrl+F')
     const action = vi.fn()
-    const result = dispatchBuiltin(e, 'commandPalette', action)
+    const result = dispatchBuiltin(e, 'findReplace', action)
     expect(result).toBe(true)
     expect(e.preventDefault).toHaveBeenCalled()
     expect(action).toHaveBeenCalledTimes(1)
@@ -206,12 +206,12 @@ describe('TC-WaveC-M16: dispatchBuiltin built-in wins, plugin binding shadows it
     // Wave B / M1: the description names the built-in
     // action that just ran, so the user can tell which
     // side won the keystroke.
-    expect(options.description).toContain('commandPalette')
+    expect(options.description).toContain('findReplace')
     expect(options.duration).toBe(3000)
     // Stable id is derived from the shortcut key, not the
     // plugin binding, so the same key collision always
     // collapses to one toast.
-    expect(options.id).toBe('plugin-conflict-commandPalette')
+    expect(options.id).toBe('plugin-conflict-findReplace')
   })
 
   it('strips the command id from the binding key (last colon wins)', () => {
@@ -222,12 +222,12 @@ describe('TC-WaveC-M16: dispatchBuiltin built-in wins, plugin binding shadows it
     // see a confusing "com.foo:bar:cmd" id in the toast.
     useUIStore.setState({
       pluginCommandShortcuts: {
-        'com.foo:bar:cmd': 'Ctrl+P',
+        'com.foo:bar:cmd': 'Ctrl+F',
       },
     })
-    const e = fakeKeyEvent('Ctrl+P')
+    const e = fakeKeyEvent('Ctrl+F')
     const action = vi.fn()
-    dispatchBuiltin(e, 'commandPalette', action)
+    dispatchBuiltin(e, 'findReplace', action)
     const [message] = vi.mocked(toast).mock.calls[0] as [string]
     // The id is the part BEFORE the last colon.
     expect(message).toContain('com.foo:bar')
@@ -253,15 +253,15 @@ describe('TC-WaveC-M16: dispatchBuiltin built-in wins, plugin binding shadows it
     // throttle.
     useUIStore.setState({
       pluginCommandShortcuts: {
-        'com.langcheck:en': 'Ctrl+P',
+        'com.langcheck:en': 'Ctrl+F',
       },
     })
-    const e = fakeKeyEvent('Ctrl+P')
+    const e = fakeKeyEvent('Ctrl+F')
     const action = vi.fn()
     const prevLang = i18n.language
     try {
       i18n.changeLanguage('en')
-      dispatchBuiltin(e, 'commandPalette', action)
+      dispatchBuiltin(e, 'findReplace', action)
       const [enMessage] = vi.mocked(toast).mock.calls[0] as [string]
       expect(enMessage).toContain('com.langcheck')
       expect(enMessage).toContain('built-in command')
@@ -271,10 +271,10 @@ describe('TC-WaveC-M16: dispatchBuiltin built-in wins, plugin binding shadows it
       // suppress the second toast.
       useUIStore.setState({
         pluginCommandShortcuts: {
-          'com.langcheck:zh': 'Ctrl+P',
+          'com.langcheck:zh': 'Ctrl+F',
         },
       })
-      dispatchBuiltin(e, 'commandPalette', action)
+      dispatchBuiltin(e, 'findReplace', action)
       const [zhMessage] = vi.mocked(toast).mock.calls[0] as [string]
       expect(zhMessage).toContain('com.langcheck')
       expect(zhMessage).toContain('内置命令')
