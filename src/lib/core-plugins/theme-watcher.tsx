@@ -27,6 +27,8 @@ import {
   usePluginEvents,
 } from '@/lib/plugin-hooks'
 import { useTranslation } from 'react-i18next'
+import i18n from '@/i18n'
+import { useUIStore } from '@/stores/ui'
 import { logger } from '../logger'
 
 // ─── Panel component ──────────────────────────────────────────────────────────
@@ -37,6 +39,20 @@ import { logger } from '../logger'
 // render would tear down and rebuild the subscriptions on every
 // parent re-render. Hoisting it here gives a stable reference.
 const WATCHED_EVENTS = ['theme:change', 'locale:change', 'settings:change'] as const
+
+/**
+ * C2：从宿主真实状态源读取当前主题/语言做初始水合。
+ * 原实现读 `localStorage('appSettings')`，但宿主设置早已迁移到 Tauri
+ * session_state，该 key 全库无写入 → 初始快照恒为 (unknown)。
+ * 现改为直接读 UI store 的 theme 与 i18n 当前语言（与 theme:change /
+ * locale:change 事件 payload 同源），值始终有效。
+ */
+export function readHostThemeLocale(): { theme: string; locale: string } {
+  return {
+    theme: useUIStore.getState().theme,
+    locale: i18n.language,
+  }
+}
 
 interface WatcherSnapshot {
   theme: string
@@ -68,29 +84,17 @@ function ThemeWatcherPanel(panel: PluginPanelProps): ReactNode {
     eventCount: 0,
   })
 
-  // Hydrate from the host's view of the world on first mount. We
-  // peek into localStorage to read the host's `appSettings` key
-  // (the host stores its own theme/locale there) and seed our
-  // snapshot with whatever the user had last picked. The host's
-  // permission guard enforces `events` on every subscription, so
-  // this is the only way to read cross-plugin state without
-  // declaring the `storage` permission.
+  // Hydrate from the host's real state on first mount: the host's
+  // settings live in Tauri session_state (not localStorage), so we
+  // read the UI store's theme and i18n's current locale directly.
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem('appSettings')
-      if (!raw) return
-      const parsed = JSON.parse(raw) as { theme?: string; locale?: string }
-      setSnapshot((prev) => ({
-        ...prev,
-        theme: parsed.theme ?? prev.theme,
-        locale: parsed.locale ?? prev.locale,
-      }))
-    } catch (err) {
-      if (verbose) {
-        logger.debug('plugin:theme-watcher', 'failed to hydrate from appSettings:', err)
-      }
-    }
-  }, [verbose])
+    const { theme, locale } = readHostThemeLocale()
+    setSnapshot((prev) => ({
+      ...prev,
+      theme: theme || prev.theme,
+      locale: locale || prev.locale,
+    }))
+  }, [])
 
   // Subscribe to every event we care about in a single effect. The
   // hook is generic over the union of subscribed events; the

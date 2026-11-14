@@ -41,7 +41,4 @@ export const CORE_PLUGINS: readonly PluginDefinition[] = [
   themeWatcherManifest,
 ] as const
 
-/** @deprecated Use CORE_PLUGINS instead */
-export const SAMPLE_PLUGINS = CORE_PLUGINS
-
 export default CORE_PLUGINS

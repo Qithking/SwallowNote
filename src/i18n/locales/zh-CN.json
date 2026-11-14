@@ -3,10 +3,6 @@
     "close": "关闭",
     "closeOthers": "关闭其他"
   },
-  "commandPalette": {
-    "placeholder": "输入命令或搜索...",
-    "noResults": "未找到命令"
-  },
   "settings": {
     "general": "通用",
     "appearance": "外观",
@@ -128,8 +124,6 @@
     "shortcuts.toggleLanguage.desc": "切换界面显示语言（中文/英文）",
     "shortcuts.openExplorer": "打开文件资源管理器",
     "shortcuts.openExplorer.desc": "在系统文件管理器中打开选中节点",
-    "shortcuts.commandPalette": "命令面板",
-    "shortcuts.commandPalette.desc": "打开命令面板进行快速操作",
     "shortcuts.searchPanel": "全局搜索",
     "shortcuts.searchPanel.desc": "切换侧边栏全局搜索视图",
     "shortcuts.findReplace": "查找/替换",
@@ -297,7 +291,6 @@
   },
   "editor": {
     "untitled": "未命名",
-    "loadFailed": "加载文件失败: {{error}}",
     "loading": "加载中...",
     "binaryFile": "二进制文件无法在编辑器中显示",
     "cannotOpen": "无法打开此文件类型",
@@ -344,7 +337,6 @@
     "cloneRepo": "克隆仓库",
     "recent": "最近记录",
     "noRecent": "暂无最近记录",
-    "quickOpen": "快速打开",
     "newFile": "新建文件",
     "save": "保存文件",
     "settings": "设置"
@@ -417,6 +409,7 @@
     "submodule": "子模块",
     "noRemote": "无远程仓库",
     "parentRepo": "父仓库",
+    "defaultCommitMessage": "同步变更",
     "noReposToSync": "没有需要同步的仓库或没有变更",
     "noChangesToSync": "没有需要同步的变更",
     "submoduleHasChanges": "子模块内部有未提交的变更，请先在子模块内提交",
@@ -589,7 +582,11 @@
       "invalidPathEncoding": "无效的路径编码",
       "invalidRelativePath": "无效的相对路径",
       "fetchFailed": "拉取失败",
-      "checkoutFileFailed": "检出文件失败"
+      "checkoutFileFailed": "检出文件失败",
+      "createDirFailed": "创建目录失败",
+      "cloneSpawnFailed": "启动 git clone 失败",
+      "cloneWaitFailed": "等待克隆进程失败",
+      "cloneTaskPanicked": "克隆任务异常终止"
     }
   },
   "tray": {
@@ -1014,8 +1011,6 @@
     "toggleLanguage.desc": "切换界面显示语言（中文/英文）",
     "openExplorer": "打开文件资源管理器",
     "openExplorer.desc": "在系统文件管理器中打开选中节点",
-    "commandPalette": "命令面板",
-    "commandPalette.desc": "打开命令面板进行快速操作",
     "searchPanel": "全局搜索",
     "searchPanel.desc": "切换侧边栏全局搜索视图",
     "findReplace": "查找/替换",

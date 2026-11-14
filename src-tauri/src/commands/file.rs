@@ -66,10 +66,6 @@ pub struct SearchRequest {
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub use_regex: bool,
-    #[allow(dead_code)]
-    pub include_files: Option<String>,  // Glob pattern for files to include
-    #[allow(dead_code)]
-    pub exclude_files: Option<String>,  // Glob pattern for files to exclude
 }
 
 #[derive(Serialize, Clone)]
@@ -310,6 +306,30 @@ pub async fn export_text_file(path: String, content: String) -> Result<(), Strin
         .map_err(|e| format!("Failed to write file: {}", e))
 }
 
+/// C21：唯一 tmp 文件名（原文件名 + pid + 原子计数 + 纳秒时间戳）。
+/// 与目标同目录（保证 rename 同盘原子性）；并发写同一文件互不踩踏；
+/// 点前缀命名，文件树按隐藏文件过滤不显示。
+fn unique_tmp_path(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    path.with_file_name(format!(
+        ".{}.{}.{}.{}.tmp",
+        file_name,
+        std::process::id(),
+        seq,
+        nanos
+    ))
+}
+
 #[tauri::command]
 pub async fn read_file(
     app: tauri::AppHandle,
@@ -372,15 +392,17 @@ pub async fn write_file(
 
     #[cfg(not(target_os = "windows"))]
     {
-        // Atomic write: write to temp file first, then rename
-        let temp_path = path.with_extension("tmp");
+        // Atomic write: write to unique temp file first, then rename (C21)
+        let temp_path = unique_tmp_path(&path);
         tokio::fs::write(&temp_path, &content)
             .await
             .map_err(|e| format!("Failed to write temporary file: {}", e))?;
 
-        tokio::fs::rename(&temp_path, &path)
-            .await
-            .map_err(|e| format!("Failed to rename temporary file: {}", e))?;
+        if let Err(e) = tokio::fs::rename(&temp_path, &path).await {
+            // C21：rename 失败清理 tmp，避免残留 .tmp 垃圾文件
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return Err(format!("Failed to rename temporary file: {}", e));
+        }
     }
 
     Ok(())
@@ -1036,4 +1058,28 @@ pub async fn search_in_files(
         .collect();
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    // C21 回归：tmp 名唯一（pid + 原子计数 + 纳秒），并发写不互踩
+    #[test]
+    fn unique_tmp_path_generates_distinct_names() {
+        let target = Path::new("/tmp/ws/notes/a.md");
+        let a = unique_tmp_path(target);
+        let b = unique_tmp_path(target);
+        assert_ne!(a, b);
+        // 与目标同目录（rename 同盘原子）
+        assert_eq!(a.parent(), target.parent());
+        // 保留原文件名前缀，.tmp 后缀
+        let name = a.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with(".a.md.") && name.ends_with(".tmp"), "{}", name);
+        // 原扩展名不再被 with_extension 改写（旧实现 a.tar.gz → a.tar.tmp）
+        let nested = Path::new("/tmp/ws/notes/a.tar.gz");
+        let t = unique_tmp_path(nested).file_name().unwrap().to_str().unwrap().to_string();
+        assert!(t.starts_with(".a.tar.gz."), "{}", t);
+    }
 }

@@ -51,6 +51,24 @@ function hasBase64Placeholder(tpl: string): boolean {
   return /\{base64\}/.test(tpl)
 }
 
+/**
+ * C30：校验自定义端点响应中的 URL——仅允许 http/https 绝对地址。
+ * javascript:/data: 等 scheme 拼入笔记后可能被执行或构成注入载体。
+ */
+export function validateImageUrlScheme(url: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error('Custom: 响应 URL 无效（非绝对 URL）')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(
+      `Custom: 不支持的 URL scheme：${parsed.protocol.replace(':', '')}（仅允许 http/https）`
+    )
+  }
+}
+
 export const customProvider: PicgoProvider = {
   id: 'custom',
   displayName: 'Custom',
@@ -137,6 +155,8 @@ export const customProvider: PicgoProvider = {
         `Custom: 响应中未找到 URL（路径：${responsePath || '(none)'}）`
       )
     }
+    // C30：scheme 校验通过后才返回给编辑器插入链路
+    validateImageUrlScheme(url)
 
     onProgress?.({ loaded: file.size, total: file.size, percent: 100 })
 

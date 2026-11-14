@@ -55,7 +55,8 @@ pub fn estimate_tokens(text: &str) -> u64 {
 /// system 消息（双层提示词）永不裁剪；最后一条（当前消息）永远保留；
 /// 其余消息由新到旧填充至预算，装不下的更早消息全部省略并计数。
 pub fn trim_messages(messages: &[ChatMessage], context_window: u64) -> TrimResult {
-    let budget = context_window * CONTEXT_BUDGET_RATIO / 100;
+    // C34：context_window 来自远端模型配置，用 saturating_mul 防御异常大值乘比例溢出
+    let budget = context_window.saturating_mul(CONTEXT_BUDGET_RATIO) / 100;
     // system（双层提示词）不计入截断
     let system_tokens: u64 = messages
         .iter()

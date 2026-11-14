@@ -69,6 +69,25 @@ pub fn drop_secure_storage_for(conn: &Connection, plugin_id: &str) -> Result<()>
     Ok(())
 }
 
+/// 读全部行（B3 启动迁移用）：(plugin_id, key, ciphertext)。
+pub fn read_all_secrets(conn: &Connection) -> Result<Vec<(String, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT plugin_id, key, ciphertext FROM secure_storage ORDER BY plugin_id ASC, key ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

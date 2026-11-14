@@ -22,11 +22,6 @@ static STARTUP_T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock
 static WINDOW_SHOWN_LOGGED: std::sync::Once = std::sync::Once::new();
 
 #[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-#[tauri::command]
 fn log_startup_time(stage: &str, elapsed_ms: u64) {
     info!("[STARTUP-TIME] {} t={}", stage, elapsed_ms);
 }
@@ -139,7 +134,6 @@ pub fn run() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
-            greet,
             commands::app::restart_app,
             log_startup_time,
             commands::file::path_exists,
@@ -311,6 +305,23 @@ pub fn run() {
                                 false
                             }
                         };
+
+                        // B3：secureStorage 旧派生（machine_id）密文 → keyring 主密钥派生（v2）。
+                        // 幂等 best-effort：失败/跳过不阻塞启动（读路径双试兜底）。
+                        {
+                            // 中毒恢复（项目惯例）：迁移幂等（读路径双试兜底），
+                            // panic 残留锁重入执行仍安全，不静默跳过迁移
+                            let conn = db.conn.lock().unwrap_or_else(|p| p.into_inner());
+                            match commands::plugin_secure_storage::migrate_secure_storage_to_keyring(&conn)
+                            {
+                                Ok((migrated, skipped)) if migrated > 0 => info!(
+                                    "[crypto-migrate] secure_storage migrated {} rows, skipped {} (already v2 or undecryptable)",
+                                    migrated, skipped
+                                ),
+                                Ok(_) => {}
+                                Err(e) => warn!("[crypto-migrate] secure_storage migration failed: {}", e),
+                            }
+                        }
 
                         app.handle().manage(db);
                         info!("[STARTUP-TIME] db_init_done t={}", startup_t0.elapsed().as_millis());

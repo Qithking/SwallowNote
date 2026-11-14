@@ -529,7 +529,7 @@ function App() {
                 )}
                 <ErrorBoundary fallback={
                   <div className="flex items-center justify-center flex-1 text-sm text-[var(--text-muted)]">
-                    {t('editor.loadFailed')}
+                    {t('error.componentRenderError')}
                   </div>
                 }>
                   <EditorView />

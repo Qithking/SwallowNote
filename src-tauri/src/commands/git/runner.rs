@@ -89,9 +89,14 @@ pub fn run_git_raw(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Resu
         });
         let shared = Arc::new(Mutex::new(child));
         let _ = child_tx.send(Arc::clone(&shared));
-        // 轮询 try_wait 而非持锁 wait()：锁只被瞬间持有，超时分支的 kill 不会被阻塞
+        // 轮询 try_wait 而非持锁 wait()：锁只被瞬间持有，超时分支的 kill 不会被阻塞。
+        // 中毒恢复：持锁线程 panic 不应让该仓库后续 git 命令连锁 panic（与 repo_lock.rs/file.rs 同模式）
         let status_result = loop {
-            match shared.lock().unwrap().try_wait() {
+            match shared
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .try_wait()
+            {
                 Ok(Some(status)) => break Ok(status),
                 Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
                 Err(e) => break Err(e),

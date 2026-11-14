@@ -60,6 +60,22 @@ fn role_of(m: &Value) -> &str {
     m.get("role").and_then(|r| r.as_str()).unwrap_or("")
 }
 
+/// C29：URL 路径段百分号编码（RFC 3986 unreserved 字符集直传，其余按 UTF-8 字节编码）。
+/// google 分支把 model_id 拼进路径前必须编码，空格/斜杠/中文等
+/// 特殊字符直接拼接会破坏请求 URL。
+fn encode_url_path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 /// 按三家协议构造流式请求载荷。未知 provider 一律走 OpenAI 兼容分支（与内置实现一致）。
 pub fn build_request(cfg: &ProviderConfig, messages: &[Value]) -> BuiltRequest {
     let base = resolve_base_url(&cfg.provider, &cfg.base_url);
@@ -112,7 +128,11 @@ pub fn build_request(cfg: &ProviderConfig, messages: &[Value]) -> BuiltRequest {
                 payload["systemInstruction"] = json!({"parts": [{"text": system_texts.join("\n\n")}]});
             }
             BuiltRequest {
-                url: format!("{}/models/{}:streamGenerateContent?alt=sse", base, cfg.model_id),
+                url: format!(
+                    "{}/models/{}:streamGenerateContent?alt=sse",
+                    base,
+                    encode_url_path_segment(&cfg.model_id)
+                ),
                 body: serde_json::to_string(&payload).unwrap(),
                 headers: vec![("x-goog-api-key".to_string(), cfg.api_key.clone())],
             }
@@ -361,6 +381,19 @@ mod tests {
         assert!(req
             .headers
             .contains(&("Authorization".into(), "Bearer sk-test".into())));
+    }
+
+    /// C29 回归：google 分支 model_id 必须经 URL 路径段编码，
+    /// 空格/斜杠/中文等特殊字符不得直接拼入 URL 破坏请求。
+    #[test]
+    fn google_model_id_url_encoded() {
+        let mut c = cfg("google");
+        c.model_id = "my model/v1".into();
+        let req = build_request(&c, &[json!({"role": "user", "content": "hi"})]);
+        assert_eq!(
+            req.url,
+            "https://generativelanguage.googleapis.com/v1beta/models/my%20model%2Fv1:streamGenerateContent?alt=sse"
+        );
     }
 
     /// 默认地址表 + 自定义地址覆盖 + 尾斜杠裁剪。

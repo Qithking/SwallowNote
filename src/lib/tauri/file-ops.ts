@@ -57,8 +57,6 @@ export interface SearchRequest {
   case_sensitive: boolean
   whole_word: boolean
   use_regex: boolean
-  include_files: string | null
-  exclude_files: string | null
 }
 
 export interface LineMatch {

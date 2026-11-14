@@ -67,11 +67,11 @@ describe('bindingKey 解析一致性', () => {
   describe('dispatchBuiltin — reverse-DNS pluginId 冲突 toast', () => {
     it('com.foo.bar:baz:cmd 的 toast 显示 pluginId 为 "com.foo.bar:baz"', () => {
       useUIStore.setState({
-        pluginCommandShortcuts: { 'com.foo.bar:baz:cmd': 'Ctrl+P' },
+        pluginCommandShortcuts: { 'com.foo.bar:baz:cmd': 'Ctrl+F' },
       })
-      const e = fakeKeyEvent('Ctrl+P')
+      const e = fakeKeyEvent('Ctrl+F')
       const action = vi.fn()
-      dispatchBuiltin(e, 'commandPalette', action)
+      dispatchBuiltin(e, 'findReplace', action)
 
       expect(toast).toHaveBeenCalledTimes(1)
       const [message] = vi.mocked(toast).mock.calls[0] as [string]

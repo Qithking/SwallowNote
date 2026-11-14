@@ -234,14 +234,9 @@ class PluginEventBusImpl {
     const totalDuration = performance.now() - dispatchStart
     // Lazy import to avoid a circular dep (telemetry imports nothing
     // from host; host imports telemetry only on emit, which is rare).
+    // C1：原先在此处全量 JSON.stringify 计算 payloadSize 后被 void 丢弃
+    // （死代码 + 每次 emit 的高频冗余序列化），已删除。
     void import('./plugin-telemetry').then(({ recordEventMetric }) => {
-      const payloadSize = (() => {
-        try {
-          return JSON.stringify(payload).length
-        } catch (e) {
-          logger.error('plugin-host', 'serialize payload failed', e); return 0
-        }
-      })()
       for (const [pid, stats] of perPlugin) {
         // Skip telemetry for plugins that were uninstalled between the
         // sync dispatch and this async callback landing. The handler
@@ -259,8 +254,6 @@ class PluginEventBusImpl {
           stats.errors
         )
       }
-      // Keep the local references to silence unused warnings
-      void payloadSize
     })
   }
 }

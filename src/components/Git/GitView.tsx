@@ -201,7 +201,9 @@ function CommitSection({
   onStatusUpdate: (conflictPaths: string[], errorPaths: string[]) => void
 }) {
   const [isCommitting, setIsCommitting] = useState(false)
-  const [commitMessage, setCommitMessage] = useState('Sync changes')
+  const { t } = useTranslation()
+  // C15：默认提交消息走 i18n（原硬编码英文 'Sync changes'）
+  const [commitMessage, setCommitMessage] = useState(() => t('git.defaultCommitMessage'))
   const [credentialDialog, setCredentialDialog] = useState<{
     open: boolean
     repoPath: string
@@ -218,7 +220,6 @@ function CommitSection({
   }>({ open: false, repoPath: '', repoName: '', branch: '', localCommits: 0, remoteCommits: 0 })
   const [isResolvingDiverged, setIsResolvingDiverged] = useState(false)
   const showToast = useUIStore((s) => s.showToast)
-  const { t } = useTranslation()
 
   const handlePushWithCredentials = async (username: string, password: string) => {
     setIsPushingWithCredentials(true)

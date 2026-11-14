@@ -264,9 +264,61 @@ describe('TC-012: 编辑器状态恢复测试', () => {
     expect(stateBefore.tabs.find(t => t.id === 'tab-2')?.isDirty).toBe(true)
     
     useEditorStore.getState().filterTabs(t => t.isDirty)
-    
+
     const state = useEditorStore.getState()
     expect(state.tabs.length).toBe(1)
     expect(state.tabs[0].id).toBe('tab-2')
+  })
+})
+
+describe('B9 回归: addTab 复用不得命中 diff tab', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useEditorStore.setState({ tabs: [], activeTabId: null })
+  })
+
+  it('查看 diff 后再打开同 path 正文：新建正文 tab 并激活，而非激活 diff tab', () => {
+    // 模拟 openDiffTab 创建的 diff tab 形态：path 同源文件、content 为空、type 'diff'
+    useEditorStore.getState().addTab({
+      id: 'diff-/workspace/note1.md-abc1234',
+      path: '/workspace/note1.md',
+      name: 'fix: demo (abc1234)',
+      content: '',
+      isDirty: false,
+      isEdited: false,
+      type: 'diff',
+      commitHash: 'abc1234',
+      diffContent: '+ diff line',
+      viewMode: 'source',
+    })
+    expect(useEditorStore.getState().tabs).toHaveLength(1)
+
+    // 从文件树打开同一文件 → 必须新建正文 tab，不能命中 diff tab
+    useEditorStore.getState().addTab({
+      id: 'tab-body',
+      path: '/workspace/note1.md',
+      name: 'note1.md',
+      content: '# 正文',
+      isDirty: false,
+      isEdited: false,
+      viewMode: 'preview',
+    })
+
+    const { tabs, activeTabId } = useEditorStore.getState()
+    // 回归断言：修复前 addTab 按 path 复用会误命中 diff tab（tabs 为 1 且激活 diff）
+    expect(tabs).toHaveLength(2)
+    expect(activeTabId).toBe('tab-body')
+    // diff tab 不应被正文打开逻辑覆盖内容字段
+    const diffTab = tabs.find(t => t.type === 'diff')
+    expect(diffTab?.diffContent).toBe('+ diff line')
+  })
+
+  it('已存在同 path 正文 tab 时仍正常复用激活（不回归既有行为）', () => {
+    useEditorStore.getState().addTab({ id: 'tab-1', path: '/workspace/note1.md', name: 'note1.md', content: '# 旧', isDirty: false, isEdited: false, viewMode: 'preview' })
+    useEditorStore.getState().addTab({ id: 'tab-2', path: '/workspace/note2.md', name: 'note2.md', content: '', isDirty: false, isEdited: false, viewMode: 'preview' })
+    useEditorStore.getState().addTab({ id: 'tab-1b', path: '/workspace/note1.md', name: 'note1.md', content: '# 新', isDirty: false, isEdited: false, viewMode: 'preview' })
+    const { tabs, activeTabId } = useEditorStore.getState()
+    expect(tabs).toHaveLength(2)
+    expect(activeTabId).toBe('tab-1')
   })
 })

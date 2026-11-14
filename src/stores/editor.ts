@@ -298,7 +298,9 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
     // 切换 activeTabId 前保存当前活动 tab 的 scrollTop
     saveActiveTabScrollTopIfNeeded(get)
     set((state) => {
-      const existing = state.tabs.find((t) => t.path === tab.path)
+      // 复用判断排除 diff tab：diff tab 与源文件同 path（openDiffTab 以 filePath 为 path），
+      // 不排除会导致查看 diff 后正文 tab 永远打不开；未加载更新分支同理，避免覆盖 diff tab 的数据字段
+      const existing = state.tabs.find((t) => t.path === tab.path && t.type !== 'diff')
       if (existing) {
         // 同 path 复用既有 tab；仅未加载时更新 content（避免覆盖空文件）
         if (existing.content === undefined && tab.content !== undefined) {
@@ -313,7 +315,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
           }
           return {
             tabs: state.tabs.map((t) =>
-              t.path === tab.path
+              t.path === tab.path && t.type !== 'diff'
                 ? {
                     ...t,
                     content,

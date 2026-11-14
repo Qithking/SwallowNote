@@ -114,7 +114,8 @@ async fn do_git_clone(
     if let Some(parent) = Path::new(local_path).parent() {
         if !parent.exists() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+                // C24：错误消息透传前端展示，统一走 i18n
+                .map_err(|e| format!("{}: {}", i18n::t("backend.git.createDirFailed"), e))?;
         }
     }
 
@@ -191,7 +192,7 @@ async fn do_git_clone(
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to execute git clone: {}", e))?;
+        .map_err(|e| format!("{}: {}", i18n::t("backend.git.cloneSpawnFailed"), e))?;
 
     // Store the child PID so the frontend can cancel the clone.
     let pid = child.id();
@@ -287,14 +288,14 @@ async fn do_git_clone(
         tokio::task::spawn_blocking(move || {
             let status = child
                 .wait()
-                .map_err(|e| format!("Failed to wait for git clone: {}", e))?;
+                .map_err(|e| format!("{}: {}", i18n::t("backend.git.cloneWaitFailed"), e))?;
             if let Some(handle) = stderr_handle {
                 let _ = handle.join();
             }
             Ok::<std::process::ExitStatus, String>(status)
         })
         .await
-        .map_err(|e| format!("Clone task panicked: {}", e))?
+        .map_err(|e| format!("{}: {}", i18n::t("backend.git.cloneTaskPanicked"), e))?
     }?;
 
     // Clear the clone state — clone is no longer running.

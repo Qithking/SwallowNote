@@ -233,6 +233,12 @@ fn attempt_stream(
             let _ = r.into_string();
             return classify_status(code);
         }
+        // C29：InvalidUrl（BadUrl）是确定性配置错误（如 custom provider 空
+        // base_url 拼出相对 URL），重试无意义——Fatal 快速失败，避免白等退避
+        // 后报误导性「连接失败」
+        Err(ureq::Error::Transport(t)) if t.kind() == ureq::ErrorKind::InvalidUrl => {
+            return Attempt::Fatal(format!("请求地址无效: {}", t));
+        }
         Err(e) => return Attempt::Retryable(format!("连接失败: {}", e)),
     };
 
@@ -242,17 +248,21 @@ fn attempt_stream(
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
-            // 上游正常关流 = 流结束
-            Ok(0) => return Attempt::Success(()),
+            // 上游正常关流 = 流结束；EOF 时派发残余未终止事件（C28：SSE 规范
+            // 要求 end of stream 时非空 data buffer 仍需派发）
+            Ok(0) => {
+                for item in parser.finish() {
+                    if let Some(result) = dispatch_sse_item(item, provider_name, emit) {
+                        return result;
+                    }
+                }
+                return Attempt::Success(());
+            }
             Ok(n) => match parser.feed(&buf[..n]) {
                 Ok(items) => {
                     for item in items {
-                        let SseItem::Data(data) = item;
-                        match parse_sse_data(provider_name, &data) {
-                            StreamTick::Delta(text) => emit("chunk", json!({ "text": text })),
-                            StreamTick::Finish => return Attempt::Success(()),
-                            StreamTick::Error(m) => return Attempt::Fatal(m),
-                            StreamTick::Ignore => {}
+                        if let Some(result) = dispatch_sse_item(item, provider_name, emit) {
+                            return result;
                         }
                     }
                     // 有数据到达说明流活跃：此处检查停止标志使停止即时生效，
@@ -278,6 +288,26 @@ fn attempt_stream(
             }
             Err(e) => return Attempt::Fatal(format!("读取上游响应失败: {}", e)),
         }
+    }
+}
+
+/// 统一派发单个 SSE 事件（EOF 残余与常规读取两分支共用）：
+/// Delta 转发 chunk，Finish/Error 决定流结局，Ignore 丢弃。
+/// 返回 Some 时调用方立即透传该结局返回。
+fn dispatch_sse_item(
+    item: SseItem,
+    provider_name: &str,
+    emit: &mut dyn FnMut(&str, Value),
+) -> Option<Attempt<()>> {
+    let SseItem::Data(data) = item;
+    match parse_sse_data(provider_name, &data) {
+        StreamTick::Delta(text) => {
+            emit("chunk", json!({ "text": text }));
+            None
+        }
+        StreamTick::Finish => Some(Attempt::Success(())),
+        StreamTick::Error(m) => Some(Attempt::Fatal(m)),
+        StreamTick::Ignore => None,
     }
 }
 
@@ -428,5 +458,24 @@ mod tests {
             "慢 TTFB 不应导致流失败: {result:?}"
         );
         assert_eq!(chunks, vec!["早".to_string()]);
+    }
+
+    /// C29 回归：custom provider 空 base_url → 相对 URL → ureq BadUrl。
+    /// BadUrl 是确定性配置错误，必须 Fatal（原误分类为 Retryable：
+    /// 白等 500ms+2s 退避后报误导性「连接失败」）。
+    #[test]
+    fn bad_url_is_fatal_not_retryable() {
+        let cfg = ProviderConfig {
+            provider: "custom".into(),
+            model_id: "m".into(),
+            base_url: String::new(), // custom 无默认地址 → 空 base → 相对 URL
+            api_key: "k".into(),
+        };
+        let built = provider::build_request(&cfg, &[json!({"role": "user", "content": "hi"})]);
+        assert_eq!(built.url, "/chat/completions");
+        let mut emit = |_e: &str, _v: Value| {};
+        let cancel = AtomicBool::new(false);
+        let result = attempt_stream(&built, "custom", &mut emit, &cancel);
+        assert!(matches!(result, Attempt::Fatal(_)), "BadUrl 必须 Fatal: {result:?}");
     }
 }
