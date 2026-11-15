@@ -68,6 +68,8 @@ describe('useSessionAutoSave', () => {
     const saveSessionStateNow = vi.fn().mockResolvedValue(undefined)
     const { unmount } = renderHook(() => useSessionAutoSave(saveSessionStateNow))
 
+    // 起点与默认值(400)区分开,确保宽度确实变化以触发保存
+    useUIStore.setState({ rightPanelWidth: 300 } as never)
     useUIStore.getState().setRightPanelWidth(400)
 
     vi.advanceTimersByTime(500)

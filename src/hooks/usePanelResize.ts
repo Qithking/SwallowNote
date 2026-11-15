@@ -41,11 +41,9 @@ export function usePanelResize(saveSessionStateNow: () => Promise<void>) {
     const clientX = e.clientX
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null
-      const newWidth = window.innerWidth - clientX
-      const maxWidth = window.innerWidth * 0.5
-      if (newWidth >= 250 && newWidth <= maxWidth) {
-        setRightPanelWidth(newWidth)
-      }
+      // 仅更新面板宽度：窗口总宽不变，编辑区由 flex:1 自动吸收差值。
+      // 越界值由 store 的 setRightPanelWidth 钳制到 [150,600]。
+      setRightPanelWidth(window.innerWidth - clientX)
     })
   }, [isDraggingRight, setRightPanelWidth])
 

@@ -40,6 +40,7 @@ import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { useEditorSettingsStore } from '@/stores'
 import { isPluginSidebarView } from '@/lib/plugin-utils'
+import { attachEditorWidthLock } from '@/lib/rightPanelTransition'
 
 function App() {
   useTheme()
@@ -73,6 +74,12 @@ function App() {
   const initRef = useRef(false)
   // 标记启动关键路径已完成，自动同步可以开始
   const startupReadyRef = useRef(false)
+  // 右面板开合锁宽：resize 前锁编辑区像素宽度，防止 webview 重排时编辑区瞬时变宽闪动
+  const editorAreaRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = editorAreaRef.current
+    return el ? attachEditorWidthLock(el) : undefined
+  }, [])
 
   const { saveSessionStateNow, restoreSessionState, restoreWindowGeometry } = useSessionPersistence()
 
@@ -523,7 +530,12 @@ function App() {
           )}
 
           {/* Editor Area / Full Panel / Plugin Manager */}
-          <div className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ background: 'var(--bg-secondary-gradient, var(--bg-secondary))'}}>
+          {/* 编辑区 flex:1 占满；右面板开合时窗口宽度增减面板宽，编辑区宽度保持不变 */}
+          <div
+            ref={editorAreaRef}
+            className="flex-1 flex flex-col overflow-hidden rounded-[var(--radius)]"
+            style={{ background: 'var(--bg-secondary-gradient, var(--bg-secondary))' }}
+          >
             {settingsPanelVisible && sidebarView === 'settings' ? (
               <SettingsView />
             ) : isPluginManagerActive ? (
@@ -569,7 +581,7 @@ function App() {
 
           {/* Right Panel - moved outside editor, same level as sidebar */}
           {rightPanelType && (
-            <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)] " style={{ width: rightPanelWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))', borderColor: 'var(--border-color)' }}>
+            <div className="shrink-0 flex flex-col overflow-hidden rounded-[var(--radius)]" style={{ width: rightPanelWidth, background: 'var(--bg-secondary-gradient, var(--bg-secondary))', borderColor: 'var(--border-color)' }}>
               <RightPanelContent />
             </div>
           )}

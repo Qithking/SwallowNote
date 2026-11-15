@@ -6,6 +6,8 @@ import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import i18n from '@/i18n'
 import { getLatestFolder, getAppSettings, saveAppSettings, setAppLocale, setAutoStartEnabled, isAutoStartEnabled, restartApp } from '@/lib/tauri'
+import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window'
+import { RIGHT_PANEL_TRANSITION_START, RIGHT_PANEL_TRANSITION_END } from '@/lib/rightPanelTransition'
 import { ShortcutKey } from '@/lib/shortcuts'
 import { useFileTreeStore } from './filetree'
 import { emitLocaleChanged, emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
@@ -458,7 +460,7 @@ export interface UIState {
   setSettingsPanelVisible: (visible: boolean) => void
   setSettingsSection: (section: SettingsSection) => void
   toggleSettingsPanel: () => void
-  setRightPanelType: (type: RightPanelType) => void
+  setRightPanelType: (type: RightPanelType) => Promise<void>
   setRightPanelWidth: (width: number) => void
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void
   setClipboardFiles: (files: string[], isCut: boolean) => void
@@ -505,13 +507,52 @@ export interface UIState {
   loadSettings: () => Promise<void>
 }
 
+// 右面板开合时同步调整窗口宽度（逻辑像素）：打开 +面板宽、关闭 -面板宽，
+// 编辑区（flex:1）因此保持宽度不变。最大化/全屏下窗口尺寸不可改，跳过。
+async function adjustWindowWidthForPanel(open: boolean, panelWidth: number): Promise<number | null> {
+  try {
+    const win = getCurrentWindow()
+    // 一次往返取齐窗口状态与尺寸，缩短开合时序中 DOM 变化的等待窗口（防闪动）
+    const [maximized, fullscreen, size, sf] = await Promise.all([
+      win.isMaximized(),
+      win.isFullscreen(),
+      win.innerSize(),
+      win.scaleFactor(),
+    ])
+    if (maximized || fullscreen) return null
+    const width = Math.round(size.width / sf) + (open ? panelWidth : -panelWidth)
+    await win.setSize(new LogicalSize(width, Math.round(size.height / sf)))
+    return width
+  } catch (e) {
+    logger.warn('ui', 'Failed to adjust window width for right panel:', e)
+    return null
+  }
+}
+
+// 等待 webview 视口宽度收敛到目标值再放行解锁：setSize 的 Promise resolve 不代表
+// DOM 视口已更新（跨进程异步），解锁早于视口更新会让 flex-1 编辑区在旧视口宽度下
+// 瞬间扩展填充原面板空间（关闭方向闪动）。轮询收敛而非固定 sleep；超时兜底防锁宽悬挂。
+function waitForViewportWidth(target: number, timeoutMs = 150): Promise<void> {
+  return new Promise((resolve) => {
+    const start = Date.now()
+    const poll = () => {
+      if (Math.abs(window.innerWidth - target) <= 1 || Date.now() - start >= timeoutMs) {
+        resolve()
+        return
+      }
+      setTimeout(poll, 16)
+    }
+    poll()
+  })
+}
+
 export const useUIStore = create<UIState>((set, get) => ({
   theme: 'light',
   themeColor: '#005fb8',
   sidebarView: 'explorer',
   sidebarVisible: true,
   sidebarWidth: 240,
-  rightPanelWidth: 288,
+  rightPanelWidth: 400,
   statusBarVisible: true,
   editorViewMode: 'split',
   settingsPanelVisible: false,
@@ -570,7 +611,28 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSettingsSection: (section: SettingsSection) => set({ settingsSection: section }),
   toggleSettingsPanel: () =>
     set((state) => ({ settingsPanelVisible: !state.settingsPanelVisible })),
-  setRightPanelType: (type) => set({ rightPanelType: type }),
+  setRightPanelType: async (type) => {
+    if (type !== null) {
+      // 打开：同步锁编辑区宽度 → 加宽窗口（编辑区不动，右侧仅露出空白）→ 渲染面板 → 解锁。
+      // dispatch 的 handler 在调用栈内同步执行，锁在 await（OS 异步动作）前已生效；
+      // 若无锁，webview 重排不等 JS，编辑区 flex 瞬时变宽一帧（闪动）
+      window.dispatchEvent(new Event(RIGHT_PANEL_TRANSITION_START))
+      const target = await adjustWindowWidthForPanel(true, get().rightPanelWidth)
+      // 视口收敛后再渲染面板：若视口滞后就挂载，面板会被旧视口裁剪一帧
+      if (target !== null) await waitForViewportWidth(target)
+      set({ rightPanelType: type })
+      window.dispatchEvent(new Event(RIGHT_PANEL_TRANSITION_END))
+    } else {
+      // 关闭：同步锁编辑区宽度 → 卸载面板（编辑区不动，右侧空白）→ 收窄窗口
+      // → 视口收敛 → 解锁。收敛等待不可省：解锁早于视口更新会让 flex-1 编辑区
+      // 在旧视口宽度下瞬间扩展（关闭方向闪动的根因）
+      window.dispatchEvent(new Event(RIGHT_PANEL_TRANSITION_START))
+      set({ rightPanelType: null })
+      const target = await adjustWindowWidthForPanel(false, get().rightPanelWidth)
+      if (target !== null) await waitForViewportWidth(target)
+      window.dispatchEvent(new Event(RIGHT_PANEL_TRANSITION_END))
+    }
+  },
   showToast: (message, type = 'info') => {
     switch (type) {
       case 'success':
