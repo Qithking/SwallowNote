@@ -14,6 +14,31 @@ import { openPluginPanel, createPluginPanelProps } from '../plugin-utils'
 import { useUIStore, usePluginStore } from '@/stores'
 import { setGranted, clearAll } from '../plugin-permission-guard'
 
+// setRightPanelType 现为 async(开面板先加宽窗口再渲染,防闪动),mock 窗口 API 让
+// resize 链在本文件内确定性完成,断言前 flush microtask 等状态写入落定。
+// 另需视口宽度与 mock 的 resize 目标(1200+400=1600)一致:解锁前会轮询等待
+// webview 视口收敛,不设则走 150ms 超时兜底,flush 一轮等不到状态落定
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    isMaximized: () => Promise.resolve(false),
+    isFullscreen: () => Promise.resolve(false),
+    innerSize: () => Promise.resolve({ width: 1200, height: 800 }),
+    scaleFactor: () => Promise.resolve(1),
+    setSize: () => Promise.resolve(),
+  }),
+  LogicalSize: class {
+    constructor(public width: number, public height: number) {}
+  },
+}))
+
+// jsdom 的 innerWidth 是原型只读 getter，用 defineProperty 覆盖为可写
+const setViewportWidth = (w: number) => {
+  Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true })
+}
+
+/** 等待一轮宏任务,确保所有已排队的 microtask(async action 链)执行完毕 */
+const flushMicrotasks = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
 const PID = 'test-plugin'
 
 /** setup.ts 全局 core mock 的 invoke（默认 resolved undefined） */
@@ -21,13 +46,15 @@ const invokeMock = vi.mocked(invoke)
 
 beforeEach(() => {
   clearAll()
+  setViewportWidth(1600) // 与 mock resize 目标一致，视口轮询第一轮即收敛
   useUIStore.setState({ rightPanelType: null, pendingPluginRequest: null })
   usePluginStore.setState({ activeRightPanelPluginId: null })
 })
 
 describe('openPluginPanel：面板请求管道写入', () => {
-  it('写入 rightPanelType=plugin:<id>、激活插件、pending 透传 payload', () => {
+  it('写入 rightPanelType=plugin:<id>、激活插件、pending 透传 payload', async () => {
     openPluginPanel(PID, { text: 'hi' })
+    await flushMicrotasks()
     expect(useUIStore.getState().rightPanelType).toBe(`plugin:${PID}`)
     expect(usePluginStore.getState().activeRightPanelPluginId).toBe(PID)
     expect(useUIStore.getState().pendingPluginRequest).toEqual({
@@ -36,10 +63,11 @@ describe('openPluginPanel：面板请求管道写入', () => {
     })
   })
 
-  it('payload 缺省：清空残留 pending（防旧 payload 泄漏），面板仍正常打开', () => {
+  it('payload 缺省：清空残留 pending（防旧 payload 泄漏），面板仍正常打开', async () => {
     openPluginPanel(PID, { stale: true })
     expect(useUIStore.getState().pendingPluginRequest).not.toBeNull()
     openPluginPanel(PID)
+    await flushMicrotasks()
     expect(useUIStore.getState().pendingPluginRequest).toBeNull()
     expect(useUIStore.getState().rightPanelType).toBe(`plugin:${PID}`)
     expect(usePluginStore.getState().activeRightPanelPluginId).toBe(PID)
