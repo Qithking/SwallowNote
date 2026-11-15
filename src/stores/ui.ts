@@ -623,6 +623,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       set({ rightPanelType: type })
       window.dispatchEvent(new Event(RIGHT_PANEL_TRANSITION_END))
     } else {
+      // 幂等保护：右面板本就未打开时为 no-op。设置面板等路径会无条件调
+      // setRightPanelType(null)（仅确保关闭），若不拦截会把窗口错误收窄一个面板宽
+      if (get().rightPanelType === null) return
       // 关闭：同步锁编辑区宽度 → 卸载面板（编辑区不动，右侧空白）→ 收窄窗口
       // → 视口收敛 → 解锁。收敛等待不可省：解锁早于视口更新会让 flex-1 编辑区
       // 在旧视口宽度下瞬间扩展（关闭方向闪动的根因）
