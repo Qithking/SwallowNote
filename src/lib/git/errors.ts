@@ -20,6 +20,8 @@ export enum GitErrorCode {
   AlreadyUpToDate = 'ALREADY_UP_TO_DATE',
   NoRemote = 'NO_REMOTE',
   NotInGitRepo = 'NOT_IN_GIT_REPO',
+  /** S-26：本地未提交改动会被 merge/pull 覆盖，需先提交或暂存后再同步 */
+  LocalChangesOverwrite = 'LOCAL_CHANGES_OVERWRITE',
   Unknown = 'UNKNOWN',
 }
 
@@ -43,6 +45,8 @@ const PREFIX_TO_CODE: Array<[string, GitErrorCode]> = [
   ['ALREADY_UP_TO_DATE:', GitErrorCode.AlreadyUpToDate],
   ['NO_REMOTE:', GitErrorCode.NoRemote],
   ['NOT_IN_GIT_REPO:', GitErrorCode.NotInGitRepo],
+  // S-26：本地改动覆盖错误独立归类（此前落入 Unknown）
+  ['LOCAL_CHANGES_OVERWRITE:', GitErrorCode.LocalChangesOverwrite],
 ]
 
 /** 把 Tauri 抛出的 "CODE:msg" 字符串解析为 typed GitError */

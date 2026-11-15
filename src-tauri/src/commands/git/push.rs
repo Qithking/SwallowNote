@@ -153,6 +153,16 @@ fn git_force_push_impl(
     username: Option<String>,
     password: Option<String>,
 ) -> Result<(), String> {
+    // S-05 修复：与 git_push_impl 同款冲突态检查——冲突状态下先 `add -A`
+    // 会把冲突标记入库，index 被污染且后续 commit 才失败。必须在 add 前拒绝。
+    if is_rebase_or_merge_in_progress(&path) {
+        if has_real_conflicts(&path) {
+            return Err("REBASE_CONFLICT:Cannot force push while rebase/merge is in progress. Please resolve conflicts first.".to_string());
+        }
+        // Stale state files - clean up before proceeding
+        cleanup_stale_rebase_state(&path);
+    }
+
     // 修复 detached HEAD（必须在 commit 之前，否则 commit 可能失败）
     if let Err(e) = fix_detached_head(&path) {
         // 分叉需用户决策，上抛前端弹框
@@ -288,5 +298,59 @@ mod tests {
         let _ = work_tmp; // 持有 TempDir 防止目录被提前删除
         let result = retry_push_on_detached_head(&work_path, false, None, "Failed to fetch: network error");
         assert!(result.is_none(), "non-detached error should return None, got: {:?}", result);
+    }
+
+    /// S-05 回归：冲突状态下 force push 必须在 add -A 之前拒绝，
+    /// 防止冲突标记被入库污染 index。
+    #[test]
+    fn test_force_push_rejects_when_merge_conflict() {
+        use super::super::test_utils::setup_conflict_repo;
+        let tmp = setup_conflict_repo();
+        let repo = tmp.path();
+
+        // 制造真实冲突：feature 分支改动 file.txt，main 也改动，merge 产生冲突
+        git_cmd(repo, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.join("file.txt"), "line1\nremote\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "feature"]);
+
+        git_cmd(repo, &["checkout", "-q", "main"]);
+        std::fs::write(repo.join("file.txt"), "line1\nlocal\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "main"]);
+
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["merge", "feature", "--no-commit", "--no-ff"])
+            .status()
+            .unwrap();
+        assert!(!status.success(), "merge should produce conflicts");
+
+        let result = git_force_push_impl(
+            repo.to_str().unwrap().to_string(),
+            None,
+            None,
+        );
+        let err = result.expect_err("force push must fail during conflict");
+        assert!(
+            err.starts_with("REBASE_CONFLICT:"),
+            "error should be REBASE_CONFLICT, got: {}",
+            err
+        );
+
+        // 冲突标记文件不得被 add（index 未被污染）：文件应仍处于 unmerged
+        // 状态（未被 git add 解析为 stage 0）。git diff --cached 会显示
+        // unmerged 条目，故用 ls-files --unmerged 断言。
+        let unmerged = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["ls-files", "--unmerged", "--", "file.txt"])
+            .output()
+            .unwrap();
+        let unmerged_out = String::from_utf8_lossy(&unmerged.stdout);
+        assert!(
+            !unmerged_out.trim().is_empty(),
+            "conflict marker file must remain unmerged (not staged), unmerged: {}",
+            unmerged_out
+        );
     }
 }

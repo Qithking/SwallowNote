@@ -502,8 +502,10 @@ export function pluginHasUpdateAvailable(args: {
   // 回退：市场索引版本比较（与角标 updateIdSet / 市场卡片同源）。
   // 覆盖 upload 安装的插件 —— Rust 端会跳过它们，但市场安装流程
   // （install_plugin_from_bytes）仍可正常更新这类插件。
+  // I17：用 isNewerVersion 严格 semver 比较（曾用 !==——本地版本比索引新
+  // 时会误报「有更新」，如手动升级过的插件）。
   const entry = args.marketIndex?.plugins.find((e) => e.id === args.pluginId)
-  return !!entry && entry.version !== args.localVersion
+  return !!entry && isNewerVersion(entry.version, args.localVersion)
 }
 
 /** 切换已安装插件的活跃版本。 */

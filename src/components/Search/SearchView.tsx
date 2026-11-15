@@ -8,6 +8,7 @@ import { useWorkspaceStore, useEditorStore, useUIStore } from '@/stores'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getFileIcon } from '@/lib/utils/fileIcon'
+import { resolveNodeModifiedTime } from '@/components/FileTree/FileTreeView'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { invoke } from '@tauri-apps/api/core'
@@ -91,11 +92,13 @@ const SearchResultMatch = memo(function SearchResultMatch({
   file,
   match,
   query,
+  searchOptions,
   onClick,
 }: {
   file: SearchResult
   match: { line_number: number; content: string; start_col: number; end_col: number }
   query: string
+  searchOptions: { caseSensitive: boolean; wholeWord: boolean; useRegex: boolean }
   onClick: (file: SearchResult, lineNumber: number) => void
 }) {
   return (
@@ -105,26 +108,57 @@ const SearchResultMatch = memo(function SearchResultMatch({
     >
       <div className="w-[26px] shrink-0" />
       <span className="text-xs truncate flex-1" style={{ color: 'var(--text-secondary)' }}>
-        <HighlightMatches content={match.content} query={query} />
+        <HighlightMatches content={match.content} query={query} searchOptions={searchOptions} />
       </span>
     </div>
   )
 })
 
-// 高亮匹配文本 - 使用 memo 优化
-const HighlightMatches = memo(function HighlightMatches({ content, query }: { content: string; query: string }) {
-  if (!query) return <>{content}</>
-  
-  const lowerContent = content.toLowerCase()
-  const lowerQuery = query.toLowerCase()
-  const matches: { start: number; end: number }[] = []
-  
-  let pos = 0
-  while ((pos = lowerContent.indexOf(lowerQuery, pos)) !== -1) {
-    matches.push({ start: pos, end: pos + query.length })
-    pos += 1
+/**
+ * I13④：收集与后端搜索语义一致的高亮区间（regex/全词/大小写开关联动）。
+ * 此前高亮用字面 indexOf——regex/全词模式下高亮与实际命中不一致。
+ * 无效正则返回空区间（退化为不高亮，与后端编译失败无结果一致），不抛错。
+ */
+export function collectHighlightRanges(
+  content: string,
+  query: string,
+  opts: { caseSensitive: boolean; wholeWord: boolean; useRegex: boolean }
+): Array<{ start: number; end: number }> {
+  if (!query) return []
+  let re: RegExp
+  try {
+    const flags = opts.caseSensitive ? 'g' : 'gi'
+    if (opts.useRegex) {
+      re = new RegExp(query, flags) // 后端 use_regex 时 whole_word 不参与
+    } else {
+      const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      re = new RegExp(opts.wholeWord ? `\\b(?:${escaped})\\b` : escaped, flags)
+    }
+  } catch {
+    return []
   }
-  
+  const ranges: Array<{ start: number; end: number }> = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content)) !== null) {
+    if (m.index === re.lastIndex) re.lastIndex++ // 零宽匹配防死循环
+    ranges.push({ start: m.index, end: m.index + m[0].length })
+    if (ranges.length >= 500) break // 单行高亮上限，防极端长文本
+  }
+  return ranges
+}
+
+// 高亮匹配文本 - 使用 memo 优化
+const HighlightMatches = memo(function HighlightMatches({
+  content,
+  query,
+  searchOptions,
+}: {
+  content: string
+  query: string
+  searchOptions: { caseSensitive: boolean; wholeWord: boolean; useRegex: boolean }
+}) {
+  const matches = collectHighlightRanges(content, query, searchOptions)
+
   if (matches.length === 0) return <>{content}</>
   
   const parts: { text: string; highlighted: boolean }[] = []
@@ -153,6 +187,35 @@ const HighlightMatches = memo(function HighlightMatches({ content, query }: { co
   )
 })
 
+/** YAML 筛选结果行（与后端 search_frontmatter 返回对应） */
+export interface YamlFilterResult {
+  file_path: string
+  title: string | null
+}
+
+/**
+ * 按工作区根列表逐个限定查询 frontmatter 索引并按 file_path 去重合并（I6）。
+ * 全局 SQLite 索引跨工作区共享，不按前缀限定会把其它工作区的记录混入结果。
+ */
+export async function searchFrontmatterByRoots(
+  roots: string[],
+  filters: Record<string, string>
+): Promise<YamlFilterResult[]> {
+  if (roots.length === 0) return []
+  const perRoot = await Promise.all(
+    roots.map((root) =>
+      invoke<YamlFilterResult[]>('search_frontmatter', { filters, pathPrefix: root }).catch(() => [])
+    )
+  )
+  const merged = new Map<string, YamlFilterResult>()
+  for (const list of perRoot) {
+    for (const r of list) {
+      if (!merged.has(r.file_path)) merged.set(r.file_path, r)
+    }
+  }
+  return [...merged.values()]
+}
+
 const SearchView = memo(function SearchView() {
   const rootPath = useWorkspaceStore((s) => s.rootPath)
   const workspaceFolders = useWorkspaceStore((s) => s.workspaceFolders)
@@ -166,10 +229,14 @@ const SearchView = memo(function SearchView() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
+  // I13①：区分「已回车搜索过」与「仅输入未回车」——未搜索时不显示「未找到匹配项」
+  const [hasSearched, setHasSearched] = useState(false)
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [wholeWord, setWholeWord] = useState(false)
   const [useRegex, setUseRegex] = useState(false)
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set())
+  // I13③：搜索代际号——连续搜索时丢弃旧响应，防止旧结果覆盖新结果
+  const searchSeqRef = useRef(0)
 
   // YAML 筛选状态
   const [showYamlFilter, setShowYamlFilter] = useState(false)
@@ -183,22 +250,36 @@ const SearchView = memo(function SearchView() {
     inputRef.current?.focus()
   }, [])
 
-  const handleSearch = useCallback(async () => {
+  // 当前搜索范围根：folder 模式 rootPath；workspace 模式多根（I6 YAML 筛选共用）
+  const searchRoots = useMemo<string[]>(
+    () => (workspaceMode === 'workspace' ? workspaceFolders : (rootPath ? [rootPath] : [])),
+    [workspaceMode, workspaceFolders, rootPath]
+  )
+
+  // I13②③：搜索主体支持开关值覆写（开关切换时立即携带最新值重搜，绕过 setState 异步）
+  const runSearch = useCallback(async (overrides?: {
+    caseSensitive?: boolean
+    wholeWord?: boolean
+    useRegex?: boolean
+  }) => {
     if (!query.trim()) {
       setResults([])
       setYamlResults([])
       return
     }
 
-    const searchPaths = workspaceMode === 'workspace' 
-      ? workspaceFolders 
-      : (rootPath ? [rootPath] : [])
+    const searchPaths = searchRoots
 
     if (searchPaths.length === 0) {
       setResults([])
       return
     }
 
+    const cs = overrides?.caseSensitive ?? caseSensitive
+    const ww = overrides?.wholeWord ?? wholeWord
+    const re = overrides?.useRegex ?? useRegex
+    // I13③：代际号防竞态——旧响应晚到时丢弃，不覆盖新结果
+    const seq = ++searchSeqRef.current
     setIsSearching(true)
 
     try {
@@ -206,13 +287,14 @@ const SearchView = memo(function SearchView() {
         searchInFiles({
           query,
           root_path: path,
-          case_sensitive: caseSensitive,
-          whole_word: wholeWord,
-          use_regex: useRegex,
+          case_sensitive: cs,
+          whole_word: ww,
+          use_regex: re,
         }).catch(() => [])
       )
 
       const allResults = await Promise.all(searchPromises)
+      if (seq !== searchSeqRef.current) return // 已有更新的搜索发起，丢弃本次旧结果
 
       const mergedMap = new Map<string, SearchResult>()
       for (const results of allResults) {
@@ -235,12 +317,24 @@ const SearchView = memo(function SearchView() {
 
       setResults(mergedResults)
       setExpandedFiles(new Set(mergedResults.map(r => r.file_path)))
+      setHasSearched(true)
     } catch {
-      setResults([])
+      if (seq === searchSeqRef.current) setResults([])
     } finally {
-      setIsSearching(false)
+      if (seq === searchSeqRef.current) {
+        setIsSearching(false)
+        setHasSearched(true)
+      }
     }
-  }, [query, workspaceMode, workspaceFolders, rootPath, caseSensitive, wholeWord, useRegex])
+  }, [query, searchRoots, caseSensitive, wholeWord, useRegex])
+
+  const handleSearch = useCallback(() => runSearch(), [runSearch])
+
+  // I13①：输入即重置「已搜索」状态，未回车前不显示「未找到匹配项」
+  const setQueryValue = useCallback((value: string) => {
+    setQuery(value)
+    setHasSearched(false)
+  }, [])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -263,10 +357,9 @@ const SearchView = memo(function SearchView() {
 
     setIsYamlSearching(true)
     try {
-      const result = await invoke<Array<{ file_path: string; title: string | null }>>('search_frontmatter', {
-        filters,
-      })
-      setYamlResults(result)
+      // I6：按当前工作区根逐个限定查询并合并，避免全局索引跨工作区污染
+      const merged = await searchFrontmatterByRoots(searchRoots, filters)
+      setYamlResults(merged)
       setShowYamlFilter(false)
     } catch (e) {
       logger.error('search', 'YAML search failed:', e)
@@ -274,7 +367,7 @@ const SearchView = memo(function SearchView() {
     } finally {
       setIsYamlSearching(false)
     }
-  }, [yamlFilters])
+  }, [yamlFilters, searchRoots])
 
   const toggleFileExpanded = useCallback((filePath: string) => {
     setExpandedFiles(prev => {
@@ -290,8 +383,13 @@ const SearchView = memo(function SearchView() {
 
   const handleResultClick = useCallback(async (result: SearchResult, lineNumber?: number) => {
     try {
+      // S-02：冲突文件不得以普通 tab 加载（工作树含标记）——改走冲突面板
+      const { openFileWithConflictGuard } = await import('@/lib/git/conflictOpen')
+      if (openFileWithConflictGuard(result.file_path)) return
       const { readFile } = await import('@/lib/tauri')
       const content = await readFile(result.file_path)
+      // I9 同款：真实 mtime（获取失败保持 undefined，不回退当前时间）
+      const modifiedTime = await resolveNodeModifiedTime(result.file_path)
       addTab({
         id: result.file_path,
         path: result.file_path,
@@ -301,7 +399,7 @@ const SearchView = memo(function SearchView() {
         isEdited: false,
         viewMode: 'source' as const,
         fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
-        modifiedTime: new Date().toLocaleString(),
+        modifiedTime,
         wordCount: countWords(content),
         cursorPosition: lineNumber ? { line: lineNumber, column: 1 } : undefined,
       })
@@ -368,14 +466,14 @@ const SearchView = memo(function SearchView() {
             style={{ color: 'var(--text-primary)' }}
             placeholder={t('search.placeholder')}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => setQueryValue(e.target.value)}
             onKeyDown={handleKeyDown}
           />
           
           {query && (
             <button
               // 清空关键词：保留 yaml 筛选器（原业务逻辑），仅清空关键词与结果
-              onClick={() => { setQuery(''); setYamlResults([]) }}
+              onClick={() => { setQueryValue(''); setYamlResults([]) }}
               className="flex items-center justify-center w-6 h-full shrink-0 cursor-pointer"
               style={{ color: 'var(--text-muted)' }}
             >
@@ -387,7 +485,12 @@ const SearchView = memo(function SearchView() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => setCaseSensitive(!caseSensitive)}
+                  onClick={() => {
+                    const next = !caseSensitive
+                    setCaseSensitive(next)
+                    // I13②：已有搜索结果时切换开关自动重搜（携带最新开关值）
+                    if (query.trim() && hasSearched) void runSearch({ caseSensitive: next })
+                  }}
                   className="flex items-center justify-center w-5 h-full cursor-pointer rounded-l-sm"
                   style={{ 
                     backgroundColor: caseSensitive ? 'var(--bg-hover)' : 'transparent',
@@ -402,7 +505,12 @@ const SearchView = memo(function SearchView() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => setWholeWord(!wholeWord)}
+                  onClick={() => {
+                    const next = !wholeWord
+                    setWholeWord(next)
+                    // I13②：已有搜索结果时切换开关自动重搜
+                    if (query.trim() && hasSearched) void runSearch({ wholeWord: next })
+                  }}
                   className="flex items-center justify-center w-5 h-full cursor-pointer"
                   style={{ 
                     backgroundColor: wholeWord ? 'var(--bg-hover)' : 'transparent',
@@ -417,7 +525,12 @@ const SearchView = memo(function SearchView() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => setUseRegex(!useRegex)}
+                  onClick={() => {
+                    const next = !useRegex
+                    setUseRegex(next)
+                    // I13②：已有搜索结果时切换开关自动重搜
+                    if (query.trim() && hasSearched) void runSearch({ useRegex: next })
+                  }}
                   className="flex items-center justify-center w-5 h-full rounded-r-sm"
                   style={{ 
                     backgroundColor: useRegex ? 'var(--bg-hover)' : 'transparent',
@@ -556,7 +669,7 @@ const SearchView = memo(function SearchView() {
 
       {/* Results List with Virtualization */}
       <ScrollArea className="flex-1">
-        {!query ? (
+        {!query || !hasSearched ? (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
             <Search size={24} className="mb-2 opacity-50" />
             <p className="text-sm text-center">{t('search.inputPlaceholder')}</p>
@@ -605,6 +718,7 @@ const SearchView = memo(function SearchView() {
                         file={item.file}
                         match={item.match}
                         query={query}
+                        searchOptions={{ caseSensitive, wholeWord, useRegex }}
                         onClick={handleResultClick}
                       />
                     )}

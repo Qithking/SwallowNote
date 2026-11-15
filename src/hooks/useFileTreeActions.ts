@@ -4,7 +4,7 @@ import { logger } from '@/lib/logger'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
 import { loadDirectory } from '@/lib/api'
-import { createFile, deleteFile as deleteFileTauri, renameFile, writeFile } from '@/lib/tauri'
+import { createFile, deleteFile as deleteFileTauri, renameFile, writeFile, workspaceRootFor } from '@/lib/tauri'
 import { injectDefaultFrontmatter } from '@/lib/utils/frontmatter'
 import type { FileNode } from '@/stores/filetree'
 import { useTranslation } from 'react-i18next'
@@ -115,9 +115,9 @@ export function useFileTreeActions() {
       const newName = editingName.trim()
       const newPath = parentPath + '/' + newName
       await renameFile(editingPath, newPath)
-      // 旧路径已失效，使其 frontmatter 缓存失效（传 rootPath 供后端 fs_guard 校验）
+      // 旧路径已失效，使其 frontmatter 缓存失效（按旧路径所属工作区根解析）
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-      invalidateFrontmatterCache(editingPath, rootPath)
+      invalidateFrontmatterCache(editingPath, workspaceRootFor(editingPath))
       updateTabPath(editingPath, newPath, newName)
 
       if (parent) {
@@ -235,7 +235,7 @@ export function useFileTreeActions() {
     for (const path of pathsToDelete) {
       try {
         await deleteFileTauri(path)
-        invalidateFrontmatterCache(path, rootPath)
+        invalidateFrontmatterCache(path, workspaceRootFor(path))
         const editorStore = useEditorStore.getState()
         const node = findNodeByPath(path, nodes)
         const tabsToClose = editorStore.tabs.filter(tab =>

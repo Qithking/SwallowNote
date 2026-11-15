@@ -458,6 +458,7 @@ export function ChatPanel({ services, pendingRequest }: ChatPanelProps) {
           onSave={modelCtl.saveModel}
           onDelete={modelCtl.deleteModel}
           onSetDefault={modelCtl.setDefaultModel}
+          onFetchUpstream={modelCtl.fetchUpstreamModels}
           onClose={() => setSettingsOpen(false)}
         />
       )}

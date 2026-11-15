@@ -132,7 +132,8 @@ async fn do_git_clone(
     {
         let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
         if guard.pid.is_some() {
-            return Err("已有克隆任务正在进行中，请等待完成或取消后再试".to_string());
+            // I18：错误消息透传前端展示，统一走 i18n（原硬编码中文）
+            return Err(i18n::t("backend.git.cloneInProgress"));
         }
         guard.url = url.to_string();
         guard.local_path = local_path.to_string();
@@ -284,7 +285,11 @@ async fn do_git_clone(
     // child.wait() is blocking and can last minutes for large repos.
     // Wrap it in spawn_blocking to avoid blocking the Tauri async runtime.
     let local_path_owned = local_path.to_string();
-    let status = {
+    // S-19 修复：wait 结果包进 Result——wait 失败（进程无法等待）或 join panic
+    // 时不再 `?` 直接提前返回，而是与正常失败路径一样清理 pid_state/askpass/
+    // partial 目录。此前失败路径残留 pid_state，前端 git_clone_status 误报
+    // "clone 进行中"。这里显式拆两层（spawn_blocking 的 join 结果 × wait 结果）。
+    let wait_result = {
         tokio::task::spawn_blocking(move || {
             let status = child
                 .wait()
@@ -295,10 +300,10 @@ async fn do_git_clone(
             Ok::<std::process::ExitStatus, String>(status)
         })
         .await
-        .map_err(|e| format!("{}: {}", i18n::t("backend.git.cloneTaskPanicked"), e))?
-    }?;
+        .map_err(|e| format!("{}: {}", i18n::t("backend.git.cloneTaskPanicked"), e))
+    };
 
-    // Clear the clone state — clone is no longer running.
+    // Clear the clone state — clone is no longer running（成功/失败/join panic 统一清理）
     {
         let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
         *guard = CloneStateInfo::default();
@@ -308,6 +313,20 @@ async fn do_git_clone(
     if let Some(ref askpass_path) = askpass_script_path {
         let _ = std::fs::remove_file(askpass_path);
     }
+
+    let status = match wait_result {
+        Ok(Ok(status)) => status,
+        Ok(Err(e)) | Err(e) => {
+            // S-19 修复：wait 失败/join panic 时删除 partial clone 目录并上抛错误，
+            // 与 status.success()==false 分支同等清理（pid_state 已在上面统一清空）
+            let _ = std::fs::remove_dir_all(&local_path_owned);
+            let _ = app.emit("git-clone-progress", serde_json::json!({
+                "status": "error",
+                "message": i18n::t("backend.git.cloneFailed")
+            }));
+            return Err(e);
+        }
+    };
 
     if status.success() {
         let _ = app.emit("git-clone-progress", serde_json::json!({

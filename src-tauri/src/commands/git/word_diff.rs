@@ -1,5 +1,11 @@
 use super::models::{WordDiffPart, WordDiffResult};
 
+/// S-25：word diff 输入大小上限（两文本合计字节数）。
+/// TextDiff::from_words 的词级 diff 在超大输入（数 MB 级文件）上会消耗
+/// 显著 CPU/内存（词拆分 + 对齐），冲突面板大文件场景可能卡顿。
+/// 超限返回独立错误码，由前端降级为行级对比。
+pub const WORD_DIFF_MAX_INPUT_BYTES: usize = 1_000_000;
+
 /// Compute word-level diff between two text strings using the `similar` crate.
 /// This performs a word-granularity diff (similar to `diffWords` in jsdiff),
 /// then splits the result into separate arrays for the old and new sides.
@@ -10,6 +16,14 @@ use super::models::{WordDiffPart, WordDiffResult};
 #[tauri::command]
 pub fn compute_word_diff(old_text: String, new_text: String) -> Result<WordDiffResult, String> {
     use similar::{ChangeTag, TextDiff};
+
+    // S-25 修复：超大输入直接报错，避免 from_words 耗 CPU/内存导致卡顿
+    if old_text.len() + new_text.len() > WORD_DIFF_MAX_INPUT_BYTES {
+        return Err(format!(
+            "WORD_DIFF_TOO_LARGE: input exceeds {} bytes limit",
+            WORD_DIFF_MAX_INPUT_BYTES
+        ));
+    }
 
     let diff = TextDiff::from_words(&old_text, &new_text);
 
@@ -187,5 +201,21 @@ mod tests {
             result.new_parts.iter().all(|p| !p.removed),
             "new_parts should not contain removed parts"
         );
+    }
+
+    /// S-25：超过上限的输入必须返回 WORD_DIFF_TOO_LARGE（拒绝词级 diff）
+    #[test]
+    fn test_compute_word_diff_rejects_oversized_input() {
+        let big = "x".repeat(WORD_DIFF_MAX_INPUT_BYTES + 1);
+        // 用 .err() 避免 WordDiffResult 不实现 Debug 导致的 expect_err 编译失败
+        let err = compute_word_diff(big.clone(), "small".to_string()).err();
+        assert!(err.is_some(), "oversized input must be rejected");
+        let err = err.unwrap();
+        assert!(err.starts_with("WORD_DIFF_TOO_LARGE"), "unexpected error: {}", err);
+
+        // 边界：恰好等于上限（0 + limit）应放行
+        let at_limit = "y".repeat(WORD_DIFF_MAX_INPUT_BYTES);
+        assert!(compute_word_diff(at_limit, String::new()).is_ok(),
+            "input at the limit should still be accepted");
     }
 }

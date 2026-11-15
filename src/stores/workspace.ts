@@ -3,7 +3,7 @@
  */
 import { create } from 'zustand'
 import { logger } from '@/lib/logger'
-import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory, getSessionState, registerAssetScope } from '@/lib/tauri'
+import { getLatestFolder, saveFolderHistory, getFolderHistory, watchDirectory, unwatchDirectory, getSessionState, registerAssetScope, getHomeDir } from '@/lib/tauri'
 import { triggerFrontmatterScan } from '@/lib/utils/searchQuery'
 import { useFileTreeStore } from './filetree'
 import { useUIStore, WorkspaceMode } from './ui'
@@ -33,6 +33,33 @@ export interface WorkspaceState {
   startBackgroundServices: () => void
 }
 
+/** home 目录缓存（展开 ~ 前缀用，进程内只取一次） */
+let cachedHomeDir: string | null = null
+
+/**
+ * 入口路径归一：展开 ~ 前缀、去尾分隔符。
+ * 统一 folder/workspace 条目形态，保证 workspaceRootFor 的 startsWith 前缀匹配可靠（根因 B）。
+ */
+export async function normalizeWorkspacePath(input: string): Promise<string> {
+  let p = input.trim()
+  if (!p) return p
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) {
+    if (!cachedHomeDir) {
+      try {
+        cachedHomeDir = await getHomeDir()
+      } catch {
+        // home 获取失败保留原样，交由后端 fs_guard fail-closed 拒绝
+      }
+    }
+    if (cachedHomeDir) p = cachedHomeDir + p.slice(1)
+  }
+  // 去尾分隔符（保留根 "/"）
+  while (p.length > 1 && (p.endsWith('/') || p.endsWith('\\'))) {
+    p = p.slice(0, -1)
+  }
+  return p
+}
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   rootPath: null,
   workspaceFolders: [],
@@ -46,6 +73,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   openFolder: async (path: string) => {
     set({ isLoading: true, error: null })
     try {
+      // 入口 normalize（根因 B）：保证 rootPath 形态与允许根前缀匹配一致
+      path = await normalizeWorkspacePath(path)
       const fileTreeStore = useFileTreeStore.getState()
 
       const loadSuccess = await fileTreeStore.loadRoot(path)
@@ -136,6 +165,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
   addWorkspaceFolder: async (path: string) => {
+    // 入口 normalize（根因 B）
+    path = await normalizeWorkspacePath(path)
     const { workspaceFolders } = get()
     if (workspaceFolders.includes(path)) return
     
@@ -196,6 +227,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   loadWorkspaceFile: async (workspacePath: string) => {
     set({ isLoading: true, error: null })
     try {
+      // 入口 normalize（根因 B：~ 前缀 / 尾斜杠会让允许根与历史记录错位）
+      workspacePath = await normalizeWorkspacePath(workspacePath)
       const { readFile } = await import('@/lib/tauri')
       // workspace 文件的允许根：rootPath 仅 folder 模式设置（workspace 模式为 null），
       // 不传覆盖会被 ensure_path_allowed 只允许 app_data → 工作区 .swallow-workspace 被误拒。
@@ -210,7 +243,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         fileTreeStore.clearAll()
 
         // Load file tree first before updating state
-        const loadSuccess = await fileTreeStore.addRoots(workspace.folders)
+        // 入口 normalize：workspace 文件为用户手写 JSON，可能含尾斜杠/~ 前缀（根因 B）
+        const folders = await Promise.all(workspace.folders.map((f: string) => normalizeWorkspacePath(f)))
+        const loadSuccess = await fileTreeStore.addRoots(folders)
 
         // Verify file tree loaded successfully
         if (!loadSuccess) {
@@ -218,7 +253,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         }
 
         // B4：.swallow-workspace 多根场景逐个运行期注册 asset scope
-        for (const folder of workspace.folders) {
+        for (const folder of folders) {
           registerAssetScope(folder).catch(err =>
             logger.warn('workspace-store', `Failed to register asset scope for ${folder}:`, err)
           )
@@ -227,14 +262,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         fileTreeStore.clearExpanded()
 
         set({
-          workspaceFolders: workspace.folders,
+          workspaceFolders: folders,
           currentWorkspacePath: workspacePath,
           isLoading: false
         })
 
         // 非阻塞：保存历史、启动文件监听和frontmatter扫描
         saveFolderHistory(workspacePath).catch(err => logger.warn('workspace-store', 'Failed to save folder history:', err))
-        for (const folder of workspace.folders) {
+        for (const folder of folders) {
           watchDirectory(folder).catch(err => logger.warn('workspace-store', `Failed to watch directory ${folder}:`, err))
           // workspace 多根：folder 自身即其允许根（workspace 文件目录无法覆盖全部 folders）
           triggerFrontmatterScan(folder, folder).catch(err => logger.warn('workspace-store', `Failed to trigger frontmatter scan for ${folder}:`, err))
@@ -253,6 +288,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (mode === workspaceMode) return
 
     useUIStore.getState().setWorkspaceMode(mode)
+    // 对称清理对侧状态（根因 A）：workspaceRootFor 首选 rootPath，folder→workspace
+    // 残留旧 rootPath 会把 workspace 内文件解析到旧 folder 根，被 fs_guard 拒绝
+    if (mode === 'workspace') {
+      set({ rootPath: null })
+    } else {
+      set({ workspaceFolders: [], currentWorkspacePath: null })
+    }
     if (targetPath) {
       // 直接加载调用方指定的目标路径（如从最近记录点击某项），
       // 跳过 loadLatestByMode 的 sessionContextPath/history 预加载（根因 A：双重加载 + 失效重试放大）

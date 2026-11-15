@@ -468,6 +468,9 @@ describe('TC-035: pullAllRepos 错误分类 characterization', () => {
     expect(results[0].error).toContain('AUTH_REQUIRED')
     expect(results[0].isConflict).toBeUndefined()
     expect(results[0].isDetachedHead).toBeUndefined()
+    // S-03 修复：凭证缺失必须透传 needsCredential——此前 PullResult 丢失该标志，
+    // GitView pull 失败无法区分凭证缺失，凭证输入入口不可达
+    expect(results[0].needsCredential).toBe(true)
   })
 
   it('TC-035-02: AUTH_REQUIRED + 凭证成功 → success:true', async () => {

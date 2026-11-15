@@ -2,11 +2,11 @@ import { useEffect, useRef } from 'react'
 import { logger } from '@/lib/logger'
 import { useUIStore, useEditorStore, useFileTreeStore, useWorkspaceStore, type Theme } from '@/stores'
 import { ShortcutKey, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
-import { openFolderDialog, openWorkspaceDialog, createFile, writeFile, openInFinder } from '@/lib/tauri'
+import { openFolderDialog, openWorkspaceDialog, createFile, writeFile, openInFinder, workspaceRootFor } from '@/lib/tauri'
 import { loadDirectory } from '@/lib/api'
 import { injectDefaultFrontmatter } from '@/lib/utils/frontmatter'
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
-import { emitLocaleChanged, emitNoteSaved } from '@/lib/plugin-host'
+import { emitNoteSaved } from '@/lib/plugin-host'
 import { listPluginCommands } from '@/lib/plugin-commands'
 import { toast } from 'sonner'
 import i18n from 'i18next'
@@ -74,12 +74,24 @@ export function dispatchBuiltin(
   return true
 }
 
-export async function handleNewFile() {
+/**
+ * 解析新建文件/文件夹的目标目录（handleNewFile / handleNewFolder 共用）。
+ * - folder 模式：以 rootPath 为根，无 rootPath 返回 null（保持静默跳过）
+ * - workspace 模式：rootPath 恒为 null（I4 快捷键失效根因），改取当前选中
+ *   目录/其父目录，无选中时回退首个 workspace 根
+ */
+function resolveCreateTargetDir(): string | null {
   const { selectedPath, nodes } = useFileTreeStore.getState()
-  const { rootPath } = useWorkspaceStore.getState()
-  if (!rootPath) return
+  const { rootPath, workspaceFolders } = useWorkspaceStore.getState()
+  const { workspaceMode } = useUIStore.getState()
 
-  let targetDir = rootPath
+  const baseRoot =
+    workspaceMode === 'workspace'
+      ? (selectedPath ? workspaceRootFor(selectedPath) : null) ?? workspaceFolders[0] ?? null
+      : rootPath
+  if (!baseRoot) return null
+
+  let targetDir = baseRoot
   if (selectedPath) {
     const selected = findNodeByPath(selectedPath, nodes)
     if (selected?.isDirectory) {
@@ -88,6 +100,13 @@ export async function handleNewFile() {
       targetDir = selectedPath.substring(0, selectedPath.lastIndexOf('/'))
     }
   }
+  return targetDir
+}
+
+export async function handleNewFile() {
+  const { nodes } = useFileTreeStore.getState()
+  const targetDir = resolveCreateTargetDir()
+  if (!targetDir) return
 
   const children = (findNodeByPath(targetDir, nodes)?.children) || []
   const defaultFileName = i18n.t('fileTree.defaultFileName')
@@ -110,20 +129,10 @@ export async function handleNewFile() {
   }
 }
 
-async function handleNewFolder() {
-  const { selectedPath, nodes } = useFileTreeStore.getState()
-  const { rootPath } = useWorkspaceStore.getState()
-  if (!rootPath) return
-
-  let targetDir = rootPath
-  if (selectedPath) {
-    const selected = findNodeByPath(selectedPath, nodes)
-    if (selected?.isDirectory) {
-      targetDir = selected.path
-    } else if (selectedPath.includes('/')) {
-      targetDir = selectedPath.substring(0, selectedPath.lastIndexOf('/'))
-    }
-  }
+export async function handleNewFolder() {
+  const { nodes } = useFileTreeStore.getState()
+  const targetDir = resolveCreateTargetDir()
+  if (!targetDir) return
 
   const children = (findNodeByPath(targetDir, nodes)?.children) || []
   const defaultFolderName = i18n.t('fileTree.defaultFolderName')
@@ -180,6 +189,8 @@ export async function handleSaveFile() {
     const isMarkdown = activeTab.path.toLowerCase().endsWith('.md')
     // 保存前正文基准，用于 CAS 判断避免误标已保存
     const savingContent = activeTab.content
+    // I11：frontmatter 基准同步记录——保存期间属性面板可能改 frontmatter（引用更新）
+    const savingFrontmatter = activeTab.frontmatter
     let writeContent = activeTab.content
     let fm: NoteFrontmatter | undefined
     if (isMarkdown) {
@@ -194,19 +205,26 @@ export async function handleSaveFile() {
     if (isMarkdown) {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
-        // workspaceRoot 注入：后端 fs_guard 白名单校验（架构审计候选 2）
+        // workspaceRoot 注入：后端 fs_guard 白名单校验（I14：走 workspaceRootFor，
+        // workspace 模式 rootPath 恒 null 不能直传）
         await invoke('index_saved_file', {
           path: activeTab.path,
-          workspaceRoot: useWorkspaceStore.getState().rootPath || null,
+          workspaceRoot: workspaceRootFor(activeTab.path),
         })
       } catch (e) {
         // 索引线程会异步补偿，记录日志便于排查
         logger.error('keyboard', 'Failed to index saved file:', activeTab.path, e)
       }
     }
-    // CAS 保护：仅期间无新编辑才清脏标记
+    // CAS 保护：仅期间无新编辑才清脏标记。I11：content 与 frontmatter 均未被
+    // 再次编辑才命中——期间改过 frontmatter 则保留用户新值与脏标记，等待用户
+    // 再次保存，而不是被保存前旧快照静默还原
     const currentTab = useEditorStore.getState().tabs.find((t) => t.id === activeTab.id)
-    if (currentTab && currentTab.content === savingContent) {
+    if (
+      currentTab &&
+      currentTab.content === savingContent &&
+      currentTab.frontmatter === savingFrontmatter
+    ) {
       useEditorStore.setState((state) => ({
         tabs: state.tabs.map((t) =>
           t.id === activeTab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
@@ -218,18 +236,23 @@ export async function handleSaveFile() {
     // 失效 frontmatter 缓存以刷新搜索/文件树
     if (isMarkdown) {
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-      invalidateFrontmatterCache(activeTab.path, useWorkspaceStore.getState().rootPath)
+      invalidateFrontmatterCache(activeTab.path, workspaceRootFor(activeTab.path))
     }
     window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: activeTab.path } }))
     const { gitAutoCommit } = await import('@/lib/tauri')
     try {
       await gitAutoCommit(activeTab.path)
+      // S-14 修复：自动提交成功后通知 git 面板刷新（与 editor store 保存路径一致）
+      window.dispatchEvent(new CustomEvent('git-auto-committed', { detail: { path: activeTab.path } }))
     } catch (e) {
       // 保存时自动提交失败此前只有 debug 级别，提升为 warn 保证可见
       logger.warn('keyboard', 'Git auto-commit skipped:', e)
     }
   } catch (e) {
     logger.error('keyboard', 'Failed to save file:', e)
+    // I8：与 saveAllDirtyTabs 一致派发 save-error（App.tsx 监听后弹 toast），
+    // 否则 Cmd+S 保存失败用户无从得知，可能误以为已保存而关窗丢数据
+    window.dispatchEvent(new CustomEvent('save-error', { detail: { path: activeTab.path, error: e } }))
   } finally {
     // 延迟移除 savingPaths，等 file-watcher 平息
     const savedPath = activeTab.path
@@ -368,11 +391,11 @@ export function useKeyboardShortcuts() {
       if (dispatchBuiltin(e, 'closeAll', handleCloseAll)) return
       if (dispatchBuiltin(e, 'toggleTheme', handleToggleTheme)) return
       if (
+        // I5：语言切换统一走 store 收口（i18n + 后端通知 + 插件事件 + 持久化）
         dispatchBuiltin(e, 'toggleLanguage', () => {
           const currentLang = i18n.language
           const newLang = currentLang === 'zh-CN' ? 'en' : 'zh-CN'
-          i18n.changeLanguage(newLang)
-          queueMicrotask(() => emitLocaleChanged(newLang))
+          useUIStore.getState().changeAppLocale(newLang)
         })
       )
         return

@@ -322,3 +322,38 @@ describe('B9 回归: addTab 复用不得命中 diff tab', () => {
     expect(activeTabId).toBe('tab-1')
   })
 })
+
+describe('saveAllDirtyTabs 写盘失败契约（I1 回归锚点）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useEditorStore.setState({ tabs: [], activeTabId: null })
+  })
+
+  it('writeFile 失败时保持脏标记并派发 save-error，供「保存并关闭」流程校验中止', async () => {
+    const { writeFile } = await import('@/lib/tauri')
+    vi.mocked(writeFile).mockRejectedValueOnce(new Error('disk full'))
+
+    const saveErrorDetail = new Promise<{ path: string; error: unknown }>((resolve) => {
+      const handler = (e: Event) => {
+        window.removeEventListener('save-error', handler)
+        resolve((e as CustomEvent).detail)
+      }
+      window.addEventListener('save-error', handler)
+    })
+
+    useEditorStore.getState().addTab({
+      id: 'tab-err', path: '/workspace/err.md', name: 'err.md', content: 'content', isDirty: false, isEdited: false, viewMode: 'preview',
+    })
+    useEditorStore.getState().updateTabContent('tab-err', 'modified')
+
+    await useEditorStore.getState().saveAllDirtyTabs()
+    const detail = await saveErrorDetail
+
+    expect(detail.path).toBe('/workspace/err.md')
+    // 回归断言：失败时脏标记必须保留，getDirtyTabsCount()>0 供 App 中止关闭避免内容丢失
+    expect(useEditorStore.getState().getDirtyTabsCount()).toBe(1)
+    const tab = useEditorStore.getState().tabs.find(t => t.id === 'tab-err')
+    expect(tab?.isDirty).toBe(true)
+    expect(tab?.content).toBe('modified')
+  })
+})

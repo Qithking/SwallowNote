@@ -183,6 +183,23 @@ export function useAiModels(services: AiServices) {
     [services, refresh],
   )
 
+  /** I19：从服务商拉取模型清单（后端 fetchUpstreamModels，P2.3/D11）。
+   *  返回 [{id, name}]，供 ModelSettings「拉取模型清单」入口填充 modelId。 */
+  const fetchUpstreamModels = useCallback(
+    async (form: { provider: string; baseUrl: string; apiKey?: string }) => {
+      const { models } = await services.invokeBackend<{ models: { id: string; name: string }[] }>(
+        'fetchUpstreamModels',
+        {
+          provider: form.provider,
+          baseUrl: form.baseUrl ?? '',
+          apiKey: form.apiKey ?? '',
+        },
+      )
+      return models
+    },
+    [services],
+  )
+
   useEffect(() => {
     void refresh().catch(() => {})
   }, [refresh])
@@ -197,9 +214,10 @@ export function useAiModels(services: AiServices) {
       saveModel,
       deleteModel,
       setDefaultModel,
+      fetchUpstreamModels,
       refresh,
     }),
-    [models, activeModelId, activeModelIdRef, setActiveModel, saveModel, deleteModel, setDefaultModel, refresh],
+    [models, activeModelId, activeModelIdRef, setActiveModel, saveModel, deleteModel, setDefaultModel, fetchUpstreamModels, refresh],
   )
 }
 

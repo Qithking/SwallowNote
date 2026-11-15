@@ -3,7 +3,7 @@ use super::runner::{run_git, run_git_with_env, run_git_blocking};
 use super::branch::{should_use_rebase, is_detached_head, fix_detached_head, get_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::get_remote_url;
 use super::askpass::{create_askpass_script, build_askpass_env};
-use super::errors::{is_conflict_error, is_auth_error};
+use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error};
 use log::warn;
 
 /// Pull changes from remote with rebase by default.
@@ -99,9 +99,16 @@ fn git_pull_impl(
             if is_auth_error(&e) {
                 cleanup_stale_rebase_state(&path);
                 Err(format!("AUTH_REQUIRED:{}", e))
+            } else if is_local_changes_overwrite_error(&e) {
+                // S-26：本地未提交改动会被 merge 覆盖——归类独立错误码，前端
+                // 提示"提交或暂存本地改动"（此前降级为通用失败，用户难定位）
+                Err(format!("LOCAL_CHANGES_OVERWRITE:{}", e))
             } else if is_conflict_error(&e) {
                 // Do NOT abort the rebase - preserve the conflict state for the UI to resolve.
                 // Keep conflict markers in the working tree so the user must resolve them in ConflictResolver.
+                // S-21 决策：merge 冲突（pull.rebase=false）也复用 REBASE_CONFLICT 前缀——
+                // 前端错误码契约绑定该前缀（GitErrorCode.RebaseConflict），语义偏差无实际影响
+                // （两种场景都要求用户经冲突面板解决），改动需同步前端多处，维持现状。
                 Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers preserved in working tree. Use ConflictResolver to resolve.]", e))
             } else {
                 // Non-conflict error (network, zlib, etc.): clean up stale rebase state

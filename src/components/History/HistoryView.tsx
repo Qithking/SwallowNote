@@ -429,7 +429,13 @@ const HistoryView = memo(function HistoryView({ visible }: { visible: boolean })
                       onClick={() => {
                         setSelectedHash(entry.hash)
                         if (activeTabPath) {
-                          openDiffTab(activeTabPath, entry.hash, entry.message)
+                          // I10：diff 打开失败此前完全静默（unhandled rejection，无 tab 无提示），补 toast
+                          openDiffTab(activeTabPath, entry.hash, entry.message).catch((e: unknown) => {
+                            logger.error('history', 'Failed to open diff tab:', e)
+                            toast(t('history.openDiffFailed'), {
+                              description: e instanceof Error ? e.message : String(e),
+                            })
+                          })
                         }
                       }}
                     >

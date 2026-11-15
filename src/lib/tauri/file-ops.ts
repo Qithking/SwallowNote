@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core'
-import { logger } from '@/lib/logger'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 /**
@@ -11,14 +10,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 export function workspaceRootFor(path: string): string | null {
   const ws = useWorkspaceStore.getState()
   if (ws.rootPath) return ws.rootPath
-  const root = ws.workspaceFolders.find((f) => path === f || path.startsWith(f + '/')) ?? null
-  // bug-ws-expand-null DEBUG START（临时插桩：定位 workspace 展开被拒根因，fix 后移除）
-  logger.warn(
-    'file-ops',
-    `[bug-ws-expand-null] path=${path} | rootPath=${String(ws.rootPath)} | folders=${JSON.stringify(ws.workspaceFolders)} | resolved=${String(root)}`
-  )
-  // bug-ws-expand-null DEBUG END
-  return root
+  return ws.workspaceFolders.find((f) => path === f || path.startsWith(f + '/')) ?? null
 }
 
 /**

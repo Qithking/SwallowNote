@@ -6,7 +6,7 @@ import { logger } from '@/lib/logger'
 import { subscribeWithSelector } from 'zustand/middleware'
 import type { ReactNode } from 'react'
 import { loadFileContent } from '@/lib/api'
-import { writeFile, gitAutoCommit, indexSavedFile } from '@/lib/tauri'
+import { writeFile, gitAutoCommit, indexSavedFile, workspaceRootFor } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
 import { findScrollContainer } from '@/lib/scroll-position'
 import { clearCursorAnchorCache, getCursorAnchorCache } from '@/lib/cursor-anchor'
@@ -216,6 +216,8 @@ export interface EditorTab {
   scrollTop?: number
   /** 光标锚点（仅预览模式 BlockNote）：离开 tab 时保存，内容渲染完成后校验恢复 */
   cursorAnchor?: CursorAnchor
+  /** 最近激活序号（I12：content LRU 淘汰依据；会话恢复的 tab 无此值视为最旧） */
+  lastActivated?: number
 }
 
 export interface EditorState {
@@ -223,6 +225,8 @@ export interface EditorState {
   activeTabId: string | null
   /** File paths being saved (ignore watcher remove events during atomic writes) */
   savingPaths: Set<string>
+  /** tab 激活序号计数器（I12：分配 lastActivated 单调递增序号） */
+  activationSeq: number
   addTab: (tab: EditorTab) => void
   openDiffTab: (filePath: string, commitHash: string, commitMessage: string) => Promise<void>
   openConflictTab: (repoPath: string, repoName: string, options?: { autoSelectFile?: string; autoHideTree?: boolean }) => void
@@ -278,6 +282,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
   tabs: [],
   activeTabId: null,
   savingPaths: new Set<string>(),
+  activationSeq: 0,
   addTab: (tab) => {
     // 达到最大打开 tab 上限时，先尝试关闭最旧的可关闭 tab，避免无限增长
     const current = get()
@@ -323,17 +328,33 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
                     fileSize: tab.fileSize,
                     modifiedTime: tab.modifiedTime,
                     wordCount: tab.wordCount,
+                    // I12：复用激活也算使用，更新 LRU 序号
+                    lastActivated: state.activationSeq + 1,
                   }
                 : t
             ),
             activeTabId: existing.id,
+            activationSeq: state.activationSeq + 1,
           }
         }
-        return { activeTabId: existing.id }
+        return {
+          tabs: state.tabs.map((t) =>
+            t.id === existing.id ? { ...t, lastActivated: state.activationSeq + 1 } : t
+          ),
+          activeTabId: existing.id,
+          activationSeq: state.activationSeq + 1,
+        }
       }
       // 新 .md tab 解析 frontmatter
       const isMarkdown = tab.path.toLowerCase().endsWith('.md')
-      const newTab = { ...tab, isDirty: false, isEdited: false, viewMode: 'preview' as const }
+      const newTab = {
+        ...tab,
+        isDirty: false,
+        isEdited: false,
+        viewMode: 'preview' as const,
+        // I12：新打开即激活，分配 LRU 序号
+        lastActivated: state.activationSeq + 1,
+      }
       if (isMarkdown && tab.content !== undefined) {
         const result = parseFrontmatter(tab.content)
         newTab.content = result.body
@@ -345,6 +366,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
       return {
         tabs: newTabs,
         activeTabId: tab.id,
+        activationSeq: state.activationSeq + 1,
       }
     })
   },
@@ -480,15 +502,20 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
     set((state) => {
       const prevActiveId = state.activeTabId
       if (prevActiveId === id) return state
-      // 内存策略：保留活动 tab + 最近 5 个 tab 的 content
+      // 内存策略：保留活动 tab + 最近使用（LRU）的 5 个 tab content。
+      // I12：旧实现按数组顺序 slice(-5)——交替使用最早的两个 tab 会互相
+      // 驱逐 content，每次切换都重载出现 loading 闪烁；改为按 lastActivated
+      // 淘汰最久未用者（会话恢复无序号的 tab 视为最旧，优先淘汰）
+      const seq = state.activationSeq + 1
       const recentTabIds = new Set<string>([id])
       state.tabs
         .filter(t => t.id !== id)
-        .slice(-5)
+        .sort((a, b) => (b.lastActivated ?? 0) - (a.lastActivated ?? 0))
+        .slice(0, 5)
         .forEach(t => recentTabIds.add(t.id))
       const tabs = state.tabs.map((t) => {
-        // 保留集合中的 tab content
-        if (recentTabIds.has(t.id)) return t
+        // 保留集合中的 tab content（活动 tab 顺带更新 LRU 序号）
+        if (recentTabIds.has(t.id)) return t.id === id ? { ...t, lastActivated: seq } : t
         // 保留 dirty tab 的 content，避免丢失修改
         if (t.isDirty || t.frontmatterDirty) return t
         // diff/conflict/plugin tab 无法 reload，保留
@@ -499,7 +526,7 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         }
         return t
       })
-      return { tabs, activeTabId: id }
+      return { tabs, activeTabId: id, activationSeq: seq }
     })
     // 切换到非 .md 文件时关属性面板
     const newTab = get().tabs.find((t) => t.id === id)
@@ -829,6 +856,8 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         let writeContent = tab.content
         // 保存前正文基准，用于 CAS 判断避免误标已保存
         const savingContent = tab.content
+        // I11：frontmatter 基准同步记录——保存期间属性面板可能改 frontmatter（引用更新）
+        const savingFrontmatter = tab.frontmatter
         let fm: NoteFrontmatter | undefined
         if (isMarkdown) {
           fm = { ...(tab.frontmatter || {}), updated: new Date().toISOString() }
@@ -848,9 +877,15 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
             logger.error('editor-store', 'Failed to index saved file:', tab.path, e)
           }
         }
-        // CAS 保护：仅期间无新编辑才清脏标记
+        // CAS 保护：仅期间无新编辑才清脏标记。I11：content 与 frontmatter 均未被
+        // 再次编辑才命中——期间改过 frontmatter 则保留用户新值与脏标记（该修改
+        // 尚未写盘），等待用户再次保存，而不是被保存前旧快照静默还原
         const currentTab = get().tabs.find((t) => t.id === tab.id)
-        if (currentTab && currentTab.content === savingContent) {
+        if (
+          currentTab &&
+          currentTab.content === savingContent &&
+          currentTab.frontmatter === savingFrontmatter
+        ) {
           set((state) => ({
             tabs: state.tabs.map((t) =>
               t.id === tab.id ? { ...t, frontmatter: fm, isDirty: false, isEdited: false, frontmatterDirty: false } : t
@@ -862,13 +897,16 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         // 失效 frontmatter 缓存以刷新搜索/文件树
         if (isMarkdown) {
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          const { useWorkspaceStore } = await import('@/stores/workspace')
-          invalidateFrontmatterCache(tab.path, useWorkspaceStore.getState().rootPath)
+          // workspace 模式 rootPath 恒 null 不能直传：按所属工作区根解析（与 I14 同款）
+          invalidateFrontmatterCache(tab.path, workspaceRootFor(tab.path))
         }
         window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: tab.path } }))
         // 若在 git 仓库则自动提交（异步非阻塞）
         try {
           await gitAutoCommit(tab.path)
+          // S-14 修复：自动提交成功后通知 git 面板刷新 hasUncommittedChanges
+          // 等字段——此前保存面板列表停留在旧状态直到下次扫描
+          window.dispatchEvent(new CustomEvent('git-auto-committed', { detail: { path: tab.path } }))
         } catch (e) {
           logger.warn('editor-store', 'gitAutoCommit failed for', tab.path, e)
         }

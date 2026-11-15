@@ -474,6 +474,9 @@ pub fn purge_orphan_records(
 pub fn search_frontmatter(
     db: &Database,
     filters: HashMap<String, String>,
+    // I6：限定查询路径前缀。全局 SQLite 索引跨工作区共享，不限定会把
+    // 其它工作区的记录混入 YAML 筛选结果。
+    path_prefix: Option<String>,
 ) -> Result<Vec<FrontmatterRecord>> {
     // Phase 1: 锁外构建 SQL（纯字符串操作，无需持锁）
     let mut conditions: Vec<String> = Vec::new();
@@ -533,6 +536,20 @@ pub fn search_frontmatter(
                 param_values.push(format!("%{}%", val));
                 param_idx += 1;
             }
+        }
+    }
+
+    // I6：路径前缀过滤（转义 LIKE 通配符，与 query_by_prefix 同一策略）
+    if let Some(prefix) = path_prefix.as_deref() {
+        if !prefix.trim().is_empty() {
+            let escaped = prefix
+                .trim_end_matches('/')
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            conditions.push(format!("file_path LIKE ?{} ESCAPE '\\'", param_idx));
+            param_values.push(format!("{}%", escaped));
+            param_idx += 1;
         }
     }
 
@@ -894,6 +911,31 @@ mod tests {
         Database {
             conn: std::sync::Mutex::new(conn),
         }
+    }
+
+    #[test]
+    fn test_search_frontmatter_path_prefix_scopes_results() {
+        let db = create_test_db();
+        let yaml: serde_yaml::Value = serde_yaml::from_str("title: a").unwrap();
+        upsert_frontmatter(&db, "/ws-a/note.md", &yaml, "", "1").unwrap();
+        upsert_frontmatter(&db, "/ws-b/note.md", &yaml, "", "1").unwrap();
+
+        // 不限定前缀：两条都返回（保持原行为）
+        let all = search_frontmatter(&db, HashMap::new(), None).unwrap();
+        assert_eq!(all.len(), 2);
+
+        // I6：限定 /ws-a 前缀只返回该工作区记录
+        let scoped = search_frontmatter(&db, HashMap::new(), Some("/ws-a".to_string())).unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].file_path, "/ws-a/note.md");
+
+        // 前缀中的 LIKE 通配符（%）必须被转义，不得扩大匹配范围
+        let weird = search_frontmatter(&db, HashMap::new(), Some("/ws-%".to_string())).unwrap();
+        assert_eq!(weird.len(), 0);
+
+        // 空前缀等价于不限定（前端不会传，防御性覆盖）
+        let empty = search_frontmatter(&db, HashMap::new(), Some(String::new())).unwrap();
+        assert_eq!(empty.len(), 2);
     }
 
     #[test]

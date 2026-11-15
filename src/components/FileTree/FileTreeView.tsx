@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { useWorkspaceStore, useEditorStore, useFileTreeStore } from '@/stores'
 import { useUIStore } from '@/stores/ui'
 import { loadFileContent } from '@/lib/api'
-import { openFolderDialog } from '@/lib/tauri'
+import { openFolderDialog, getFileMetadata } from '@/lib/tauri'
 import { isImageFile } from '@/lib/utils/fileTypeUtils'
 import type { FileNode } from '@/stores/filetree'
 import { TreeNodeContextMenu } from './FileTreeContextMenu'
@@ -38,8 +38,22 @@ import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { logger } from '@/lib/logger'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
+import { openFileWithConflictGuard } from '@/lib/git/conflictOpen'
 
 export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
+
+/**
+ * I9：解析节点真实修改时间。此前两处 addTab 用 `new Date().toLocaleString()`
+ * ——修改时间显示为「打开时刻」且永不更新，违背 editor store「不回退当前
+ * 时间」的既有约定。获取失败返回 undefined（保持字段缺省）而不是假时间。
+ */
+export async function resolveNodeModifiedTime(path: string): Promise<string | undefined> {
+  try {
+    return (await getFileMetadata(path)).modified_time
+  } catch {
+    return undefined
+  }
+}
 
 // 扁平化的树节点，用于虚拟化
 interface FlattenedNode {
@@ -609,21 +623,28 @@ const { t } = useTranslation()
     }
     // 图片文件无需读取 content(二进制非 UTF-8 会 read 失败),用 tab.path 直接预览
     if (isImageFile(node.name)) {
-      addTab({
-        id: node.id,
-        path: node.path,
-        name: node.name,
-        content: '',
-        isDirty: false,
-        isEdited: false,
-        viewMode: 'preview',
-        fileSize: '-',
-        modifiedTime: new Date().toLocaleString(),
-      })
+      resolveNodeModifiedTime(node.path).then((modifiedTime) =>
+        addTab({
+          id: node.id,
+          path: node.path,
+          name: node.name,
+          content: '',
+          isDirty: false,
+          isEdited: false,
+          viewMode: 'preview',
+          fileSize: '-',
+          modifiedTime,
+        })
+      )
       return
     }
+    // S-02：冲突文件不得以普通 tab 加载（工作树含标记）——改走冲突面板
+    if (openFileWithConflictGuard(node.path)) return
+
     loadFileContent(node.path)
-      .then((content) => {
+      .then(async (content) => {
+        // I9：真实 mtime（获取失败保持 undefined，不回退当前时间）
+        const modifiedTime = await resolveNodeModifiedTime(node.path)
         addTab({
           id: node.id,
           path: node.path,
@@ -633,7 +654,7 @@ const { t } = useTranslation()
           isEdited: false,
           viewMode: 'preview',
           fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
-          modifiedTime: new Date().toLocaleString(),
+          modifiedTime,
           wordCount: countWords(content),
         })
       })

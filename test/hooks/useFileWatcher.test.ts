@@ -148,3 +148,67 @@ describe('useFileWatcher', () => {
     // (This test verifies no crash and no side effects after unmount)
   })
 })
+
+describe('removed 事件与脏 tab 保护（I2 回归锚点）', () => {
+  beforeEach(() => {
+    fileWatcherCallback = null
+    useEditorStore.setState({ tabs: [], activeTabId: null })
+    useFileTreeStore.getState().clearAll()
+    useGitStore.setState({ isPulling: false, syncStatus: { isSyncing: false, isAutoPushing: false, lastSyncTime: null, succeeded: 0, failed: 0, conflicted: 0 } })
+    useWorkspaceStore.getState().setRootPath('/tmp')
+    vi.clearAllMocks()
+  })
+
+  it('外部删除脏文件时先 confirm，取消则保留脏 tab（改动不丢）', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderHook(() => useFileWatcher())
+    useEditorStore.getState().addTab(makeTab({ id: 'tab-1' }))
+    // addTab 会强制重置 isDirty: false（editor.ts:336），需用 updateTabDirty 标脏
+    useEditorStore.getState().updateTabDirty('tab-1', true)
+
+    fileWatcherCallback!({ payload: { type: 'removed', path: '/tmp/note.md' } })
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(useEditorStore.getState().tabs.find(t => t.id === 'tab-1')).toBeDefined()
+    confirmSpy.mockRestore()
+  })
+
+  it('外部删除 frontmatterDirty 文件且确认后正常关闭 tab', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderHook(() => useFileWatcher())
+    useEditorStore.getState().addTab(makeTab({ id: 'tab-1', isDirty: false, frontmatterDirty: true }))
+
+    fileWatcherCallback!({ payload: { type: 'removed', path: '/tmp/note.md' } })
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(useEditorStore.getState().tabs.find(t => t.id === 'tab-1')).toBeUndefined()
+    confirmSpy.mockRestore()
+  })
+
+  it('外部删除未脏文件静默关闭（不弹确认）', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderHook(() => useFileWatcher())
+    useEditorStore.getState().addTab(makeTab({ id: 'tab-1', isDirty: false }))
+
+    fileWatcherCallback!({ payload: { type: 'removed', path: '/tmp/note.md' } })
+
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(useEditorStore.getState().tabs.find(t => t.id === 'tab-1')).toBeUndefined()
+    confirmSpy.mockRestore()
+  })
+
+  it('目录被外部删除：聚合确认一次，取消则保留脏 tab、仅关闭未脏 tab', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    renderHook(() => useFileWatcher())
+    useEditorStore.getState().addTab(makeTab({ id: 'tab-dirty', path: '/tmp/dir/a.md', name: 'a.md' }))
+    useEditorStore.getState().updateTabDirty('tab-dirty', true)
+    useEditorStore.getState().addTab(makeTab({ id: 'tab-clean', path: '/tmp/dir/b.md', name: 'b.md', isDirty: false }))
+
+    fileWatcherCallback!({ payload: { type: 'removed', path: '/tmp/dir' } })
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(useEditorStore.getState().tabs.find(t => t.id === 'tab-dirty')).toBeDefined()
+    expect(useEditorStore.getState().tabs.find(t => t.id === 'tab-clean')).toBeUndefined()
+    confirmSpy.mockRestore()
+  })
+})

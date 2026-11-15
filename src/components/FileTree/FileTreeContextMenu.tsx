@@ -35,6 +35,7 @@ import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuIte
 import { updateNodesWithChildren, findParentNode } from '@/lib/utils/treeUtils'
 import { usePluginEditors } from '@/stores/pluginEditor'
 import { countWords } from '@/lib/utils/wordCount'
+import { resolveNodeModifiedTime } from './FileTreeView'
 import { logger } from '@/lib/logger'
 
 function getRelativePath(rootPath: string, fullPath: string): string {
@@ -127,21 +128,29 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       setLastClickedPath(node.path)
       // 图片文件无需读取 content(二进制非 UTF-8 会 read 失败),用 tab.path 直接预览
       if (isImageFile(node.name)) {
-        addTab({
-          id: node.id,
-          path: node.path,
-          name: node.name,
-          content: '',
-          isDirty: false,
-          isEdited: false,
-          viewMode: 'preview',
-          fileSize: '-',
-          modifiedTime: new Date().toLocaleString(),
-        })
+        // I9 同款：真实 mtime（获取失败保持 undefined，不回退当前时间）
+        resolveNodeModifiedTime(node.path).then((modifiedTime) =>
+          addTab({
+            id: node.id,
+            path: node.path,
+            name: node.name,
+            content: '',
+            isDirty: false,
+            isEdited: false,
+            viewMode: 'preview',
+            fileSize: '-',
+            modifiedTime,
+          })
+        )
         return
       }
+      // S-02：冲突文件不得以普通 tab 加载（工作树含标记）——改走冲突面板
+      const { openFileWithConflictGuard } = await import('@/lib/git/conflictOpen')
+      if (openFileWithConflictGuard(node.path)) return
       try {
         const content = await loadFileContent(node.path)
+        // I9 同款：真实 mtime（获取失败保持 undefined，不回退当前时间）
+        const modifiedTime = await resolveNodeModifiedTime(node.path)
         addTab({
           id: node.id,
           path: node.path,
@@ -151,7 +160,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           isEdited: false,
           viewMode: 'preview',
           fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
-          modifiedTime: new Date().toLocaleString(),
+          modifiedTime,
           wordCount: countWords(content),
         })
       } catch (e) {
@@ -238,9 +247,9 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
         // 如果是剪切模式，删除源文件并更新/关闭相关 tab
         if (clipboardIsCut) {
           await deleteFile(sourcePath)
-          // 源文件已删除，使其 frontmatter 缓存失效
+          // 源文件已删除，使其 frontmatter 缓存失效（按源路径所属工作区根解析）
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          invalidateFrontmatterCache(sourcePath, useWorkspaceStore.getState().rootPath)
+          invalidateFrontmatterCache(sourcePath, workspaceRootFor(sourcePath))
           // Update tabs: move from source path to destination path
           const editorStore = useEditorStore.getState()
           const destName = getFileName(destPath)
@@ -278,7 +287,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
 
       // 删除文件后使该路径的 frontmatter 缓存失效，避免残留
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-      invalidateFrontmatterCache(node.path, useWorkspaceStore.getState().rootPath)
+      invalidateFrontmatterCache(node.path, workspaceRootFor(node.path))
 
       // Close any open tabs for the deleted file or files within the deleted directory
       const editorStore = useEditorStore.getState()

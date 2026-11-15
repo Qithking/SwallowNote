@@ -18,7 +18,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useGitStore, GitRepository, PullResult } from '@/stores/git'
-import { gitPush, gitForcePush, gitForcePull, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitAttachBranchToHead, gitSwitchToLocalBranch } from '@/lib/tauri'
+import { gitPush, gitForcePush, gitForcePull, gitPull, gitCredentialSave, gitCredentialGet, gitCredentialDelete, gitAttachBranchToHead, gitSwitchToLocalBranch } from '@/lib/tauri'
+import type { RepoStatus } from '@/stores/git'
 import { withCredentialFallback, commitAndPushRepo } from '@/lib/git/service'
 import { GitErrorCode, parseDivergedInfo } from '@/lib/git/errors'
 import { DetachedHeadDivergedDialog } from '@/components/Git/DetachedHeadDivergedDialog'
@@ -36,6 +37,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components'
 import { useTranslation } from 'react-i18next'
 import { logger } from '@/lib/logger'
+import { refreshOpenTabsAfterSync } from '@/lib/git/refreshOpenTabs'
 import {
   Dialog,
   DialogContent,
@@ -189,7 +191,8 @@ function CredentialDialog({
 }
 
 // Commit section with vertical layout
-function CommitSection({ 
+// I16：named export 供回归测试（仅测试引用）
+export function CommitSection({ 
   selectedRepos, 
   allRepos, 
   onRefresh,
@@ -201,14 +204,28 @@ function CommitSection({
   onStatusUpdate: (conflictPaths: string[], errorPaths: string[]) => void
 }) {
   const [isCommitting, setIsCommitting] = useState(false)
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   // C15：默认提交消息走 i18n（原硬编码英文 'Sync changes'）
   const [commitMessage, setCommitMessage] = useState(() => t('git.defaultCommitMessage'))
+  // I16：语言切换后默认提交消息跟随刷新（仅当用户未手动编辑——与最近一次
+  // 默认文案比较判断）；用户已编辑则保持自定义内容不被覆盖
+  const lastDefaultMessageRef = useRef(commitMessage)
+  useEffect(() => {
+    const nextDefault = t('git.defaultCommitMessage')
+    // 注意：setState 的 updater 延迟到下次渲染才执行，而 ref 在下方同步更新；
+    // updater 内直接读 ref 会读到已写入的新值，导致未编辑时也判为「已编辑」。
+    // 因此先捕获 ref 当前值供 updater 比较。
+    const prevDefault = lastDefaultMessageRef.current
+    setCommitMessage((prev) => (prev === prevDefault ? nextDefault : prev))
+    lastDefaultMessageRef.current = nextDefault
+  }, [i18n.language])
   const [credentialDialog, setCredentialDialog] = useState<{
     open: boolean
     repoPath: string
     repoName: string
-  }>({ open: false, repoPath: '', repoName: '' })
+    /** S-03：凭证框用途——pull（手动拉取认证失败）或 push（提交推送认证失败） */
+    action: 'pull' | 'push'
+  }>({ open: false, repoPath: '', repoName: '', action: 'push' })
   const [isPushingWithCredentials, setIsPushingWithCredentials] = useState(false)
   const [divergedDialog, setDivergedDialog] = useState<{
     open: boolean
@@ -224,8 +241,13 @@ function CommitSection({
   const handlePushWithCredentials = async (username: string, password: string) => {
     setIsPushingWithCredentials(true)
     try {
-      await gitPush(credentialDialog.repoPath, username, password)
-      setCredentialDialog({ open: false, repoPath: '', repoName: '' })
+      // S-03：凭证框按用途分发——pull 用 gitPull 重试拉取，push 用 gitPush 重试推送
+      if (credentialDialog.action === 'pull') {
+        await gitPull(credentialDialog.repoPath, username, password)
+      } else {
+        await gitPush(credentialDialog.repoPath, username, password)
+      }
+      setCredentialDialog({ open: false, repoPath: '', repoName: '', action: 'push' })
       showToast(`${credentialDialog.repoName}: ${t('git.syncSuccess', { count: 1 })}`, 'success')
       onRefresh()
     } catch (e) {
@@ -265,6 +287,7 @@ function CommitSection({
     useGitStore.getState().setSyncStatus({ isSyncing: true })
     let successCount = 0
     let failCount = 0
+    let hasCredentialRepo = false
     const errorDetails: string[] = []
     const conflictPaths: string[] = []
     const errorPaths: string[] = []
@@ -280,11 +303,15 @@ function CommitSection({
           logger.error('git-view', 'Failed to commit and push:', repo.path, r.error)
         }
         if (r.needsCredential) {
+          // S-16 修复：本地累计凭证缺失标记——不能用 credentialDialog.open（state
+          // 闭包读旧值，setState 异步更新不可靠）；toast 汇总据此给出引导提示
+          hasCredentialRepo = true
           // Show credential dialog for manual input
           setCredentialDialog({
             open: true,
             repoPath: repo.path,
             repoName: repo.name,
+            action: 'push',
           })
           continue
         }
@@ -312,11 +339,15 @@ function CommitSection({
           errorDetails.push(`${repo.name}: ${t('git.detachedHead')}`)
           errorPaths.push(repo.path)
         } else if (code === GitErrorCode.SubmoduleUncommitted) {
-          successCount++
+          // S-15 修复：子模块存在未提交变更不是同步成功——此前 successCount++
+          // 导致 toast 报成功但仓库同时标红（errorPaths.push），计数自相矛盾。
+          // 改为计入失败，与仓库标红语义一致（需用户先处理子模块）
+          failCount++
           errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
           errorPaths.push(repo.path)
         } else if (code === GitErrorCode.SubmoduleRefNeedsUpdate) {
-          successCount++
+          // S-15 修复：同子模块未提交，计入失败而非成功
+          failCount++
           errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
           errorPaths.push(repo.path)
         } else if (code === GitErrorCode.RebaseConflict) {
@@ -335,12 +366,19 @@ function CommitSection({
         }
       }
     } finally {
-      // F3：无论成功、失败还是异常都复位标志，避免标志卡死阻塞后续同步
+      // F3：无论成功、失败还是异常都复位提交中标志，避免标志卡死阻塞后续同步
       setIsCommitting(false)
-      useGitStore.getState().setSyncStatus({ isSyncing: false })
     }
 
-    await onRefresh()
+    try {
+      await onRefresh()
+    } finally {
+      // S-29 修复：isSyncing 复位必须等 onRefresh 完成后——此前 finally 先复位
+      // 再 await onRefresh，窗口期内自动同步定时器看到 isSyncing=false 会并发
+      // 启动一轮同步（与刚完成的 commit/push 重叠）。onRefresh 期间保持互斥标志，
+      // onRefresh 抛错时也由 finally 兜底复位。
+      useGitStore.getState().setSyncStatus({ isSyncing: false })
+    }
     
     // Update repository statuses after refresh (refresh resets all to normal)
     if (conflictPaths.length > 0 || errorPaths.length > 0) {
@@ -360,8 +398,12 @@ function CommitSection({
     }
     
     if (failCount === 0) {
-      if (successCount > 0 && !credentialDialog.open) {
+      if (successCount > 0 && !hasCredentialRepo) {
         showToast(t('git.syncSuccess', { count: successCount }), 'success')
+      } else if (hasCredentialRepo && successCount === 0 && errorDetails.length === 0) {
+        // S-16 修复：全部仓库凭证缺失（success/fail/error 均 0）——凭证框已打开，
+        // 用户取消后此处给出引导提示（此前完全静默）
+        showToast(t('git.credentialRequired'), 'info')
       }
     } else {
       showToast(t('git.syncPartial', { success: successCount, fail: failCount }), 'error')
@@ -418,7 +460,7 @@ function CommitSection({
       </div>
       <CredentialDialog
         open={credentialDialog.open}
-        onClose={() => setCredentialDialog({ open: false, repoPath: '', repoName: '' })}
+        onClose={() => setCredentialDialog({ open: false, repoPath: '', repoName: '', action: 'push' })}
         onSubmit={handlePushWithCredentials}
         repoName={credentialDialog.repoName}
         repoPath={credentialDialog.repoPath}
@@ -440,7 +482,7 @@ function CommitSection({
 }
 
 // Repository item with checkbox for multi-select and tooltip
-function RepositoryItem({ 
+export function RepositoryItem({ 
   repo, 
   isSelected, 
   onToggle,
@@ -474,6 +516,12 @@ function RepositoryItem({
   }
 
   const handleForcePush = async () => {
+    // S-13 修复：与同步/提交互斥——force 操作（--force 语义）不得与自动同步
+    // 并发执行，避免 isSyncing 标志被对方结束时清掉或 --hard 语义窗口踩踏
+    if (useGitStore.getState().syncStatus.isSyncing) {
+      showToast(t('git.syncInProgress'), 'info')
+      return
+    }
     setIsForceAction(true)
     setConfirmAction(null)
     try {
@@ -494,6 +542,11 @@ function RepositoryItem({
   }
 
   const handleForcePull = async () => {
+    // S-13 修复：与同步/提交互斥（同 forcePush）
+    if (useGitStore.getState().syncStatus.isSyncing) {
+      showToast(t('git.syncInProgress'), 'info')
+      return
+    }
     setIsForceAction(true)
     setConfirmAction(null)
     try {
@@ -750,6 +803,14 @@ const GitView = memo(function GitView() {
   const showToast = useUIStore((s) => s.showToast)
   const [selectedRepos, setSelectedRepos] = useState<string[]>([])
   const [isPullingRepos, setIsPullingRepos] = useState(false)
+  // S-03 修复：手动 pull 凭证缺失时弹出凭证框（GitView 组件级，与 CommitSection
+  // 的 push 凭证框独立——pull 用 gitPull 重试，语义不同）
+  const [pullCredentialDialog, setPullCredentialDialog] = useState<{
+    open: boolean
+    repoPath: string
+    repoName: string
+  }>({ open: false, repoPath: '', repoName: '' })
+  const [isPullCredentialLoading, setIsPullCredentialLoading] = useState(false)
   const { t } = useTranslation()
   const hasInitialSyncRef = useRef(false)
   // 跟踪已扫描过的路径指纹，避免启动阶段依赖变化触发重复扫描
@@ -759,6 +820,21 @@ const GitView = memo(function GitView() {
   useEffect(() => {
     loadConflictRepos()
   }, [loadConflictRepos])
+
+  // S-14 修复：自动提交（gitAutoCommit）成功后刷新面板——hasUncommittedChanges
+  // 等字段此前停留旧状态直到下次扫描。用 ref 转发 handleRefresh 避免 effect 依赖
+  // 定义在后的 handleRefresh（闭包运行时已就绪，无时序问题）。
+  const handleRefreshRef = useRef<(() => Promise<void>) | null>(null)
+  useEffect(() => {
+    handleRefreshRef.current = handleRefresh
+  })
+  useEffect(() => {
+    const onAutoCommitted = () => {
+      handleRefreshRef.current?.()
+    }
+    window.addEventListener('git-auto-committed', onAutoCommitted)
+    return () => window.removeEventListener('git-auto-committed', onAutoCommitted)
+  }, [])
 
   // Keep displayed repositories in sync with the canonical cache
   useEffect(() => {
@@ -818,9 +894,24 @@ const GitView = memo(function GitView() {
     )
   }
 
+  /** S-03 修复：手动 pull 凭证框提交——输入凭证后重试拉取并刷新 */
+  const handlePullWithCredentials = async (username: string, password: string) => {
+    setIsPullCredentialLoading(true)
+    try {
+      await gitPull(pullCredentialDialog.repoPath, username, password)
+      setPullCredentialDialog({ open: false, repoPath: '', repoName: '' })
+      showToast(`${pullCredentialDialog.repoName}: ${t('git.syncSuccess', { count: 1 })}`, 'success')
+      await handleRefresh()
+    } catch (e) {
+      const errorMessage = String(e).trim()
+      showToast(`${pullCredentialDialog.repoName}: ${errorMessage || t('git.unknownError')}`, 'error')
+    } finally {
+      setIsPullCredentialLoading(false)
+    }
+  }
+
   const handlePull = async () => {
     if (repositories.length === 0) return
-
     // F4：与自动同步/手动提交互斥——同步进行中不允许拉取，
     // 避免本操作结束时清掉对方仍持有的 isSyncing 互斥标志
     if (useGitStore.getState().syncStatus.isSyncing) {
@@ -853,6 +944,36 @@ const GitView = memo(function GitView() {
       // Update repository statuses based on pull results
       updateRepositoryStatuses(results)
 
+      // S-04 修复：pull 后重扫仓库回灌 uncommittedCount/currentBranch 等字段——
+      // 此前仅 updateRepositoryStatuses（只改 status），rebase 后 uncommitted 计数
+      // 失真，CommitSection「无改动/无仓库」提示基于陈旧数据。与 useAutoSync 的
+      // scanGitRepos 回灌逻辑一致。
+      try {
+        const { scanGitRepos } = await import('@/lib/tauri')
+        const { mapRepoInfosToRepositories } = await import('@/stores/git')
+        const scanPaths = results.map((r: PullResult) => r.path)
+        const scanResults = await Promise.all(
+          scanPaths.map(async (p) => {
+            try { return await scanGitRepos(p) } catch { return [] }
+          })
+        )
+        const freshRepos = mapRepoInfosToRepositories(scanResults.flat())
+        const statusMap = new Map<string, RepoStatus>()
+        for (const r of results) {
+          if (r.isConflict) statusMap.set(r.path, 'conflict')
+          else if (!r.success) statusMap.set(r.path, 'error')
+        }
+        const mergedRepos = freshRepos.map((repo: GitRepository) => {
+          const status = statusMap.get(repo.path)
+          return status ? { ...repo, status } : repo
+        })
+        gitStore.setRepositories(mergedRepos)
+        gitStore.setCachedRepositories(mergedRepos)
+      } catch (e) {
+        // 重扫失败不影响 pull 结果本身，留日志便于排查列表不刷新问题
+        logger.warn('git-view', 'Repo rescan after pull failed:', e)
+      }
+
       gitStore.setSyncStatus({
         isSyncing: false,
         lastSyncTime: Date.now(),
@@ -864,6 +985,14 @@ const GitView = memo(function GitView() {
       if (succeeded > 0 || conflicted > 0) {
         const fileTreeStore = useFileTreeStore.getState()
         fileTreeStore.refreshExpanded()
+        // S-01：pull 改写磁盘后刷新已打开的 tab（非 dirty 重载；冲突文件关闭
+        // 引导冲突面板，不把含标记内容加载进编辑器）。tab 刷新失败不影响
+        // 同步结果提示
+        try {
+          await refreshOpenTabsAfterSync(reposWithRemote.map((r: GitRepository) => r.path))
+        } catch (e) {
+          logger.warn('git-view', 'Open tab refresh after pull failed:', e)
+        }
       }
 
       // Consolidate toast messages: show one summary toast instead of per-repo toasts
@@ -877,6 +1006,18 @@ const GitView = memo(function GitView() {
         const gitStore = useGitStore.getState()
         await gitStore.syncConflictReposFromPullResults(results)
       } else if (failed > 0) {
+        // S-03 修复：pull 凭证缺失（AuthRequired 且无可用凭证）时弹凭证框，
+        // 让用户输入凭证重试拉取——此前 needsCredential 在 PullResult 丢失，
+        // 仅显示通用失败 toast，凭证输入入口不可达
+        const credentialRepos = results.filter((r: PullResult) => r.needsCredential)
+        if (credentialRepos.length > 0) {
+          const first = credentialRepos[0]
+          setPullCredentialDialog({
+            open: true,
+            repoPath: first.path,
+            repoName: first.name,
+          })
+        }
         // G-06 修复：批量 pull 遇到 detached HEAD 时给出更明确的提示
         const detachedNames = results.filter((r: PullResult) => r.isDetachedHead).map((r: PullResult) => r.name).join(', ')
         if (detachedNames) {
@@ -916,6 +1057,7 @@ const GitView = memo(function GitView() {
   }
 
   return (
+    <>
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between h-[40px] px-3 shrink-0 select-none" >
@@ -990,6 +1132,16 @@ const GitView = memo(function GitView() {
         )}
       </ScrollArea>
     </div>
+    {/* S-03 修复：手动 pull 凭证框——凭证缺失时用户输入重试拉取 */}
+    <CredentialDialog
+      open={pullCredentialDialog.open}
+      onClose={() => setPullCredentialDialog({ open: false, repoPath: '', repoName: '' })}
+      onSubmit={handlePullWithCredentials}
+      repoName={pullCredentialDialog.repoName}
+      repoPath={pullCredentialDialog.repoPath}
+      isLoading={isPullCredentialLoading}
+    />
+    </>
   )
 })
 

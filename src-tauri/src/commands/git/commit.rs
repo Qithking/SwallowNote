@@ -5,7 +5,7 @@ use super::runner::{run_git, run_git_no_trim, run_git_blocking};
 use super::paths::to_git_path;
 use super::branch::{is_detached_head, fix_detached_head, should_use_rebase, resolve_push_target_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::{get_remote_url, parse_gitmodules};
-use super::errors::{is_conflict_error, is_auth_error};
+use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error};
 use crate::i18n;
 use log::{debug, error, warn};
 
@@ -17,9 +17,12 @@ use log::{debug, error, warn};
 #[tauri::command]
 pub async fn git_commit(path: String, message: String) -> Result<bool, String> {
     // F2/F6 补充：per-repo 互斥——add/commit 与 pull/push/commit_and_push/auto_commit
-    // 等写操作命令串行执行，避免并发踩踏（先克隆锁键，规避借用与 move 冲突）
+    // 等写操作命令串行执行，避免并发踩踏（先克隆锁键，规避借用与 move 冲突）。
+    // S-08 修复：锁等待移入 blocking 线程池（同 run_git_blocking 约定）——sync 类
+    // 命令持锁最长 120s，async 命令内同步等锁会卡死 tokio worker。
     let lock_key = path.clone();
-    with_repo_lock(&lock_key, || git_commit_impl(path, message))
+    run_git_blocking(move || with_repo_lock(&lock_key, || git_commit_impl(path, message)))
+        .await
 }
 
 fn git_commit_impl(path: String, message: String) -> Result<bool, String> {
@@ -216,6 +219,10 @@ fn git_commit_and_push_impl(path: String, message: String) -> Result<CommitPushR
             // Auth errors during pull
             if is_auth_error(&e) {
                 return Err(format!("AUTH_REQUIRED:{}", e));
+            }
+            // S-26：本地未提交改动会被 merge 覆盖——中止流程并提示用户先提交/暂存
+            if is_local_changes_overwrite_error(&e) {
+                return Err(format!("LOCAL_CHANGES_OVERWRITE:{}", e));
             }
             // Non-conflict, non-auth error (network, zlib, etc.):
             // Clean up stale rebase state that pull --rebase may have left.
@@ -641,8 +648,19 @@ pub async fn git_show_file_content(file_path: String, commit_hash: String) -> Re
 /// This performs a git fetch + checkout of the remote branch version for the specific file.
 #[tauri::command]
 pub async fn git_pull_file_latest(file_path: String) -> Result<String, String> {
-    // Find the git root by walking up directories
-    let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+    // S-18 修复：fetch + checkout 会改写工作区文件（checkout 写 index/工作树），
+    // 与 pull/commit_and_push/auto_commit 等写命令并发会踩踏（index.lock 冲突）。
+    // 补 per-repo 互斥 + blocking 线程池（同 git_commit_and_push 约定），
+    // 锁键取仓库根（find_git_root 与命令体一并移入 blocking 线程）。
+    run_git_blocking(move || {
+        let repo_root = find_git_root(&file_path).ok_or("NOT_IN_GIT_REPO".to_string())?;
+        let lock_key = repo_root.clone();
+        with_repo_lock(&lock_key, || git_pull_file_latest_impl(file_path, repo_root))
+    })
+    .await
+}
+
+fn git_pull_file_latest_impl(file_path: String, repo_root: String) -> Result<String, String> {
     let repo_path = repo_root.as_str();
     let relative_path = Path::new(&file_path)
         .strip_prefix(repo_path)

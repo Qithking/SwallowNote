@@ -1,6 +1,7 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use super::models::ConflictFile;
-use super::runner::{run_git, run_git_no_trim};
+use super::with_repo_lock;
+use super::runner::{run_git, run_git_no_trim, run_git_blocking};
 use super::paths::{to_git_path, unescape_git_path};
 use super::branch::is_rebase_scenario;
 use super::conflict_content::{fetch_stage_content, get_conflict_content, check_and_continue_rebase};
@@ -8,14 +9,53 @@ use super::conflict_content::{fetch_stage_content, get_conflict_content, check_a
 use crate::services::fs_guard::ensure_path_allowed;
 use log::{debug, warn};
 
+/// S-02：判断指定文件是否处于 git 冲突（unmerged）状态。
+/// 通过 `ls-files --unmerged -- <path>` 检查——只有真实冲突文件才会在 index
+/// 留下 unmerged 条目。冲突处理只允许操作此类文件，避免误删/误覆盖普通文件。
+pub fn is_file_unmerged(repo_path: &str, rel_path: &str) -> bool {
+    run_git(repo_path, &["ls-files", "--unmerged", "--", rel_path])
+        .map(|o| !o.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// 校验相对 git 路径不含路径穿越组件（".."）。
+/// S-23 修复：原 `contains("..")` 会误拒绝含双点的合法文件名
+/// （如 "a..b.txt"、"dir/..hidden"），改为按 '/' 分割做组件级判断——
+/// 只有独立的 ".." 组件才是真实穿越（"../secret"、"a/../../b"）。
+pub fn has_path_traversal(git_path: &str) -> bool {
+    git_path.split('/').any(|comp| comp == "..")
+}
+
+/// 获取 git 状态文件在 gitdir 内的真实路径。
+/// S-24 修复：worktree 的 `.git` 是文件（指向真实 gitdir），直接拼接
+/// `.git/rebase-merge` 会漏检状态文件；`git rev-parse --git-path` 输出
+/// gitdir 内实际路径，普通仓库行为不变（仍解析到 .git/rebase-merge 等）。
+/// 命令失败（非仓库/损坏）时回退到旧的 .git/<name> 拼接。
+fn git_state_path(repo_path: &str, name: &str) -> PathBuf {
+    run_git(repo_path, &["rev-parse", "--git-path", name])
+        .ok()
+        .map(|s| {
+            let p = PathBuf::from(s.trim());
+            if p.is_absolute() {
+                p
+            } else {
+                // 实测 `git rev-parse --git-path` 输出相对当前工作目录的路径
+                // （如 ".git/rebase-merge"），需以仓库根为基准解析为绝对路径
+                Path::new(repo_path).join(p)
+            }
+        })
+        .unwrap_or_else(|| Path::new(repo_path).join(".git").join(name))
+}
+
 /// Get list of conflicting files in a repository during a rebase or merge
 #[tauri::command]
 pub async fn git_get_conflict_files(repo_path: String) -> Result<Vec<ConflictFile>, String> {
     // Check if there's an ongoing rebase or merge
-    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
-    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
-    let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
-    let has_state_file = rebase_merge.exists() || rebase_apply.exists() || merge_head.exists();
+    // S-24 修复：经 git rev-parse --git-path 解析 gitdir 真实路径，支持 worktree
+    // （.git 为文件时仍能查到主仓库 gitdir 下的状态文件）
+    let has_state_file = git_state_path(&repo_path, "rebase-merge").exists()
+        || git_state_path(&repo_path, "rebase-apply").exists()
+        || git_state_path(&repo_path, "MERGE_HEAD").exists();
 
     let mut seen_paths = std::collections::HashSet::new();
     let mut files = Vec::new();
@@ -23,11 +63,14 @@ pub async fn git_get_conflict_files(repo_path: String) -> Result<Vec<ConflictFil
     // Method 1: Get unmerged files using diff-filter=U
     if let Ok(output) = run_git(&repo_path, &["-c", "core.quotepath=false", "diff", "--name-only", "--diff-filter=U"]) {
         for line in output.lines() {
-            let rel_path = line.trim().trim_matches('"');
-            if !rel_path.is_empty() && seen_paths.insert(rel_path.to_string()) {
+            // S-11 修复：Method 1 同样经 unescape_git_path（与 Method 2/3 一致）——
+            // 此前仅 trim_matches('"')，含引号/反斜杠/制表符的文件名（git C 风格
+            // 转义）路径被破坏，且 Method 1 非空时短路掉正确处理路径的 Method 2/3。
+            let rel_path = unescape_git_path(line.trim().trim_matches('"'));
+            if !rel_path.is_empty() && seen_paths.insert(rel_path.clone()) {
                 let abs_path = format!("{}/{}", repo_path.trim_end_matches('/'), rel_path);
                 files.push(ConflictFile {
-                    path: rel_path.to_string(),
+                    path: rel_path,
                     abs_path,
                 });
             }
@@ -116,8 +159,8 @@ pub async fn git_get_conflict_local_content(repo_path: String, file_path: String
     debug!("[INFO] git_get_conflict_local_content: repo_path={}, file_path={}", repo_path, file_path);
 
     let rel_path = file_path.trim().trim_start_matches('/').trim_matches('"').to_string();
-    // Validate: reject path traversal attempts
-    if rel_path.contains("..") {
+    // Validate: reject path traversal attempts（S-23：组件级校验，放行 a..b.txt 等合法文件名）
+    if has_path_traversal(&rel_path) {
         return Err(format!("Invalid file path: path traversal detected in '{}'", rel_path));
     }
     debug!("[INFO] git_get_conflict_local_content: normalized rel_path='{}'", rel_path);
@@ -158,8 +201,8 @@ pub async fn git_get_conflict_remote_content(repo_path: String, file_path: Strin
     debug!("[INFO] git_get_conflict_remote_content: repo_path={}, file_path={}", repo_path, file_path);
 
     let rel_path = file_path.trim().trim_start_matches('/').trim_matches('"').to_string();
-    // Validate: reject path traversal attempts
-    if rel_path.contains("..") {
+    // Validate: reject path traversal attempts（S-23：组件级校验，放行 a..b.txt 等合法文件名）
+    if has_path_traversal(&rel_path) {
         return Err(format!("Invalid file path: path traversal detected in '{}'", rel_path));
     }
     debug!("[INFO] git_get_conflict_remote_content: normalized rel_path='{}'", rel_path);
@@ -203,6 +246,34 @@ pub async fn git_get_conflict_remote_content(repo_path: String, file_path: Strin
 pub async fn git_resolve_conflict_file(
     app: tauri::AppHandle,
     workspace_root: Option<String>,
+    db: tauri::State<'_, crate::db::Database>,
+    repo_path: String,
+    file_path: String,
+    side: String,
+) -> Result<(), String> {
+    // S-09 修复：per-repo 互斥 + blocking 线程池——resolve 会写工作树/索引并可能
+    // 触发 rebase --continue，与 pull/commit 并发会踩踏（index.lock 冲突）；
+    // 锁等待与命令体都移入 spawn_blocking，不阻塞 tokio worker（同 S-08 约定）。
+    let lock_key = repo_path.clone();
+    let repo_path_for_lock = repo_path.clone();
+    let result = run_git_blocking(move || {
+        with_repo_lock(&lock_key, || {
+            git_resolve_conflict_file_impl(app, workspace_root, repo_path_for_lock, file_path, side)
+        })
+    })
+    .await;
+    // S-27：resolve 成功后后端主动对齐 DB 冲突记录（前端 handlePostResolve 清理的
+    // 兜底——前端异常路径会残留脏记录，启动时误报冲突 badge）。db 为借用不能
+    // 移入闭包，在闭包外按结果同步。
+    if result.is_ok() {
+        sync_conflict_record_after_change(&db, &repo_path);
+    }
+    result
+}
+
+fn git_resolve_conflict_file_impl(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
     repo_path: String,
     file_path: String,
     side: String,
@@ -227,12 +298,19 @@ pub async fn git_resolve_conflict_file(
     };
     let git_path = to_git_path(&rel_path);
 
-    // Validate: reject path traversal attempts
-    if git_path.contains("..") {
+    // Validate: reject path traversal attempts（S-23：组件级校验，放行 a..b.txt 等合法文件名）
+    if has_path_traversal(&git_path) {
         return Err(format!("Invalid file path: path traversal detected in '{}'", git_path));
     }
 
     debug!("[INFO] git_resolve_conflict_file: repo_path={}, file_path={}, side={}", repo_path, file_path, side);
+
+    // S-02：写/删前校验目标文件确实处于 unmerged 状态——冲突处理只允许
+    // 操作真实冲突文件；前端列表过期/外部已解决后传入非冲突文件时拒绝，
+    // 防止静默删除工作区文件或把非冲突文件覆盖为某侧版本（潜在数据丢失）。
+    if !is_file_unmerged(&repo_path, &git_path) {
+        return Err(format!("NOT_UNMERGED:{}", git_path));
+    }
 
     // If side is "current", the user has already edited and saved the file via
     // git_save_conflict_file_content, so we just need to stage it.
@@ -261,6 +339,25 @@ pub async fn git_resolve_conflict_file(
     }
 
     // Stage the resolved file
+    // S-10 修复：side=current（用户编辑保存后 stage）时后端兜底校验工作树文件
+    // 不再含冲突标记——此前仅前端保证顺序（先 save 后 resolve），前端顺序出错时
+    // 带 <<<<<<< 标记的文件会被 add 提交进历史。side=local/remote 已由上方写入
+    // 权威内容，无需此检查。
+    if side == "current" {
+        let target_path = Path::new(&repo_path).join(&rel_path);
+        // 用 read + from_utf8_lossy 而非 read_to_string：冲突标记为 ASCII，
+        // 非 UTF-8 字节不影响检测；权限/IO 读取失败必须上抛（此文件已通过
+        // is_file_unmerged 校验必然存在，静默跳过会让带标记内容被 add）
+        let existing = std::fs::read(&target_path)
+            .map_err(|e| format!("Failed to read conflict file '{}': {}", target_path.display(), e))?;
+        let existing = String::from_utf8_lossy(&existing);
+        if existing.contains("<<<<<<<") || existing.contains(">>>>>>>") || existing.contains("=======") {
+            return Err(format!(
+                "CONFLICT_MARKERS:{} still contains conflict markers. Please edit and save the file before marking resolved.",
+                git_path
+            ));
+        }
+    }
     run_git(&repo_path, &["add", &git_path])?;
 
     check_and_continue_rebase(&repo_path)
@@ -278,23 +375,62 @@ pub async fn git_save_conflict_file_content(
     file_path: String,
     content: String,
 ) -> Result<(), String> {
-    let rel_path = Path::new(&file_path)
-        .strip_prefix(Path::new(&repo_path))
-        .map_err(|e| format!("Invalid relative path: {}", e))?;
-    let git_path = to_git_path(rel_path);
+    // S-09 修复：per-repo 互斥 + blocking 线程池——save 写工作树，与 pull 并发
+    // 会踩踏（同 resolve 一致）。
+    let lock_key = repo_path.clone();
+    run_git_blocking(move || {
+        with_repo_lock(&lock_key, || {
+            git_save_conflict_file_content_impl(app, workspace_root, repo_path, file_path, content)
+        })
+    })
+    .await
+}
 
-    // Validate: reject path traversal attempts
-    if git_path.contains("..") {
+fn git_save_conflict_file_content_impl(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    repo_path: String,
+    file_path: String,
+    content: String,
+) -> Result<(), String> {
+    // S-12 修复：与 resolve 同款 strip_prefix + canonicalize 回退（/var vs /private/var
+    // 等符号链接场景），此前仅 strip_prefix 导致 save 报 "Invalid relative path" 而
+    // resolve 却成功，前后不一致。
+    let rel_path = match Path::new(&file_path).strip_prefix(Path::new(&repo_path)) {
+        Ok(p) => p.to_path_buf(),
+        Err(_) => {
+            let canon_file = std::fs::canonicalize(&file_path)
+                .map_err(|e| format!("Failed to resolve file path '{}': {}", file_path, e))?;
+            let canon_repo = std::fs::canonicalize(&repo_path)
+                .map_err(|e| format!("Failed to resolve repo path '{}': {}", repo_path, e))?;
+            canon_file
+                .strip_prefix(&canon_repo)
+                .map(|p| p.to_path_buf())
+                .map_err(|e| {
+                    format!("File path '{}' is not within repository '{}': {}", file_path, repo_path, e)
+                })?
+        }
+    };
+    let git_path = to_git_path(&rel_path);
+
+    // Validate: reject path traversal attempts（S-23：组件级校验，放行 a..b.txt 等合法文件名）
+    if has_path_traversal(&git_path) {
         return Err(format!("Invalid file path: path traversal detected in '{}'", git_path));
     }
 
     debug!("[INFO] git_save_conflict_file_content: repo_path={}, file_path={}", repo_path, file_path);
 
+    // S-02：写入前校验目标文件确实处于 unmerged 状态——冲突面板保存只允许
+    // 操作真实冲突文件，防止把编辑内容写入普通文件覆盖用户数据。
+    if !is_file_unmerged(&repo_path, &git_path) {
+        return Err(format!("NOT_UNMERGED:{}", git_path));
+    }
+
     // Write the edited content back to the file
     // Do NOT run `git add` here — that would prematurely resolve the conflict.
     // Staging is done in `git_resolve_conflict_file` when the user explicitly resolves.
     // 写入目标基于 repo_path + 相对路径，避免前端传入的 file_path 指向仓库外（路径穿越）。
-    let target_path = Path::new(&repo_path).join(rel_path);
+    let target_path = Path::new(&repo_path).join(&rel_path);
     // fs_guard 白名单校验（候选 2）：写入目标必须位于工作区/应用数据目录内
     ensure_path_allowed(&app, workspace_root.as_deref(), &target_path)?;
     std::fs::write(&target_path, &content)
@@ -305,10 +441,30 @@ pub async fn git_save_conflict_file_content(
 
 /// Abort the current rebase or merge, restoring the repository to a clean state
 #[tauri::command]
-pub async fn git_abort_conflict(repo_path: String) -> Result<(), String> {
-    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
-    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
-    let merge_head = Path::new(&repo_path).join(".git/MERGE_HEAD");
+pub async fn git_abort_conflict(
+    db: tauri::State<'_, crate::db::Database>,
+    repo_path: String,
+) -> Result<(), String> {
+    // S-09 修复：per-repo 互斥 + blocking 线程池——abort 会重置工作树/索引，与
+    // pull/commit 并发会踩踏。
+    let lock_key = repo_path.clone();
+    let repo_path_for_lock = repo_path.clone();
+    let result = run_git_blocking(move || {
+        with_repo_lock(&lock_key, || git_abort_conflict_impl(repo_path_for_lock))
+    })
+    .await;
+    // S-27：abort 后仓库回到冲突前状态，主动删除/对齐 DB 冲突记录（兜底）
+    if result.is_ok() {
+        sync_conflict_record_after_change(&db, &repo_path);
+    }
+    result
+}
+
+fn git_abort_conflict_impl(repo_path: String) -> Result<(), String> {
+    // S-24 修复：worktree 场景经 git rev-parse --git-path 解析状态文件真实路径
+    let rebase_merge = git_state_path(&repo_path, "rebase-merge");
+    let rebase_apply = git_state_path(&repo_path, "rebase-apply");
+    let merge_head = git_state_path(&repo_path, "MERGE_HEAD");
 
     if rebase_merge.exists() || rebase_apply.exists() {
         run_git(&repo_path, &["rebase", "--abort"])?;
@@ -318,6 +474,27 @@ pub async fn git_abort_conflict(repo_path: String) -> Result<(), String> {
         return Err("No rebase or merge in progress".to_string());
     }
     Ok(())
+}
+
+/// S-27：resolve/abort 成功后对齐 DB 冲突记录——此前清理只依赖前端
+/// handlePostResolve，前端异常路径（崩溃/会话恢复/流程中断）会残留脏记录，
+/// 启动时误报冲突 badge。命令成功路径后端主动同步（幂等，与前端重复无害）。
+/// 冲突计数用 `git diff --diff-filter=U`（与 check_and_continue_rebase 同源，
+/// 只统计 unmerged index 条目）。
+fn sync_conflict_record_after_change(db: &crate::db::Database, repo_path: &str) {
+    let remaining = run_git(repo_path, &["diff", "--name-only", "--diff-filter=U"])
+        .unwrap_or_default();
+    let count = remaining.lines().filter(|l| !l.trim().is_empty()).count() as i64;
+    let repo_name = Path::new(repo_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(repo_path)
+        .to_string();
+    if count == 0 {
+        let _ = crate::db::conflict_repo::remove_conflict_repo(db, repo_path);
+    } else {
+        let _ = crate::db::conflict_repo::upsert_conflict_repo(db, repo_path, &repo_name, count);
+    }
 }
 
 pub fn get_uncommitted_count(path: &str) -> (bool, usize) {
@@ -340,6 +517,40 @@ pub fn get_uncommitted_count(path: &str) -> (bool, usize) {
 mod tests {
     use super::*;
     use super::super::test_utils::{git_cmd, setup_conflict_repo, normalize};
+
+    /// S-02 回归：is_file_unmerged 区分真实冲突文件与普通文件
+    #[test]
+    fn test_is_file_unmerged_distinguishes_conflict_and_plain() {
+        let tmp = setup_conflict_repo();
+        let repo = tmp.path();
+
+        // 普通文件（无冲突）：非 unmerged
+        assert!(!is_file_unmerged(repo.to_str().unwrap(), "file.txt"));
+
+        // 制造真实冲突：feature 分支改动 file.txt，main 也改动，merge 产生冲突
+        git_cmd(repo, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.join("file.txt"), "line1\nremote\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "feature"]);
+
+        git_cmd(repo, &["checkout", "-q", "main"]);
+        std::fs::write(repo.join("file.txt"), "line1\nlocal\n").unwrap();
+        git_cmd(repo, &["add", "file.txt"]);
+        git_cmd(repo, &["commit", "-q", "-m", "main"]);
+
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(["merge", "feature", "--no-commit", "--no-ff"])
+            .status()
+            .unwrap();
+        assert!(!status.success(), "merge should produce conflicts");
+
+        assert!(is_file_unmerged(repo.to_str().unwrap(), "file.txt"),
+            "file.txt should be unmerged after conflicting merge");
+
+        // 未冲突的文件：仍非 unmerged
+        assert!(!is_file_unmerged(repo.to_str().unwrap(), "nonexistent.txt"));
+    }
 
     #[tokio::test]
     async fn test_get_conflict_local_content_merge_has_no_markers() {
@@ -418,5 +629,85 @@ mod tests {
 
         assert_eq!(normalize(&local), "line1\nlocal\n", "local content should be REBASE_HEAD/stage 3 version (branch being rebased)");
         assert_eq!(normalize(&remote), "line1\nremote\n", "remote content should be HEAD/stage 2 version (upstream)");
+    }
+
+    /// S-23：组件级路径穿越校验——放行含双点的合法文件名，拒绝真实 ".." 组件
+    #[test]
+    fn test_has_path_traversal() {
+        // 合法：双点在文件名内部，不是独立组件
+        assert!(!has_path_traversal("a..b.txt"));
+        assert!(!has_path_traversal("dir/..hidden"));
+        assert!(!has_path_traversal("dir/file.txt"));
+        assert!(!has_path_traversal("..hidden"));
+        assert!(!has_path_traversal(""));
+        // 真实穿越：独立 ".." 组件
+        assert!(has_path_traversal("../secret"));
+        assert!(has_path_traversal("dir/../secret"));
+        assert!(has_path_traversal("a/../../b"));
+        assert!(has_path_traversal("a/.."));
+    }
+
+    /// S-24：普通仓库的 git_state_path 解析到 .git/<name>
+    #[test]
+    fn test_git_state_path_regular_repo() {
+        let tmp = setup_conflict_repo();
+        let repo = tmp.path();
+        let state = git_state_path(repo.to_str().unwrap(), "rebase-merge");
+        assert_eq!(state, repo.join(".git/rebase-merge"),
+            "regular repo resolves git-state path to .git/<name>");
+    }
+
+    /// S-24：worktree 的 .git 是文件，git_state_path 必须解析到 worktree 自己的
+    /// gitdir（.git/worktrees/<name>/rebase-merge）——真实 rebase 冲突时状态文件
+    /// 就写在那里，此前直接拼 worktree 根的 .git/<name> 会漏检
+    #[test]
+    fn test_git_state_path_worktree() {
+        let tmp = setup_conflict_repo();
+        let main = tmp.path();
+        let wt_tmp = tempfile::tempdir().unwrap();
+        // 默认分支 main 已在主 worktree 检出，link 到新分支避免 "already checked out"
+        git_cmd(main, &["worktree", "add", "-q", "-b", "wt-test", wt_tmp.path().to_str().unwrap()]);
+        let wt = wt_tmp.path();
+
+        // worktree 的 .git 是文件而非目录
+        assert!(wt.join(".git").is_file(),
+            "precondition: linked worktree .git must be a file");
+
+        // 在 worktree 内真实制造 rebase 冲突（两个分支改同一行）：
+        // ① wt-test 提交（改 f.txt）→ ② 从 main 分出 feat（不含 wt-change）并提交
+        // （也改 f.txt）→ ③ 切回 wt-test rebase feat → 冲突
+        git_cmd(wt, &["config", "user.email", "test@example.com"]);
+        git_cmd(wt, &["config", "user.name", "Test"]);
+        std::fs::write(wt.join("file.txt"), "line1\nwt-edit\n").unwrap();
+        git_cmd(wt, &["add", "file.txt"]);
+        git_cmd(wt, &["commit", "-q", "-m", "wt-change"]);
+        // feat 必须从 main 分出（不含 wt-change），否则 rebase 是 fast-forward 无冲突
+        git_cmd(main, &["branch", "feat"]);
+        git_cmd(wt, &["checkout", "-q", "feat"]);
+        std::fs::write(wt.join("file.txt"), "line1\nfeat-edit\n").unwrap();
+        git_cmd(wt, &["add", "file.txt"]);
+        git_cmd(wt, &["commit", "-q", "-m", "feat-edit"]);
+        git_cmd(wt, &["checkout", "-q", "wt-test"]);
+        let rebase_status = std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["rebase", "feat"])
+            .status()
+            .unwrap();
+        assert!(!rebase_status.success(), "rebase must produce conflicts in the worktree");
+
+        // worktree 自身的 .git 是文件，.git/rebase-merge 永远不可能存在
+        assert!(!wt.join(".git/rebase-merge").exists(),
+            "worktree's own .git is a file, so .git/rebase-merge can never exist");
+
+        // git_state_path 必须解析到 worktree 的 gitdir（真实 rebase 状态所在）
+        let state = git_state_path(wt.to_str().unwrap(), "rebase-merge");
+        assert!(state.exists(),
+            "worktree must resolve rebase-merge state inside its own gitdir (got: {:?})", state);
+        // macOS 下 /var → /private/var 符号链接：rev-parse 输出 canonical 路径，
+        // 断言基准也需 canonicalize 后比较
+        let expected_base = std::fs::canonicalize(main.join(".git/worktrees"))
+            .unwrap_or_else(|_| main.join(".git/worktrees"));
+        assert!(state.starts_with(&expected_base),
+            "state path should live under the main gitdir worktrees area (got: {:?}, base: {:?})", state, expected_base);
     }
 }

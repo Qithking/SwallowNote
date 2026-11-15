@@ -9,6 +9,7 @@ import { EditorView } from '@/components/Editor'
 import { RightPanelContent, FullPanelPluginContent } from '@/components/PanelContent'
 import { SettingsView } from '@/components/Settings/SettingsView'
 import { flushAllEditors } from '@/lib/editor-flush'
+import { getDirtyCloseGuard } from '@/lib/close-flow'
 import { readActiveEditorScrollTop } from '@/stores/editor'
 import { attachLogger, logger } from '@/lib/logger'
 import { PluginManagerView, PluginManagerLoading, preloadPluginManager } from '@/components/PluginManagerLoading'
@@ -308,10 +309,7 @@ function App() {
       // 会按 closeWithoutExit 走 win.hide() 而非 win.destroy()，导致托盘"退出"被拦截为"隐藏"。
       const isForceQuit = forceQuitRef.current
       if (dirtyCount > 0) {
-        const dirtyTabs = useEditorStore.getState().tabs.filter((t) => t.isDirty || t.frontmatterDirty)
-        const names = dirtyTabs.slice(0, 5).map((t) => t.name)
-        if (dirtyTabs.length > 5) names.push('...')
-        setDirtyFileNames(names)
+        setDirtyFileNames(getDirtyCloseGuard().dirtyNames)
         setShowSaveDialog(true)
         pendingCloseRef.current = true
         // 阻止默认关闭，等用户在 SaveDialog 选择后再处理
@@ -386,6 +384,19 @@ function App() {
     if (!shouldClose) { actionTakenRef.current = false; return }
     await flushAllEditors()
     await useEditorStore.getState().saveAllDirtyTabs()
+    // I1 修复：校验保存结果——saveAllDirtyTabs 吞掉写盘错误（仅派发 save-error 事件），
+    // 仍有脏 tab 说明保存失败（磁盘满/权限/文件被锁），中止关闭并重新弹出保存对话框，
+    // 避免未保存内容随窗口销毁永久丢失（save-error toast 此时仍可见）
+    const guard = getDirtyCloseGuard()
+    if (guard.abort) {
+      setDirtyFileNames(guard.dirtyNames)
+      // 保留关闭意图与 forceQuit 标志，等用户在重新弹出的对话框中决策（重试保存/放弃/取消）
+      pendingCloseRef.current = true
+      forceQuitRef.current = isForceQuit
+      setShowSaveDialog(true)
+      actionTakenRef.current = false
+      return
+    }
     const win = getCurrentWindow()
     await saveSessionStateNow()
     const { closeWithoutExit } = useUIStore.getState()

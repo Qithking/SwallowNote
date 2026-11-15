@@ -21,7 +21,13 @@ pub fn is_auth_error(error: &str) -> bool {
         || lower.contains("permission denied (publickey)")
         || lower.contains("permission denied (keyboard-interactive)")
         || lower.contains("access denied")
-        || lower.contains("fatal: could not read from remote repository")
+        // S-07 修复：`could not read from remote repository` 在纯网络故障（远程
+        // 不可达/仓库不存在）时同样输出，无条件归 auth 会误弹凭证框——仅在同时
+        // 伴随认证信号（access rights / permission denied / authentication）时归类。
+        || (lower.contains("could not read from remote repository")
+            && (lower.contains("access rights")
+                || lower.contains("permission denied")
+                || lower.contains("authentication")))
         || lower.contains("http 403")
         || lower.contains("invalid username or password")
         || lower.contains("authentication error")
@@ -30,6 +36,15 @@ pub fn is_auth_error(error: &str) -> bool {
         || lower.contains("username for")
         || lower.contains("password for")
         || lower.contains("fatal: unable to access") && (lower.contains("403") || lower.contains("401") || lower.contains("authentication") || lower.contains("credential"))
+}
+
+/// S-26：本地未提交改动会被 merge/pull 覆盖时的拒绝错误
+/// （git 提示 "please commit your changes or stash them"）。
+/// 此前未归类，落入通用失败分支，前端无法给出"提交或暂存本地改动"
+/// 的明确指引。归入独立错误码 LOCAL_CHANGES_OVERWRITE。
+pub fn is_local_changes_overwrite_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("local changes to the following files would be overwritten")
 }
 
 #[cfg(test)]
@@ -73,7 +88,10 @@ mod tests {
         assert!(is_auth_error("Permission denied (publickey)"));
         assert!(is_auth_error("Permission denied (keyboard-interactive)"));
         assert!(is_auth_error("Access denied"));
-        assert!(is_auth_error("fatal: could not read from remote repository"));
+        // S-07 修复：裸 `could not read from remote repository` 不算认证错误（纯网络
+        // 故障同样输出该句）；附带认证信号（access rights / permission denied）才归类
+        assert!(!is_auth_error("fatal: could not read from remote repository"));
+        assert!(is_auth_error("fatal: could not read from remote repository\nPlease make sure you have the correct access rights and the repository exists."));
         assert!(is_auth_error("HTTP 403 Forbidden"));
         assert!(is_auth_error("Invalid username or password"));
         assert!(is_auth_error("Logon failed"));
@@ -147,8 +165,11 @@ mod tests {
         assert!(is_auth_error("Permission denied (keyboard-interactive)"));
         // "access denied"
         assert!(is_auth_error("Access denied"));
-        // "fatal: could not read from remote repository"
-        assert!(is_auth_error("fatal: could not read from remote repository"));
+        // S-07 修复：裸 `could not read from remote repository`（无认证信号）不算
+        // 认证错误——远程不可达/仓库不存在等纯网络故障也会输出该句，误归 auth
+        // 会让前端误弹凭证框
+        assert!(!is_auth_error("fatal: could not read from remote repository"));
+        assert!(!is_auth_error("fatal: could not read from remote repository: Connection refused"));
         // "http 403"
         assert!(is_auth_error("HTTP 403 Forbidden"));
         // "invalid username or password"
@@ -175,5 +196,25 @@ mod tests {
         assert!(!is_auth_error("401 Unauthorized"));
         // "fatal: unable to access" without 403/401/auth/credential is NOT an auth error
         assert!(!is_auth_error("fatal: unable to access: Connection timed out"));
+    }
+
+    /// S-26：本地改动覆盖错误识别——merge/pull/checkout 拒绝文本必须命中，
+    /// 冲突/认证/成功等其它错误不受影响
+    #[test]
+    fn test_is_local_changes_overwrite_error_patterns() {
+        assert!(is_local_changes_overwrite_error(
+            "error: Your local changes to the following files would be overwritten by merge: src/main.rs Please commit your changes or stash them before you merge."
+        ));
+        assert!(is_local_changes_overwrite_error(
+            "error: Your local changes to the following files would be overwritten by checkout"
+        ));
+        assert!(is_local_changes_overwrite_error(
+            "YOUR LOCAL CHANGES TO THE FOLLOWING FILES WOULD BE OVERWRITTEN BY PULL"
+        ));
+        // 非该模式：冲突、认证、成功等不误报
+        assert!(!is_local_changes_overwrite_error("CONFLICT (content): Merge conflict"));
+        assert!(!is_local_changes_overwrite_error("authentication failed"));
+        assert!(!is_local_changes_overwrite_error("Everything up-to-date"));
+        assert!(!is_local_changes_overwrite_error(""));
     }
 }

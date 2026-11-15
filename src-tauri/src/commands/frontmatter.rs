@@ -102,8 +102,9 @@ pub fn index_saved_file(
 pub fn search_frontmatter(
     db: State<Database>,
     filters: HashMap<String, String>,
+    path_prefix: Option<String>,
 ) -> Result<Vec<FrontmatterRecord>, String> {
-    md_frontmatter::search_frontmatter(&db, filters)
+    md_frontmatter::search_frontmatter(&db, filters, path_prefix)
         .map_err(|e| format!("Failed to search frontmatter: {}", e))
 }
 
