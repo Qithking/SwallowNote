@@ -21,6 +21,8 @@ interface ModelSettingsProps {
   onSave: (form: ModelForm) => Promise<unknown>
   onDelete: (id: string) => Promise<unknown>
   onSetDefault: (id: string) => Promise<unknown>
+  /** I19：从服务商拉取模型清单（返回 [{id, name}]，点击填入 modelId） */
+  onFetchUpstream: (form: { provider: string; baseUrl: string; apiKey?: string }) => Promise<{ id: string; name: string }[]>
   onClose: () => void
 }
 
@@ -33,7 +35,7 @@ const emptyForm = (): ModelForm => ({
   apiKey: '',
 })
 
-export function ModelSettings({ services, models, onSave, onDelete, onSetDefault, onClose }: ModelSettingsProps) {
+export function ModelSettings({ services, models, onSave, onDelete, onSetDefault, onFetchUpstream, onClose }: ModelSettingsProps) {
   const [editing, setEditing] = useState<ModelForm | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -184,7 +186,13 @@ export function ModelSettings({ services, models, onSave, onDelete, onSetDefault
             </div>
           </>
         ) : (
-          <ModelFormView form={editing} setForm={setEditing} onSave={handleSave} busy={busy} />
+          <ModelFormView
+            form={editing}
+            setForm={setEditing}
+            onSave={handleSave}
+            busy={busy}
+            onFetchUpstream={onFetchUpstream}
+          />
         )}
 
         {error !== '' && <p style={errorStyle}>{error}</p>}
@@ -202,12 +210,46 @@ function ModelFormView({
   setForm,
   onSave,
   busy,
+  onFetchUpstream,
 }: {
   form: ModelForm
   setForm: (f: ModelForm | null) => void
   onSave: () => void
   busy: boolean
+  onFetchUpstream: ModelSettingsProps['onFetchUpstream']
 }) {
+  // I19：拉取模型清单状态（列表 / 错误 / 进行中）
+  const [upstreamList, setUpstreamList] = useState<{ id: string; name: string }[] | null>(null)
+  const [upstreamError, setUpstreamError] = useState('')
+  const [fetching, setFetching] = useState(false)
+
+  const handleFetchUpstream = async () => {
+    if (fetching) return
+    if (!form.baseUrl.trim()) {
+      setUpstreamError('请先填写 Base URL（或留空使用官方默认地址）')
+      return
+    }
+    setUpstreamError('')
+    setFetching(true)
+    try {
+      const list = await onFetchUpstream({
+        provider: form.provider,
+        baseUrl: form.baseUrl,
+        apiKey: form.apiKey ?? '',
+      })
+      setUpstreamList(list)
+      // 单模型时直接填入，多模型等待用户点选
+      if (list.length === 1) {
+        setForm({ ...form, modelId: list[0].id })
+      }
+    } catch (e) {
+      setUpstreamList(null)
+      setUpstreamError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setFetching(false)
+    }
+  }
+
   const field = (
     label: string,
     node: React.ReactNode,
@@ -250,6 +292,37 @@ function ModelFormView({
           onChange={(e) => setForm({ ...form, modelId: e.target.value })}
         />,
       )}
+      {/* I19：拉取模型清单入口 —— 用当前 provider/baseUrl/apiKey 调用后端 */}
+      <div style={{ marginBottom: 10 }}>
+        <button type="button" onClick={() => void handleFetchUpstream()} style={secondaryBtnStyle} disabled={busy || fetching}>
+          {fetching ? '拉取中…' : '拉取模型清单'}
+        </button>
+        {upstreamError !== '' && <p style={errorStyle}>{upstreamError}</p>}
+        {upstreamList !== null && upstreamList.length > 0 && (
+          <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {upstreamList.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setForm({ ...form, modelId: m.id })}
+                style={{
+                  textAlign: 'left',
+                  border: '1px solid var(--border-color, #e5e5e5)',
+                  background: 'transparent',
+                  borderRadius: 6,
+                  padding: '5px 8px',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  color: 'var(--text-primary, #1d1d1f)',
+                }}
+              >
+                {m.name || m.id}
+                <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--text-secondary, #6e6e73)' }}>{m.id}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       {field(
         'Base URL',
         <input

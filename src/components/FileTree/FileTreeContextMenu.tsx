@@ -244,9 +244,9 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
         // 如果是剪切模式，删除源文件并更新/关闭相关 tab
         if (clipboardIsCut) {
           await deleteFile(sourcePath)
-          // 源文件已删除，使其 frontmatter 缓存失效
+          // 源文件已删除，使其 frontmatter 缓存失效（按源路径所属工作区根解析）
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          invalidateFrontmatterCache(sourcePath, useWorkspaceStore.getState().rootPath)
+          invalidateFrontmatterCache(sourcePath, workspaceRootFor(sourcePath))
           // Update tabs: move from source path to destination path
           const editorStore = useEditorStore.getState()
           const destName = getFileName(destPath)
@@ -284,7 +284,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
 
       // 删除文件后使该路径的 frontmatter 缓存失效，避免残留
       const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-      invalidateFrontmatterCache(node.path, useWorkspaceStore.getState().rootPath)
+      invalidateFrontmatterCache(node.path, workspaceRootFor(node.path))
 
       // Close any open tabs for the deleted file or files within the deleted directory
       const editorStore = useEditorStore.getState()

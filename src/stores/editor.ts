@@ -6,7 +6,7 @@ import { logger } from '@/lib/logger'
 import { subscribeWithSelector } from 'zustand/middleware'
 import type { ReactNode } from 'react'
 import { loadFileContent } from '@/lib/api'
-import { writeFile, gitAutoCommit, indexSavedFile } from '@/lib/tauri'
+import { writeFile, gitAutoCommit, indexSavedFile, workspaceRootFor } from '@/lib/tauri'
 import { emitNoteChanged, emitNoteClosed, emitNoteOpened, emitNoteSaved } from '@/lib/plugin-host'
 import { findScrollContainer } from '@/lib/scroll-position'
 import { clearCursorAnchorCache, getCursorAnchorCache } from '@/lib/cursor-anchor'
@@ -897,8 +897,8 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         // 失效 frontmatter 缓存以刷新搜索/文件树
         if (isMarkdown) {
           const { invalidateFrontmatterCache } = await import('@/lib/utils/searchQuery')
-          const { useWorkspaceStore } = await import('@/stores/workspace')
-          invalidateFrontmatterCache(tab.path, useWorkspaceStore.getState().rootPath)
+          // workspace 模式 rootPath 恒 null 不能直传：按所属工作区根解析（与 I14 同款）
+          invalidateFrontmatterCache(tab.path, workspaceRootFor(tab.path))
         }
         window.dispatchEvent(new CustomEvent('file-saved', { detail: { path: tab.path } }))
         // 若在 git 仓库则自动提交（异步非阻塞）
