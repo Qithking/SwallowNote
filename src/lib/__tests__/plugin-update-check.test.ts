@@ -101,6 +101,29 @@ describe('pluginHasUpdateAvailable：管理页「更新」按钮判定（与角�
     })
     expect(result).toBe(false)
   })
+
+  // I17：回退路径曾用字符串 !== 比较——本地版本比市场索引新（如手动升级过）
+  // 时会被误报「有更新」。须走 isNewerVersion 严格 semver 比较。
+  it('I17：本地版本比市场索引新（手动升级过）→ 不误报有更新', () => {
+    const result = pluginHasUpdateAvailable({
+      pluginId: 'picgo',
+      localVersion: '0.2.0',
+      marketUpdates: [] as PluginUpdateInfo[],
+      marketIndex: makeIndex([{ id: 'picgo', version: '0.1.2' }]),
+    })
+    expect(result).toBe(false)
+  })
+
+  it('I17：市场索引版本严格更新于本地（semver）→ 有更新', () => {
+    // 0.10.0 > 0.9.0 仅 semver 成立（字典序 '0.10.0' < '0.9.0'）
+    const result = pluginHasUpdateAvailable({
+      pluginId: 'mindmap',
+      localVersion: '0.9.0',
+      marketUpdates: [] as PluginUpdateInfo[],
+      marketIndex: makeIndex([{ id: 'mindmap', version: '0.10.0' }]),
+    })
+    expect(result).toBe(true)
+  })
 })
 
 describe('isHostVersionCompatible：宿主版本与 minHostVersion 比较', () => {

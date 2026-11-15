@@ -6,6 +6,7 @@
  */
 import { useEffect } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import i18n from '@/i18n'
 import { useEditorStore, useFileTreeStore, useGitStore, useUIStore, useWorkspaceStore } from '@/stores'
 
 export function useFileWatcher() {
@@ -42,7 +43,20 @@ export function useFileWatcher() {
           const tabsToClose = editorStore.tabs.filter(tab =>
             tab.path === path || tab.path.startsWith(path + '/')
           )
-          for (const tab of tabsToClose) {
+          // I2 修复：含未保存修改的 tab 不静默关闭——外部删除时先确认，
+          // 用户取消则保留脏 tab（改动不丢），仅关闭未脏 tab
+          const dirtyTabs = tabsToClose.filter(tab => tab.isDirty || tab.frontmatterDirty)
+          let closableTabs = tabsToClose
+          if (dirtyTabs.length > 0) {
+            const names = dirtyTabs.map(t => t.name).join(', ')
+            const confirmed = window.confirm(
+              i18n.t('dialog.deletedFileCloseConfirm', { count: dirtyTabs.length }) + '\n' + names
+            )
+            if (!confirmed) {
+              closableTabs = tabsToClose.filter(tab => !(tab.isDirty || tab.frontmatterDirty))
+            }
+          }
+          for (const tab of closableTabs) {
             editorStore.removeTab(tab.id)
           }
 

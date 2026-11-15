@@ -9,8 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { setAppLocale } from '@/lib/tauri'
-import { emitLocaleChanged } from '@/lib/plugin-host'
+import { useUIStore } from '@/stores/ui'
 import type { NoteWidth, UpdateChannel } from '@/stores'
 import { SettingRow } from '../SettingRow'
 
@@ -102,7 +101,8 @@ export function GeneralSettings({
           </div>
           <div className="px-4">
             <SettingRow label={t('settings.general.language')} desc={t('settings.general.language.desc')}>
-              <Select value={i18n.language} onValueChange={(v) => { i18n.changeLanguage(v); setAppLocale(v); queueMicrotask(() => emitLocaleChanged(v)); }}>
+              {/* I5：语言切换统一走 store 收口（i18n + 后端通知 + 插件事件 + 持久化） */}
+              <Select value={i18n.language} onValueChange={(v) => useUIStore.getState().changeAppLocale(v as 'zh-CN' | 'en')}>
                 <SelectTrigger className="w-[160px]">
                   <SelectValue />
                 </SelectTrigger>

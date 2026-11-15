@@ -994,8 +994,10 @@ function ExportToolbarButton(props: ToolbarButtonProps): ReactNode {
       ])
       const b64 = (await invokeBackend('markdown_to_docx', {
         markdown,
-        imageAssets,
-        renderedAssets,
+        // 键名必须与后端 main.rs 的 JSON-RPC 参数一致（snake_case），
+        // camelCase 会被后端忽略 → DOCX 图片/预渲染图静默丢失（I7）
+        image_assets: imageAssets,
+        rendered_assets: renderedAssets,
       })) as string
       return b64
     })
@@ -1122,6 +1124,9 @@ function ExportPanel(_props: PluginPanelProps): ReactNode {
 // ../manifest.json；icon/panel/toolbarButton 组件由 definePlugin 注入。
 // `hasBackend` 不属于 PluginManifest：宿主安装 zip 时按 backend/ 是否存在
 // 自动填充到 PluginDefinition（见 SDK 文档）。
+// 供回归测试直接挂载工具栏按钮（宿主运行时仍走 definePlugin 注册）
+export { ExportToolbarButton }
+
 export default definePlugin(manifestJson, {
   icon: ExportIcon,
   panel: ExportPanel,

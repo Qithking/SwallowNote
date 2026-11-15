@@ -101,6 +101,8 @@ export interface AppSettings {
   logMaxFileSize: string
   /** 更新下载渠道：github=官方直连，ghproxy=gh-proxy 加速 */
   updateChannel: string
+  /** 界面语言（I5 持久化）：'zh-CN' | 'en'，空 = 默认 zh-CN */
+  appLocale: string
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -137,6 +139,7 @@ export async function getAppSettings(): Promise<AppSettings> {
     developerMode: get('developerMode', 'false'),
     logMaxFileSize: get('logMaxFileSize', '10'),
     updateChannel: get('updateChannel', 'github'),
+    appLocale: get('appLocale', ''),
   }
 }
 

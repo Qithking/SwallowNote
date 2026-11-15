@@ -333,6 +333,15 @@ function EditorToolbar() {
             className="flex items-center gap-1 ml-2 shrink-0 px-1.5 py-0.5 rounded text-[10px] cursor-pointer hover:opacity-80"
             style={{ background: 'var(--bg-warning)', color: 'var(--text-warning)' }}
             onClick={async () => {
+              // I3 修复：强制重载会以磁盘版本覆盖本地未保存修改，脏 tab（正文/frontmatter）
+              // 先确认再执行，与 TabBar 刷新对脏 tab 的 confirm 行为保持一致
+              const live = useEditorStore.getState().tabs.find((t) => t.id === activeTab.id)
+              if (
+                (live?.isDirty || live?.frontmatterDirty) &&
+                !window.confirm(t('editorToolbar.externalChangeReloadConfirm'))
+              ) {
+                return
+              }
               // Force reload to overwrite cached content with external changes.
               // loadTabContent clears hasExternalChange on success and keeps it
               // true on failure, so no need to manually clear here.

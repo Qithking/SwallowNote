@@ -129,3 +129,19 @@ pub fn set_app_locale(locale: String) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// I18 回归：并发 clone 冲突错误消息（backend.git.cloneInProgress）
+    /// 必须在 zh-CN 与 en 双语资源中存在，否则运行时会回退显示键名。
+    #[test]
+    fn clone_in_progress_translation_exists_in_both_locales() {
+        init_translations();
+        let zh = t_with_locale("backend.git.cloneInProgress", "zh-CN");
+        assert!(zh.contains("克隆任务正在进行中"), "zh-CN 缺少 cloneInProgress 翻译: {zh}");
+        let en = t_with_locale("backend.git.cloneInProgress", "en");
+        assert!(en.contains("clone task is already in progress"), "en 缺少 cloneInProgress 翻译: {en}");
+    }
+}

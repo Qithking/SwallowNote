@@ -132,7 +132,8 @@ async fn do_git_clone(
     {
         let mut guard = pid_state.lock().map_err(|e| e.to_string())?;
         if guard.pid.is_some() {
-            return Err("已有克隆任务正在进行中，请等待完成或取消后再试".to_string());
+            // I18：错误消息透传前端展示，统一走 i18n（原硬编码中文）
+            return Err(i18n::t("backend.git.cloneInProgress"));
         }
         guard.url = url.to_string();
         guard.local_path = local_path.to_string();

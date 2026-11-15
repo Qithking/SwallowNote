@@ -35,6 +35,7 @@ import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuIte
 import { updateNodesWithChildren, findParentNode } from '@/lib/utils/treeUtils'
 import { usePluginEditors } from '@/stores/pluginEditor'
 import { countWords } from '@/lib/utils/wordCount'
+import { resolveNodeModifiedTime } from './FileTreeView'
 import { logger } from '@/lib/logger'
 
 function getRelativePath(rootPath: string, fullPath: string): string {
@@ -127,21 +128,26 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
       setLastClickedPath(node.path)
       // 图片文件无需读取 content(二进制非 UTF-8 会 read 失败),用 tab.path 直接预览
       if (isImageFile(node.name)) {
-        addTab({
-          id: node.id,
-          path: node.path,
-          name: node.name,
-          content: '',
-          isDirty: false,
-          isEdited: false,
-          viewMode: 'preview',
-          fileSize: '-',
-          modifiedTime: new Date().toLocaleString(),
-        })
+        // I9 同款：真实 mtime（获取失败保持 undefined，不回退当前时间）
+        resolveNodeModifiedTime(node.path).then((modifiedTime) =>
+          addTab({
+            id: node.id,
+            path: node.path,
+            name: node.name,
+            content: '',
+            isDirty: false,
+            isEdited: false,
+            viewMode: 'preview',
+            fileSize: '-',
+            modifiedTime,
+          })
+        )
         return
       }
       try {
         const content = await loadFileContent(node.path)
+        // I9 同款：真实 mtime（获取失败保持 undefined，不回退当前时间）
+        const modifiedTime = await resolveNodeModifiedTime(node.path)
         addTab({
           id: node.id,
           path: node.path,
@@ -151,7 +157,7 @@ export function TreeNodeContextMenu({ node, children, onRename, onNewFile, onNew
           isEdited: false,
           viewMode: 'preview',
           fileSize: content.length > 1024 ? `${(content.length / 1024).toFixed(1)}Kb` : `${content.length}B`,
-          modifiedTime: new Date().toLocaleString(),
+          modifiedTime,
           wordCount: countWords(content),
         })
       } catch (e) {

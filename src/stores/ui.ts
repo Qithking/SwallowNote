@@ -5,10 +5,10 @@ import { create } from 'zustand'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 import i18n from '@/i18n'
-import { getLatestFolder, getAppSettings, saveAppSettings, setAutoStartEnabled, isAutoStartEnabled, restartApp } from '@/lib/tauri'
+import { getLatestFolder, getAppSettings, saveAppSettings, setAppLocale, setAutoStartEnabled, isAutoStartEnabled, restartApp } from '@/lib/tauri'
 import { ShortcutKey } from '@/lib/shortcuts'
 import { useFileTreeStore } from './filetree'
-import { emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
+import { emitLocaleChanged, emitSettingChanged, emitThemeChanged } from '@/lib/plugin-host'
 import type { PluginPanelRequest } from '@/types/plugin'
 
 export type Theme = 'light' | 'dark' | 'system'
@@ -469,6 +469,8 @@ export interface UIState {
   setAutoCheckUpdate: (value: boolean) => void
   setLogMaxFileSize: (mb: number) => void
   setUpdateChannel: (channel: UpdateChannel) => void
+  /** 切换界面语言并持久化（I5：settings.appLocale + Rust 端 + 插件事件统一收口） */
+  changeAppLocale: (locale: 'zh-CN' | 'en') => void
   setCloseWithoutExit: (value: boolean) => void
   setNoteWidth: (width: NoteWidth) => void
   setShowAllFiles: (value: boolean) => void
@@ -622,6 +624,16 @@ export const useUIStore = create<UIState>((set, get) => ({
     set({ updateChannel: channel })
     saveAppSettings({ updateChannel: channel })
     queueMicrotask(() => emitSettingChanged('updateChannel', channel))
+  },
+  changeAppLocale: (locale) => {
+    i18n.changeLanguage(locale)
+    // 插件语言变化事件（原设置面板与快捷键两处各自派发，统一收口）
+    queueMicrotask(() => emitLocaleChanged(locale))
+    // 通知 Rust 端（如系统托盘/原生菜单语言）并持久化到 session_state
+    setAppLocale(locale).catch((e) => logger.warn('ui-store', 'setAppLocale failed', e))
+    saveAppSettings({ appLocale: locale }).catch((e) =>
+      logger.warn('ui-store', 'saveAppSettings(appLocale) failed', e)
+    )
   },
   setCloseWithoutExit: (value) => {
     set({ closeWithoutExit: value })
@@ -921,6 +933,11 @@ export const useUIStore = create<UIState>((set, get) => ({
         activeDarkCustomThemeId: s.activeDarkCustomThemeId || 'builtin-dark',
         developerMode: s.developerMode === 'true',
       })
+
+      // I5：恢复持久化的界面语言（空值/非法值保持 init 默认 zh-CN）
+      if (s.appLocale === 'en' || s.appLocale === 'zh-CN') {
+        i18n.changeLanguage(s.appLocale)
+      }
     } catch {
       // DB not ready, use defaults
     }

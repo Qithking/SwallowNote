@@ -60,7 +60,8 @@ export function useEditorLinkHandling(
         isDirty: false,
         isEdited: false,
         viewMode: 'preview',
-        // 使用文件元数据中的真实大小和修改时间，回退到近似值
+        // 使用文件元数据中的真实大小（缺失时回退近似值）；
+        // I9 同款：modifiedTime 不回退当前时间，元数据失败保持 undefined
         fileSize: meta
           ? meta.file_size > 1024
             ? `${(meta.file_size / 1024).toFixed(1)}Kb`
@@ -68,7 +69,7 @@ export function useEditorLinkHandling(
           : content.length > 1024
             ? `${(content.length / 1024).toFixed(1)}Kb`
             : `${content.length}B`,
-        modifiedTime: meta?.modified_time || new Date().toLocaleString(),
+        modifiedTime: meta?.modified_time,
         wordCount: countWords(content),
       })
     } catch (e) {

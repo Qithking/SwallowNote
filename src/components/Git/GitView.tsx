@@ -189,7 +189,8 @@ function CredentialDialog({
 }
 
 // Commit section with vertical layout
-function CommitSection({ 
+// I16：named export 供回归测试（仅测试引用）
+export function CommitSection({ 
   selectedRepos, 
   allRepos, 
   onRefresh,
@@ -201,9 +202,21 @@ function CommitSection({
   onStatusUpdate: (conflictPaths: string[], errorPaths: string[]) => void
 }) {
   const [isCommitting, setIsCommitting] = useState(false)
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   // C15：默认提交消息走 i18n（原硬编码英文 'Sync changes'）
   const [commitMessage, setCommitMessage] = useState(() => t('git.defaultCommitMessage'))
+  // I16：语言切换后默认提交消息跟随刷新（仅当用户未手动编辑——与最近一次
+  // 默认文案比较判断）；用户已编辑则保持自定义内容不被覆盖
+  const lastDefaultMessageRef = useRef(commitMessage)
+  useEffect(() => {
+    const nextDefault = t('git.defaultCommitMessage')
+    // 注意：setState 的 updater 延迟到下次渲染才执行，而 ref 在下方同步更新；
+    // updater 内直接读 ref 会读到已写入的新值，导致未编辑时也判为「已编辑」。
+    // 因此先捕获 ref 当前值供 updater 比较。
+    const prevDefault = lastDefaultMessageRef.current
+    setCommitMessage((prev) => (prev === prevDefault ? nextDefault : prev))
+    lastDefaultMessageRef.current = nextDefault
+  }, [i18n.language])
   const [credentialDialog, setCredentialDialog] = useState<{
     open: boolean
     repoPath: string
