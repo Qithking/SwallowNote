@@ -38,6 +38,7 @@ import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { logger } from '@/lib/logger'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
+import { openFileWithConflictGuard } from '@/lib/git/conflictOpen'
 
 export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
 
@@ -637,6 +638,9 @@ const { t } = useTranslation()
       )
       return
     }
+    // S-02：冲突文件不得以普通 tab 加载（工作树含标记）——改走冲突面板
+    if (openFileWithConflictGuard(node.path)) return
+
     loadFileContent(node.path)
       .then(async (content) => {
         // I9：真实 mtime（获取失败保持 undefined，不回退当前时间）

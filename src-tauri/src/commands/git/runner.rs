@@ -46,6 +46,15 @@ pub fn run_git_raw(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Resu
     cmd.env("LC_ALL", "C");
     cmd.env("LANG", "C");
 
+    // S-06 修复：Unix 上为 git 子进程创建独立进程组（setsid），超时 kill 时
+    // kill(-pid) 可连同 git 派生的子进程（git-remote-https、git-credential 等）
+    // 一并终止，避免孤儿进程继续占网络/资源（与 clone.rs G-17 同款模式）。
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
     for (key, value) in env_vars {
         cmd.env(key, value);
     }
@@ -145,8 +154,26 @@ pub fn run_git_raw(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Resu
             match child_rx.try_recv() {
                 Ok(child) => {
                     if let Ok(mut c) = child.lock() {
-                        let _ = c.kill();
+                        // S-06 修复：kill 整个进程组（负 PID），连同 git 派生的子进程
+                        // （git-remote-https 等）一并终止；失败回退仅 kill 进程本身
+                        #[cfg(unix)]
+                        {
+                            let pid = c.id() as i32;
+                            let group_kill = unsafe { libc::kill(-pid, libc::SIGKILL) };
+                            if group_kill != 0 {
+                                let _ = c.kill();
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = c.kill();
+                        }
                     }
+                    // S-22 修复：git 进程被 kill 时可能正持有 .git/index.lock
+                    // （写 index 阶段），残留锁文件会让后续 git 写命令全部报
+                    // "index.lock: File exists"。kill 的是自己的进程组，此时
+                    // 持有者已不存在，删除残留锁是安全的。
+                    cleanup_stale_index_lock(path);
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     warn!(
@@ -184,4 +211,43 @@ pub fn run_git_with_env(path: &str, args: &[&str], env_vars: &[(&str, &str)]) ->
 pub fn run_git_with_env_no_trim(path: &str, args: &[&str], env_vars: &[(&str, &str)]) -> Result<String, String> {
     let stdout = run_git_raw(path, args, env_vars)?;
     Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+/// S-22：删除超时 kill 后可能残留的 `.git/index.lock`。
+/// git 在写 index 阶段被 SIGKILL 会留下锁文件，此后所有 git 写命令都会因
+/// "index.lock: File exists" 失败。仅在刚 kill 掉自己启动的进程组后调用——
+/// 持有者已不存在，删除安全；删除路径名不影响其他进程已打开的 fd（POSIX
+/// 语义），若恰好有等待该锁的并发 git 进程，可能使其提前进入（git 自身
+/// 通过锁互斥，此处只清理确定由超时进程留下的残留）。
+fn cleanup_stale_index_lock(path: &str) {
+    let lock_file = std::path::Path::new(path).join(".git/index.lock");
+    if lock_file.exists() {
+        let _ = std::fs::remove_file(&lock_file);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// S-22：残留 index.lock 应被清理（超时 kill 场景的兜底）。
+    #[test]
+    fn cleanup_stale_index_lock_removes_existing_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        let lock = git_dir.join("index.lock");
+        std::fs::write(&lock, "").unwrap();
+
+        cleanup_stale_index_lock(tmp.path().to_str().unwrap());
+        assert!(!lock.exists(), "stale index.lock should be removed");
+    }
+
+    /// S-22：无 index.lock 时应为 no-op（不 panic、不误删其它文件）。
+    #[test]
+    fn cleanup_stale_index_lock_noop_without_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        cleanup_stale_index_lock(tmp.path().to_str().unwrap());
+        // 无 .git/index.lock，函数应静默返回
+    }
 }

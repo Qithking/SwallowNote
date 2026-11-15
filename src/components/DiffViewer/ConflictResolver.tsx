@@ -14,6 +14,7 @@ import {
   Download,
   Upload,
   Save,
+  Undo2,
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react'
@@ -26,6 +27,7 @@ import {
   gitGetConflictRemoteContent,
   gitResolveConflictFile,
   gitSaveConflictFileContent,
+  gitAbortConflict,
   removeConflictRepoRecord,
   checkAndUpdateConflictRepo,
   ConflictFile,
@@ -491,6 +493,42 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
     }
   }
 
+  // S-27：放弃当前 rebase/merge——abort 后仓库回到冲突前状态（丢弃冲突期间改动）。
+  // 后端 git_abort_conflict 成功后会主动清理 DB 冲突记录（此前前端未接线该命令，
+  // 且清理只依赖 handlePostResolve 的前端路径）。
+  const handleAbort = async () => {
+    setIsResolving(true)
+    try {
+      await gitAbortConflict(repoPath)
+      showToast(t('git.abortSuccess'), 'success')
+
+      const gitStore = useGitStore.getState()
+      gitStore.updateRepository(repoPath, { status: 'normal' })
+      await useGitStore.getState().loadConflictRepos()
+      const fileTreeStore = useFileTreeStore.getState()
+      fileTreeStore.refreshExpanded()
+      // 广播冲突已放弃：空闲自动推送监听后恢复该仓库的提交推送
+      window.dispatchEvent(new CustomEvent('git-conflict-resolved', { detail: { repoPath } }))
+
+      // 关闭冲突 tab（延迟关闭与 handlePostResolve 保持一致）
+      const { useEditorStore } = await import('@/stores')
+      const conflictTabId = `conflict-${repoPath}`
+      const editorStore = useEditorStore.getState()
+      const tab = editorStore.tabs.find(t => t.id === conflictTabId)
+      if (tab) {
+        setTimeout(() => {
+          editorStore.removeTab(conflictTabId)
+        }, 1500)
+      }
+      setSelectedFile(null)
+    } catch (e) {
+      logger.error('conflict-resolver', 'Failed to abort conflict:', e)
+      showToast(t('git.abortFailed', { error: String(e) }), 'error')
+    } finally {
+      setIsResolving(false)
+    }
+  }
+
   // Shared post-resolve logic: refresh file tree, auto-close tab if all resolved
   const handlePostResolve = async () => {
     await loadConflicts()
@@ -771,6 +809,25 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
             >
               <Upload size={13} />
               {t('git.acceptLocal')}
+            </Button>
+
+            <div className="w-px h-4 mx-1" style={{ background: 'var(--border-color)' }} />
+
+            {/* Abort button — S-27：放弃当前 rebase/merge，仓库回到冲突前状态 */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1 font-medium"
+              disabled={isResolving}
+              onClick={handleAbort}
+              style={isResolving ? {} : {
+                background: 'rgba(239, 68, 68, 0.1)',
+                color: '#ef4444',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+              }}
+            >
+              <Undo2 size={13} />
+              {t('git.abortConflict')}
             </Button>
 
           </div>

@@ -383,6 +383,9 @@ const SearchView = memo(function SearchView() {
 
   const handleResultClick = useCallback(async (result: SearchResult, lineNumber?: number) => {
     try {
+      // S-02：冲突文件不得以普通 tab 加载（工作树含标记）——改走冲突面板
+      const { openFileWithConflictGuard } = await import('@/lib/git/conflictOpen')
+      if (openFileWithConflictGuard(result.file_path)) return
       const { readFile } = await import('@/lib/tauri')
       const content = await readFile(result.file_path)
       // I9 同款：真实 mtime（获取失败保持 undefined，不回退当前时间）

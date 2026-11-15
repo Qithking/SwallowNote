@@ -47,6 +47,9 @@ export function useEditorLinkHandling(
         toast.error(t('download.fileNotFound', { path: filePath }))
         return
       }
+      // S-02：冲突文件不得以普通 tab 加载（工作树含标记）——改走冲突面板
+      const { openFileWithConflictGuard } = await import('@/lib/git/conflictOpen')
+      if (openFileWithConflictGuard(filePath)) return
       const [content, meta] = await Promise.all([
         readFile(filePath),
         getFileMetadata(filePath).catch(() => null),

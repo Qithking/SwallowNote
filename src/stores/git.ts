@@ -56,6 +56,8 @@ export interface PullResult {
   errorCode?: GitErrorCode
   isConflict?: boolean
   isDetachedHead?: boolean
+  /** S-03：凭证缺失（AuthRequired 且 keyring 无可用凭证），caller 应弹凭证框 */
+  needsCredential?: boolean
 }
 
 export interface SyncStatus {
@@ -230,6 +232,9 @@ export const useGitStore = create<GitState>((set, get) => ({
             if (r.error) result.error = r.error
             // 透传结构化错误码：定时同步日志需要据此给出错误类型与处理建议
             if (r.errorCode) result.errorCode = r.errorCode
+            // S-03 修复：透传 needsCredential——此前 PullResult 丢失该标志，
+            // GitView pull 失败时无法区分「凭证缺失」与其它错误，凭证框提示不可达
+            if (r.needsCredential) result.needsCredential = true
             if (r.errorCode === GitErrorCode.RebaseConflict) result.isConflict = true
             if (r.errorCode === GitErrorCode.DetachedHead) result.isDetachedHead = true
             return result
@@ -339,9 +344,12 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
   isConflictFile: (filePath: string): { isConflict: boolean; repoPath: string; repoName: string } | null => {
     const { conflictRepos, conflictFilesMap } = get()
+    // Windows 文件系统大小写不敏感：filePath 与记录路径可能大小写写法不同
+    // （如 D:/Notes vs D:/notes），匹配忽略大小写（与 conflictOpen 的 rel 计算一致）
+    const lowerFilePath = filePath.toLowerCase()
     for (const repo of conflictRepos) {
       const conflictFiles = conflictFilesMap[repo.repo_path]
-      if (conflictFiles && conflictFiles.includes(filePath)) {
+      if (conflictFiles && conflictFiles.some((f) => f.toLowerCase() === lowerFilePath)) {
         return { isConflict: true, repoPath: repo.repo_path, repoName: repo.repo_name }
       }
     }

@@ -1,6 +1,6 @@
 use std::path::Path;
 use super::with_repo_lock;
-use super::runner::run_git;
+use super::runner::{run_git, run_git_blocking};
 use log::{debug, warn};
 
 /// 读取 git 配置 pull.rebase，决定 pull 用 rebase 还是 merge。
@@ -460,9 +460,11 @@ pub async fn git_attach_branch_to_head(path: String, branch: String) -> Result<(
 #[tauri::command]
 pub async fn git_switch_to_local_branch(path: String, branch: String) -> Result<(), String> {
     // F2/F6 补充：per-repo 互斥——stash/checkout 与同步类命令串行执行
-    // （先克隆锁键，规避借用与 move 冲突）
+    // （先克隆锁键，规避借用与 move 冲突）。
+    // S-08 修复：锁等待移入 blocking 线程池（同 run_git_blocking 约定）。
     let lock_key = path.clone();
-    with_repo_lock(&lock_key, || git_switch_to_local_branch_impl(path, branch))
+    run_git_blocking(move || with_repo_lock(&lock_key, || git_switch_to_local_branch_impl(path, branch)))
+        .await
 }
 
 fn git_switch_to_local_branch_impl(path: String, branch: String) -> Result<(), String> {

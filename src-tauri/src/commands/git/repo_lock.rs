@@ -29,7 +29,7 @@ pub fn with_repo_lock<T, F: FnOnce() -> T>(path: impl AsRef<Path>, f: F) -> T {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Arc::clone(
-            map.entry(path.as_ref().to_path_buf())
+            map.entry(normalize_lock_key(path.as_ref()))
                 .or_insert_with(|| Arc::new(Mutex::new(()))),
         )
     };
@@ -37,6 +37,33 @@ pub fn with_repo_lock<T, F: FnOnce() -> T>(path: impl AsRef<Path>, f: F) -> T {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     f()
+}
+
+/// S-17：规范化锁键——同一仓库的多种路径写法（尾斜杠 / 符号链接 / 内部重复斜杠）
+/// 必须命中同一把锁，否则同仓库并发写命令互相踩踏（如 "/a/repo" 与 "/a/repo/"、
+/// macOS 下 /var 与 /private/var）。
+/// 优先 canonicalize（解析符号链接，要求路径存在——仓库根通常存在）；
+/// 失败（如测试路径不存在）时回退到按组件归一化：丢弃 "."、"//" 折叠、去尾部斜杠。
+fn normalize_lock_key(path: &Path) -> PathBuf {
+    if let Ok(canon) = std::fs::canonicalize(path) {
+        return canon;
+    }
+    let mut key = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::RootDir => key.push(std::path::MAIN_SEPARATOR.to_string()),
+            std::path::Component::Prefix(p) => key.push(p.as_os_str()),
+            // "." 组件在路径语义中无意义，归一化时丢弃
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => key.push(".."),
+            std::path::Component::Normal(c) => key.push(c),
+        }
+    }
+    if key.as_os_str().is_empty() {
+        path.to_path_buf()
+    } else {
+        key
+    }
 }
 
 #[cfg(test)]
@@ -108,6 +135,71 @@ mod tests {
         assert!(
             rx.recv_timeout(Duration::from_millis(100)).is_ok(),
             "repo B should not be blocked by repo A"
+        );
+        h1.join().unwrap();
+        h2.join().unwrap();
+    }
+
+    /// S-17：尾斜杠差异的同一仓库写法必须命中同一把锁（B 应被 A 阻塞）。
+    #[test]
+    fn trailing_slash_variants_should_share_lock() {
+        // 屏障：等 h1 确认已持锁后才启动 h2，消除线程调度竞态
+        let (lock_acquired_tx, lock_acquired_rx) = std::sync::mpsc::channel::<()>();
+        let h1 = std::thread::spawn(move || {
+            with_repo_lock("/tmp/swallownote-test-repo-trailing", || {
+                lock_acquired_tx.send(()).unwrap();
+                std::thread::sleep(Duration::from_millis(300));
+            });
+        });
+        lock_acquired_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("h1 should acquire the lock first");
+
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let h2 = std::thread::spawn(move || {
+            with_repo_lock("/tmp/swallownote-test-repo-trailing/", || {
+                tx.send(()).unwrap();
+            });
+        });
+        assert!(
+            rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "trailing-slash variant should be blocked by the same repo lock"
+        );
+        h1.join().unwrap();
+        h2.join().unwrap();
+    }
+
+    /// S-17：符号链接指向同一目录的两种路径必须命中同一把锁（canonicalize 归一化）。
+    #[cfg(unix)]
+    #[test]
+    fn symlink_variants_should_share_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let (lock_acquired_tx, lock_acquired_rx) = std::sync::mpsc::channel::<()>();
+        let h1 = {
+            let real = real.clone();
+            std::thread::spawn(move || {
+                with_repo_lock(&real, || {
+                    lock_acquired_tx.send(()).unwrap();
+                    std::thread::sleep(Duration::from_millis(300));
+                });
+            })
+        };
+        lock_acquired_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("h1 should acquire the lock first");
+
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let h2 = std::thread::spawn(move || {
+            with_repo_lock(&link, || tx.send(()).unwrap());
+        });
+        assert!(
+            rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "symlink variant should be blocked by the same repo lock"
         );
         h1.join().unwrap();
         h2.join().unwrap();

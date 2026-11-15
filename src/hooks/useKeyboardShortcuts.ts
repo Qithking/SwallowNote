@@ -242,6 +242,8 @@ export async function handleSaveFile() {
     const { gitAutoCommit } = await import('@/lib/tauri')
     try {
       await gitAutoCommit(activeTab.path)
+      // S-14 修复：自动提交成功后通知 git 面板刷新（与 editor store 保存路径一致）
+      window.dispatchEvent(new CustomEvent('git-auto-committed', { detail: { path: activeTab.path } }))
     } catch (e) {
       // 保存时自动提交失败此前只有 debug 级别，提升为 warn 保证可见
       logger.warn('keyboard', 'Git auto-commit skipped:', e)

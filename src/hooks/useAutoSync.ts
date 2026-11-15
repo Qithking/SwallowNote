@@ -3,6 +3,7 @@ import { useGitStore, useUIStore, useWorkspaceStore, useFileTreeStore } from '@/
 import type { UIState, GitState, PullResult } from '@/stores'
 import type { GitRepository } from '@/stores/git'
 import { GitErrorCode, isPushConflict } from '@/lib/git/errors'
+import { refreshOpenTabsAfterSync } from '@/lib/git/refreshOpenTabs'
 import { logger } from '@/lib/logger'
 import { toast } from 'sonner'
 
@@ -21,6 +22,8 @@ const GIT_ERROR_HINTS: Partial<Record<GitErrorCode, string>> = {
   [GitErrorCode.AlreadyUpToDate]: '远程无新提交，无需处理',
   [GitErrorCode.NoRemote]: '未配置远程仓库，请在 Git 面板为该仓库添加 origin',
   [GitErrorCode.NotInGitRepo]: '目录不是有效的 git 仓库，请检查仓库配置',
+  // S-26：本地改动覆盖错误——pull/merge 拒绝覆盖未提交改动，需先提交或暂存
+  [GitErrorCode.LocalChangesOverwrite]: '本地有未提交改动会被同步覆盖，请先提交或暂存后再同步',
 }
 
 /** 拼接单个仓库失败详情：名称 [错误码] 错误信息（处理建议）；错误码可 grep，建议可执行 */
@@ -54,7 +57,13 @@ export function useAutoSync(
   useEffect(() => {
     /** 执行一轮同步；返回 false 表示被 store 级互斥跳过（调用方可重试） */
     const doSync = async (): Promise<boolean> => {
-      if (isSyncingRef.current) return true
+      if (isSyncingRef.current) {
+        // S-28 修复：重入（interval 重叠或上一轮尚未结束）静默跳过无任何痕迹——
+        // 补日志便于诊断"轮次被跳过"；行为不变（返回 true 表示本轮已由进行中的
+        // 轮次覆盖，无需重试）
+        logger.warn('app', 'Auto sync skipped: previous sync round still in progress')
+        return true
+      }
       // 空闲推送或手动同步进行中（store 级互斥），跳过本轮避免并发 git 操作
       if (useGitStore.getState().syncStatus.isSyncing) return false
       isSyncingRef.current = true
@@ -166,6 +175,14 @@ export function useAutoSync(
         if (succeeded > 0 || conflicted > 0 || pushSucceeded > 0) {
           const fileTreeStore = useFileTreeStore.getState()
           fileTreeStore.refreshExpanded()
+          // S-01：自动同步改写磁盘后同样刷新已打开的 tab（与手动同步一致；
+          // 冲突文件关闭引导冲突面板，不把含标记内容加载进编辑器）。
+          // tab 刷新失败不影响同步结果提示（与下方 scan 刷新同款容错）
+          try {
+            await refreshOpenTabsAfterSync(repos.map((r: GitRepository) => r.path))
+          } catch (e) {
+            logger.warn('app', 'Open tab refresh after auto sync failed:', e)
+          }
         }
         if (conflicted > 0) {
           const repoNames = results.filter((r: PullResult) => r.isConflict).map((r: PullResult) => r.name).join(', ')

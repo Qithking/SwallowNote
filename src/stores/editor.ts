@@ -904,6 +904,9 @@ export const useEditorStore = create<EditorState>()(subscribeWithSelector((set, 
         // 若在 git 仓库则自动提交（异步非阻塞）
         try {
           await gitAutoCommit(tab.path)
+          // S-14 修复：自动提交成功后通知 git 面板刷新 hasUncommittedChanges
+          // 等字段——此前保存面板列表停留在旧状态直到下次扫描
+          window.dispatchEvent(new CustomEvent('git-auto-committed', { detail: { path: tab.path } }))
         } catch (e) {
           logger.warn('editor-store', 'gitAutoCommit failed for', tab.path, e)
         }
