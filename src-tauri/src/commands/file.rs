@@ -5,7 +5,11 @@ use uuid::Uuid;
 use log::{debug, error};
 
 // 路径白名单校验统一收编到 services::fs_guard（架构审计候选 2）
-use crate::services::fs_guard::ensure_path_allowed;
+use crate::services::fs_guard::{check_path_in_roots, ensure_path_allowed};
+
+/// 搜索代际号：每次 search_in_files 调用自增。visitor 检测到代际不匹配
+/// 立即退出遍历（即时搜索下连续输入时，旧批次不再全量跑完占用 CPU）
+static SEARCH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[derive(Serialize)]
 pub struct FileMetadata {
@@ -62,7 +66,9 @@ pub struct RenameFileRequest {
 #[derive(Deserialize)]
 pub struct SearchRequest {
     pub query: String,
-    pub root_path: String,
+    /// 搜索根列表（folder 模式 1 个，workspace 模式多根）。
+    /// 多根合并为一次调用：取消粒度=批次，避免多根并发时互相误取消。
+    pub roots: Vec<String>,
     pub case_sensitive: bool,
     pub whole_word: bool,
     pub use_regex: bool,
@@ -926,24 +932,217 @@ pub async fn open_in_finder(
     Ok(())
 }
 
+/// 搜索载荷上限（间歇性「输入卡死、结果卡住不显示」根因修复）：
+/// 行内容全量返回 + 每匹配克隆整行 + 无总量上限 → 广泛查询（常见词/短词）
+/// 产生 MB 级 IPC JSON，webview 主线程解析冻结 → 输入卡死、结果迟迟不显示。
+/// 概率性来源：载荷大小取决于查询广泛度与文件行长度。
+const LINE_WINDOW_HALF: usize = 150;        // 超长行截断窗口：命中前后各保留的字符数
+const MAX_TOTAL_LINE_MATCHES: usize = 5000; // 单次搜索全局匹配行总数上限
+
+/// 超长行窗口截断：行内容超过 2×LINE_WINDOW_HALF 时，只保留首个命中附近的窗口，
+/// start_col/end_col 同步换算为窗口内偏移（字节偏移 → 字符偏移换算，保证 UTF-8 安全）
+fn truncate_line_window(line: &str, mat_start: usize, mat_end: usize) -> (String, usize, usize) {
+    if line.chars().count() <= LINE_WINDOW_HALF * 2 {
+        return (line.to_string(), mat_start, mat_end);
+    }
+    let chars: Vec<char> = line.chars().collect();
+    let cs = line[..mat_start].chars().count(); // 命中起点字符偏移
+    let ce = line[..mat_end].chars().count();   // 命中终点字符偏移
+    let s = cs.saturating_sub(LINE_WINDOW_HALF);
+    let e = (ce + LINE_WINDOW_HALF).min(chars.len());
+    (chars[s..e].iter().collect(), cs - s, ce - s)
+}
+
+/// 搜索遍历线程数：CPU 占用约束（用户要求 ≤50% 甚至更低）。
+/// 逻辑核数一半且硬上限 2：4 核→2（50%）、8 核→2（25%）、更多核占用更低；
+/// 1-2 核机器退化为单线程。资源约束优先于搜索速度。
+fn search_thread_count() -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
+    (cores / 2).clamp(1, 2)
+}
+
+/// 并行遍历 roots 并按 regex 逐行匹配（search_in_files 核心逻辑，独立于
+/// AppHandle 以便单测）。my_gen 为本批次代际号：visitor 检测到全局代际
+/// 变化立即退出遍历（即时搜索下旧批次不再占用 CPU）。
+fn walk_and_match(
+    roots: &[PathBuf],
+    regex: &regex::Regex,
+    my_gen: u64,
+) -> std::collections::HashMap<String, Vec<LineMatch>> {
+    use std::collections::HashMap;
+    use std::io::{BufRead, BufReader};
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+    use ignore::{WalkBuilder, WalkState};
+    use ignore::overrides::OverrideBuilder;
+
+    // 资源控制：遍历线程受 search_thread_count 约束（CPU 占用 ≤50% 甚至更低）；
+    // 单文件 5MB 上限防超大文件拖慢；间隙零占用（无后台常驻）
+    const MAX_FILE_SIZE: u64 = 5 * 1024 * 1024;
+
+    let matches: Arc<Mutex<HashMap<String, Vec<LineMatch>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    // 全局匹配行计数（跨遍历线程共享）：达到上限立即截停，载荷有界
+    let total = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    for root in roots {
+        let mut builder = WalkBuilder::new(root);
+        builder
+            .hidden(true)               // 点前缀文件/目录排除（等价旧 starts_with('.')）
+            .git_ignore(true)           // git 仓库内遵循 .gitignore（ripgrep 同款行为）
+            .follow_links(false)        // symlink 防环：不跟随符号链接
+            .threads(search_thread_count())
+            .max_filesize(Some(MAX_FILE_SIZE));
+        // 显式复刻旧实现的 8 目录排除清单（固定字符串 glob 不会编译失败）
+        let mut ov_builder = OverrideBuilder::new(root);
+        for dir in ["node_modules", "target", "dist", "build", ".swallownote", "__pycache__", ".next", ".nuxt"] {
+            let _ = ov_builder.add(&format!("!{dir}"));
+        }
+        if let Ok(ov) = ov_builder.build() {
+            builder.overrides(ov);
+        }
+
+        let matches_clone = matches.clone();
+        let total_clone = total.clone();
+        builder.build_parallel().run(|| {
+            // Regex 内部 Arc 结构，每线程 clone 零成本
+            let re = regex.clone();
+            let matches_clone = matches_clone.clone();
+            let total = total_clone.clone();
+            Box::new(move |entry: Result<ignore::DirEntry, ignore::Error>| {
+                // 新批次已发起：本批遍历立即退出，不再占用 CPU
+                if SEARCH_GENERATION.load(Ordering::Relaxed) != my_gen {
+                    return WalkState::Quit;
+                }
+                // 匹配行总数已达上限：立即截停（载荷有界，防广泛查询冻结前端）
+                if total.load(Ordering::Relaxed) >= MAX_TOTAL_LINE_MATCHES {
+                    return WalkState::Quit;
+                }
+                let Ok(entry) = entry else { return WalkState::Continue };
+                if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    return WalkState::Continue;
+                }
+                let path = entry.path();
+                // 二进制扩展黑名单（与旧实现一致）
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if matches!(ext_lower.as_str(),
+                        "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp"
+                        | "pdf" | "zip" | "tar" | "gz" | "rar" | "7z"
+                        | "exe" | "dll" | "so" | "dylib" | "a" | "o" | "obj"
+                        | "woff" | "woff2" | "ttf" | "eot" | "otf"
+                        | "mp3" | "mp4" | "wav" | "avi" | "mov" | "webm"
+                        | "wasm" | "pyc" | "class"
+                    ) {
+                        return WalkState::Continue;
+                    }
+                }
+
+                let path_str = path.to_string_lossy().to_string().replace('\\', "/");
+
+                if let Ok(file) = std::fs::File::open(path) {
+                    let reader = BufReader::new(file);
+                    // 流式逐行读取：每行仅取首个命中（与旧去重语义一致）+ 超长行窗口截断；
+                    // enumerate 天然行号升序，前端展示顺序确定
+                    let mut line_matches: Vec<LineMatch> = Vec::new();
+                    for (idx, line) in reader.lines().enumerate() {
+                        // 行级总量检查：单文件数千行命中时尽早截停
+                        if total.load(Ordering::Relaxed) >= MAX_TOTAL_LINE_MATCHES {
+                            return WalkState::Quit;
+                        }
+                        let line = match line {
+                            Ok(l) => l,
+                            Err(_) => continue, // 读取出错的行跳过
+                        };
+                        let Some(mat) = re.find(&line) else { continue };
+                        let (content, sc, ec) = truncate_line_window(&line, mat.start(), mat.end());
+                        line_matches.push(LineMatch {
+                            line_number: idx + 1,
+                            content,
+                            start_col: sc,
+                            end_col: ec,
+                        });
+                        total.fetch_add(1, Ordering::Relaxed);
+                    }
+
+                    if !line_matches.is_empty() {
+                        // 锁中毒时恢复内部数据，避免连锁 panic
+                        let mut matches_map = matches_clone.lock().unwrap_or_else(|e| {
+                            error!("锁中毒: {}", e);
+                            e.into_inner()
+                        });
+                        matches_map.insert(path_str, line_matches);
+                    }
+                }
+                WalkState::Continue
+            })
+        });
+
+        // 本根遍历期间已被取消：不再处理后续根
+        if SEARCH_GENERATION.load(Ordering::Relaxed) != my_gen {
+            break;
+        }
+    }
+
+    let guard = matches.lock().unwrap_or_else(|e| {
+        error!("锁中毒: {}", e);
+        e.into_inner()
+    });
+    guard.clone()
+}
+
+/// HashMap → SearchResult 列表。HashMap 迭代序随机：
+/// 同一查询两次搜索若顺序不同，前端整个列表会洗牌跳动（用户点击结果打开文件后找不到刚打开的项）。
+fn collect_results_sorted(
+    matches_map: &std::collections::HashMap<String, Vec<LineMatch>>,
+) -> Vec<SearchResult> {
+    let mut results: Vec<SearchResult> = matches_map
+        .iter()
+        .map(|(path, line_matches)| {
+            let file_name = PathBuf::from(path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            SearchResult {
+                file_path: path.clone(),
+                file_name,
+                line_matches: line_matches.clone(),
+            }
+        })
+        .collect();
+    // 按 file_path 稳定排序：同一查询的每次搜索产生完全一致的顺序，
+    // 结果落地时列表不再洗牌（即时搜索下旧批次落地不会打乱用户正在查看的结果）
+    results.sort_by(|a, b| a.file_path.cmp(&b.file_path));
+    results
+}
+
 #[tauri::command]
 pub async fn search_in_files(
     app: tauri::AppHandle,
-    workspace_root: Option<String>,
+    // 全部已打开工作区根（folder 1 个 / workspace 多个）：
+    // 多根合并单次 invoke 时白名单必须覆盖所有根，否则其余根被 fail-closed 拒绝
+    workspace_roots: Option<Vec<String>>,
     req: SearchRequest,
 ) -> Result<Vec<SearchResult>, String> {
-    use std::sync::Arc;
-    use std::sync::Mutex;
-    use std::io::BufRead;
-    use std::io::BufReader;
-
-    // 校验搜索根在允许集内，防止被注入脚本扫描任意目录
-    ensure_path_allowed(&app, workspace_root.as_deref(), Path::new(&req.root_path))?;
-    let root = PathBuf::from(&req.root_path);
-    if !root.exists() || !root.is_dir() {
-        return Err(format!("Invalid root path: {}", root.display()));
+    // 聚合白名单：全部已打开根 + 应用数据目录（安全语义与逐根校验等价）
+    let allowed = crate::services::fs_guard::allowed_roots_multi(
+        &app,
+        workspace_roots.as_deref().unwrap_or(&[]),
+    )?;
+    // 逐根校验白名单与存在性（安全边界与旧实现一致），多根共享同一批次
+    let mut valid_roots = Vec::with_capacity(req.roots.len());
+    for r in &req.roots {
+        let root = PathBuf::from(r);
+        check_path_in_roots(&allowed, &root)?;
+        if !root.exists() || !root.is_dir() {
+            return Err(format!("Invalid root path: {}", root.display()));
+        }
+        valid_roots.push(root);
     }
 
+    // 模式构造逻辑与旧实现完全一致（行为等价）
     let pattern_str = if req.use_regex {
         req.query.clone()
     } else if req.whole_word {
@@ -957,107 +1156,237 @@ pub async fn search_in_files(
     let regex = regex::Regex::new(&pattern_str)
         .map_err(|e| format!("Invalid pattern: {}", e))?;
 
-    let file_matches: Arc<Mutex<std::collections::HashMap<String, Vec<LineMatch>>>> = 
-        Arc::new(Mutex::new(std::collections::HashMap::new()));
+    // 取本批次代际号：即时搜索下新查询发起即令旧批次失效
+    let my_gen = SEARCH_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
 
-    // 同上，blocking 线程执行
-    let file_matches_clone = file_matches.clone();
-    tokio::task::spawn_blocking(move || {
-        fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let file_name = entry.file_name();
-                    let name = file_name.to_string_lossy();
-                    if name.starts_with('.') {
-                        continue;
-                    }
-                    if matches!(name.as_ref(), "node_modules" | "target" | "dist" | "build" | ".swallownote" | "__pycache__" | ".next" | ".nuxt") {
-                        continue;
-                    }
-                    let path = entry.path();
-                    if path.is_dir() {
-                        collect_files(&path, files);
-                    } else {
-                        files.push(path);
-                    }
-                }
-            }
-        }
-
-        let mut all_files = Vec::new();
-        collect_files(&root, &mut all_files);
-
-        for path in all_files {
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                let ext_lower = ext.to_lowercase();
-                if matches!(ext_lower.as_str(),
-                    "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp"
-                    | "pdf" | "zip" | "tar" | "gz" | "rar" | "7z"
-                    | "exe" | "dll" | "so" | "dylib" | "a" | "o" | "obj"
-                    | "woff" | "woff2" | "ttf" | "eot" | "otf"
-                    | "mp3" | "mp4" | "wav" | "avi" | "mov" | "webm"
-                    | "wasm" | "pyc" | "class"
-                ) {
-                    continue;
-                }
-            }
-
-            let path_str = path.to_string_lossy().to_string().replace('\\', "/");
-            
-            if let Ok(file) = std::fs::File::open(&path) {
-                let reader = BufReader::new(file);
-                // 流式逐行读取 + 正则匹配，避免一次性 collect 全部行到 Vec 造成内存峰值
-                let mut line_matches: Vec<LineMatch> = Vec::new();
-                for (idx, line) in reader.lines().enumerate() {
-                    let line = match line {
-                        Ok(l) => l,
-                        Err(_) => continue, // 读取出错的行跳过，继续处理后续行
-                    };
-                    for mat in regex.find_iter(&line) {
-                        line_matches.push(LineMatch {
-                            line_number: idx + 1,
-                            content: line.clone(),
-                            start_col: mat.start(),
-                            end_col: mat.end(),
-                        });
-                    }
-                }
-
-                if !line_matches.is_empty() {
-                    // 锁中毒时恢复内部数据，避免 spawn_blocking 任务连锁 panic
-                    let mut matches_map = file_matches_clone.lock().unwrap_or_else(|e| {
-                        error!("锁中毒: {}", e);
-                        e.into_inner()
-                    });
-                    let mut line_map: std::collections::HashMap<usize, LineMatch> = std::collections::HashMap::new();
-                    for m in line_matches {
-                        line_map.entry(m.line_number).or_insert(m);
-                    }
-                    let unique: Vec<LineMatch> = line_map.into_values().collect();
-                    if !unique.is_empty() {
-                        matches_map.insert(path_str, unique);
-                    }
-                }
-            }
-        }
+    // blocking 线程执行并行遍历（tokio 线程池不被阻塞）
+    let matches_map = tokio::task::spawn_blocking(move || {
+        walk_and_match(&valid_roots, &regex, my_gen)
     }).await.map_err(|e| format!("Search task failed: {}", e))?;
 
-    let matches_map = file_matches.lock().map_err(|e| format!("DB lock error: {}", e))?;
-    let results: Vec<SearchResult> = matches_map.iter()
-        .map(|(path, line_matches)| {
-            let file_name = PathBuf::from(path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            SearchResult {
-                file_path: path.clone(),
-                file_name,
-                line_matches: line_matches.clone(),
-            }
-        })
-        .collect();
+    // 被新批次取代：返回空（前端按代际丢弃，本就不可见）
+    if SEARCH_GENERATION.load(std::sync::atomic::Ordering::SeqCst) != my_gen {
+        return Ok(vec![]);
+    }
+
+    let results = collect_results_sorted(&matches_map);
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::Ordering;
+    use std::sync::Mutex;
+
+    /// 串行化：三个测试共享全局 SEARCH_GENERATION，须互斥执行防互相推进代际
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// 构造独立临时工作区（测试结束自行清理）
+    fn temp_workspace(tag: &str) -> PathBuf {
+        let base = std::env::temp_dir().join(format!("sw-rt-search-{}-{}", tag, std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        base
+    }
+
+    /// 排除规则与旧实现等价：仅普通 md 命中，node_modules/隐藏文件/二进制扩展不命中
+    #[test]
+    fn exclusion_rules_equivalent() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = temp_workspace("excl");
+        fs::write(root.join("a.md"), "needle here\nsecond line\n").unwrap();
+        fs::create_dir_all(root.join("node_modules")).unwrap();
+        fs::write(root.join("node_modules/n.md"), "needle in node_modules\n").unwrap();
+        fs::write(root.join(".hidden.md"), "needle hidden\n").unwrap();
+        fs::write(root.join("pic.png"), "needle fake binary\n").unwrap();
+
+        let re = regex::Regex::new("needle").unwrap();
+        // gen 取当前值且不推进：visitor 视为本批次有效，正常完成遍历
+        let my_gen = SEARCH_GENERATION.load(Ordering::SeqCst);
+        let map = walk_and_match(&[root.clone()], &re, my_gen);
+
+        let keys: Vec<&String> = map.keys().collect();
+        assert!(keys.iter().any(|k| k.ends_with("/a.md")), "a.md 应命中: {:?}", keys);
+        assert!(!keys.iter().any(|k| k.contains("node_modules")), "node_modules 应被排除: {:?}", keys);
+        assert!(!keys.iter().any(|k| k.contains(".hidden.md")), "隐藏文件应被排除: {:?}", keys);
+        assert!(!keys.iter().any(|k| k.contains("pic.png")), "二进制扩展应被排除: {:?}", keys);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 自指 symlink 不死循环不 panic（follow_links(false) 防环）
+    #[cfg(unix)]
+    #[test]
+    fn self_referential_symlink_terminates() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = temp_workspace("symlink");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs/a.md"), "needle\n").unwrap();
+        std::os::unix::fs::symlink(&root.join("docs"), root.join("docs/self")).unwrap();
+
+        let re = regex::Regex::new("needle").unwrap();
+        let my_gen = SEARCH_GENERATION.load(Ordering::SeqCst);
+        let map = walk_and_match(&[root.clone()], &re, my_gen);
+
+        assert_eq!(map.len(), 1, "仅 a.md 命中且正常终止: {:?}", map.keys().collect::<Vec<_>>());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 代际取消：本批次已被新搜索取代时返回空
+    #[test]
+    fn stale_generation_returns_empty() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = temp_workspace("cancel");
+        fs::write(root.join("a.md"), "needle\n").unwrap();
+
+        // fetch_add 返回旧值作 my_gen，全局已推进到 my_gen+1 → visitor 立即 Quit
+        let my_gen = SEARCH_GENERATION.fetch_add(1, Ordering::SeqCst);
+        let re = regex::Regex::new("needle").unwrap();
+        let map = walk_and_match(&[root.clone()], &re, my_gen);
+
+        assert!(map.is_empty(), "旧批次应返回空: {:?}", map.keys().collect::<Vec<_>>());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 结果顺序确定性：HashMap 迭代序随机，同一组命中两次转换必须产生完全一致的顺序，
+    /// 否则每次搜索落地前端列表整体洗牌（用户打开文件后找不到刚点的结果）
+    #[test]
+    fn results_order_deterministic_across_conversions() {
+        // 50 个 key：无排序时两个 HashMap 实例迭代序几乎必然不同，保证测试能抓到 bug
+        let all: Vec<String> = (0..50).map(|i| format!("f{:02}.md", 49 - i)).collect();
+        let mk_map = |order: &[String]| -> std::collections::HashMap<String, Vec<LineMatch>> {
+            let mut m = std::collections::HashMap::new();
+            for p in order {
+                m.insert(
+                    p.clone(),
+                    vec![LineMatch { line_number: 1, content: "x".into(), start_col: 0, end_col: 1 }],
+                );
+            }
+            m
+        };
+        let paths = |v: &[SearchResult]| -> Vec<String> {
+            v.iter().map(|r| r.file_path.clone()).collect()
+        };
+
+        // 正序/反序插入的两个 HashMap（迭代序随机）→ 转换结果必须一致且有序
+        let a = collect_results_sorted(&mk_map(&all));
+        let reversed: Vec<String> = all.iter().rev().cloned().collect();
+        let b = collect_results_sorted(&mk_map(&reversed));
+
+        let mut expected = all.clone();
+        expected.sort();
+        assert_eq!(paths(&a), expected, "结果必须按 file_path 排序");
+        assert_eq!(paths(&a), paths(&b), "同一组命中两次转换顺序必须完全一致");
+    }
+
+    /// 载荷上限 T1：超长行内容必须窗口截断（全量返回会让单条匹配携带 MB 级内容，
+    /// 广泛查询下 IPC JSON 撑爆 webview 主线程 → 输入卡死）
+    #[test]
+    fn long_line_content_is_truncated_to_window() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = temp_workspace("trunc");
+
+        // ASCII 超长行：needle 位于第 10000 字符处
+        let ascii_line = format!("{}needle{}", "a".repeat(10000), "b".repeat(9994));
+        fs::write(root.join("big.md"), ascii_line).unwrap();
+        // CJK 超长行：字节数 = 字符数 × 3，验证字节→字符偏移换算
+        let cjk_line = format!("{}needle{}", "中".repeat(10000), "文".repeat(9994));
+        fs::write(root.join("cjk.md"), cjk_line).unwrap();
+
+        let re = regex::Regex::new("needle").unwrap();
+        let my_gen = SEARCH_GENERATION.load(Ordering::SeqCst);
+        let map = walk_and_match(&[root.clone()], &re, my_gen);
+
+        let window_bound = LINE_WINDOW_HALF * 2 + "needle".chars().count();
+        for (name, key) in [("ascii", "/big.md"), ("cjk", "/cjk.md")] {
+            let ms = map
+                .iter()
+                .find(|(k, _)| k.ends_with(key))
+                .map(|(_, v)| v)
+                .unwrap_or_else(|| panic!("{} 必须命中", name));
+            let m = ms.first().unwrap();
+            let content_chars = m.content.chars().count();
+            assert!(
+                content_chars <= window_bound,
+                "{} 行内容必须截断到窗口内，实际 {} 字符",
+                name,
+                content_chars
+            );
+            assert!(m.content.contains("needle"), "{} 截断窗口必须包含命中", name);
+            assert!(m.end_col <= content_chars, "{} 窗口内列偏移必须一致", name);
+            assert_eq!(ms.len(), 1, "{} 单行单匹配（与旧去重语义一致）", name);
+        }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 载荷上限 T2：单次搜索全局匹配行总数封顶（广泛查询不再产生无界载荷）
+    #[test]
+    fn total_line_matches_capped() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = temp_workspace("cap");
+        // 6000 行每行都命中 → 超过上限必须截停
+        let body: String = (0..6000).map(|_| "needle line\n").collect();
+        fs::write(root.join("many.md"), body).unwrap();
+
+        let re = regex::Regex::new("needle").unwrap();
+        let my_gen = SEARCH_GENERATION.load(Ordering::SeqCst);
+        let map = walk_and_match(&[root.clone()], &re, my_gen);
+
+        let total: usize = map.values().map(|v| v.len()).sum();
+        assert!(
+            total <= MAX_TOTAL_LINE_MATCHES,
+            "匹配行总数必须封顶 {}，实际 {}",
+            MAX_TOTAL_LINE_MATCHES,
+            total
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// CPU 资源约束（用户要求占用 ≤50% 甚至更低）：搜索遍历线程数
+    /// 不得超过逻辑核数一半，且硬上限 2（多核机器占用更低）
+    #[test]
+    fn search_thread_count_bounded_for_cpu() {
+        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
+        let t = search_thread_count();
+        assert!(t >= 1, "至少 1 线程，实际 {}", t);
+        assert!(t <= 2, "搜索线程硬上限 2（CPU ≤50% 甚至更低），实际 {}", t);
+        assert!(
+            t * 2 <= cores,
+            "线程×2 不得超过逻辑核数（占用 ≤50%）：{} 核 {} 线程",
+            cores,
+            t
+        );
+    }
+
+    /// 行顺序确定性：同一文件内行号必须升序
+    /// （HashMap into_values 迭代序随机 → 文件内匹配行每次搜索洗牌，同「跳动」缺陷族）
+    #[test]
+    fn line_matches_sorted_by_line_number() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = temp_workspace("lineorder");
+        // 100 行每行命中：随机序恰为升序的概率 ≈ 1/100!，可稳定抓到缺陷
+        let body: String = (0..100).map(|i| format!("needle {}\n", i)).collect();
+        fs::write(root.join("order.md"), body).unwrap();
+
+        let re = regex::Regex::new("needle").unwrap();
+        let my_gen = SEARCH_GENERATION.load(Ordering::SeqCst);
+        let map = walk_and_match(&[root.clone()], &re, my_gen);
+
+        let ms = map.values().next().expect("order.md 必须命中");
+        let numbers: Vec<usize> = ms.iter().map(|m| m.line_number).collect();
+        let mut sorted = numbers.clone();
+        sorted.sort();
+        assert_eq!(numbers, sorted, "文件内匹配行必须按行号升序");
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
 
 #[cfg(test)]

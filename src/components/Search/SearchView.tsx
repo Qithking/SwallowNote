@@ -157,7 +157,11 @@ const HighlightMatches = memo(function HighlightMatches({
   query: string
   searchOptions: { caseSensitive: boolean; wholeWord: boolean; useRegex: boolean }
 }) {
-  const matches = collectHighlightRanges(content, query, searchOptions)
+  // 正则编译+全文扫描结果缓存：props 不变时不重复计算
+  const matches = useMemo(
+    () => collectHighlightRanges(content, query, searchOptions),
+    [content, query, searchOptions]
+  )
 
   if (matches.length === 0) return <>{content}</>
   
@@ -231,6 +235,9 @@ const SearchView = memo(function SearchView() {
   const [isSearching, setIsSearching] = useState(false)
   // I13①：区分「已回车搜索过」与「仅输入未回车」——未搜索时不显示「未找到匹配项」
   const [hasSearched, setHasSearched] = useState(false)
+  // 产生当前 results 的搜索词：高亮用它而非实时 query——
+  // 输入时 searchedQuery 不变 → match 项 memo 命中 → keystroke 渲染跳过列表（防卡死）
+  const [searchedQuery, setSearchedQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [wholeWord, setWholeWord] = useState(false)
   const [useRegex, setUseRegex] = useState(false)
@@ -254,6 +261,12 @@ const SearchView = memo(function SearchView() {
   const searchRoots = useMemo<string[]>(
     () => (workspaceMode === 'workspace' ? workspaceFolders : (rootPath ? [rootPath] : [])),
     [workspaceMode, workspaceFolders, rootPath]
+  )
+
+  // 高亮开关引用稳定化：内联对象会让所有 match 项 memo 失效（每 keystroke 全量重渲染）
+  const searchOptions = useMemo(
+    () => ({ caseSensitive, wholeWord, useRegex }),
+    [caseSensitive, wholeWord, useRegex]
   )
 
   // I13②③：搜索主体支持开关值覆写（开关切换时立即携带最新值重搜，绕过 setState 异步）
@@ -283,42 +296,23 @@ const SearchView = memo(function SearchView() {
     setIsSearching(true)
 
     try {
-      const searchPromises = searchPaths.map(path =>
-        searchInFiles({
-          query,
-          root_path: path,
-          case_sensitive: cs,
-          whole_word: ww,
-          use_regex: re,
-        }).catch(() => [])
-      )
-
-      const allResults = await Promise.all(searchPromises)
+      // 多根合并为单次 invoke：取消粒度=批次（新查询立即令旧批次后端遍历退出）
+      const mergedResults = await searchInFiles({
+        query,
+        roots: searchPaths,
+        case_sensitive: cs,
+        whole_word: ww,
+        use_regex: re,
+      })
       if (seq !== searchSeqRef.current) return // 已有更新的搜索发起，丢弃本次旧结果
-
-      const mergedMap = new Map<string, SearchResult>()
-      for (const results of allResults) {
-        for (const result of results) {
-          if (mergedMap.has(result.file_path)) {
-            const existing = mergedMap.get(result.file_path)!
-            const existingLines = new Set(existing.line_matches.map(m => m.line_number))
-            for (const match of result.line_matches) {
-              if (!existingLines.has(match.line_number)) {
-                existing.line_matches.push(match)
-                existingLines.add(match.line_number)
-              }
-            }
-          } else {
-            mergedMap.set(result.file_path, { ...result })
-          }
-        }
-      }
-      const mergedResults = Array.from(mergedMap.values())
 
       setResults(mergedResults)
       setExpandedFiles(new Set(mergedResults.map(r => r.file_path)))
+      setSearchedQuery(query)
       setHasSearched(true)
-    } catch {
+    } catch (e) {
+      // 白名单拒绝/invoke 失败必须可见，否则表现为「搜不到结果」无法排查
+      logger.error('search', 'Content search failed:', e)
       if (seq === searchSeqRef.current) setResults([])
     } finally {
       if (seq === searchSeqRef.current) {
@@ -330,14 +324,29 @@ const SearchView = memo(function SearchView() {
 
   const handleSearch = useCallback(() => runSearch(), [runSearch])
 
-  // I13①：输入即重置「已搜索」状态，未回车前不显示「未找到匹配项」
+  // 即时搜索下输入不清 hasSearched：保留旧结果列表，新结果 300ms 后平滑替换
+  // （回车时代的「输入即清」会让每个字符触发 列表→placeholder→列表 的闪动）
   const setQueryValue = useCallback((value: string) => {
     setQuery(value)
-    setHasSearched(false)
   }, [])
+
+  // 即时搜索：输入/开关停止变化 300ms 后自动搜索（空 query 立即清结果）；
+  // 前端防抖 + 后端代际号双层确保连续输入只跑最后一次查询
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    searchTimerRef.current = setTimeout(
+      () => runSearch(),
+      query.trim() ? 300 : 0,
+    )
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    }
+  }, [query, caseSensitive, wholeWord, useRegex, runSearch])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
+      // 回车立即搜索并取消挂起的防抖计时器，避免 300ms 后重复搜索
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
       handleSearch()
     }
   }, [handleSearch])
@@ -656,8 +665,8 @@ const SearchView = memo(function SearchView() {
         )}
       </div>
 
-      {/* Results Header */}
-      {query && !isSearching && (
+      {/* Results Header：搜索中且已有旧结果时保留显示，避免标题行每轮搜索消失重现 */}
+      {query && (results.length > 0 || !isSearching) && (
         <div className="px-3 py-1 text-xs" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
           {results.length > 0 ? (
             t('search.resultSummary', { files: results.length, matches: totalMatches })
@@ -669,12 +678,14 @@ const SearchView = memo(function SearchView() {
 
       {/* Results List with Virtualization */}
       <ScrollArea className="flex-1">
-        {!query || !hasSearched ? (
+        {/* 无 query 或从未搜索过 → placeholder；搜索中且无旧结果 → spinner；
+            有旧结果时始终渲染列表，新结果 key 稳定增量替换（防闪动） */}
+        {!query || (!hasSearched && results.length === 0) ? (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] px-4">
             <Search size={24} className="mb-2 opacity-50" />
             <p className="text-sm text-center">{t('search.inputPlaceholder')}</p>
           </div>
-        ) : isSearching ? (
+        ) : isSearching && results.length === 0 ? (
           <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
             <Search size={16} className="animate-spin mr-2" />
             <span className="text-sm">{t('search.searching')}</span>
@@ -717,8 +728,8 @@ const SearchView = memo(function SearchView() {
                       <SearchResultMatch
                         file={item.file}
                         match={item.match}
-                        query={query}
-                        searchOptions={{ caseSensitive, wholeWord, useRegex }}
+                        query={searchedQuery}
+                        searchOptions={searchOptions}
                         onClick={handleResultClick}
                       />
                     )}
