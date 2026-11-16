@@ -1048,7 +1048,10 @@ fn walk_and_match(
                     // enumerate 天然行号升序，前端展示顺序确定
                     let mut line_matches: Vec<LineMatch> = Vec::new();
                     for (idx, line) in reader.lines().enumerate() {
-                        // 行级总量检查：单文件数千行命中时尽早截停
+                        // 行级检查：取消信号尽早响应（逐行而非逐文件）+ 总量封顶
+                        if SEARCH_GENERATION.load(Ordering::Relaxed) != my_gen {
+                            return WalkState::Quit;
+                        }
                         if total.load(Ordering::Relaxed) >= MAX_TOTAL_LINE_MATCHES {
                             return WalkState::Quit;
                         }
@@ -1132,14 +1135,22 @@ pub async fn search_in_files(
         workspace_roots.as_deref().unwrap_or(&[]),
     )?;
     // 逐根校验白名单与存在性（安全边界与旧实现一致），多根共享同一批次
+    // 与旧逐根 invoke 行为对齐：跳过无效根而非整个搜索失败
     let mut valid_roots = Vec::with_capacity(req.roots.len());
     for r in &req.roots {
         let root = PathBuf::from(r);
-        check_path_in_roots(&allowed, &root)?;
+        // 白名单校验失败（安全越权）：立即拒绝，不跳过（fail-closed 原则）
+        if check_path_in_roots(&allowed, &root).is_err() {
+            return Err(format!("Path is outside allowed directories: {}", root.display()));
+        }
+        // 根目录已被删除/移动：跳过（非安全问题，允许其他根正常搜索）
         if !root.exists() || !root.is_dir() {
-            return Err(format!("Invalid root path: {}", root.display()));
+            continue;
         }
         valid_roots.push(root);
+    }
+    if valid_roots.is_empty() {
+        return Err("All search roots are unavailable".to_string());
     }
 
     // 模式构造逻辑与旧实现完全一致（行为等价）
@@ -1386,6 +1397,31 @@ mod search_tests {
         assert_eq!(numbers, sorted, "文件内匹配行必须按行号升序");
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// P1-2 回归：walk_and_match 对不存在的根不 panic，有效根正常搜索
+    /// （search_in_files 层面：存在性失败跳过而非拒绝，全部不可用才报错）
+    #[test]
+    fn walk_and_match_tolerates_missing_root() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let valid_root = temp_workspace("mixed");
+        fs::write(valid_root.join("a.md"), "needle here\n").unwrap();
+        // 唯一不存在的根
+        let missing_root = std::env::temp_dir()
+            .join(format!("sw-absent-root-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+
+        let re = regex::Regex::new("needle").unwrap();
+        let my_gen = SEARCH_GENERATION.load(Ordering::SeqCst);
+        // WalkParallel 对不存在根应跳过或返回空，不 panic
+        let map = walk_and_match(&[valid_root.clone(), missing_root.clone()], &re, my_gen);
+
+        assert!(
+            map.keys().any(|k| k.ends_with("/a.md")),
+            "有效根应正常搜索，实际 keys: {:?}",
+            map.keys().collect::<Vec<_>>()
+        );
+
+        let _ = fs::remove_dir_all(&valid_root);
     }
 }
 
