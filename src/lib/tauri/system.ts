@@ -109,7 +109,7 @@ export async function getAppSettings(): Promise<AppSettings> {
   const all = await getSessionState()
   const get = (key: string, fallback: string) => all[SETTINGS_PREFIX + key] ?? fallback
   return {
-    theme: get('theme', 'light'),
+    theme: get('theme', 'system'),
     themeColor: get('themeColor', '#005fb8'),
     autoStart: get('autoStart', 'false'),
     autoCheckUpdate: get('autoCheckUpdate', 'true'),

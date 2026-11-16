@@ -547,7 +547,7 @@ function waitForViewportWidth(target: number, timeoutMs = 150): Promise<void> {
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
-  theme: 'light',
+  theme: 'system',
   themeColor: '#0E7490',
   sidebarView: 'explorer',
   sidebarVisible: true,
