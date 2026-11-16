@@ -27,8 +27,8 @@ tokio = { version = "1", features = ["full"] }
 notify = "8.2"
 notify-debouncer-full = "0.7"
 uuid = { version = "1.0", features = ["v4"] }
-grep-searcher = "0.1"
-grep = "0.1"
+# 搜索遍历引擎（ripgrep 同款）：并行遍历 + gitignore + symlink 防护
+ignore = "0.4"
 regex = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 zip = "2"

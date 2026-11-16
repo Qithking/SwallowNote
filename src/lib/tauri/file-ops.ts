@@ -45,7 +45,8 @@ interface RenameFileRequest {
 // Search Types
 export interface SearchRequest {
   query: string
-  root_path: string
+  /** 搜索根列表（folder 1 个，workspace 多根合并单次调用） */
+  roots: string[]
   case_sensitive: boolean
   whole_word: boolean
   use_regex: boolean
@@ -229,7 +230,9 @@ export async function registerAssetScope(path: string): Promise<void> {
 }
 
 export async function searchInFiles(req: SearchRequest): Promise<SearchResult[]> {
-  return await invoke('search_in_files', { req, workspaceRoot: workspaceRootFor(req.root_path) })
+  // workspaceRoots 传全部待搜索根（folder 1 个 / workspace 多个）：
+  // 后端聚合白名单须覆盖所有根，单根会导致其余根被 fail-closed 拒绝
+  return await invoke('search_in_files', { req, workspaceRoots: req.roots })
 }
 
 /** 保存 .md 后同步解析 frontmatter 并更新索引表（fs_guard 白名单校验） */

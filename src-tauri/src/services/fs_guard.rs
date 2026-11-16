@@ -68,6 +68,29 @@ pub fn allowed_roots(
     Ok(roots)
 }
 
+/// 多根版本：聚合多个已打开工作区根（如 workspace 模式多根搜索）。
+/// 语义与 allowed_roots 一致：每个根 canonicalize 后加入白名单 + 应用数据目录。
+pub fn allowed_roots_multi(
+    app: &tauri::AppHandle,
+    workspace_roots: &[String],
+) -> Result<Vec<PathBuf>, String> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for root in workspace_roots {
+        if !root.is_empty() {
+            if let Ok(canonical_root) = std::fs::canonicalize(root) {
+                roots.push(canonical_root);
+            }
+        }
+    }
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
+    let canonical_app_data = std::fs::canonicalize(&app_data).unwrap_or(app_data);
+    roots.push(canonical_app_data);
+    Ok(roots)
+}
+
 /// 校验目标路径位于允许根列表内（fail-closed：任一环节失败即拒绝）。
 /// - 已存在路径：canonicalize 穿透 symlink 后校验（拒绝 symlink 逃逸）；
 /// - 不存在路径（新建/重命名目标）：校验其存在的最近父目录后拼接剩余片段。

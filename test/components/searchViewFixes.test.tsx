@@ -1,6 +1,6 @@
 /**
- * I13 搜索四连修复回归测试：
- * ① 输入未回车不显示「未找到匹配项」（以 hasSearched 判断而非 query 非空）
+ * I13 搜索四连修复回归测试（即时搜索语义已更新）：
+ * ① 「未找到匹配项」由防抖 300ms 自动搜索驱动显示（无需回车）；输入期间旧状态保留防闪动
  * ② Aa/ab/.* 开关切换在已有结果时自动重搜
  * ③ 连续搜索用代际号丢弃旧结果，防止旧响应覆盖新响应
  * ④ 高亮与命中语义一致（regex/全词/大小写），不再是字面 indexOf
@@ -14,7 +14,22 @@ vi.mock('@/lib/plugin-host', () => ({
   emitLocaleChanged: vi.fn(),
 }))
 
-type SearchParams = { query: string; root_path: string; case_sensitive?: boolean; whole_word?: boolean; use_regex?: boolean }
+// jsdom 无布局，真实 useVirtualizer 尺寸恒为 0 不渲染任何项；
+// mock 为展开全部 items，使结果列表 DOM 断言可行
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: (opts: { count: number; getItemKey?: (i: number) => string }) => ({
+    getTotalSize: () => opts.count * 24,
+    getVirtualItems: () =>
+      Array.from({ length: opts.count }, (_, index) => ({
+        index,
+        key: opts.getItemKey?.(index) ?? String(index),
+        size: 24,
+        start: index * 24,
+      })),
+  }),
+}))
+
+type SearchParams = { query: string; roots: string[]; case_sensitive?: boolean; whole_word?: boolean; use_regex?: boolean }
 const mockSearchInFiles = vi.fn()
 vi.mock('@/lib/tauri', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tauri')>()
@@ -75,17 +90,22 @@ describe('SearchView 交互修复（I13①②③）', () => {
     useWorkspaceStore.setState({ rootPath: '/root', workspaceFolders: [] })
   })
 
-  it('① 输入未回车不显示「未找到匹配项」，回车后才显示', async () => {
+  it('① 即时搜索：输入停止 300ms 自动显示「未找到匹配项」；输入期间旧状态保留防闪动', async () => {
     renderSearchView()
     const input = screen.getByRole('textbox')
     fireEvent.change(input, { target: { value: 'nosuchthing' } })
-    // 未回车：不显示 notFound
+    // 防抖期内（300ms 未到）：不显示 notFound
     expect(screen.queryByText('未找到匹配项')).toBeNull()
-    // 回车：显示 notFound
-    fireEvent.keyDown(input, { key: 'Enter' })
-    await waitFor(() => expect(screen.getByText('未找到匹配项')).toBeTruthy())
-    // 输入新内容（未回车）：notFound 消失
+    // 防抖到期自动搜索（无需回车）→ 显示 notFound
+    await waitFor(() => expect(screen.getByText('未找到匹配项')).toBeTruthy(), { timeout: 1500 })
+
+    // 下一次搜索将有结果
+    mockSearchInFiles.mockResolvedValueOnce([makeResult('/root/b.md', 'x')])
     fireEvent.change(input, { target: { value: 'other' } })
+    // 输入瞬间旧 notFound 保留渲染（列表不被 placeholder 替换 → 防闪动）
+    expect(screen.getByText('未找到匹配项')).toBeTruthy()
+    // 300ms 后新结果到达 → notFound 消失，结果显示
+    await waitFor(() => expect(screen.getByText('b.md')).toBeTruthy(), { timeout: 1500 })
     expect(screen.queryByText('未找到匹配项')).toBeNull()
   })
 
