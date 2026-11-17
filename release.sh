@@ -739,15 +739,6 @@ merge_beta_to_main() {
         echo_info "分支已分叉，调用 GitHub API 远程合并 beta -> main..."
         if merge_output=$(gh api -X POST "repos/$REPO_NAME/merges" -f base=main -f head=beta 2>&1); then
             echo_success "GitHub API 远程合并完成: beta 已合并到 main!"
-            # 关键: 把含 merge commit 的远程 main 回写到远程 beta（fast-forward），
-            # 否则 main/beta 永久分叉，下一轮只能再次走 API 合并并累积 merge commit。
-            # API merge 只更新远程 main，本地 tracking 引用是旧值 → 回写前先 fetch
-            echo_info "回写远程 main 到 beta（消除分叉）..."
-            if ! git fetch "$remote_name" -q; then
-                echo_warning "回写前 fetch 失败，跳过回写（main 已正确更新）"
-            elif ! git push "$remote_name" "refs/remotes/$remote_name/main:refs/heads/beta"; then
-                echo_warning "回写 beta 失败（main 已正确更新；下次执行仍可通过 API 合并）"
-            fi
             return 0
         fi
         if echo "$merge_output" | grep -qi "conflict"; then
