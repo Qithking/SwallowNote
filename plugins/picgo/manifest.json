@@ -13,8 +13,6 @@
   "hasBackend": false,
   "entry": "src/index.tsx",
   "permissions": [
-    "network",
-    "clipboard",
     "storage",
     "events"
   ]

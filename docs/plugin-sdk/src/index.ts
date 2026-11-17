@@ -161,17 +161,15 @@ export interface PluginCommand {
 
 /**
  * 插件权限类型，镜像宿主的固定权限目录。
+ * 仅收录宿主有实际运行时强制的权限（PL-5：无宿主代理 API 的
+ * filesystem/network/clipboard/notifications 不再出现在目录中，
+ * 避免授权弹窗的虚假安全感）。
  */
 export type PluginPermission =
   | 'storage'
   | 'events'
   | 'context-menu'
   | 'backend'
-  | 'filesystem-read'
-  | 'filesystem-write'
-  | 'network'
-  | 'clipboard'
-  | 'notifications'
   | 'editor'
   | 'editor-write'
   | 'files'

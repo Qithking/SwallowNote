@@ -77,32 +77,6 @@ export async function revokePluginPermissions(
   setGranted(pluginId, remaining)
 }
 
-/** 检查插件是否有指定权限 */
-export async function checkPluginPermission(
-  pluginId: string,
-  permission: PluginPermission
-): Promise<boolean> {
-  const permissions = await getPluginPermissions(pluginId)
-  const status = permissions.find((p) => p.permission === permission)
-  return status?.granted ?? false
-}
-
-/** 批量检查权限 */
-export async function checkPluginPermissions(
-  pluginId: string,
-  permissions: PluginPermission[]
-): Promise<Record<PluginPermission, boolean>> {
-  const current = await getPluginPermissions(pluginId)
-  const result: Record<PluginPermission, boolean> = {} as Record<PluginPermission, boolean>
-  
-  for (const p of permissions) {
-    const status = current.find((s) => s.permission === p)
-    result[p] = status?.granted ?? false
-  }
-  
-  return result
-}
-
 /** 初始化插件权限（设置 requested） */
 export async function initializePluginPermissions(
   pluginId: string,

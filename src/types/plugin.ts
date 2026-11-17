@@ -56,17 +56,12 @@ export interface PluginPermissionStatus {
   requested: boolean
 }
 
-/** 已知权限的规范列表。 */
+/** 已知权限的规范列表（PL-5：仅收录宿主实际强制的 8 项）。 */
 export const PLUGIN_PERMISSIONS: PermissionInfo[] = [
   { permission: 'storage' },
   { permission: 'events' },
   { permission: 'context-menu' },
   { permission: 'backend' },
-  { permission: 'filesystem-read' },
-  { permission: 'filesystem-write' },
-  { permission: 'network' },
-  { permission: 'clipboard' },
-  { permission: 'notifications' },
   { permission: 'editor' },
   { permission: 'editor-write' },
   { permission: 'files' },

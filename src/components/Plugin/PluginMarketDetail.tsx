@@ -26,7 +26,7 @@
  * (which wraps the Tauri commands). After a successful install we
  * re-trigger the marketplace store's `refreshUpdates` and notify the
  * parent to close. Per-version installs reuse the G1 SHA-256 path
- * (`downloadPluginVersion` caches by per-version digest) and forward
+ * (`downloadPluginZip` 校验 per-entry 摘要后缓存) and forward
  * the explicit `version` string to the host so the on-disk
  * `.versions/<v>/` directory is created with the right name.
  */

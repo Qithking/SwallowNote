@@ -45,12 +45,6 @@ export function dropPluginBlobUrl(pluginPath: string): void {
   pluginBlobUrlCache.delete(pluginPath)
 }
 
-/** 通过 Tauri asset 协议动态加载插件 index.js。 */
-export async function loadPluginModule(pluginPath: string): Promise<PluginManifest | null> {
-  const { manifest } = await loadPluginModuleWithRef(pluginPath)
-  return manifest
-}
-
 /** 返回 manifest 与模块引用，供 host takeover 调用 setHost。 */
 async function loadPluginModuleWithRef(
   pluginPath: string

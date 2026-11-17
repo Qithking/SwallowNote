@@ -100,11 +100,6 @@ const manifest: PluginManifest = {
 | `'events'` | 订阅宿主事件 | `events.on('note:open', ...)` 等订阅时；`onSettingsChange` 设置变更订阅同样走 events 门（内部是 `events.on('plugin-settings:change')`） |
 | `'context-menu'` | 贡献右键菜单项 | `registerContextMenu(...)` 注册时 |
 | `'backend'` | 调用 Rust 后端 | `invokeBackend('cmd', args)` 调用时 |
-| `'filesystem-read'` | 读文件 | 未来 FS API 启用时 |
-| `'filesystem-write'` | 写文件 | 未来 FS API 启用时 |
-| `'network'` | 网络请求 | 未来 net API 启用时 |
-| `'clipboard'` | 剪贴板读写 | 未来 clipboard API 启用时 |
-| `'notifications'` | 系统通知 | 未来 notifications API 启用时 |
 | `'editor'` | 注册自定义文件编辑器 | `registerEditor(pluginId, extension, component)` 注册时 |
 | `'editor-write'` | 编辑器写操作与选区查询 | `editor.insertAtCursor / replaceSelection / replaceContent / getSelection` 调用时（面板 props 或模块级） |
 | `'files'` | 工作区文件访问 | `files.createNote / listWorkspace` 调用时（面板 props 或模块级） |

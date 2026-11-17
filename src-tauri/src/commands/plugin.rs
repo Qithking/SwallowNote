@@ -204,6 +204,23 @@ pub fn validate_plugin_id(id: &str) -> Result<(), PluginError> {
     Ok(())
 }
 
+/// PL-7：市场仓库 URL 仅接受 https。索引 per-entry 自带公钥（无内置信任锚），
+/// 明文 http 下 MITM 可整包替换索引（含公钥）并自签 zip，sha256+ed25519
+/// 校验双双通过——https 是当前信任模型下的最低传输层保障。
+pub(crate) fn validate_repo_url(url: &str) -> Result<(), PluginError> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err(PluginError::InvalidInput("repo_url is required".to_string()));
+    }
+    if !trimmed.to_ascii_lowercase().starts_with("https://") {
+        return Err(PluginError::Security(format!(
+            "repo_url must use https scheme, got: {}",
+            trimmed
+        )));
+    }
+    Ok(())
+}
+
 /// Same as [`validate_plugin_id`] but for the `version` field, which
 /// is semver-ish so we additionally allow `+` (build metadata).
 fn validate_plugin_version(version: &str) -> Result<(), PluginError> {
@@ -552,19 +569,17 @@ pub async fn scan_plugins(app_handle: tauri::AppHandle) -> Result<Vec<PluginMeta
     Ok(plugins)
 }
 
-#[tauri::command]
-pub fn install_plugin(
-    app_handle: tauri::AppHandle,
+/// PL-6：同步安装实现（重 I/O：最多 100MB zip 读入内存 + 解压 + 双遍
+/// precheck），由 async command 经 spawn_blocking 调用，避免阻塞 Tauri
+/// runtime 冻结 UI。settings 表落库在 async 侧完成（不依赖本函数）。
+fn install_plugin_sync(
+    app_data_dir: &Path,
+    host_version: &Version,
     zip_path: String,
     expected_sha256: Option<String>,
     source: Option<String>,
 ) -> Result<PluginMetadataRust, PluginError> {
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
-
-    let plugins_root = plugins_dir(&app_data_dir);
+    let plugins_root = plugins_dir(app_data_dir);
     fs::create_dir_all(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to create plugins dir: {}", e)))?;
 
     // 用户上传 zip 使用 "upload" 哨兵版本，覆盖式安装。
@@ -662,7 +677,7 @@ pub fn install_plugin(
 
     // minHostVersion 门禁：包要求比当前宿主更新的版本时拒绝安装，
     // 并清理临时目录避免留下 .installing-* 残留。
-    let host_version = app_handle.package_info().version.clone();
+    // （host_version 已在 async command 侧捕获并传入本函数。）
     if let Some(meta) = parsed_manifest.as_ref() {
         if !is_host_compatible(&host_version, meta.min_host_version.as_deref()) {
             let _ = fs::remove_dir_all(&temp_plugin_dir);
@@ -705,23 +720,6 @@ pub fn install_plugin(
         }
     }
 
-    // Materialise / migrate the settings table for this plugin id.
-    // Best-effort: a missing or malformed settings.json is not a
-    // reason to fail the install. We log to stderr so the user can
-    // see the cause in the dev console.
-    if let Some(db) = app_handle.try_state::<crate::db::Database>() {
-        if let Ok(conn) = db.conn.lock() {
-            if let Err(e) = crate::commands::plugin_settings::apply_settings_schema_on_disk(
-                &app_handle, &conn, &real_plugin_id,
-            ) {
-                error!(
-                    "[plugin] apply_settings_schema for '{}' on install: {}",
-                    real_plugin_id, e
-                );
-            }
-        }
-    }
-
     let has_backend = final_version_dir.join("backend").exists();
     let has_settings_schema = final_version_dir.join("settings.json").exists();
     let enabled = !final_plugin_dir.join(".disabled").exists();
@@ -748,7 +746,47 @@ pub fn install_plugin(
     });
     meta.source = source_value;
     meta.host_compatible =
-        is_host_compatible(&host_version, meta.min_host_version.as_deref());
+        is_host_compatible(host_version, meta.min_host_version.as_deref());
+
+    Ok(meta)
+}
+
+#[tauri::command]
+pub async fn install_plugin(
+    app_handle: tauri::AppHandle,
+    zip_path: String,
+    expected_sha256: Option<String>,
+    source: Option<String>,
+) -> Result<PluginMetadataRust, PluginError> {
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
+    let host_version = app_handle.package_info().version.clone();
+
+    // PL-6：重 I/O 移到 blocking 线程池（同 scan_plugins 模式），避免阻塞 runtime。
+    let mut meta = tokio::task::spawn_blocking(move || {
+        install_plugin_sync(&app_data_dir, &host_version, zip_path, expected_sha256, source)
+    })
+    .await
+    .map_err(|e| PluginError::Io(format!("install_plugin join error: {}", e)))??;
+
+    // Materialise / migrate the settings table for this plugin id.
+    // Best-effort: a missing or malformed settings.json is not a
+    // reason to fail the install. We log to stderr so the user can
+    // see the cause in the dev console.（PL-6：DB 访问留在 blocking 池外。）
+    if let Some(db) = app_handle.try_state::<crate::db::Database>() {
+        if let Ok(conn) = db.conn.lock() {
+            if let Err(e) = crate::commands::plugin_settings::apply_settings_schema_on_disk(
+                &app_handle, &conn, &meta.id,
+            ) {
+                error!(
+                    "[plugin] apply_settings_schema for '{}' on install: {}",
+                    meta.id, e
+                );
+            }
+        }
+    }
 
     Ok(meta)
 }
@@ -1432,6 +1470,8 @@ pub async fn check_plugin_updates(
     if repo_url.is_empty() {
         return Err(PluginError::InvalidInput("repo_url is required".to_string()));
     }
+    // PL-7：与市场源添加入口同口径，非 https 仓库一律拒绝。
+    validate_repo_url(&repo_url)?;
 
     // 使用 async reqwest + 30s 内存缓存，避免阻塞主线程。
     use std::sync::OnceLock;
@@ -1778,9 +1818,9 @@ pub struct PluginConfigImportResult {
 }
 
 // 将所有插件的 storage.json 打包为 zip（含 manifest.json）。无 storage 的跳过。
-#[tauri::command]
-pub fn export_plugin_configs(
-    app_handle: tauri::AppHandle,
+// PL-6：同步实现由 async command 经 spawn_blocking 调用（同 scan_plugins 模式）。
+fn export_plugin_configs_sync(
+    plugins_root: PathBuf,
     dest_path: String,
 ) -> Result<ExportManifest, PluginError> {
     // Reject path traversal in the destination. We treat the path
@@ -1794,11 +1834,6 @@ pub fn export_plugin_configs(
         return Err(PluginError::InvalidInput("dest_path is required".to_string()));
     }
 
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
-    let plugins_root = plugins_dir(&app_data_dir);
     fs::create_dir_all(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to create plugins dir: {}", e)))?;
 
     // Walk the plugins root, collect every (plugin_id, storage_path)
@@ -1878,10 +1913,32 @@ pub fn export_plugin_configs(
     Ok(manifest)
 }
 
-// 导出 zip 导入：校验 schema_version 后写入 plugins/<id>/storage.json。插件须已安装，覆盖式恢复。
 #[tauri::command]
-pub fn import_plugin_configs(
+pub async fn export_plugin_configs(
     app_handle: tauri::AppHandle,
+    dest_path: String,
+) -> Result<ExportManifest, PluginError> {
+    if dest_path.trim().is_empty() {
+        return Err(PluginError::InvalidInput("dest_path is required".to_string()));
+    }
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
+    let plugins_root = plugins_dir(&app_data_dir);
+    fs::create_dir_all(&plugins_root).map_err(|e| PluginError::Io(format!("Failed to create plugins dir: {}", e)))?;
+
+    // PL-6：zip 打包 I/O 移到 blocking 线程池，避免阻塞 Tauri runtime 冻结 UI。
+    tokio::task::spawn_blocking(move || export_plugin_configs_sync(plugins_root, dest_path))
+        .await
+        .map_err(|e| PluginError::Io(format!("export_plugin_configs join error: {}", e)))?
+}
+
+// 导出 zip 导入：校验 schema_version 后写入 plugins/<id>/storage.json。插件须已安装，覆盖式恢复。
+// PL-6：同步实现由 async command 经 spawn_blocking 调用（同 scan_plugins 模式）。
+fn import_plugin_configs_sync(
+    plugins_root: PathBuf,
     src_path: String,
 ) -> Result<PluginConfigImportResult, PluginError> {
     if src_path.trim().is_empty() {
@@ -1902,12 +1959,6 @@ pub fn import_plugin_configs(
             manifest.schema_version, EXPORT_SCHEMA_VERSION
         )));
     }
-
-    let app_data_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
-    let plugins_root = plugins_dir(&app_data_dir);
 
     let mut entries: Vec<PluginConfigImportEntry> = Vec::new();
     let mut imported: u32 = 0;
@@ -2053,6 +2104,27 @@ pub fn import_plugin_configs(
     })
 }
 
+#[tauri::command]
+pub async fn import_plugin_configs(
+    app_handle: tauri::AppHandle,
+    src_path: String,
+) -> Result<PluginConfigImportResult, PluginError> {
+    if src_path.trim().is_empty() {
+        return Err(PluginError::InvalidInput("src_path is required".to_string()));
+    }
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| PluginError::Io(format!("Failed to get app data dir: {}", e)))?;
+    let plugins_root = plugins_dir(&app_data_dir);
+
+    // PL-6：zip 解析 I/O 移到 blocking 线程池，避免阻塞 Tauri runtime 冻结 UI。
+    tokio::task::spawn_blocking(move || import_plugin_configs_sync(plugins_root, src_path))
+        .await
+        .map_err(|e| PluginError::Io(format!("import_plugin_configs join error: {}", e)))?
+}
+
 /// Pull `manifest.json` out of an open zip archive and decode it.
 /// Returns a typed error variant the caller can surface to the UI
 /// without re-parsing the message string.
@@ -2073,6 +2145,17 @@ fn read_export_manifest<R: std::io::Read + std::io::Seek>(
 #[allow(dead_code)]
 mod tests {
     use super::*;
+
+    /// PL-7 回归：repo_url 仅接受 https，http / 空 / 非 URL 一律拒绝。
+    #[test]
+    fn test_validate_repo_url_requires_https() {
+        assert!(validate_repo_url("https://example.com/repo.json").is_ok());
+        assert!(validate_repo_url("HTTPS://Example.com/repo.json").is_ok());
+        assert!(validate_repo_url("  https://example.com  ").is_ok());
+        for bad in ["http://example.com/repo.json", "ftp://example.com", "example.com", ""] {
+            assert!(validate_repo_url(bad).is_err(), "must reject {bad:?}");
+        }
+    }
 
     #[test]
     fn test_parse_manifest_from_index_js() {

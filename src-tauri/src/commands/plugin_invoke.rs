@@ -388,10 +388,14 @@ async fn spawn_plugin_process(
                             }
                         }
                         None => {
+                            // 按字符截断而非字节切片：多字节 UTF-8 字符中间
+                            // 的字节切片会 panic，导致 reader 任务死亡、
+                            // 该插件后续全部 invoke 超时直至熔断。
+                            let preview: String = line.chars().take(256).collect();
                             error!(
                                 "[plugin-host] malformed frame from '{}': {}",
                                 plugin_id_for_reader,
-                                &line[..line.len().min(256)]
+                                preview
                             );
                         }
                     }
@@ -514,9 +518,9 @@ async fn write_request(
     ),
     PluginError,
 > {
-    if plugin_id.is_empty() {
-        return Err(PluginError::InvalidInput("plugin_id is required".to_string()));
-    }
+    // 统一入口校验：拒绝 `..`/`/` 等非法字符，防止路径探测逃逸 plugins 根目录。
+    // prewarm_plugin / kill_plugin_backend 同口径，均复用 validate_plugin_id。
+    super::plugin::validate_plugin_id(plugin_id)?;
     if command.is_empty() {
         return Err(PluginError::InvalidInput("command is required".to_string()));
     }
@@ -820,23 +824,8 @@ pub async fn kill_plugin_backend(
     plugin_id: &str,
 ) -> Result<bool, PluginError> {
     // 此层也校验 id，防止未来 Rust 侧调用方绕过路径遍历防护。
-    if plugin_id.is_empty() || plugin_id.len() > 128
-        || plugin_id == "." || plugin_id == ".."
-    {
-        return Err(PluginError::InvalidInput(format!(
-            "plugin id {:?} is invalid",
-            plugin_id
-        )));
-    }
-    for c in plugin_id.chars() {
-        let ok = c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-';
-        if !ok {
-            return Err(PluginError::InvalidInput(format!(
-                "plugin id {:?} contains illegal character {:?}",
-                plugin_id, c
-            )));
-        }
-    }
+    // 复用 plugin::validate_plugin_id，避免手写规则两处演进漂移。
+    super::plugin::validate_plugin_id(plugin_id)?;
 
     // 锁内仅做 remove，锁外调用 kill_removed_proc 执行实际 kill，
     // 避免 map 锁与 child/pending 锁嵌套。
@@ -1028,6 +1017,27 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    /// PL-2 回归：write_request 入口必须拒绝含 `..`/`/`/空格等非法字符的
+    /// plugin_id，防止路径探测逃逸 plugins 根目录。校验必须先于任何
+    /// spawn / 目录解析，失败后不残留任何进程条目。
+    #[tokio::test]
+    async fn write_request_rejects_path_traversal_ids() {
+        let state = new_shared_plugin_process_state();
+        let root = tempdir();
+        for bad in ["../escape", "a/b", "..", ".", "", "a b"] {
+            let err = match write_request(&state, &root, bad, "ping", None, None).await {
+                Err(e) => e,
+                Ok(_) => panic!("must reject traversal id: {bad:?}"),
+            };
+            assert!(
+                matches!(err, PluginError::InvalidInput(_)),
+                "bad={bad:?}, got {err:?}"
+            );
+        }
+        // 校验失败不应产生任何子进程条目。
+        assert!(state.lock().await.is_empty());
     }
 
     // 假后端（python3）：读两行 JSON-RPC 请求，按 id 升序标记 A/B 两路，

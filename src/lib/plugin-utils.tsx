@@ -15,9 +15,8 @@ import { useUIStore, usePluginStore } from '@/stores'
 import { getPluginStorage, createPluginEventBus } from './plugin-host'
 import { assertPermission, hasPermission } from './plugin-permission-guard'
 import { invokePluginBackendStream } from './plugin-stream'
-import { loadSettings, readSetting } from './plugin-settings'
+import { loadSettings, readSetting, writeSettingKey } from './plugin-settings'
 import {
-  writePluginSettings,
   readSecureStorage,
   writeSecureStorage,
   deleteSecureStorage,
@@ -328,9 +327,8 @@ export function createPluginPanelProps(
     },
     setSetting: async <T = unknown>(key: string, value: T): Promise<void> => {
       assertPermission(pluginId, 'storage', `write plugin setting "${key}"`)
-      const view = await loadSettings(pluginId, true)
-      const next = { ...view.values, [key]: value }
-      await writePluginSettings(pluginId, next)
+      // PL-4：单键写经 per-plugin 串行队列，读-改-写不再并发互相覆盖。
+      const next = await writeSettingKey(pluginId, key, value)
       emitPluginSettingsChanged(pluginId, next)
     },
     getAllSettings: async (): Promise<Record<string, unknown>> => {
@@ -507,9 +505,8 @@ export function createToolbarButtonProps(
     },
     setSetting: async <T = unknown>(key: string, value: T): Promise<void> => {
       assertPermission(pluginId, 'storage', `write plugin setting "${key}"`)
-      const view = await loadSettings(pluginId, true)
-      const next = { ...view.values, [key]: value }
-      await writePluginSettings(pluginId, next)
+      // PL-4：单键写经 per-plugin 串行队列，读-改-写不再并发互相覆盖。
+      const next = await writeSettingKey(pluginId, key, value)
       emitPluginSettingsChanged(pluginId, next)
     },
     getAllSettings: async (): Promise<Record<string, unknown>> => {

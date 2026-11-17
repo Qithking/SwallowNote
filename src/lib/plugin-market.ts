@@ -174,11 +174,19 @@ export function filterHostCompatibleEntries(
   }
 }
 
+/** PL-7：市场仓库 URL 仅接受 https（Rust 侧 check_plugin_updates / add_market_source 同口径）。 */
+export function assertHttpsRepoUrl(url: string): void {
+  if (!/^https:\/\//i.test(url.trim())) {
+    throw new Error(`repo url must use https scheme: ${url}`)
+  }
+}
+
 /** 拉取并解析 PluginIndex，snake_case 转 camelCase。 */
 export async function fetchPluginIndex(url: string, signal?: AbortSignal): Promise<PluginIndex> {
   if (!url) {
     throw new Error('repo url is empty')
   }
+  assertHttpsRepoUrl(url)
   const res = await fetch(url, { cache: 'no-store', signal })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching plugin index`)
@@ -196,6 +204,7 @@ export async function fetchWithProgress(
   if (!url) {
     throw new Error('repo url is empty')
   }
+  assertHttpsRepoUrl(url)
 
   const res = await fetch(url, { cache: 'no-store', signal })
   if (!res.ok) {
@@ -298,38 +307,6 @@ export async function downloadPluginZip(
   } else {
     throw new Error(
       `sha256 mismatch for ${entry.id}@${entry.version}: expected ${entry.sha256}, got ${actual}`
-    )
-  }
-
-  return bytes
-}
-
-/** 下载指定历史版本（G5），缓存键为 per-version sha256。 */
-export async function downloadPluginVersion(
-  pluginId: string,
-  version: { version: string; downloadUrl: string; sha256: string },
-  repoUrl: string,
-): Promise<ArrayBuffer> {
-  const cached = await readZipFromCache(version.sha256)
-  if (cached) return cached
-
-  // 同上，相对 URL 需重新锚定到 repoUrl
-  const url = resolveDownloadUrl(version.downloadUrl, repoUrl)
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) {
-    throw new Error(
-      `HTTP ${res.status} downloading ${pluginId}@${version.version}`
-    )
-  }
-  const bytes = await res.arrayBuffer()
-
-  // 同样不持久化摘要不匹配的 zip
-  const actual = await sha256Hex(bytes)
-  if (actual.toLowerCase() === version.sha256.toLowerCase()) {
-    await writeZipToCache(version.sha256, bytes, version.downloadUrl)
-  } else {
-    throw new Error(
-      `sha256 mismatch for ${pluginId}@${version.version}: expected ${version.sha256}, got ${actual}`
     )
   }
 

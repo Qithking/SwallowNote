@@ -12,8 +12,10 @@ import type {
 } from '@/types/plugin'
 import { emptyRegistry } from '@/types/plugin'
 import { useUIStore } from './ui'
-import { buildPluginContext, clearPluginTripped } from '@/lib/plugin-host'
-import { runPluginLifecycleHook, installHostTakeover, type PluginWithModule } from '@/lib/plugin-host-takeover'
+import { buildPluginContext, clearPluginTripped, pluginEventBus } from '@/lib/plugin-host'
+import { runPluginLifecycleHook, installHostTakeover, uninstallHostTakeover, type PluginWithModule } from '@/lib/plugin-host-takeover'
+import { clearPluginMenuItems } from '@/lib/plugin-menu'
+import { clearPluginCommands } from '@/lib/plugin-commands'
 import {
   detectPluginConflicts,
   type PluginConflict,
@@ -420,6 +422,13 @@ export const usePluginStore = create<PluginState>((set, get) => ({
         // B5：禁用时注销该插件注册的全部编辑器扩展，打开的文件立即回退
         // 内建编辑器；先于 onDisable 钩子执行，保证钩子运行期间派发已回退。
         unregisterEditor(id)
+        // PL-3：禁用 ≠ 卸载，但运行期注册项必须全部下线——菜单项、命令面板
+        // 条目、事件订阅与 host takeover 均与 enable 分支的补注册（:414 对称）。
+        // 权限与插件 storage 保留（用户仅切换开关），不触发 onUnload 钩子。
+        clearPluginMenuItems(id)
+        clearPluginCommands(id)
+        pluginEventBus.removeAllListenersForPlugin(id)
+        uninstallHostTakeover(id)
       }
       const hook = enabled ? target.hooks?.onEnable : target.hooks?.onDisable
       const hookName = enabled ? 'onEnable' : 'onDisable'
