@@ -108,7 +108,7 @@ function ToolbarButtonPanel(panel: PluginPanelProps) {
 
   const handleCopy = () => {
     if (!activeNoteContent) return
-    // 仅作演示：实际剪贴板写入需 'clipboard' 权限
+    // 仅作演示：宿主当前无剪贴板代理 API，实际写入需走浏览器原生 API
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1500)
   }

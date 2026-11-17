@@ -1,7 +1,6 @@
 /** 插件遥测：收集事件、存储、钩子、IPC 指标 */
 
 import type { PluginEvent, PluginEventPayloadMap } from '@/types/plugin'
-import { getPluginStorageSize } from './tauri'
 import { logger } from './logger'
 
 // 指标类型
@@ -472,17 +471,6 @@ export function seedPluginStorageSizes(sizes: Record<string, number>): void {
   }
 }
 
-/** 重新 stat 单个插件 storage.json 并更新跟踪器。 */
-export async function refreshPluginStorageSize(pluginId: string): Promise<number | null> {
-  const size = await getPluginStorageSize(pluginId)
-  const prev = pluginStorageSize.get(pluginId) ?? 0
-  if (size !== prev) {
-    pluginStorageSize.set(pluginId, size)
-    bumpMetricsVersion()
-  }
-  return size
-}
-
 /** 订阅 plugin-storage-changed 事件同步尺寸 */
 export async function subscribeToPluginStorageChanges(): Promise<() => void> {
   if (pluginStorageChangesUnsub) return pluginStorageChangesUnsub
@@ -602,24 +590,6 @@ function estimatePayloadSize(payload: unknown): number {
   } catch {
     return 0
   }
-}
-
-/** Measure execution time of an async function */
-export async function measureAsync<T>(
-  fn: () => Promise<T>
-): Promise<{ result: T; durationMs: number }> {
-  const start = performance.now()
-  const result = await fn()
-  const durationMs = performance.now() - start
-  return { result, durationMs }
-}
-
-/** 测量同步函数执行耗时 */
-export function measure<T>(fn: () => T): { result: T; durationMs: number } {
-  const start = performance.now()
-  const result = fn()
-  const durationMs = performance.now() - start
-  return { result, durationMs }
 }
 
 // 日志格式化
@@ -852,147 +822,6 @@ export function exportLogs(
   // format 预留给未来格式扩展
   void format
   return { text, recordCount: limited.length, format: 'jsonl' }
-}
-
-// 时间窗口聚合
-
-/** 单时间窗口的聚合指标桶。 */
-export interface TelemetryBucket {
-  /** 桶起始时间戳（含） */
-  startTs: number
-  /** 桶结束时间戳（不含） */
-  endTs: number
-  /** 钩子调用数 */
-  hookCount: number
-  /** 后端 IPC 调用数 */
-  backendCount: number
-  /** 存储操作数 */
-  storageCount: number
-  /** 事件发射数 */
-  eventCount: number
-  /** 平均钩子耗时 ms */
-  avgHookDurationMs: number
-  /** 平均后端耗时 ms */
-  avgBackendDurationMs: number
-  /** 错误总数 */
-  errorCount: number
-  /** 操作总数 */
-  totalCount: number
-  /** 错误率 [0,1] */
-  errorRate: number
-}
-
-/** 聚合参数 */
-export interface TimeWindowAggregateOptions {
-  /** 过滤插件 id；省略聚合所有插件 */
-  pluginId?: string
-  /** 桶宽 ms，默认 60000；非正返回空 */
-  windowMs?: number
-  /** 桶数，默认 30；非正返回空 */
-  bucketCount?: number
-  /** 参考 now 时间戳，默认 Date.now() */
-  now?: number
-}
-
-/** 将指标缓冲聚合为固定数量的等宽时间窗口桶。 */
-export function aggregateTelemetryByTimeWindow(
-  options: TimeWindowAggregateOptions = {}
-): TelemetryBucket[] {
-  const {
-    pluginId,
-    windowMs = 60_000,
-    bucketCount = 30,
-    now = Date.now(),
-  } = options
-
-  // 防御性校验：非有限值返回空数组。
-  if (!Number.isFinite(windowMs) || windowMs <= 0) return []
-  if (!Number.isFinite(bucketCount) || bucketCount <= 0) return []
-
-  const firstStart = now - bucketCount * windowMs
-  const buckets: TelemetryBucket[] = new Array(bucketCount)
-  for (let i = 0; i < bucketCount; i++) {
-    const endTs = firstStart + (i + 1) * windowMs
-    buckets[i] = {
-      startTs: endTs - windowMs,
-      endTs,
-      hookCount: 0,
-      backendCount: 0,
-      storageCount: 0,
-      eventCount: 0,
-      avgHookDurationMs: 0,
-      avgBackendDurationMs: 0,
-      errorCount: 0,
-      totalCount: 0,
-      errorRate: 0,
-    }
-  }
-
-  // 并行累加数组，末尾统一算均值
-  const hookDurationSum = new Array<number>(bucketCount).fill(0)
-  const backendDurationSum = new Array<number>(bucketCount).fill(0)
-
-  // 计算时间戳所属桶索引。ts === now 归入最后一个桶。
-  const place = (ts: number): number => {
-    if (ts < firstStart) return -1
-    if (ts > now) return -1
-    if (ts === now) return bucketCount - 1
-    const idx = Math.floor((ts - firstStart) / windowMs)
-    return idx >= 0 && idx < bucketCount ? idx : -1
-  }
-
-  // 钩子指标：启动时长信号
-  for (const m of hookMetrics) {
-    if (pluginId !== undefined && m.pluginId !== pluginId) continue
-    const idx = place(m.timestamp)
-    if (idx < 0) continue
-    const b = buckets[idx]
-    b.hookCount++
-    b.totalCount++
-    hookDurationSum[idx] += m.durationMs
-    if (!m.success) b.errorCount++
-  }
-  // backend IPC 指标：次级时长信号。
-  for (const m of backendMetrics) {
-    if (pluginId !== undefined && m.pluginId !== pluginId) continue
-    const idx = place(m.timestamp)
-    if (idx < 0) continue
-    const b = buckets[idx]
-    b.backendCount++
-    b.totalCount++
-    backendDurationSum[idx] += m.durationMs
-    if (!m.success) b.errorCount++
-  }
-  // 存储操作仅计入总数和错误数
-  for (const m of storageMetrics) {
-    if (pluginId !== undefined && m.pluginId !== pluginId) continue
-    const idx = place(m.timestamp)
-    if (idx < 0) continue
-    const b = buckets[idx]
-    b.storageCount++
-    b.totalCount++
-    if (!m.success) b.errorCount++
-  }
-  // 事件发射仅计入错误数
-  for (const m of eventMetrics) {
-    if (pluginId !== undefined && m.pluginId !== pluginId) continue
-    const idx = place(m.timestamp)
-    if (idx < 0) continue
-    const b = buckets[idx]
-    b.eventCount++
-    b.totalCount++
-    b.errorCount += m.errors
-  }
-
-  // 计算均值与错误率
-  for (let i = 0; i < bucketCount; i++) {
-    const b = buckets[i]
-    b.avgHookDurationMs = b.hookCount > 0 ? hookDurationSum[i] / b.hookCount : 0
-    b.avgBackendDurationMs = b.backendCount > 0 ? backendDurationSum[i] / b.backendCount : 0
-    b.errorRate = b.totalCount > 0 ? b.errorCount / b.totalCount : 0
-  }
-
-  return buckets
 }
 
 function formatTime(d: Date): string {

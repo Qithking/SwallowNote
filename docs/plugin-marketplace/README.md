@@ -41,6 +41,8 @@ interface PluginIndexEntry {
   pubkey_b64: string                  // 覆盖仓库级公钥（可选）
   versions: PluginIndexEntryVersion[] // 历史版本（最新在前）
   dependencies: string[]              // 依赖的对等插件 id
+  permissions?: string[]              // 作者声明的权限列表（可选，与插件 manifest 一致）；
+                                      // 缺失 = 未声明，详情页安装前将显示空状态
 }
 
 interface PluginIndexEntryVersion {
@@ -67,7 +69,7 @@ PEM 需要 ASN.1 DER 解析 `SubjectPublicKeyInfo` 结构，这要么引入新�
 
 ### 生成一个签过名的 zip
 
-**推荐：自动流程**。官方插件目录（`plugins/<name>/`）的 `package.sh` 会在打包末尾调用 `plugins/sign-common.sh` 自动签名，并把 `sha256` / `signature_b64` / 仓库级 `pubkey_b64` 一并写入 `repo.json`——除非要接入**非官方**插件，否则不需要手动执行下面的步骤。签名绑定 zip 字节：每次重打包都必须重跑 package.sh 刷新签名与索引，否则市场安装会因旧签名不匹配被拒。
+**推荐：自动流程**。在仓库根目录运行 `./plugins/package.sh <name> "<changelog>"`（统一脚本，替代此前各插件目录的 `package.sh` + `plugins/sign-common.sh`）：校验 `dist/manifest.json` 与仓库 manifest 一致后，以可复现方式打包（zip 内固定时间戳 2020-01-01 / 固定权限 / 排序与压缩级别，相同源产物字节级一致），再调用 `sign_plugin` 签名并把 `version` / `sha256` / `signature_b64` / `changelog` / `published_at` / `updated_at` 一并写入 `repo.json`。除非要接入**非官方**插件，否则不需要手动执行下面的步骤。签名绑定 zip 字节：每次重打包都必须重跑 package.sh 刷新签名与索引，否则市场安装会因旧签名不匹配被拒。
 
 手动流程（外部仓库 / 一次性示例）：
 

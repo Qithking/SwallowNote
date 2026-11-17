@@ -174,11 +174,19 @@ export function filterHostCompatibleEntries(
   }
 }
 
+/** PL-7：市场仓库 URL 仅接受 https（Rust 侧 check_plugin_updates / add_market_source 同口径）。 */
+export function assertHttpsRepoUrl(url: string): void {
+  if (!/^https:\/\//i.test(url.trim())) {
+    throw new Error(`repo url must use https scheme: ${url}`)
+  }
+}
+
 /** 拉取并解析 PluginIndex，snake_case 转 camelCase。 */
 export async function fetchPluginIndex(url: string, signal?: AbortSignal): Promise<PluginIndex> {
   if (!url) {
     throw new Error('repo url is empty')
   }
+  assertHttpsRepoUrl(url)
   const res = await fetch(url, { cache: 'no-store', signal })
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching plugin index`)
@@ -196,6 +204,7 @@ export async function fetchWithProgress(
   if (!url) {
     throw new Error('repo url is empty')
   }
+  assertHttpsRepoUrl(url)
 
   const res = await fetch(url, { cache: 'no-store', signal })
   if (!res.ok) {
@@ -304,38 +313,6 @@ export async function downloadPluginZip(
   return bytes
 }
 
-/** 下载指定历史版本（G5），缓存键为 per-version sha256。 */
-export async function downloadPluginVersion(
-  pluginId: string,
-  version: { version: string; downloadUrl: string; sha256: string },
-  repoUrl: string,
-): Promise<ArrayBuffer> {
-  const cached = await readZipFromCache(version.sha256)
-  if (cached) return cached
-
-  // 同上，相对 URL 需重新锚定到 repoUrl
-  const url = resolveDownloadUrl(version.downloadUrl, repoUrl)
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) {
-    throw new Error(
-      `HTTP ${res.status} downloading ${pluginId}@${version.version}`
-    )
-  }
-  const bytes = await res.arrayBuffer()
-
-  // 同样不持久化摘要不匹配的 zip
-  const actual = await sha256Hex(bytes)
-  if (actual.toLowerCase() === version.sha256.toLowerCase()) {
-    await writeZipToCache(version.sha256, bytes, version.downloadUrl)
-  } else {
-    throw new Error(
-      `sha256 mismatch for ${pluginId}@${version.version}: expected ${version.sha256}, got ${actual}`
-    )
-  }
-
-  return bytes
-}
-
 /** 解析条目公钥，缺省回退 repo 级 */
 export function effectivePubkey(
   index: PluginIndex,
@@ -390,6 +367,10 @@ function normaliseEntry(raw: any): PluginIndexEntry {
     versions: Array.isArray(raw.versions) ? raw.versions.map(normaliseVersion) : undefined,
     dependencies: Array.isArray(raw.dependencies) ? raw.dependencies : [],
     minHostVersion: raw.min_host_version ?? raw.minHostVersion,
+    // 作者声明的权限（可选）：只保留非空字符串项，未知权限由 UI 端兜底展示。
+    permissions: Array.isArray(raw.permissions)
+      ? raw.permissions.filter((p: unknown): p is string => typeof p === 'string' && p.length > 0)
+      : undefined,
   }
 }
 

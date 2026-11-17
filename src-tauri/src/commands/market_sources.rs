@@ -28,6 +28,11 @@ pub fn list_market_sources(db: State<'_, Database>) -> Result<Vec<MarketSourceVi
 
 #[tauri::command]
 pub fn add_market_source(db: State<'_, Database>, name: String, url: String) -> Result<(), String> {
+    // PL-7：市场仓库 URL 仅接受 https（与 check_plugin_updates 同口径）。
+    // 索引 per-entry 自带公钥、无内置信任锚，明文 http 可被 MITM 整包替换。
+    if !url.trim().to_ascii_lowercase().starts_with("https://") {
+        return Err("market source url must use https scheme".to_string());
+    }
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     repo::add_source(&conn, &name, &url).map_err(|e| e.to_string())
 }

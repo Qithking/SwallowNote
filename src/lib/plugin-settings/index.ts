@@ -74,6 +74,40 @@ export async function saveSettings(
   }
 }
 
+/** Per-plugin 设置写串行队列（PL-4）：队尾 promise 即最新一次写。 */
+const settingsWriteQueues = new Map<string, Promise<Record<string, unknown>>>()
+
+/**
+ * 串行化的单键设置写入（PL-4 修复）。
+ *
+ * 读-改-写序列（force 读快照 → 合并单键 → 全量写回）按插件依次执行：
+ * 并发 set('a',1) / set('b',2) 不再各自读取同一快照互相覆盖丢键。
+ * 前一次写失败不阻塞后续写（每次 op 都从最新快照重读）；本次写入的
+ * 合并结果返回给调用方用于广播 `plugin-settings:change`。
+ */
+export async function writeSettingKey(
+  pluginId: string,
+  key: string,
+  value: unknown
+): Promise<Record<string, unknown>> {
+  const prev = settingsWriteQueues.get(pluginId) ?? Promise.resolve()
+  const op = async (): Promise<Record<string, unknown>> => {
+    const view = await loadSettings(pluginId, true)
+    const next = { ...view.values, [key]: value }
+    await saveSettings(pluginId, next)
+    return next
+  }
+  const queued = prev.then(op, op)
+  settingsWriteQueues.set(pluginId, queued)
+  // 本次写已是队尾且完成时清掉条目，避免长期驻留的 Map 泄漏。
+  void queued.finally(() => {
+    if (settingsWriteQueues.get(pluginId) === queued) {
+      settingsWriteQueues.delete(pluginId)
+    }
+  })
+  return queued
+}
+
 /** Drop the cache entry and the SQLite table (irreversible). */
 export async function resetSettings(pluginId: string): Promise<void> {
   await deletePluginSettings(pluginId)

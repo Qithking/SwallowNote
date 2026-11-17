@@ -1121,6 +1121,35 @@ fn collect_results_sorted(
     results
 }
 
+/// 过滤出可搜索的有效根（独立函数便于单测，不依赖 AppHandle）：
+/// - 不存在/非目录的根：跳过（与旧逐根 invoke 容错语义一致）；
+/// - 白名单校验失败（安全越权）：立即拒绝（fail-closed 原则）；
+/// - 全部根不可用：报错。
+fn filter_valid_roots(
+    allowed: &[PathBuf],
+    roots: &[String],
+) -> Result<Vec<PathBuf>, String> {
+    let mut valid_roots = Vec::with_capacity(roots.len());
+    for r in roots {
+        let root = PathBuf::from(r);
+        // 先做存在性检查：被删除的根无法 canonicalize、必然不在白名单内，
+        // 若先走白名单校验会被 fail-closed 拒绝导致整单失败。
+        // 不存在的路径不会被 walk 触碰（无越权面），跳过安全。
+        if !root.exists() || !root.is_dir() {
+            continue;
+        }
+        // 根实际存在：canonicalize 可行，白名单校验失败（安全越权）立即拒绝（fail-closed 原则）
+        if check_path_in_roots(allowed, &root).is_err() {
+            return Err(format!("Path is outside allowed directories: {}", root.display()));
+        }
+        valid_roots.push(root);
+    }
+    if valid_roots.is_empty() {
+        return Err("All search roots are unavailable".to_string());
+    }
+    Ok(valid_roots)
+}
+
 #[tauri::command]
 pub async fn search_in_files(
     app: tauri::AppHandle,
@@ -1134,24 +1163,8 @@ pub async fn search_in_files(
         &app,
         workspace_roots.as_deref().unwrap_or(&[]),
     )?;
-    // 逐根校验白名单与存在性（安全边界与旧实现一致），多根共享同一批次
-    // 与旧逐根 invoke 行为对齐：跳过无效根而非整个搜索失败
-    let mut valid_roots = Vec::with_capacity(req.roots.len());
-    for r in &req.roots {
-        let root = PathBuf::from(r);
-        // 白名单校验失败（安全越权）：立即拒绝，不跳过（fail-closed 原则）
-        if check_path_in_roots(&allowed, &root).is_err() {
-            return Err(format!("Path is outside allowed directories: {}", root.display()));
-        }
-        // 根目录已被删除/移动：跳过（非安全问题，允许其他根正常搜索）
-        if !root.exists() || !root.is_dir() {
-            continue;
-        }
-        valid_roots.push(root);
-    }
-    if valid_roots.is_empty() {
-        return Err("All search roots are unavailable".to_string());
-    }
+    // 逐根校验白名单与存在性，多根共享同一批次
+    let valid_roots = filter_valid_roots(&allowed, &req.roots)?;
 
     // 模式构造逻辑与旧实现完全一致（行为等价）
     let pattern_str = if req.use_regex {
@@ -1422,6 +1435,44 @@ mod search_tests {
         );
 
         let _ = fs::remove_dir_all(&valid_root);
+    }
+
+    /// A1 回归：被彻底删除的根被跳过而非整单拒绝。
+    /// 根被删除时 canonicalize 失败 → 不进白名单；若白名单校验先于 exists 检查，
+    /// check_path_in_roots 会走 existing_ancestor 找到父目录后拒绝 → 整个搜索失败。
+    /// 期望：跳过被删根，有效根正常保留；越权根仍 fail-closed。
+    #[test]
+    fn filter_valid_roots_skips_deleted_root() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root_a = temp_workspace("a1valid");
+        fs::write(root_a.join("a.md"), "needle\n").unwrap();
+        // 被删除的根：从不创建
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let deleted = std::env::temp_dir().join(format!("sw-a1-deleted-{}-{}", std::process::id(), nanos));
+        // 白名单只含根 A（模拟 allowed_roots_multi 对被删根 canonicalize 失败跳过的结果）；
+        // 与生产一致须 canonicalize（macOS /tmp → /private/tmp）
+        let allowed = vec![std::fs::canonicalize(&root_a).unwrap()];
+        // 存在但白名单外的根：用于验证 fail-closed 语义不变
+        let outside = std::env::temp_dir().join(format!("sw-a1-outside-{}-{}", std::process::id(), nanos + 1));
+        fs::create_dir_all(&outside).unwrap();
+
+        // ① 被删根 + 有效根：跳过被删根，返回有效根
+        let res = filter_valid_roots(
+            &allowed,
+            &[root_a.to_string_lossy().into_owned(), deleted.to_string_lossy().into_owned()],
+        );
+        assert!(res.is_ok(), "被删根应被跳过而非整单拒绝: {:?}", res.err());
+        let valid = res.unwrap();
+        assert_eq!(valid.len(), 1, "应只保留有效根 A");
+
+        // ② 全部不可用：报错
+        assert!(filter_valid_roots(&allowed, &[deleted.to_string_lossy().into_owned()]).is_err());
+
+        // ③ 存在但白名单外：立即拒绝（fail-closed 安全语义不变）
+        assert!(filter_valid_roots(&allowed, &[outside.to_string_lossy().into_owned()]).is_err());
+
+        let _ = fs::remove_dir_all(&root_a);
+        let _ = fs::remove_dir_all(&outside);
     }
 }
 

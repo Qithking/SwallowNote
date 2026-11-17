@@ -46,9 +46,6 @@ test-output.txt
 target/
 .dbg/
 
-# 插件构建产物
-plugins/*/*.zip
-
 # 插件签名私钥（发布凭证，绝不入库）
 plugins/.signing-key
 

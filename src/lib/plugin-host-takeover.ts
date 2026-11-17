@@ -37,7 +37,6 @@ import { useEditorStore, registerPluginTabRuntime } from '@/stores/editor'
 import { assertPermission } from './plugin-permission-guard'
 import { invokePluginBackendStream } from './plugin-stream'
 import {
-  writePluginSettings,
   readSecureStorage,
   writeSecureStorage,
   deleteSecureStorage,
@@ -54,7 +53,7 @@ import {
   pluginFilesRead,
 } from './plugin-write-api'
 import { normalizePluginBackendError, openPluginPanel } from './plugin-utils'
-import { loadSettings as loadSettingsCache, readSetting } from './plugin-settings'
+import { loadSettings as loadSettingsCache, readSetting, writeSettingKey } from './plugin-settings'
 import { emitPluginSettingsChanged } from '@swallow-note/plugin-sdk'
 import { logger } from './logger'
 
@@ -174,9 +173,8 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
     },
     __pluginSettings_set: async (id, key, value) => {
       assertPermission(id, 'storage', `write plugin setting "${key}"`)
-      const view = await loadSettingsCache(id, true)
-      const next = { ...view.values, [key]: value }
-      await writePluginSettings(id, next)
+      // PL-4：单键写经 per-plugin 串行队列，读-改-写不再并发互相覆盖。
+      const next = await writeSettingKey(id, key, value)
       // 广播 plugin-settings:change 事件。
       emitPluginSettingsChanged(id, next)
     },

@@ -2,7 +2,7 @@
   "id": "com.swallownote.wenyan",
   "name": "文颜排版",
   "description": "使用文颜引擎将 Markdown 排版为微信公众号样式的富文本",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "manifestVersion": 1,
   "author": "SwallowNote",
   "publishedAt": "2026-11-12T08:19:41Z",
@@ -13,7 +13,6 @@
   "hasBackend": true,
   "entry": "src/index.tsx",
   "permissions": [
-    "clipboard",
     "storage",
     "events",
     "backend"

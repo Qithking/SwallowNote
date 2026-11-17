@@ -705,26 +705,6 @@
           "name": "后端",
           "description": "与原生 Rust 后端通信"
         },
-        "filesystem-read": {
-          "name": "文件系统读取",
-          "description": "读取系统中的文件"
-        },
-        "filesystem-write": {
-          "name": "文件系统写入",
-          "description": "写入系统中的文件"
-        },
-        "network": {
-          "name": "网络",
-          "description": "发起网络请求"
-        },
-        "clipboard": {
-          "name": "剪贴板",
-          "description": "读取和写入剪贴板"
-        },
-        "notifications": {
-          "name": "通知",
-          "description": "显示桌面通知"
-        },
         "editor-write": {
           "name": "编辑器写入",
           "description": "向当前编辑器插入或替换内容"
@@ -1043,30 +1023,6 @@
     "hostIncompatibleBase": "宿主版本过旧：该插件要求更新的宿主版本，已跳过加载。",
     "hostIncompatibleDetail": "要求宿主版本 {{min}} 或更高。",
     "underlyingError": "底层错误: {{error}}"
-  },
-  "pluginCore": {
-    "recentNotes": {
-      "title": "最近笔记",
-      "installedAt": "安装时间",
-      "defaultView": "默认视图"
-    },
-    "themeWatcher": {
-      "theme": "主题",
-      "locale": "语言",
-      "events": "事件",
-      "lastSetting": "最后设置"
-    },
-    "wordCounter": {
-      "title": "字数统计",
-      "words": "字数",
-      "characters": "字符数",
-      "lines": "行数",
-      "readingTime": "阅读时间",
-      "refresh": "刷新字数统计"
-    },
-    "common": {
-      "pluginId": "插件 ID"
-    }
   },
   "theme": {
     "light": "浅色主题",

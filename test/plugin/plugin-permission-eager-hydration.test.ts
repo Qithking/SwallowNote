@@ -85,7 +85,7 @@ describe('TC-WaveH-M1: eager sync hydration of the permission guard', () => {
       'com.swallownote.wenyan': [
         { permission: 'storage', granted: true, requested: true },
         { permission: 'events', granted: true, requested: true },
-        { permission: 'clipboard', granted: false, requested: true },
+        { permission: 'backend', granted: false, requested: true },
       ],
     })
 
@@ -103,8 +103,8 @@ describe('TC-WaveH-M1: eager sync hydration of the permission guard', () => {
     ).not.toThrow()
     // ...but the not-granted permission still throws.
     expect(() =>
-      assertPermission('com.swallownote.wenyan', 'clipboard', 'read clipboard'),
-    ).toThrow(/missing permission: clipboard/)
+      assertPermission('com.swallownote.wenyan', 'backend', 'invoke backend'),
+    ).toThrow(/missing permission: backend/)
   })
 
   it('skips entries with no granted permissions (so a fresh install still denies)', async () => {

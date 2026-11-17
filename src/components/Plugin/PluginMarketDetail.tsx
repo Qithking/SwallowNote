@@ -8,9 +8,12 @@
  *   - Changelog     — per-version release notes + install/rollback actions
  *                     (this absorbs the previous G5 "history" tab: the
  *                     changelog *is* the per-version history).
- *   - Permissions   — permissions the plugin would request (from the
- *                     installed copy when present; otherwise an empty
- *                     state explaining the index doesn't declare them).
+ *   - Permissions   — permissions the plugin would request. Data source:
+ *                     the installed copy when present (authoritative);
+ *                     otherwise the index entry's optional `permissions`
+ *                     field (BUG-B: authors declare them in repo.json so
+ *                     users can review before installing); empty state
+ *                     only when neither source has data.
  *   - Dependencies  — peer-plugin dependency resolution (G4) lifted
  *                     out of the overview tab so the deps sub-tree
  *                     gets the room it deserves.
@@ -26,7 +29,7 @@
  * (which wraps the Tauri commands). After a successful install we
  * re-trigger the marketplace store's `refreshUpdates` and notify the
  * parent to close. Per-version installs reuse the G1 SHA-256 path
- * (`downloadPluginVersion` caches by per-version digest) and forward
+ * (`downloadPluginZip` 校验 per-entry 摘要后缓存) and forward
  * the explicit `version` string to the host so the on-disk
  * `.versions/<v>/` directory is created with the right name.
  */
@@ -103,7 +106,15 @@ async function reloadAfterInstall(): Promise<void> {
   }
 }
 
-function friendlyInstallError(
+/**
+ * 把安装链路的原始错误映射为用户可读文案。
+ *
+ * BUG-A: HTTP 状态类错误（"HTTP 404 downloading id@version"）必须透传
+ * 原始消息 —— 状态码与插件 id 是用户定位"仓库缺文件 vs 网络异常"的
+ * 关键信息，吞成笼统文案会导致无法诊断（详见 fixes/plugin-market-install-and-permissions）。
+ * 笼统的 errorDownload 文案只留给真正的网络层失败（fetch TypeError）。
+ */
+export function friendlyInstallError(
   e: unknown,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
@@ -112,7 +123,11 @@ function friendlyInstallError(
   if (lower.includes('sha256 mismatch')) {
     return t('plugin.market.errorSha256Mismatch')
   }
-  if (lower.startsWith('http ') || lower.includes(' downloading ')) {
+  if (lower.startsWith('http ')) {
+    // HTTP 状态错误透传：含状态码 + 插件 id@version
+    return raw
+  }
+  if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('load failed')) {
     return t('plugin.market.errorDownload')
   }
   if (lower.includes('disallowed scheme')) {
@@ -217,7 +232,11 @@ export function PluginMarketDetail({
   const installedPlugin = usePluginStore((s) =>
     s.plugins.find((p) => p.id === entry.id) ?? null,
   )
-  const declaredPermissions: PluginPermission[] = installedPlugin?.permissions ?? []
+  // BUG-B: 权限展示数据源优先级 —— 已安装副本（权威）> 索引声明（安装前
+  // 预览）> 空。市场索引新增可选 permissions 字段，作者在 repo.json 里
+  // 声明与 manifest 一致的权限列表，安装前即可预览"将请求"的权限。
+  const declaredPermissions: PluginPermission[] =
+    installedPlugin?.permissions ?? entry.permissions ?? []
 
   /**
    * Install one plugin entry from the marketplace index. Lifted
@@ -442,7 +461,7 @@ export function PluginMarketDetail({
             icon={<Shield size={12} />}
             active={activeTab === 'permissions'}
             onClick={() => setActiveTab('permissions')}
-            badge={isInstalled ? declaredPermissions.length : undefined}
+            badge={declaredPermissions.length > 0 ? declaredPermissions.length : undefined}
             data-testid="pmd-tab-permissions"
           />
           <DetailTabButton
@@ -480,7 +499,6 @@ export function PluginMarketDetail({
             {activeTab === 'permissions' && (
               <div className="pmd-permissions">
                 <PermissionsPanel
-                  isInstalled={isInstalled}
                   declaredPermissions={declaredPermissions}
                 />
               </div>
@@ -728,24 +746,14 @@ function OverviewPanel({
  * the granted / pending state.
  */
 function PermissionsPanel({
-  isInstalled,
   declaredPermissions,
 }: {
-  isInstalled: boolean
   declaredPermissions: PluginPermission[]
 }) {
   const { t } = useTranslation()
 
-  if (!isInstalled) {
-    return (
-      <EmptyStatePanel
-        icon={<Shield size={28} />}
-        title={t('plugin.market.permissionsEmpty')}
-        hint={t('plugin.market.permissionsEmptyHint')}
-      />
-    )
-  }
-
+  // BUG-B: 不再按 isInstalled 区分空状态 —— 索引声明了权限就渲染
+  // （安装前展示作者声明的"将请求"权限），只有索引未声明时才空状态。
   if (declaredPermissions.length === 0) {
     return (
       <EmptyStatePanel
