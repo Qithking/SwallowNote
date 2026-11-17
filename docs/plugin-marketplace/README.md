@@ -41,6 +41,8 @@ interface PluginIndexEntry {
   pubkey_b64: string                  // 覆盖仓库级公钥（可选）
   versions: PluginIndexEntryVersion[] // 历史版本（最新在前）
   dependencies: string[]              // 依赖的对等插件 id
+  permissions?: string[]              // 作者声明的权限列表（可选，与插件 manifest 一致）；
+                                      // 缺失 = 未声明，详情页安装前将显示空状态
 }
 
 interface PluginIndexEntryVersion {

@@ -203,6 +203,8 @@ export interface PluginIndexEntry {
   dependencies: string[]
   /** 插件要求的最低宿主版本；缺失/空 = 无要求。 */
   minHostVersion?: string
+  /** 作者声明的权限列表（与插件 manifest 一致），供安装前展示；缺失 = 索引未声明。 */
+  permissions?: PluginPermission[]
 }
 
 export interface PluginIndexEntryVersion {

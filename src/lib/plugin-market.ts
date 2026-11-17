@@ -367,6 +367,10 @@ function normaliseEntry(raw: any): PluginIndexEntry {
     versions: Array.isArray(raw.versions) ? raw.versions.map(normaliseVersion) : undefined,
     dependencies: Array.isArray(raw.dependencies) ? raw.dependencies : [],
     minHostVersion: raw.min_host_version ?? raw.minHostVersion,
+    // 作者声明的权限（可选）：只保留非空字符串项，未知权限由 UI 端兜底展示。
+    permissions: Array.isArray(raw.permissions)
+      ? raw.permissions.filter((p: unknown): p is string => typeof p === 'string' && p.length > 0)
+      : undefined,
   }
 }
 

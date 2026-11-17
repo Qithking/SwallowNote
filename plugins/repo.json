@@ -19,7 +19,12 @@
       "changelog": "初版发布：从 host 抽出为独立插件，支持 .smm 文件编辑、5 大布局组（逻辑结构/思维导图/组织结构/时间轴/鱼骨图）、多种主题、外框/水印/节点样式",
       "published_at": "2026-11-12T08:19:27Z",
       "dependencies": [],
-      "signature_b64": "hXe0ockdlunE+ddun4s2B1WqDh1HW/NYYmxvkiB+n0M2KeLjpWRK3GRb7beAUF4AuVgIgg1IX4jmGUHkoEkQDA=="
+      "signature_b64": "hXe0ockdlunE+ddun4s2B1WqDh1HW/NYYmxvkiB+n0M2KeLjpWRK3GRb7beAUF4AuVgIgg1IX4jmGUHkoEkQDA==",
+      "permissions": [
+        "editor",
+        "events",
+        "storage"
+      ]
     },
     {
       "id": "com.swallownote.export",
@@ -39,7 +44,10 @@
       "changelog": "v0.2.4: 同步 manifest 与构建产物；v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
       "published_at": "2026-11-12T08:19:17Z",
       "dependencies": [],
-      "signature_b64": "g4x4U75BtM5fu/wQhKtqWQBU3spU31lZQNTNtX0dIRvmn6wqOzMVFjSlUdf6q0/I+o91KVK2jTEN/VJ4r2f7Cw=="
+      "signature_b64": "g4x4U75BtM5fu/wQhKtqWQBU3spU31lZQNTNtX0dIRvmn6wqOzMVFjSlUdf6q0/I+o91KVK2jTEN/VJ4r2f7Cw==",
+      "permissions": [
+        "backend"
+      ]
     },
     {
       "id": "com.swallownote.wenyan",
@@ -59,7 +67,12 @@
       "changelog": "初版发布：集成 @wenyan-md/core 排版引擎，支持多主题、代码高亮、实时预览、一键复制",
       "published_at": "2026-11-12T08:19:41Z",
       "dependencies": [],
-      "signature_b64": "ywV39Mgtn6337QcNdE5S4LTKjJqEs9m2mkMQzSdeOdxib5HLg9XOsNbBTa2ConwDK5MEJYh2AVr3aJA5HNafAg=="
+      "signature_b64": "ywV39Mgtn6337QcNdE5S4LTKjJqEs9m2mkMQzSdeOdxib5HLg9XOsNbBTa2ConwDK5MEJYh2AVr3aJA5HNafAg==",
+      "permissions": [
+        "storage",
+        "events",
+        "backend"
+      ]
     },
     {
       "id": "com.swallownote.picgo",
@@ -81,7 +94,11 @@
       "changelog": "初版发布：4 个 provider（SM.MS / Imgur / GitHub / Custom）、右侧面板 UI、上传历史、客户端转码、文件名策略、链接格式",
       "published_at": "2026-11-12T08:19:32Z",
       "dependencies": [],
-      "signature_b64": "mMq4GF5J50j2AobP8uSPxLACgzWf0iB8rEiFe1Ibs2xnbekYhd9i7ilmbULDeiWBZMF7ZGdqa4tKp1a06vpDBg=="
+      "signature_b64": "mMq4GF5J50j2AobP8uSPxLACgzWf0iB8rEiFe1Ibs2xnbekYhd9i7ilmbULDeiWBZMF7ZGdqa4tKp1a06vpDBg==",
+      "permissions": [
+        "storage",
+        "events"
+      ]
     },
     {
       "id": "com.swallownote.secret-disk",
@@ -101,7 +118,12 @@
       "changelog": "初版发布：加密的私有笔记空间，支持 SQLite 加密存储、密码管理、主编辑器打开密盘笔记、文件树右键操作及安全增强",
       "published_at": "2026-11-12T08:19:34Z",
       "dependencies": [],
-      "signature_b64": "+IdcixM0naiR9wjbtHUrNhS3+7xJsp8YykiXddSKlnJNlcK/qJB8H+SncjOUWqaxk0ip3qI+IlTyx5cgfZf/AQ=="
+      "signature_b64": "+IdcixM0naiR9wjbtHUrNhS3+7xJsp8YykiXddSKlnJNlcK/qJB8H+SncjOUWqaxk0ip3qI+IlTyx5cgfZf/AQ==",
+      "permissions": [
+        "storage",
+        "events",
+        "backend"
+      ]
     },
     {
       "id": "com.swallownote.ai",
@@ -122,7 +144,16 @@
       "published_at": "2026-11-12T08:18:59Z",
       "dependencies": [],
       "min_host_version": "0.1.0",
-      "signature_b64": "/PegBMgkweF+6ghE4qHLb22gzLtB/YATwZwjz7DaApChDnGvX9k/W5grGdj7TfpCBSX1O//qX0eJhGnb1rPXAA=="
+      "signature_b64": "/PegBMgkweF+6ghE4qHLb22gzLtB/YATwZwjz7DaApChDnGvX9k/W5grGdj7TfpCBSX1O//qX0eJhGnb1rPXAA==",
+      "permissions": [
+        "storage",
+        "events",
+        "backend",
+        "editor-write",
+        "files",
+        "context-menu",
+        "secure-storage"
+      ]
     }
   ],
   "pubkey_b64": "LCoNiX5mUrSXX3zq3p+ylQnRi+xKafJ//iQFrnGdif8="
