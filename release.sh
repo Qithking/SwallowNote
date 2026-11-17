@@ -13,7 +13,8 @@ get_remote_info() {
     echo "$remote_info" | sed -E 's/.*github\.com[:/]([^.]+).*/\1/' | awk '{print $1}'
 }
 
-REPO_NAME=$(get_remote_info || echo "SwallowNote")
+# 支持环境变量覆盖（测试注入点）；默认从 git remote 自动提取
+REPO_NAME="${RELEASE_REPO_NAME:-$(get_remote_info || echo "SwallowNote")}"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -78,38 +79,82 @@ push_to_github() {
         echo_warning "当前不在 main 分支 (当前: $current_branch)"
         read -p "是否切换到 main 分支? (y/n): " confirm
         if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-            git checkout main
+            if ! git show-ref --verify --quiet refs/heads/main; then
+                echo_error "本地不存在 main 分支，无法切换"
+                return 1
+            fi
+            if ! git checkout main; then
+                echo_error "切换到 main 分支失败"
+                return 1
+            fi
+            # 远程 main 由编号 7 服务端合并更新，本地 main 通常落后 → 先同步，
+            # 否则随后的 push 必然 non-ff 被拒
+            echo_info "同步本地 main 到远程 main..."
+            if ! git pull --ff-only "$remote_name" main; then
+                echo_error "本地 main 与远程 main 已分叉，无法 fast-forward 同步，请手动处理"
+                return 1
+            fi
         else
             echo_info "继续在当前分支操作"
         fi
     fi
-    
+    current_branch=$(git branch --show-current)
+
+    # 拉取远程最新引用（ahead/behind 判定与推送检测都依赖新鲜 tracking）
+    echo_info "拉取远程最新代码..."
+    if ! git fetch "$remote_name" --prune; then
+        echo_error "git fetch 失败，请检查网络连接"
+        return 1
+    fi
+
     # 显示更改
     echo ""
     echo_info "当前更改:"
     git status --short
-    
+
+    # 用 porcelain 判定（覆盖 untracked/staged/modified；diff-index 会无视新建文件）
     echo ""
-    if git diff-index --quiet HEAD -- 2>/dev/null; then
-        echo_info "没有需要提交的更改"
-    else
-        echo ""
-        read -p "输入提交信息 (留空使用默认): " commit_msg
-        if [ -z "$commit_msg" ]; then
-            commit_msg="Update: $(date '+%Y-%m-%d %H:%M:%S')"
+    if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
+        # 无新更改：若本地仍领先远程（如上次推送失败遗留的提交）则补推；
+        # push 同时天然检测远程领先（non-ff 被拒 → 明确报错提示 pull）
+        ahead=$(git rev-list --count "refs/remotes/$remote_name/$current_branch..$current_branch" 2>/dev/null || echo 0)
+        if [ "$ahead" -gt 0 ]; then
+            echo_info "工作区无新更改，但本地有 $ahead 个未推送提交，执行推送..."
         fi
-        
-        echo ""
-        echo_info "执行: git add . && git commit -m '$commit_msg'"
-        git add .
-        git commit -m "$commit_msg"
-        
-        echo ""
-        echo_info "推送到 $remote_name/$current_branch..."
-        git push "$remote_name" "$current_branch"
-        
-        echo_success "代码已成功推送到 GitHub!"
+        if ! git push "$remote_name" "$current_branch"; then
+            echo_error "推送失败（远程包含本地没有的提交），请先执行 git pull 同步"
+            return 1
+        fi
+        if [ "$ahead" -gt 0 ]; then
+            echo_success "代码已成功推送到 GitHub!"
+        else
+            echo_info "没有需要提交的更改，本地与远程已同步"
+        fi
+        return 0
     fi
+
+    echo ""
+    read -p "输入提交信息 (留空使用默认): " commit_msg
+    if [ -z "$commit_msg" ]; then
+        commit_msg="Update: $(date '+%Y-%m-%d %H:%M:%S')"
+    fi
+
+    echo ""
+    echo_info "执行: git add . && git commit -m '$commit_msg'"
+    git add .
+    if ! git commit -m "$commit_msg"; then
+        echo_error "git commit 失败（可能是 pre-commit hook 拒绝或配置问题）"
+        return 1
+    fi
+
+    echo ""
+    echo_info "推送到 $remote_name/$current_branch..."
+    if ! git push "$remote_name" "$current_branch"; then
+        echo_error "推送失败（远程可能包含本地没有的提交），请先执行 git pull"
+        return 1
+    fi
+
+    echo_success "代码已成功推送到 GitHub!"
 }
 
 # 发布版本
@@ -615,6 +660,13 @@ rerun_latest_action() {
 }
 
 # 将本地 beta 分支远程推送到 main（全程不检出 main，本地只保留 beta 分支）
+#
+# 合并策略（按序判定）:
+#   1. 远程 main 不存在            → 直接推送 beta 首建 main
+#   2. beta 是远程 main 的祖先     → 无新内容，明确提示（不假成功）
+#   3. 远程 main 是 beta 的祖先    → fast-forward 推送（零 merge commit，最常见路径）
+#   4. 分叉                        → GitHub API merge；成功后把含 merge commit 的
+#                                    main 回写到远程 beta（消除分叉，下次回到 ff 路径）
 merge_beta_to_main() {
     echo ""
     echo "=== 推送 beta 内容到远程 main 分支 ==="
@@ -624,66 +676,91 @@ merge_beta_to_main() {
     remote_name=$(git remote 2>/dev/null | head -1)
     if [ -z "$remote_name" ]; then
         echo_error "未找到远程仓库"
-        return
+        return 1
     fi
 
     # 校验本地 beta 分支存在
     if ! git show-ref --verify --quiet refs/heads/beta; then
         echo_error "本地未找到 beta 分支"
-        return
+        return 1
     fi
 
     # 工作区必须干净，确保推送内容与本地提交状态一致
     if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
         echo_error "工作区有未提交的更改，请先提交或暂存 (git stash)"
         git status --short
-        return
+        return 1
     fi
 
     # 拉取远程最新引用
     echo_info "拉取远程最新代码..."
     if ! git fetch "$remote_name" --prune; then
         echo_error "git fetch 失败"
-        return
+        return 1
     fi
 
-    # 首选：GitHub API 服务端合并（无需本地检出 main）
-    gh_ok=0
+    # 场景 1: 远程 main 尚不存在 → 推送 beta 首建 main
+    if ! git rev-parse --verify -q "refs/remotes/$remote_name/main" >/dev/null; then
+        echo_info "远程 main 不存在，推送 beta 首建..."
+        if git push "$remote_name" beta:main; then
+            echo_success "远程 main 已创建并同步到 beta!"
+            return 0
+        fi
+        echo_error "推送 main 失败，请检查远程仓库权限"
+        return 1
+    fi
+
+    # 场景 2: beta 已被远程 main 包含 → 无新内容（merges API 对此返回 409，
+    # 旧实现回退推送 Everything-up-to-date 后仍显示成功，造成「假成功」）
+    if git merge-base --is-ancestor beta "refs/remotes/$remote_name/main"; then
+        echo_info "远程 main 已包含 beta 全部提交，无需合并"
+        return 0
+    fi
+
+    # 场景 3: fast-forward 可行（远程 main 是 beta 的祖先）→ 直接推送
+    if git merge-base --is-ancestor "refs/remotes/$remote_name/main" beta; then
+        echo_info "远程 main 落后于 beta，fast-forward 推送..."
+        if git push "$remote_name" beta:main; then
+            echo_success "远程 main 已同步到 beta!"
+            return 0
+        fi
+        echo_error "fast-forward 推送失败，请检查远程仓库权限"
+        return 1
+    fi
+
+    # 场景 4: 真分叉 → GitHub API 服务端合并
     if command -v gh &> /dev/null && gh auth status &> /dev/null && [[ "$REPO_NAME" == */* ]]; then
-        gh_ok=1
         # 先同步远程 beta，保证服务端合并包含本地最新内容
         echo_info "同步本地 beta 到远程 beta..."
         if ! git push "$remote_name" beta; then
             echo_error "推送 beta 失败（远程 beta 可能包含本地没有的提交），请先执行 git pull 同步 beta 分支"
-            return
+            return 1
         fi
-        echo_info "调用 GitHub API 远程合并 beta -> main..."
+        echo_info "分支已分叉，调用 GitHub API 远程合并 beta -> main..."
         if merge_output=$(gh api -X POST "repos/$REPO_NAME/merges" -f base=main -f head=beta 2>&1); then
-            echo_success "远程合并完成: beta 已合并到 main!"
-            return
+            echo_success "GitHub API 远程合并完成: beta 已合并到 main!"
+            # 关键: 把含 merge commit 的远程 main 回写到远程 beta（fast-forward），
+            # 否则 main/beta 永久分叉，下一轮只能再次走 API 合并并累积 merge commit。
+            # API merge 只更新远程 main，本地 tracking 引用是旧值 → 回写前先 fetch
+            echo_info "回写远程 main 到 beta（消除分叉）..."
+            if ! git fetch "$remote_name" -q; then
+                echo_warning "回写前 fetch 失败，跳过回写（main 已正确更新）"
+            elif ! git push "$remote_name" "refs/remotes/$remote_name/main:refs/heads/beta"; then
+                echo_warning "回写 beta 失败（main 已正确更新；下次执行仍可通过 API 合并）"
+            fi
+            return 0
         fi
-        # 冲突无法自动处理；远程 main 与 beta 有分叉时 git 推送也必然被拒，直接终止
         if echo "$merge_output" | grep -qi "conflict"; then
             echo_error "远程合并存在冲突，无法自动完成，请在本地手动处理"
-            return
+            return 1
         fi
-        echo_warning "GitHub API 合并失败: $merge_output"
-        echo_warning "回退为 git 直接推送..."
+        echo_error "GitHub API 合并失败: $merge_output"
+        echo_info "分支已分叉且 API 合并失败，请手动处理（本地: git checkout main && git merge beta && git push && git checkout beta）"
+        return 1
     fi
 
-    # 回退：直接把本地 beta 推送为远程 main（远程 main 是 beta 祖先时 fast-forward 成功）
-    echo_info "推送本地 beta 到远程 main..."
-    if git push "$remote_name" beta:main; then
-        echo_success "beta 内容已成功推送到远程 main!"
-        return
-    fi
-
-    if [ "$gh_ok" -eq 1 ]; then
-        echo_error "回退推送也失败，请手动处理（远程 main 包含 beta 没有的提交且 API 合并未成功）"
-    else
-        echo_error "推送失败：远程 main 包含 beta 没有的提交，无法 fast-forward"
-        echo_info "安装并登录 GitHub CLI 后可使用 API 远程合并: brew install gh && gh auth login"
-    fi
+    echo_error "分支已分叉且未安装/登录 GitHub CLI，无法自动合并: brew install gh && gh auth login"
+    return 1
 }
 
 # 主菜单
@@ -742,10 +819,13 @@ main() {
                 echo_error "无效选择，请输入 0-7"
                 ;;
         esac
-        
+
         echo ""
         read -p "按 Enter 继续..." dummy
     done
 }
 
-main
+# 仅在直接执行时进入交互主循环；被 source（测试）时不启动
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
+fi
