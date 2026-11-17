@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-17T04:08:10Z",
+  "updated_at": "2026-11-17T05:39:18Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -63,11 +63,11 @@
         "theme"
       ],
       "download_url": "./wenyan/com.swallownote.wenyan.zip",
-      "sha256": "47a5a8ec4883fe341e0a312b54f80515d8b4567b0833ede9143245ef14ca6593",
+      "sha256": "7e10bba67363eff780df5d60555487653713323442ce6b315d55012f52785f09",
       "changelog": "v0.1.8: 清理已废弃权限声明（clipboard），与新版权限模型对齐",
-      "published_at": "2026-11-17T04:08:10Z",
+      "published_at": "2026-11-17T05:39:18Z",
       "dependencies": [],
-      "signature_b64": "Kr8jf++tpzLRKzd0Ra7beXZN5VQzqiMIq8fpxaErwV2U0H5XdFcILv6MRKCU17fgofzYAeY+70FjcVz1JP8tAg==",
+      "signature_b64": "+nPSGqPtdOQGOyRb+N6UgayThM//E1meGTQAzxYtGGLT3NFp49cz2+YLg2dvxnFOpVa3LBPVhG2FCl6s7GJOBg==",
       "permissions": [
         "storage",
         "events",
@@ -90,11 +90,11 @@
         "markdown"
       ],
       "download_url": "./picgo/com.swallownote.picgo.zip",
-      "sha256": "b89e0054c4857aa14aecd1a13daf49d5e4a0fe33853d8860fab5080921d1c15b",
+      "sha256": "fabb66a1fb7b71c6768fefd0fea28f3051c481909eae1e87ad6420a7b42d31ba",
       "changelog": "v0.1.4: 清理已废弃权限声明（network/clipboard），与新版权限模型对齐",
-      "published_at": "2026-11-17T04:08:10Z",
+      "published_at": "2026-11-17T05:39:06Z",
       "dependencies": [],
-      "signature_b64": "N77lhrNCBBmL3THeHKVwh0QZ8V7h8t9edpxmo1QLhZ+OswJ6tV3Dd6UoD2V9yrEtgZcDLRu4vg9ADUqsu3LRCQ==",
+      "signature_b64": "OdS8axt7ZTwBHR6sQ6BVzRtAX9TMhK8ygjhxUgKiO32i3CyzMAcon8YIVwotRvdBGnflLXellV59mXih0oztBQ==",
       "permissions": [
         "storage",
         "events"
