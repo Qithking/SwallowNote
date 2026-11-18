@@ -95,6 +95,26 @@ impl State {
         *guard = None; // Database 的 drop 会关闭连接并清零缓冲区
     }
 
+    /// 重置密盘：关闭连接并删除数据库文件与 .bak 残留。
+    /// 用于"忘记密码"场景：删除后回到未初始化状态，可重新设置密码，
+    /// 原有加密数据不可恢复（前端必须先经用户二次确认）。
+    /// 数据库文件不存在时同样视为重置成功（幂等）。
+    pub fn reset(&self) -> Result<(), String> {
+        self.close_db();
+        let bak_path = self.db_path.with_extension("swl.bak");
+        // 先删 .bak 再删主库：若中途失败，下次启动 cleanup_bak_file 会
+        // 把残留 .bak 恢复回来，避免半删除状态丢数据。
+        if bak_path.exists() {
+            std::fs::remove_file(&bak_path)
+                .map_err(|e| format!("删除备份文件失败: {}", e))?;
+        }
+        if self.db_path.exists() {
+            std::fs::remove_file(&self.db_path)
+                .map_err(|e| format!("删除数据库失败: {}", e))?;
+        }
+        Ok(())
+    }
+
     /// 在闭包中访问数据库连接，未解锁时返回错误。
     /// 所有 CRUD 命令通过此方法获取连接。
     pub fn with_db<F, T>(&self, f: F) -> Result<T, String>

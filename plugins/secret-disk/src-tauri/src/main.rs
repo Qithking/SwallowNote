@@ -43,6 +43,7 @@ impl PluginBackend for SecretDiskBackend {
             "lock" => self.call(commands::cmd_lock, params),
             "is_initialized" => self.call(commands::cmd_is_initialized, params),
             "is_unlocked" => self.call(commands::cmd_is_unlocked, params),
+            "reset" => self.call(commands::cmd_reset, params),
             "list_children" => self.call(commands::cmd_list_children, params),
             "create_item" => self.call(commands::cmd_create_item, params),
             "get_note" => self.call(commands::cmd_get_note, params),

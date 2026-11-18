@@ -71,6 +71,15 @@ pub fn cmd_is_unlocked(state: &State, _params: &Value) -> Result<Value, String> 
     Ok(json!(state.is_unlocked()))
 }
 
+/// `reset`：重置密盘（删除数据库与备份，回到未初始化状态）。
+/// 无需解锁即可调用——这是"忘记密码"的唯一自救路径；
+/// 前端负责二次确认，数据删除后不可恢复。
+pub fn cmd_reset(state: &State, _params: &Value) -> Result<Value, String> {
+    state.reset()?;
+    security::log_info("密盘已重置（用户主动操作，数据全部删除）");
+    Ok(json!(true))
+}
+
 // ──────────────────────────────────────────────────────────────────
 // CRUD 命令
 // ──────────────────────────────────────────────────────────────────

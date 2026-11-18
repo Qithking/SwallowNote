@@ -20,7 +20,7 @@ export interface NoteFull extends NoteListItem {
 }
 
 /** 密盘状态机：未初始化/已锁定/已解锁 */
-export type DiskState = 'uninitialized' | 'locked' | 'unlocked'
+export type DiskState = 'uninitialized' | 'locked' | 'unlocked' | 'backend-missing'
 
 /** 密码强度等级 */
 export type PasswordStrength = 'weak' | 'medium' | 'strong'

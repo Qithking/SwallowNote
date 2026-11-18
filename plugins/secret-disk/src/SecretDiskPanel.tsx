@@ -101,6 +101,13 @@ export function SecretDiskPanel(props: PluginPanelProps) {
       }
     } catch (err) {
       console.error('[secret-disk] 检查状态失败:', err)
+      // 后端二进制缺失（安装包不完整）：进入明确错误态。
+      // 不能留在 'locked' 让用户在密码框里反复尝试——那只会看到
+      // "plugin backend not found" 原始错误，也绝不能进 init 态误建新库。
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('backend not found')) {
+        setDiskState('backend-missing')
+      }
       setLoading(false)
     }
   }, [])
@@ -307,6 +314,23 @@ export function SecretDiskPanel(props: PluginPanelProps) {
     }
   }, [])
 
+  /** 重置密盘（忘记密码自救）：二次确认后删除库与备份，回到未初始化态重新设密码。 */
+  const [confirmReset, setConfirmReset] = useState(false)
+  const handleResetDisk = useCallback(async () => {
+    try {
+      await invokeBackendRef.current('reset')
+    } catch (err) {
+      console.error('[secret-disk] 重置失败:', err)
+    } finally {
+      setConfirmReset(false)
+      // 清空树缓存，避免残留旧库数据
+      parentMapRef.current.clear()
+      treeCacheRef.current.clear()
+      setRootItems([])
+      void checkState()
+    }
+  }, [checkState])
+
   /** 切换"每次打开需要密码"。 */
   const handleToggleRequirePassword = useCallback(
     async (checked: boolean) => {
@@ -396,6 +420,27 @@ export function SecretDiskPanel(props: PluginPanelProps) {
     )
   }
 
+  if (diskState === 'backend-missing') {
+    return (
+      <div style={{ padding: 32, textAlign: 'center' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>插件后端不可用</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary, #526B77)', lineHeight: 1.7, marginBottom: 16 }}>
+          未找到密盘后端程序（backend 二进制缺失），可能是插件安装包不完整。<br />
+          请卸载后重新安装完整插件包，再打开本面板。
+        </div>
+        <button
+          style={{ padding: '6px 16px', fontSize: 13, cursor: 'pointer' }}
+          onClick={() => {
+            setLoading(true)
+            void checkState()
+          }}
+        >
+          重试
+        </button>
+      </div>
+    )
+  }
+
   if (diskState === 'uninitialized') {
     return (
       <PasswordInline
@@ -408,11 +453,42 @@ export function SecretDiskPanel(props: PluginPanelProps) {
 
   if (diskState === 'locked') {
     return (
-      <PasswordInline
-        mode="unlock"
-        invokeBackend={invokeBackend}
-        onSuccess={handleAuthSuccess}
-      />
+      <div>
+        <PasswordInline
+          mode="unlock"
+          invokeBackend={invokeBackend}
+          onSuccess={handleAuthSuccess}
+        />
+        {/* 忘记密码自救入口：二次确认后才执行 reset（数据全部丢失，不可恢复） */}
+        <div style={{ textAlign: 'center', padding: '0 32px 24px' }}>
+          {confirmReset ? (
+            <div style={{ fontSize: 12, color: '#DC2626', lineHeight: 1.7 }}>
+              确定重置密盘？现有密盘库将被删除，其中保存的数据<b>全部丢失</b>，之后将重新创建新密码库。
+              <div style={{ marginTop: 8, display: 'flex', gap: 8, justifyContent: 'center' }}>
+                <button
+                  style={{ padding: '4px 12px', fontSize: 12, cursor: 'pointer', background: '#DC2626', color: '#fff', border: 'none', borderRadius: 6 }}
+                  onClick={() => void handleResetDisk()}
+                >
+                  确认重置
+                </button>
+                <button
+                  style={{ padding: '4px 12px', fontSize: 12, cursor: 'pointer' }}
+                  onClick={() => setConfirmReset(false)}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              style={{ fontSize: 12, color: 'var(--text-muted, #7E95A0)', background: 'none', border: 'none', cursor: 'pointer' }}
+              onClick={() => setConfirmReset(true)}
+            >
+              忘记密码？重置密盘…
+            </button>
+          )}
+        </div>
+      </div>
     )
   }
 
