@@ -1,5 +1,6 @@
 import React from 'react'
 import { logger } from '@/lib/logger'
+import { createPluginLogger } from '@/lib/logger'
 import * as ReactDOM from 'react-dom'
 import * as ReactJSXRuntime from 'react/jsx-runtime'
 import { createRoot } from 'react-dom/client'
@@ -30,6 +31,9 @@ function logTime(stage: string, t0: number) {
 ;(window as unknown as Window).ReactJSXRuntime = ReactJSXRuntime
 ;(window as unknown as Window).SonnerToast = toast
 ;(window as unknown as Window).ReactI18Next = { useTranslation }
+// 插件专属 logger 工厂：loader 改写插件裸 console.* 时按模块注入调用（source=plugin:<id>）
+;(window as unknown as { __snCreatePluginLogger: (id: string) => unknown }).__snCreatePluginLogger =
+  (id: string) => createPluginLogger(id)
 
 const mainT0 = performance.now()
 logTime('main_script_begin', mainT0)

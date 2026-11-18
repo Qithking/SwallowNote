@@ -388,14 +388,17 @@ async fn spawn_plugin_process(
                             }
                         }
                         None => {
+                            // 非协议行：多为插件后端的裸 print（非 JSON-RPC 帧），
+                            // 也可能是损坏的响应帧。统一以插件日志形态记录（info 级、
+                            // 带 (stdout) 标记），不再误报为协议错误 ——
+                            // 应用日志查看器按 plugin:<id> 来源展示。
                             // 按字符截断而非字节切片：多字节 UTF-8 字符中间
                             // 的字节切片会 panic，导致 reader 任务死亡、
                             // 该插件后续全部 invoke 超时直至熔断。
                             let preview: String = line.chars().take(256).collect();
-                            error!(
-                                "[plugin-host] malformed frame from '{}': {}",
-                                plugin_id_for_reader,
-                                preview
+                            info!(
+                                "[plugin:{}] (stdout) {}",
+                                plugin_id_for_reader, preview
                             );
                         }
                     }

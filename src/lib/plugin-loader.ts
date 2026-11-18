@@ -59,71 +59,26 @@ async function loadPluginModuleWithRef(
   return promise
 }
 
-async function loadPluginModuleWithRefInner(
-  pluginPath: string
-): Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null; error?: string }> {
-  let code = ''
-  try {
-    const indexJsPath = `${pluginPath}/index.js`
+/** 从插件安装路径推导插件 id（…/plugins/<id>/…/index.js）。
+ *  manifest id 在模块 import 后才可知，裸 console 改写只能在加载前注入，
+ *  故按目录名 best-effort 推导；失败回退 'unknown'（context.log 不受影响）。 */
+function derivePluginIdFromPath(pluginPath: string): string {
+  const m = pluginPath.match(/[\\/]plugins[\\/]([^\\/]+)/i)
+  return m?.[1] ?? 'unknown'
+}
 
-    // hidden 目录走 Rust 命令读取后转 blob URL
-    const { readFile, getFileMetadata } = await import('@/lib/tauri')
-
-    // 获取 mtime 判断是否复用缓存，失败降级新建
-    let currentMtime: string | undefined
-    try {
-      currentMtime = (await getFileMetadata(indexJsPath)).modified_time
-    } catch {
-      // mtime 不可用时跳过缓存复用
-    }
-
-    const cached = currentMtime ? pluginBlobUrlCache.get(pluginPath) : undefined
-    if (cached && currentMtime && cached.mtime === currentMtime) {
-      try {
-        const module = (await import(/* @vite-ignore */ cached.blobUrl)) as Record<string, unknown>
-        const manifest = (module.default || module.manifest || null) as PluginManifest | null
-        if (import.meta.env.DEV) {
-          logger.info('plugin-loader', `Reused cached blob URL for ${pluginPath} (mtime unchanged)`)
-        }
-        if (!manifest) {
-          logger.warn('plugin-loader', `No manifest found in module from ${pluginPath}`)
-        }
-        return { manifest, module }
-      } catch {
-        URL.revokeObjectURL(cached.blobUrl)
-        pluginBlobUrlCache.delete(pluginPath)
-        // 落入下方完整加载流程
-      }
-    }
-
-    code = await readFile(indexJsPath)
-
-    if (import.meta.env.DEV) {
-      logger.info('plugin-loader', `Read ${indexJsPath}: ${code.length} chars, hasReactImport: ${code.includes('from "react"')}, hasBundledReact: ${code.includes('__SECRET_INTERNALS')}`)
-    }
-
-    // 检测插件是否打包独立 React 实例，避免运行时冲突
-    const hasReactExternalImport =
-      code.includes('from "react"') || code.includes("from 'react'") ||
-      code.includes('from "react/jsx-runtime"') || code.includes("from 'react/jsx-runtime'") ||
-      code.includes('from "react/jsx-dev-runtime"') || code.includes("from 'react/jsx-dev-runtime'")
-    const hasBundledReact = code.includes('react.production.min.js') ||
-      code.includes('react.development.js') ||
-      (code.includes('__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED') &&
-       !hasReactExternalImport)
-    if (hasBundledReact) {
-      const errMsg = `Plugin bundles its own copy of React (react/react-dom must be externalized). Please rebuild the plugin with react/react-dom as external dependencies.`
-      logger.error('plugin-loader', `Plugin at ${pluginPath} bundles its own React, which causes hook crashes. The plugin must be rebuilt with react/react-dom as external dependencies.`)
-      return { manifest: null, module: null, error: errMsg }
-    }
-
-    // Vite 未替换 process.env.NODE_ENV 时注入 polyfill
-    if (code.includes('process.env')) {
-      code = 'var process=process||{env:{NODE_ENV:"production"}};\n' + code
-    }
-
-    // 将 react/react-dom/jsx-runtime 的 import 替换为 window 全局
-    code = code
+/**
+ * 插件源码改写：external imports（react/react-dom/jsx-runtime/sonner/i18next）
+ * + 裸 console.* 改写到统一日志通道。
+ *
+ * 裸 console 捕获：插件代码的 console.log/warn/... 被改写为模块作用域的
+ * __snPluginLog（createPluginLogger(plugin:<id>)，由 main.tsx 挂载工厂），
+ * 写入统一 LogStore —— 应用日志查看器即可查看全部插件日志。
+ * 模块作用域注入，多插件加载互不串扰。
+ */
+export function applyPluginCodeRewrites(code: string, pluginId: string): string {
+  // 将 react/react-dom/jsx-runtime 的 import 替换为 window 全局
+  code = code
       .replace(
         // Match: import X, { ... } from "react";
         /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s*,\s*\{([^}]*)\}\s*from\s*["']react["'];?/g,
@@ -270,6 +225,81 @@ async function loadPluginModuleWithRefInner(
         /import\s+([$_a-zA-Z][$_a-zA-Z0-9]*)\s+from\s*["']i18next["'];?/g,
         'const $1 = window.ReactI18Next;'
       )
+
+  // 裸 console.* 改写到统一日志通道（source=plugin:<id>）。
+  // 字符串字面量内的同名文本可能被误改，仅为内容噪音，不破坏语法。
+  code = code.replace(/\bconsole\.(log|info|warn|error|debug|trace)\(/g, '__snPluginLog.$1(')
+
+  // 模块作用域注入插件专属 logger（工厂 __snCreatePluginLogger 由 main.tsx 挂载）
+  return `const __snPluginLog = window.__snCreatePluginLogger(${JSON.stringify(`plugin:${pluginId}`)});\n` + code
+}
+
+async function loadPluginModuleWithRefInner(
+  pluginPath: string
+): Promise<{ manifest: PluginManifest | null; module: Record<string, unknown> | null; error?: string }> {
+  let code = ''
+  try {
+    const indexJsPath = `${pluginPath}/index.js`
+
+    // hidden 目录走 Rust 命令读取后转 blob URL
+    const { readFile, getFileMetadata } = await import('@/lib/tauri')
+
+    // 获取 mtime 判断是否复用缓存，失败降级新建
+    let currentMtime: string | undefined
+    try {
+      currentMtime = (await getFileMetadata(indexJsPath)).modified_time
+    } catch {
+      // mtime 不可用时跳过缓存复用
+    }
+
+    const cached = currentMtime ? pluginBlobUrlCache.get(pluginPath) : undefined
+    if (cached && currentMtime && cached.mtime === currentMtime) {
+      try {
+        const module = (await import(/* @vite-ignore */ cached.blobUrl)) as Record<string, unknown>
+        const manifest = (module.default || module.manifest || null) as PluginManifest | null
+        if (import.meta.env.DEV) {
+          logger.info('plugin-loader', `Reused cached blob URL for ${pluginPath} (mtime unchanged)`)
+        }
+        if (!manifest) {
+          logger.warn('plugin-loader', `No manifest found in module from ${pluginPath}`)
+        }
+        return { manifest, module }
+      } catch {
+        URL.revokeObjectURL(cached.blobUrl)
+        pluginBlobUrlCache.delete(pluginPath)
+        // 落入下方完整加载流程
+      }
+    }
+
+    code = await readFile(indexJsPath)
+
+    if (import.meta.env.DEV) {
+      logger.info('plugin-loader', `Read ${indexJsPath}: ${code.length} chars, hasReactImport: ${code.includes('from "react"')}, hasBundledReact: ${code.includes('__SECRET_INTERNALS')}`)
+    }
+
+    // 检测插件是否打包独立 React 实例，避免运行时冲突
+    const hasReactExternalImport =
+      code.includes('from "react"') || code.includes("from 'react'") ||
+      code.includes('from "react/jsx-runtime"') || code.includes("from 'react/jsx-runtime'") ||
+      code.includes('from "react/jsx-dev-runtime"') || code.includes("from 'react/jsx-dev-runtime'")
+    const hasBundledReact = code.includes('react.production.min.js') ||
+      code.includes('react.development.js') ||
+      (code.includes('__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED') &&
+       !hasReactExternalImport)
+    if (hasBundledReact) {
+      const errMsg = `Plugin bundles its own copy of React (react/react-dom must be externalized). Please rebuild the plugin with react/react-dom as external dependencies.`
+      logger.error('plugin-loader', `Plugin at ${pluginPath} bundles its own React, which causes hook crashes. The plugin must be rebuilt with react/react-dom as external dependencies.`)
+      return { manifest: null, module: null, error: errMsg }
+    }
+
+    // Vite 未替换 process.env.NODE_ENV 时注入 polyfill
+    if (code.includes('process.env')) {
+      code = 'var process=process||{env:{NODE_ENV:"production"}};\n' + code
+    }
+
+    // import 重写（react/jsx-runtime/sonner/i18next externals）
+    // + 裸 console.* 改写到统一日志通道（plugin:<id> source）
+    code = applyPluginCodeRewrites(code, derivePluginIdFromPath(pluginPath))
 
     if (import.meta.env.DEV) {
       logger.info('plugin-loader', `After transform: ${code.length} chars, still hasReactImport: ${code.includes('from "react"')}, first 300 chars:`, code.substring(0, 300))

@@ -119,6 +119,14 @@ export async function attachLogger(): Promise<void> {
       // 剥离日期/时间/级别前缀（避免与前端时间戳重复显示），target 作为 source
       const rustMatch = /^\[\d{4}-\d{2}-\d{2}\]\s*\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\]\[(?:TRACE|DEBUG|INFO|WARN|ERROR)\]\[([^\]]+)\]\s*(.*)$/.exec(message)
       if (rustMatch) {
+        // 插件后端子进程日志（plugin_invoke.rs 的 stderr/stdout 采集形态）：
+        // message 带 [plugin:<id>] 前缀 → source 重分类为 plugin:<id>，
+        // 日志查看器「来源」列可直接辨识插件（应用日志接入所有插件能力日志）
+        const pluginMatch = /^\[plugin:([^\]]+)\]\s*(.*)$/.exec(rustMatch[2])
+        if (pluginMatch) {
+          logStore.push({ timestamp: Date.now(), level: mappedLevel, source: `plugin:${pluginMatch[1]}`, message: pluginMatch[2] })
+          return
+        }
         logStore.push({ timestamp: Date.now(), level: mappedLevel, source: rustMatch[1], message: rustMatch[2] })
         return
       }

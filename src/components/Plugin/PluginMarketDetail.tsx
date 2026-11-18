@@ -58,6 +58,7 @@ import { Button } from '@/components/ui/button'
 import {
   downloadPluginZip,
   installPluginFromBytes,
+  effectivePubkey,
 } from '@/lib/plugin-market'
 import { usePluginMarketStore, usePluginStore } from '@/stores'
 import { loadAllPlugins } from '@/lib/plugin-loader'
@@ -250,11 +251,15 @@ export function PluginMarketDetail({
     e: PluginIndexEntry
   ): Promise<PluginMetadataRust | null> => {
     const bytes = await downloadPluginZip(e, repoUrl)
+    // 签名与公钥必须透传给宿主：Rust verify_ed25519 对空 pubkey 直接拒绝
+    // （"pubkey must be 32 bytes (got 0)"）；entry 缺省回退 repo 级公钥。
     return installPluginFromBytes({
       pluginId: e.id,
       version: e.version,
       bytes,
       sha256: e.sha256,
+      pubkeyB64: effectivePubkey(index, e),
+      signatureB64: e.signatureB64,
       source: repoUrl,
     })
   }

@@ -7,6 +7,7 @@ import { usePluginMarketStore } from '@/stores/plugin-market'
 import {
   downloadPluginZip,
   installPluginFromBytes,
+  effectivePubkey,
   rollbackPlugin,
   listPluginVersions,
   isNewerVersion,
@@ -108,7 +109,7 @@ export async function runAutoUpdateOnStartup(
       continue
     }
     try {
-      const result = await installOnePlugin(plugin, entry, repoUrl)
+      const result = await installOnePlugin(plugin, entry, repoUrl, index)
       if (result) {
         report.installed.push(result)
       }
@@ -229,6 +230,7 @@ async function installOnePlugin(
   plugin: PluginDefinition,
   entry: PluginIndexEntry,
   repoUrl: string,
+  index: PluginIndex,
 ): Promise<AutoUpdateInstall | null> {
   // 用 host 的 isActive 版本判断是否最新。
   const versions = await listPluginVersions(plugin.id)
@@ -241,11 +243,15 @@ async function installOnePlugin(
   const bytes = await downloadPluginZip(entry, repoUrl)
 
   // Install via the host — same path the marketplace UI uses.
+  // 签名与公钥必须透传（与市场 UI 安装同契约），否则宿主验签报
+  // "pubkey must be 32 bytes (got 0)"；entry 缺省回退 repo 级公钥。
   await installPluginFromBytes({
     pluginId: entry.id,
     version: entry.version,
     bytes,
     sha256: entry.sha256,
+    pubkeyB64: effectivePubkey(index, entry),
+    signatureB64: entry.signatureB64,
     source: repoUrl,
   })
 
