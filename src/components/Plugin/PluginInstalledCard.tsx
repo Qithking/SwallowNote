@@ -74,6 +74,8 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
   // optimistic feedback (the host often round-trips to a
   // tauri command which is ~50–100ms).
   const [switchOn, setSwitchOn] = useState(plugin.enabled)
+  // toggle 进行中守卫：防止连点并发两次反向 invoke（P1 修复）
+  const [toggling, setToggling] = useState(false)
   // Re-sync local switch state when host value drifts.
   useEffect(() => {
     if (switchOn !== plugin.enabled && !error) {
@@ -214,13 +216,22 @@ const PluginInstalledCardInner = memo(function PluginInstalledCard({
             aria-checked={switchOn}
             aria-label={`${plugin.name} ${switchOn ? '禁用' : '启用'}`}
             onClick={() => {
+              // P1 修复：进行中忽略点击；resolve=成功保持新状态，
+              // reject=失败回滚 UI（caller 需在失败时 reject——见
+              // handleToggleEnabled 的 rethrow 契约）
+              if (toggling) return
               const next = !switchOn
               setSwitchOn(next)
+              setToggling(true)
               const result = onToggle?.(next)
+              const settle = (ok: boolean) => {
+                setToggling(false)
+                if (!ok) setSwitchOn(!next)
+              }
               if (result && typeof result === 'object' && 'catch' in result) {
-                ;(result as Promise<unknown>).catch(() => {
-                  setSwitchOn(!next)
-                })
+                ;(result as Promise<unknown>).then(() => settle(true), () => settle(false))
+              } else {
+                settle(true)
               }
             }}
           >

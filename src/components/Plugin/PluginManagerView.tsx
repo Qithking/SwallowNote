@@ -502,6 +502,8 @@ function PluginManagerView() {
       toast.success(enabled ? t('plugin.enabled', { name: plugin.name }) : t('plugin.disabled', { name: plugin.name }))
     } catch (err) {
       toast.error(t('plugin.toggleFailed'), { description: String(err) })
+      // P1 修复：rethrow 把失败传给卡片开关，UI 才能回滚乐观翻转的状态
+      throw err
     }
   }, [t])
 
