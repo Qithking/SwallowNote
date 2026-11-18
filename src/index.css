@@ -42,13 +42,19 @@ html, body, #root {
 
 html {
   background-color: transparent;
-  border-radius: 12px;
+  border-radius: var(--app-radius);
 }
 
 body, #root {
   background-color: transparent;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: var(--app-radius);
+}
+
+/* 应用窗口圆角单一来源：Tauri 窗口 transparent + 无边框，圆角全靠 CSS。
+   全屏遮罩（fixed inset-0 不受祖先裁剪）也须引用此变量保持外观一致。 */
+:root {
+  --app-radius: 12px;
 }
 
 @layer base {

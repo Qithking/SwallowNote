@@ -868,7 +868,7 @@ function ConflictResolver({ repoPath, repoName: _repoName, initialSelectedFile, 
 
       {/* Resolving overlay */}
       {isResolving && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 rounded-[var(--app-radius)]">
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
             <Loader2 size={16} className="animate-spin" />
             <span className="text-sm" style={{ color: 'var(--text-primary)' }}>{t('git.resolving')}</span>

@@ -386,7 +386,7 @@ export function TitleBarRecentPopover() {
       )}
 
       {showCloneDialog && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center" style={styleOverlay}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center rounded-[var(--app-radius)]" style={styleOverlay}>
           <div className="w-[480px] rounded-lg p-4" style={styleDialogPanel}>
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-medium" style={styleTextPrimary}>{t('recent.cloneGitRepo')}</div>
