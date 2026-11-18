@@ -1,8 +1,8 @@
 use super::with_repo_lock;
 use super::runner::{run_git, run_git_with_env, run_git_blocking};
-use super::branch::{is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, fix_detached_head, resolve_push_target_branch, is_diverged_error};
+use super::branch::{is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, fix_detached_head, resolve_push_target_branch};
 use super::askpass::{create_askpass_script, build_askpass_env};
-use super::errors::is_auth_error;
+use super::errors::{is_auth_error, is_protocol_error};
 use log::debug;
 
 /// detached HEAD 重试共享 helper（Q9）：
@@ -14,7 +14,10 @@ use log::debug;
 /// - `None`：错误不是 detached HEAD 引起，调用方继续走通用错误映射
 /// - `Some(Ok(()))`：重试成功
 /// - `Some(Err(..))`：重试失败，或无法解析目标分支
-fn retry_push_on_detached_head(
+/// P2 修复（漂移收编）：此 helper 原本只服务 push.rs；git_force_upload_file
+/// 曾在 commit.rs 重复实现一份等价逻辑，现改为 pub(crate) 供其复用，
+/// 避免 detached-HEAD push 恢复策略两处漂移。
+pub(crate) fn retry_push_on_detached_head(
     path: &str,
     force: bool,
     creds: Option<(&str, &str)>,
@@ -165,8 +168,9 @@ fn git_force_push_impl(
 
     // 修复 detached HEAD（必须在 commit 之前，否则 commit 可能失败）
     if let Err(e) = fix_detached_head(&path) {
-        // 分叉需用户决策，上抛前端弹框
-        if is_diverged_error(&e) {
+        // P1-4 修复：带协议前缀的错误原样上抛（分叉 DETACHED_HEAD_DIVERGED 需用户
+        // 决策弹框；REBASE_CONFLICT 需冲突面板），包装会破坏前端 startsWith 匹配
+        if is_protocol_error(&e) {
             return Err(e);
         }
         // P1#1 修复：修复失败时继续执行会把提交挂在 detached HEAD 上（切回分支即丢失），

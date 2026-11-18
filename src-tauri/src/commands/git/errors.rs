@@ -1,9 +1,14 @@
 /// Check if a git error is a rebase/merge conflict
+/// P2 修复：不再裸匹配 `contains("conflict")`——仓库路径/文件名含 "conflict"
+/// 子串的认证/网络错误（如 URL https://host/conflict/repo 403）会被误判为冲突，
+/// 错码路由到冲突面板而不是凭证框。改为只匹配 git 真实输出中的固定形态。
 pub fn is_conflict_error(error: &str) -> bool {
     let lower = error.to_lowercase();
-    lower.contains("conflict")
+    // "CONFLICT (content/add/rename/delete): Merge conflict in X" 等 git 冲突输出
+    lower.contains("merge conflict")
+        || lower.contains("conflict in")
+        || lower.contains("conflict (")
         || lower.contains("could not apply")
-        || lower.contains("merge conflict")
         || lower.contains("resolve them")
         || lower.contains("fix conflicts")
         || lower.contains("after resolving the conflicts")
@@ -53,7 +58,33 @@ pub fn is_divergent_branches_error(error: &str) -> bool {
 /// 的明确指引。归入独立错误码 LOCAL_CHANGES_OVERWRITE。
 pub fn is_local_changes_overwrite_error(error: &str) -> bool {
     let lower = error.to_lowercase();
+    // P2 修复：补齐同语义变体——此前仅命中 "local changes..." 一句：
+    // - `git pull --rebase` 带未暂存改动报 "cannot pull with rebase: You have unstaged changes"
+    //   （index 有暂存改动时为 "...Your index contains uncommitted changes"）
+    // - untracked 文件被合并覆盖报 "The following untracked working tree files would be overwritten"
+    // 这些变体此前落入通用失败分支，前端无法给出「先提交或暂存」指引
     lower.contains("local changes to the following files would be overwritten")
+        || lower.contains("cannot pull with rebase: you have unstaged changes")
+        || lower.contains("cannot pull with rebase: your index contains uncommitted changes")
+        || lower.contains("untracked working tree files would be overwritten")
+}
+
+/// P1-4 修复：判断错误串是否已带前后端错误码协议前缀。
+/// fix_detached_head / checkout_with_stash 等底层函数可能直接返回带前缀的错误
+/// （REBASE_CONFLICT: / DETACHED_HEAD_DIVERGED: 等），调用方包装
+/// "Failed to fix ..." 会破坏前缀，前端 startsWith 匹配失败 → 冲突面板不弹。
+/// 带协议前缀的错误必须原样上抛，仅裸错误才允许包装。
+pub fn is_protocol_error(error: &str) -> bool {
+    const PREFIXES: [&str; 7] = [
+        "AUTH_REQUIRED:",
+        "REBASE_CONFLICT:",
+        "DETACHED_HEAD_DIVERGED:",
+        "DETACHED_HEAD:",
+        "SUBMODULE_UNCOMMITTED:",
+        "REBASE_CONTINUE_FAILED:",
+        "MERGE_COMMIT_FAILED:",
+    ];
+    PREFIXES.iter().any(|p| error.starts_with(p))
 }
 
 #[cfg(test)]
@@ -87,6 +118,41 @@ mod tests {
         assert!(is_conflict_error("cannot rebase: you have uncommitted changes"));
         assert!(!is_conflict_error("cannot rebase onto main branch"));
         assert!(!is_conflict_error("uncommitted changes detected"));
+    }
+
+    /// P2 回归：不再裸匹配 "conflict" 子串——路径/URL 含 conflict 的认证、网络错误
+    /// 不得误判为冲突（否则凭证框路由到冲突面板）；git 真实冲突输出必须仍命中
+    #[test]
+    fn test_is_conflict_error_not_broad_substring() {
+        // 认证错误但 URL 含 "conflict"：必须归 auth 而非 conflict
+        assert!(!is_conflict_error(
+            "fatal: unable to access 'https://github.com/conflict/repo/': 403"
+        ));
+        // 文件名含 conflict 的非冲突失败
+        assert!(!is_conflict_error("fatal: bad object conflict-notes.txt"));
+        // git 真实冲突输出的各种形态仍命中
+        assert!(is_conflict_error("CONFLICT (rename/delete): a.txt deleted in HEAD."));
+        assert!(is_conflict_error("Auto-merging notes/conflict.md\nCONFLICT (add/add): Merge conflict in notes/conflict.md"));
+        // "cannot pull with rebase: You have unstaged changes" 不是冲突也不是 "cannot rebase"
+        assert!(!is_conflict_error("error: cannot pull with rebase: You have unstaged changes."));
+    }
+
+    /// P2 回归：本地改动覆盖的 rebase 与 untracked 变体必须命中，
+    /// 归入 LOCAL_CHANGES_OVERWRITE（此前落入通用失败分支）
+    #[test]
+    fn test_is_local_changes_overwrite_error_variants() {
+        assert!(is_local_changes_overwrite_error(
+            "error: cannot pull with rebase: You have unstaged changes.\nerror: Please commit or stash them."
+        ));
+        assert!(is_local_changes_overwrite_error(
+            "error: cannot pull with rebase: Your index contains uncommitted changes."
+        ));
+        assert!(is_local_changes_overwrite_error(
+            "error: The following untracked working tree files would be overwritten by merge:\n\tnew.txt\nPlease move or remove them before you merge."
+        ));
+        // 非该模式不误报
+        assert!(!is_local_changes_overwrite_error("CONFLICT (content): Merge conflict"));
+        assert!(!is_local_changes_overwrite_error("Everything up-to-date"));
     }
 
     #[test]
@@ -225,6 +291,26 @@ mod tests {
         assert!(!is_local_changes_overwrite_error("authentication failed"));
         assert!(!is_local_changes_overwrite_error("Everything up-to-date"));
         assert!(!is_local_changes_overwrite_error(""));
+    }
+
+    /// P1-4：协议前缀错误识别——带前缀的错误必须原样上抛不被包装，
+    /// 裸错误（普通 git stderr）允许调用方包装
+    #[test]
+    fn test_is_protocol_error_prefixes() {
+        assert!(is_protocol_error("REBASE_CONFLICT:CONFLICT (content): Merge conflict in a.md"));
+        assert!(is_protocol_error("AUTH_REQUIRED:fatal: could not read Username"));
+        // DETACHED_HEAD_DIVERGED 不得被 DETACHED_HEAD 前缀误吞（子串顺序）
+        assert!(is_protocol_error("DETACHED_HEAD_DIVERGED:main:1:2"));
+        assert!(is_protocol_error("DETACHED_HEAD:Repository is in detached HEAD state"));
+        assert!(is_protocol_error("SUBMODULE_UNCOMMITTED:submodule has changes"));
+        assert!(is_protocol_error("REBASE_CONTINUE_FAILED:git rebase --continue failed"));
+        assert!(is_protocol_error("MERGE_COMMIT_FAILED:commit failed"));
+        // 裸错误不算协议前缀
+        assert!(!is_protocol_error("Failed to fix detached HEAD: checkout failed"));
+        assert!(!is_protocol_error("fatal: not a git repository"));
+        assert!(!is_protocol_error(""));
+        // 前缀必须在开头，出现在中间不算（调用方包装后已破坏，无法恢复）
+        assert!(!is_protocol_error("Failed to fix: REBASE_CONFLICT:conflict"));
     }
 
     /// git ≥2.27 分叉拒绝错误识别：hint 与 fatal 两种表述都必须命中，

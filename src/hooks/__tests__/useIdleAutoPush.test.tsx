@@ -371,6 +371,23 @@ describe('useIdleAutoPush', () => {
     expect(gitSaveConflictFileContent).not.toHaveBeenCalled()
   })
 
+  // P0-2 回归测试：commit 成功但 push 失败（后端返回 pushed=false）时，
+  // 仓库不能被计为完全成功（状态点变绿），应标 error 等下次同步重试
+  it('commit 成功但推送失败 (pushed=false) 不计为完全成功', async () => {
+    vi.mocked(commitAndPushRepo).mockResolvedValueOnce({
+      success: true,
+      committed: true,
+      pushed: false,
+    })
+    renderHook(() => useIdleAutoPush(tRef))
+    fireSave('D:\\notes\\workdoc\\a.md')
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    const repo = useGitStore.getState().repositories.find((r) => r.path === REPO_A)
+    expect(repo?.status).toBe('error')
+    expect(toast.error).toHaveBeenCalled()
+  })
+
   it('RebaseContinueFailed 错误码按冲突处理并恢复本地内容', async () => {
     vi.mocked(commitAndPushRepo).mockResolvedValueOnce({
       success: false,

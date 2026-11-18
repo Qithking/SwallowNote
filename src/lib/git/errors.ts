@@ -14,7 +14,6 @@ export enum GitErrorCode {
   /** 本地分支与当前 HEAD 已分叉，自动修复会丢数据，需用户弹框决策 */
   DetachedHeadDiverged = 'DETACHED_HEAD_DIVERGED',
   SubmoduleUncommitted = 'SUBMODULE_UNCOMMITTED',
-  SubmoduleRefNeedsUpdate = 'SUBMODULE_REF_NEEDS_UPDATE',
   RebaseContinueFailed = 'REBASE_CONTINUE_FAILED',
   MergeCommitFailed = 'MERGE_COMMIT_FAILED',
   AlreadyUpToDate = 'ALREADY_UP_TO_DATE',
@@ -22,6 +21,8 @@ export enum GitErrorCode {
   NotInGitRepo = 'NOT_IN_GIT_REPO',
   /** S-26：本地未提交改动会被 merge/pull 覆盖，需先提交或暂存后再同步 */
   LocalChangesOverwrite = 'LOCAL_CHANGES_OVERWRITE',
+  /** P2 修复：目标文件不处于 unmerged 状态（重复 resolve / 状态已过期） */
+  NotUnmerged = 'NOT_UNMERGED',
   Unknown = 'UNKNOWN',
 }
 
@@ -39,7 +40,6 @@ const PREFIX_TO_CODE: Array<[string, GitErrorCode]> = [
   ['DETACHED_HEAD_DIVERGED:', GitErrorCode.DetachedHeadDiverged],
   ['DETACHED_HEAD:', GitErrorCode.DetachedHead],
   ['SUBMODULE_UNCOMMITTED:', GitErrorCode.SubmoduleUncommitted],
-  ['SUBMODULE_REF_NEEDS_UPDATE:', GitErrorCode.SubmoduleRefNeedsUpdate],
   ['REBASE_CONTINUE_FAILED:', GitErrorCode.RebaseContinueFailed],
   ['MERGE_COMMIT_FAILED:', GitErrorCode.MergeCommitFailed],
   ['ALREADY_UP_TO_DATE:', GitErrorCode.AlreadyUpToDate],
@@ -47,11 +47,29 @@ const PREFIX_TO_CODE: Array<[string, GitErrorCode]> = [
   ['NOT_IN_GIT_REPO:', GitErrorCode.NotInGitRepo],
   // S-26：本地改动覆盖错误独立归类（此前落入 Unknown）
   ['LOCAL_CHANGES_OVERWRITE:', GitErrorCode.LocalChangesOverwrite],
+  // P2 修复：NOT_UNMERGED:<path> 带负载前缀，此前无映射落入 Unknown
+  ['NOT_UNMERGED:', GitErrorCode.NotUnmerged],
 ]
+
+/**
+ * P1-11 修复：后端这三个错误码裸发（无冒号、无负载，如 `Err("NO_REMOTE")`），
+ * 前端 startsWith 带冒号前缀永不命中 → 落入 Unknown，提示失真。
+ * 精确匹配整个错误串（trim 后）。
+ */
+const BARE_TO_CODE: Record<string, GitErrorCode> = {
+  ALREADY_UP_TO_DATE: GitErrorCode.AlreadyUpToDate,
+  NO_REMOTE: GitErrorCode.NoRemote,
+  NOT_IN_GIT_REPO: GitErrorCode.NotInGitRepo,
+}
 
 /** 把 Tauri 抛出的 "CODE:msg" 字符串解析为 typed GitError */
 export function parseGitError(error: unknown): GitError {
   const raw = String(error)
+  // P1-11：先匹配裸发错误码（无冒号）
+  const bare = BARE_TO_CODE[raw.trim()]
+  if (bare) {
+    return { code: bare, message: raw.trim(), raw }
+  }
   for (const [prefix, code] of PREFIX_TO_CODE) {
     if (raw.startsWith(prefix)) {
       return { code, message: raw.slice(prefix.length), raw }

@@ -256,12 +256,7 @@ describe('commitAndPushRepo · commit+push 复合操作', () => {
     expect(r.errorCode).toBe(GitErrorCode.SubmoduleUncommitted)
   })
 
-  it('SUBMODULE_REF_NEEDS_UPDATE → errorCode:SubmoduleRefNeedsUpdate', async () => {
-    vi.mocked(gitCommitAndPush).mockRejectedValueOnce('SUBMODULE_REF_NEEDS_UPDATE:needs update')
-    const r = await commitAndPushRepo(createRepo('/ws/r1', 'r1'), 'msg')
-    expect(r.success).toBe(false)
-    expect(r.errorCode).toBe(GitErrorCode.SubmoduleRefNeedsUpdate)
-  })
+  // P1-11：SUBMODULE_REF_NEEDS_UPDATE 为后端从不产生的死分支，已从协议删除
 
   it('REBASE_CONFLICT → errorCode:RebaseConflict', async () => {
     vi.mocked(gitCommitAndPush).mockRejectedValueOnce('REBASE_CONFLICT:conflict')

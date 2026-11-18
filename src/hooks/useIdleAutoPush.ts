@@ -139,7 +139,13 @@ export function useIdleAutoPush(tRef: React.MutableRefObject<TFunc>) {
                 ` | took=${Date.now() - startedAt}ms`,
             )
             if (r.success) {
-              results.push({ path: repo.path, name: repo.name, success: true, isConflict: false })
+              // P0-2 修复：commit 成功但推送失败（pushed=false）不能计为完全成功，
+              // 状态点不应变绿；计入失败让下次同步重试
+              const fullySynced = r.pushed !== false
+              results.push({ path: repo.path, name: repo.name, success: fullySynced, isConflict: false })
+              if (!fullySynced) {
+                logger.warn('idle-auto-push', 'commit succeeded but push failed, will retry on next sync:', repo.path)
+              }
               continue
             }
             // 凭证缺失不打扰用户（等用户手动同步时处理），但必须留日志（此前完全静默）
@@ -157,6 +163,12 @@ export function useIdleAutoPush(tRef: React.MutableRefObject<TFunc>) {
             if (code === GitErrorCode.DetachedHead) {
               // detached HEAD 无法自动推送，留日志供排查（此前完全静默）
               logger.error('idle-auto-push', 'Idle auto push skipped (detached HEAD):', repo.path, r.error || '')
+              continue
+            }
+            if (code === GitErrorCode.LocalChangesOverwrite) {
+              // P1-11 修复：本地改动覆盖，自动推送无法推进——留可执行建议日志，
+              // 用户下次手动同步时 GitView 会给出「先提交或暂存」提示
+              logger.error('idle-auto-push', 'Idle auto push skipped (local changes would be overwritten, commit or stash first):', repo.path, r.error || '')
               continue
             }
             results.push({ path: repo.path, name: repo.name, success: false, isConflict: false })

@@ -16,7 +16,6 @@ const GIT_ERROR_HINTS: Partial<Record<GitErrorCode, string>> = {
   [GitErrorCode.DetachedHead]: '仓库处于 detached HEAD，请在 Git 面板切换或恢复分支',
   [GitErrorCode.DetachedHeadDiverged]: '本地与远程已分叉，请在 Git 面板处理分叉',
   [GitErrorCode.SubmoduleUncommitted]: '子模块存在未提交变更，请先在 Git 面板处理子模块',
-  [GitErrorCode.SubmoduleRefNeedsUpdate]: '子模块引用待更新，请先在 Git 面板处理子模块',
   [GitErrorCode.RebaseContinueFailed]: 'rebase 未完成，请在 Git 面板查看并继续操作',
   [GitErrorCode.MergeCommitFailed]: '合并提交失败，请在 Git 面板查看详情',
   [GitErrorCode.AlreadyUpToDate]: '远程无新提交，无需处理',
@@ -24,6 +23,8 @@ const GIT_ERROR_HINTS: Partial<Record<GitErrorCode, string>> = {
   [GitErrorCode.NotInGitRepo]: '目录不是有效的 git 仓库，请检查仓库配置',
   // S-26：本地改动覆盖错误——pull/merge 拒绝覆盖未提交改动，需先提交或暂存
   [GitErrorCode.LocalChangesOverwrite]: '本地有未提交改动会被同步覆盖，请先提交或暂存后再同步',
+  // P2 修复：文件不处于冲突态（重复 resolve 或状态过期），刷新冲突面板即可
+  [GitErrorCode.NotUnmerged]: '该文件已不在冲突状态（可能已解决），请刷新 Git 面板后重试',
 }
 
 /** 拼接单个仓库失败详情：名称 [错误码] 错误信息（处理建议）；错误码可 grep，建议可执行 */
@@ -99,7 +100,16 @@ export function useAutoSync(
             for (const repo of reposWithChanges) {
               const r = await commitAndPushRepo(repo, 'Auto sync')
               if (r.success) {
-                if (r.committed || r.pushed) {
+                // P2 修复：统计虚高——旧逻辑 `committed || pushed` 把「已提交但未推送」
+                // 也计入 pushSucceeded（succeeded+pushSucceeded 写入 syncStatus 和
+                // toast 计数），实际远端没有该提交。改为：推送确实到达远端（pushed）
+                // 才计成功；有远端但只提交未推送的按待推送留日志，下轮自动同步重试；
+                // 无远端仓库提交即完成，计成功。
+                if (r.pushed) {
+                  pushSucceeded++
+                } else if (repo.remoteUrl && r.committed) {
+                  logger.warn('app', 'Auto sync committed but not pushed (will retry next round):', repo.path)
+                } else {
                   pushSucceeded++
                 }
                 continue

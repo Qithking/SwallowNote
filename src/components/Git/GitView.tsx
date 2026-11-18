@@ -219,40 +219,53 @@ export function CommitSection({
     setCommitMessage((prev) => (prev === prevDefault ? nextDefault : prev))
     lastDefaultMessageRef.current = nextDefault
   }, [i18n.language])
-  const [credentialDialog, setCredentialDialog] = useState<{
-    open: boolean
+  // P2 修复：凭证框改队列——批量提交中多个仓库同时缺凭证时，旧实现每次
+  // setCredentialDialog 覆盖前一个，只有最后一个弹框显示，其余仓库被静默吞掉
+  //（混合结果中被 conflicted 分支的 failCount 汇总掩盖，用户根本不知道还有仓库没同步）。
+  // 逐个处理：处理完/取消当前后自动弹出下一个。
+  const [credentialDialogQueue, setCredentialDialogQueue] = useState<Array<{
     repoPath: string
     repoName: string
-    /** S-03：凭证框用途——pull（手动拉取认证失败）或 push（提交推送认证失败） */
     action: 'pull' | 'push'
-  }>({ open: false, repoPath: '', repoName: '', action: 'push' })
+  }>>([])
+  const activeCredential = credentialDialogQueue[0]
   const [isPushingWithCredentials, setIsPushingWithCredentials] = useState(false)
-  const [divergedDialog, setDivergedDialog] = useState<{
-    open: boolean
+  // P2 修复：分叉弹框同理改队列——批量提交多个仓库同时 DETACHED_HEAD_DIVERGED
+  // 时旧实现只弹最后一个，其余分叉仓库静默丢失
+  const [divergedDialogQueue, setDivergedDialogQueue] = useState<Array<{
     repoPath: string
     repoName: string
     branch: string
     localCommits: number
     remoteCommits: number
-  }>({ open: false, repoPath: '', repoName: '', branch: '', localCommits: 0, remoteCommits: 0 })
+  }>>([])
+  const activeDiverged = divergedDialogQueue[0]
   const [isResolvingDiverged, setIsResolvingDiverged] = useState(false)
   const showToast = useUIStore((s) => s.showToast)
 
   const handlePushWithCredentials = async (username: string, password: string) => {
+    if (!activeCredential) return
     setIsPushingWithCredentials(true)
     try {
       // S-03：凭证框按用途分发——pull 用 gitPull 重试拉取，push 用 gitPush 重试推送
-      if (credentialDialog.action === 'pull') {
-        await gitPull(credentialDialog.repoPath, username, password)
+      if (activeCredential.action === 'pull') {
+        await gitPull(activeCredential.repoPath, username, password)
       } else {
-        await gitPush(credentialDialog.repoPath, username, password)
+        // P1-10 修复：commitAndPush 的 AUTH 多发生在 pull 阶段（远端领先），
+        // 只重试 push 会卡 non-fast-forward 循环——改为先 pull 整合远端再 push
+        //（pull 失败时错误原样上抛，由下方 catch 显示，冲突态保留给冲突面板）
+        await gitPull(activeCredential.repoPath, username, password)
+        await gitPush(activeCredential.repoPath, username, password)
       }
-      setCredentialDialog({ open: false, repoPath: '', repoName: '', action: 'push' })
-      showToast(`${credentialDialog.repoName}: ${t('git.syncSuccess', { count: 1 })}`, 'success')
+      // P2 队列：当前处理完成，弹出下一个
+      setCredentialDialogQueue((q) => q.slice(1))
+      showToast(`${activeCredential.repoName}: ${t('git.syncSuccess', { count: 1 })}`, 'success')
       onRefresh()
     } catch (e) {
+      // 凭证错误：弹出下一个待处理仓库（当前仓库留在 errorPaths，可再次同步）
+      setCredentialDialogQueue((q) => q.slice(1))
       const errorMessage = String(e).trim()
-      showToast(`${credentialDialog.repoName}: ${errorMessage || t('git.unknownError')}`, 'error')
+      showToast(`${activeCredential.repoName}: ${errorMessage || t('git.unknownError')}`, 'error')
     } finally {
       setIsPushingWithCredentials(false)
     }
@@ -287,6 +300,7 @@ export function CommitSection({
     useGitStore.getState().setSyncStatus({ isSyncing: true })
     let successCount = 0
     let failCount = 0
+    let pendingPushCount = 0
     let hasCredentialRepo = false
     const errorDetails: string[] = []
     const conflictPaths: string[] = []
@@ -295,8 +309,19 @@ export function CommitSection({
     try {
       for (const repo of finalRepos) {
         const r = await commitAndPushRepo(repo, commitMessage)
-        if (r.success) {
+        if (r.success && r.pushed !== false) {
           successCount++
+          continue
+        }
+        // P0-2 修复：commit 成功但推送失败（pushed=false）不能计为「同步成功」——
+        // 远端没有该提交。有远端的仓库计入待推送（下次同步重试），
+        // 无远端仓库提交即完成，仍计成功。
+        if (r.success) {
+          if (repo.remoteUrl) {
+            pendingPushCount++
+          } else {
+            successCount++
+          }
           continue
         }
         if (r.error) {
@@ -306,13 +331,8 @@ export function CommitSection({
           // S-16 修复：本地累计凭证缺失标记——不能用 credentialDialog.open（state
           // 闭包读旧值，setState 异步更新不可靠）；toast 汇总据此给出引导提示
           hasCredentialRepo = true
-          // Show credential dialog for manual input
-          setCredentialDialog({
-            open: true,
-            repoPath: repo.path,
-            repoName: repo.name,
-            action: 'push',
-          })
+          // P2 队列修复：入队而不是覆盖，处理完当前自动弹下一个
+          setCredentialDialogQueue((q) => [...q, { repoPath: repo.path, repoName: repo.name, action: 'push' }])
           continue
         }
         const code = r.errorCode ?? GitErrorCode.Unknown
@@ -325,14 +345,14 @@ export function CommitSection({
           errorDetails.push(`${repo.name}: ${t('git.detachedHeadDiverged')}`)
           errorPaths.push(repo.path)
           if (info) {
-            setDivergedDialog({
-              open: true,
+            // P2 队列修复：入队而不是覆盖，分叉弹框逐个处理
+            setDivergedDialogQueue((q) => [...q, {
               repoPath: repo.path,
               repoName: repo.name,
               branch: info.branch,
               localCommits: info.localCommits,
               remoteCommits: info.remoteCommits,
-            })
+            }])
           }
         } else if (code === GitErrorCode.DetachedHead) {
           failCount++
@@ -345,10 +365,10 @@ export function CommitSection({
           failCount++
           errorDetails.push(`${repo.name}: ${t('git.submoduleHasChanges')}`)
           errorPaths.push(repo.path)
-        } else if (code === GitErrorCode.SubmoduleRefNeedsUpdate) {
-          // S-15 修复：同子模块未提交，计入失败而非成功
+        } else if (code === GitErrorCode.LocalChangesOverwrite) {
+          // P1-11 修复：本地改动覆盖——给出可执行指引，不显示裸 git 英文报错
           failCount++
-          errorDetails.push(`${repo.name}: ${t('git.submoduleRefNeedsUpdate')}`)
+          errorDetails.push(`${repo.name}: ${t('git.localChangesOverwrite')}`)
           errorPaths.push(repo.path)
         } else if (code === GitErrorCode.RebaseConflict) {
           failCount++
@@ -365,6 +385,15 @@ export function CommitSection({
           errorPaths.push(repo.path)
         }
       }
+    } catch (loopError) {
+      // P2 修复：循环内异常（commitAndPushRepo 意外抛出）此前只由 finally 复位
+      // isCommitting，异常继续向上传播会跳过下方 onRefresh 段 → isSyncing
+      // 永不复位，自动同步/手动同步的互斥标志卡死，后续所有同步静默失效。
+      // catch 内复位互斥标志并提示后直接返回。
+      useGitStore.getState().setSyncStatus({ isSyncing: false })
+      logger.error('git-view', 'Commit loop failed unexpectedly:', loopError)
+      showToast(t('git.unknownError'), 'error')
+      return
     } finally {
       // F3：无论成功、失败还是异常都复位提交中标志，避免标志卡死阻塞后续同步
       setIsCommitting(false)
@@ -398,7 +427,10 @@ export function CommitSection({
     }
     
     if (failCount === 0) {
-      if (successCount > 0 && !hasCredentialRepo) {
+      if (pendingPushCount > 0) {
+        // P0-2 修复：有提交未到达远端，用提示级消息代替「同步成功」
+        showToast(t('git.commitPendingPush', { count: pendingPushCount }), 'info')
+      } else if (successCount > 0 && !hasCredentialRepo) {
         showToast(t('git.syncSuccess', { count: successCount }), 'success')
       } else if (hasCredentialRepo && successCount === 0 && errorDetails.length === 0) {
         // S-16 修复：全部仓库凭证缺失（success/fail/error 均 0）——凭证框已打开，
@@ -418,7 +450,8 @@ export function CommitSection({
 
   // 分叉处理：attach=以当前进度为准，keep=保留本地分支；成功后自动重新同步
   const handleResolveDiverged = async (mode: 'attach' | 'keep') => {
-    const { repoPath, repoName, branch } = divergedDialog
+    if (!activeDiverged) return
+    const { repoPath, repoName, branch } = activeDiverged
     setIsResolvingDiverged(true)
     try {
       if (mode === 'attach') {
@@ -426,10 +459,14 @@ export function CommitSection({
       } else {
         await gitSwitchToLocalBranch(repoPath, branch)
       }
-      setDivergedDialog((d) => ({ ...d, open: false }))
+      // P2 队列修复：清空整个队列——剩余分叉仓库交给下方 handleCommit 重扫时
+      // 重新入队，避免「旧队列残留 + 重扫新条目」出现同一仓库重复弹框
+      setDivergedDialogQueue([])
       await onRefresh()
       await handleCommit()
     } catch (e) {
+      // 当前仓库处理失败：弹出下一个（P2 队列），本仓库留在 errorPaths
+      setDivergedDialogQueue((q) => q.slice(1))
       const msg = String(e).trim()
       showToast(`${repoName}: ${msg || t('git.unknownError')}`, 'error')
     } finally {
@@ -459,23 +496,23 @@ export function CommitSection({
         </Button>
       </div>
       <CredentialDialog
-        open={credentialDialog.open}
-        onClose={() => setCredentialDialog({ open: false, repoPath: '', repoName: '', action: 'push' })}
+        open={credentialDialogQueue.length > 0}
+        onClose={() => setCredentialDialogQueue((q) => q.slice(1))}
         onSubmit={handlePushWithCredentials}
-        repoName={credentialDialog.repoName}
-        repoPath={credentialDialog.repoPath}
+        repoName={activeCredential?.repoName ?? ''}
+        repoPath={activeCredential?.repoPath ?? ''}
         isLoading={isPushingWithCredentials}
       />
       <DetachedHeadDivergedDialog
-        open={divergedDialog.open}
-        repoName={divergedDialog.repoName}
-        branch={divergedDialog.branch}
-        localCommits={divergedDialog.localCommits}
-        remoteCommits={divergedDialog.remoteCommits}
+        open={divergedDialogQueue.length > 0}
+        repoName={activeDiverged?.repoName ?? ''}
+        branch={activeDiverged?.branch ?? ''}
+        localCommits={activeDiverged?.localCommits ?? 0}
+        remoteCommits={activeDiverged?.remoteCommits ?? 0}
         isLoading={isResolvingDiverged}
         onAttachToHead={() => handleResolveDiverged('attach')}
         onKeepLocal={() => handleResolveDiverged('keep')}
-        onCancel={() => setDivergedDialog((d) => ({ ...d, open: false }))}
+        onCancel={() => setDivergedDialogQueue((q) => q.slice(1))}
       />
     </>
   )
@@ -524,6 +561,8 @@ export function RepositoryItem({
     }
     setIsForceAction(true)
     setConfirmAction(null)
+    // P1-9 修复：执行期间置 isSyncing（入口检查只读不占用），与定时同步/空闲推送互斥
+    useGitStore.getState().setSyncStatus({ isSyncing: true })
     try {
       const r = await withCredentialFallback(repo, 'forcePush')
       if (r.success) {
@@ -538,6 +577,7 @@ export function RepositoryItem({
       showToast(t('git.forcePushFailed', { repo: repo.name, error: r.error || t('git.unknownError') }), 'error')
     } finally {
       setIsForceAction(false)
+      useGitStore.getState().setSyncStatus({ isSyncing: false })
     }
   }
 
@@ -549,6 +589,8 @@ export function RepositoryItem({
     }
     setIsForceAction(true)
     setConfirmAction(null)
+    // P1-9 修复：同 forcePush，执行期间置 isSyncing
+    useGitStore.getState().setSyncStatus({ isSyncing: true })
     try {
       const r = await withCredentialFallback(repo, 'forcePull')
       if (r.success) {
@@ -563,12 +605,19 @@ export function RepositoryItem({
       showToast(t('git.forcePullFailed', { repo: repo.name, error: r.error || t('git.unknownError') }), 'error')
     } finally {
       setIsForceAction(false)
+      useGitStore.getState().setSyncStatus({ isSyncing: false })
     }
   }
 
   // 凭证对话框提交处理
   const handleCredentialSubmit = async (username: string, password: string) => {
+    // P1-9 修复：凭证重试同样是 force 写操作，执行期间与其它同步互斥
+    if (useGitStore.getState().syncStatus.isSyncing) {
+      showToast(t('git.syncInProgress'), 'info')
+      return
+    }
     setIsCredentialLoading(true)
+    useGitStore.getState().setSyncStatus({ isSyncing: true })
     try {
       if (credentialDialog.action === 'forcePush') {
         await gitForcePush(repo.path, username, password)
@@ -589,6 +638,7 @@ export function RepositoryItem({
       )
     } finally {
       setIsCredentialLoading(false)
+      useGitStore.getState().setSyncStatus({ isSyncing: false })
     }
   }
 
@@ -948,10 +998,15 @@ const GitView = memo(function GitView() {
       // 此前仅 updateRepositoryStatuses（只改 status），rebase 后 uncommitted 计数
       // 失真，CommitSection「无改动/无仓库」提示基于陈旧数据。与 useAutoSync 的
       // scanGitRepos 回灌逻辑一致。
+      // P1-8 修复：重扫根必须用 workspace 全路径（与 useAutoSync.ts 一致）——
+      // 用仓库自身路径做扫描根会漏掉嵌套仓库，且整体替换列表会让未参与
+      // pull 的仓库从面板消失。
       try {
         const { scanGitRepos } = await import('@/lib/tauri')
         const { mapRepoInfosToRepositories } = await import('@/stores/git')
-        const scanPaths = results.map((r: PullResult) => r.path)
+        const scanPaths = workspaceMode === 'workspace'
+          ? (workspaceFolders || [])
+          : (rootPath ? [rootPath] : [])
         const scanResults = await Promise.all(
           scanPaths.map(async (p) => {
             try { return await scanGitRepos(p) } catch { return [] }

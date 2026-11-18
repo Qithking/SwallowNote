@@ -1,4 +1,28 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use super::runner::run_git;
+
+/// 获取 git 状态文件在 gitdir 内的真实路径。
+/// S-24 修复：worktree 的 `.git` 是文件（指向真实 gitdir），直接拼接
+/// `.git/rebase-merge` 会漏检状态文件；`git rev-parse --git-path` 输出
+/// gitdir 内实际路径，普通仓库行为不变（仍解析到 .git/rebase-merge 等）。
+/// 命令失败（非仓库/损坏）时回退到旧的 .git/<name> 拼接。
+/// P0-3 收编：自 conflict.rs 上移为共享工具，供 branch.rs / conflict_content.rs
+/// 统一使用，消除各处重复的 `.git/<name>` 直接拼接。
+pub fn git_state_path(repo_path: &str, name: &str) -> PathBuf {
+    run_git(repo_path, &["rev-parse", "--git-path", name])
+        .ok()
+        .map(|s| {
+            let p = PathBuf::from(s.trim());
+            if p.is_absolute() {
+                p
+            } else {
+                // 实测 `git rev-parse --git-path` 输出相对当前工作目录的路径
+                // （如 ".git/rebase-merge"），需以仓库根为基准解析为绝对路径
+                Path::new(repo_path).join(p)
+            }
+        })
+        .unwrap_or_else(|| Path::new(repo_path).join(".git").join(name))
+}
 
 /// Convert a filesystem path to the forward-slash form required by Git commands.
 /// Git expects '/' separators on Windows; passing native backslashes will

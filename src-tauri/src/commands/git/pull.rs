@@ -1,9 +1,9 @@
 use super::with_repo_lock;
 use super::runner::{run_git, run_git_with_env, run_git_blocking};
-use super::branch::{should_use_rebase, is_detached_head, fix_detached_head, get_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
+use super::branch::{should_use_rebase, is_detached_head, fix_detached_head, get_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state};
 use super::scan::get_remote_url;
 use super::askpass::{create_askpass_script, build_askpass_env};
-use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error, is_divergent_branches_error};
+use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error, is_divergent_branches_error, is_protocol_error};
 use log::{debug, warn};
 
 /// Pull changes from remote with rebase by default.
@@ -52,12 +52,13 @@ fn git_pull_impl(
     // 必须在 cleanup_stale_rebase_state 之后检查，否则 stale state 文件导致检测失效。
     if is_detached_head(&path) {
         if let Err(e) = fix_detached_head(&path) {
-            // 分叉需用户决策，上抛前端弹框
-            if is_diverged_error(&e) {
-                return Err(e);
-            }
             // P1#1 修复：非分叉失败也必须上抛——detached HEAD 未修复时 pull 必然
             // 报 "not currently on a branch"，静默 return Ok 会让前端误报同步成功
+            // P1-4 修复：带协议前缀的错误（REBASE_CONFLICT:/DETACHED_HEAD_DIVERGED: 等）
+            // 原样上抛，包装 "Failed to fix..." 会破坏前缀导致前端匹配失败
+            if is_protocol_error(&e) {
+                return Err(e);
+            }
             return Err(format!("Failed to fix detached HEAD before pull: {}", e));
         }
     }
@@ -163,11 +164,22 @@ fn git_force_pull_impl(
         return Ok(()); // No remote, nothing to pull
     }
 
+    // P1-6 修复：rebase/merge 冲突态下 force pull 的 reset --hard 会清掉工作区
+    // 冲突标记但残留 rebase 目录，随后命令触发 abort → 假成功且状态回滚。
+    // 与 push.rs S-05 对齐：有真实冲突先拒绝让用户经冲突面板解决，stale state 先清理。
+    if is_rebase_or_merge_in_progress(&path) {
+        if has_real_conflicts(&path) {
+            return Err("REBASE_CONFLICT:Cannot force pull while rebase/merge is in progress. Please resolve conflicts first.".to_string());
+        }
+        cleanup_stale_rebase_state(&path);
+    }
+
     // Fix detached HEAD before proceeding
     // 如果修复失败，后续 get_branch 可能返回 "HEAD" 导致 reset --hard origin/HEAD 失败
     if let Err(e) = fix_detached_head(&path) {
-        // 分叉需用户决策，上抛前端弹框
-        if is_diverged_error(&e) {
+        // P1-4 修复：带协议前缀的错误原样上抛（分叉 DETACHED_HEAD_DIVERGED 需用户
+        // 决策弹框；REBASE_CONFLICT 需冲突面板），包装会破坏前端 startsWith 匹配
+        if is_protocol_error(&e) {
             return Err(e);
         }
         // P1#1 修复：修复失败时 get_branch 可能返回 "HEAD" 导致 reset 失败，

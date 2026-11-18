@@ -41,10 +41,8 @@ describe('parseGitError · 其他错误码分支', () => {
     expect(r.code).toBe(GitErrorCode.SubmoduleUncommitted)
   })
 
-  it('SUBMODULE_REF_NEEDS_UPDATE:msg → SubmoduleRefNeedsUpdate', () => {
-    const r = parseGitError('SUBMODULE_REF_NEEDS_UPDATE:submodule ref needs update')
-    expect(r.code).toBe(GitErrorCode.SubmoduleRefNeedsUpdate)
-  })
+  // P1-11：SUBMODULE_REF_NEEDS_UPDATE 为后端从不产生的死分支，已从协议删除——
+  // 该字符串不再映射为独立错误码，落入 Unknown
 
   it('REBASE_CONTINUE_FAILED:msg → RebaseContinueFailed', () => {
     const r = parseGitError('REBASE_CONTINUE_FAILED:git rebase --continue failed')

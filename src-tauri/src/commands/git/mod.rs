@@ -71,9 +71,11 @@ pub async fn git_status(path: String) -> Result<GitStatus, String> {
         "".to_string()
     });
     // 不再吞掉 run_git 错误：git 失败时向上传播，避免前端误以为"无改动"。
-    let modified = run_git(&path, &["diff", "--name-only"])?;
-    let staged_modified = run_git(&path, &["diff", "--cached", "--name-only"])?;
-    let untracked = run_git(&path, &["ls-files", "--others", "--exclude-standard"])?;
+    // P2 quotepath 修复：关闭 core.quotepath，中文路径不被转义为 "\346..." 形式
+    //（转义路径会污染前端文件列表与打开文件逻辑）
+    let modified = run_git(&path, &["-c", "core.quotepath=false", "diff", "--name-only"])?;
+    let staged_modified = run_git(&path, &["-c", "core.quotepath=false", "diff", "--cached", "--name-only"])?;
+    let untracked = run_git(&path, &["-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"])?;
 
     // Filter modified to not include staged files
     let mut all_modified: Vec<String> = Vec::new();
@@ -122,5 +124,6 @@ pub async fn git_diff(path: String, file_path: String) -> Result<String, String>
         .strip_prefix(Path::new(&path))
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
     let git_path = to_git_path(relative_path);
-    run_git(&path, &["diff", "--", &git_path])
+    // P2 quotepath 修复：同 git_status，中文路径不做八进制转义，diff 结果可定位真实文件
+    run_git(&path, &["-c", "core.quotepath=false", "diff", "--", &git_path])
 }

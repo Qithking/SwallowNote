@@ -5,7 +5,7 @@ use super::runner::{run_git, run_git_no_trim, run_git_blocking};
 use super::paths::to_git_path;
 use super::branch::{is_detached_head, fix_detached_head, should_use_rebase, resolve_push_target_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::{get_remote_url, parse_gitmodules};
-use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error, is_divergent_branches_error};
+use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error, is_divergent_branches_error, is_protocol_error};
 use crate::i18n;
 use log::{debug, error, warn};
 
@@ -93,14 +93,16 @@ fn git_commit_and_push_impl(path: String, message: String) -> Result<CommitPushR
         cleanup_stale_rebase_state(&path);
     }
 
-    // G-06 修复：必须在 cleanup 之后检测；修复失败不阻塞（reflog 可恢复，下次同步重试）。
+    // G-06 修复：必须在 cleanup 之后检测。
+    // P1-1 修复：修复失败必须上抛（对齐 push.rs，取代原 warn+continue 设计）——
+    // 修复失败继续 commit 会把提交挂在 detached HEAD 上，切回分支即孤立丢失
+    // （reflog 虽可恢复但用户无从感知）。带协议前缀的错误（P1-4）原样上抛。
     if is_detached_head(&path) {
         if let Err(e) = fix_detached_head(&path) {
-            // 分叉需用户决策，上抛前端弹框
-            if is_diverged_error(&e) {
+            if is_protocol_error(&e) {
                 return Err(e);
             }
-            warn!("[WARN] git_commit_and_push: fix_detached_head failed ({}), continuing with commit", e);
+            return Err(format!("Failed to fix detached HEAD: {}", e));
         }
     }
 
@@ -114,7 +116,9 @@ fn git_commit_and_push_impl(path: String, message: String) -> Result<CommitPushR
 
     // 使用 --porcelain 输出避免依赖本地化文本（如 "modified content"），保证跨语言环境稳定。
     // 通过将 porcelain 变更路径与 .gitmodules 中的子模块路径比对，判定子模块是否有改动。
-    let status_output = run_git(&path, &["status", "--porcelain"])?;
+    // P1-7 修复：关闭 core.quotepath——中文子模块路径默认被转义为 "\346\226\207..."
+    // 带引号形式，与 .gitmodules 中的原始 UTF-8 路径恒不匹配 → 子模块提交静默不同步。
+    let status_output = run_git(&path, &["-c", "core.quotepath=false", "status", "--porcelain"])?;
     let gitmodules_path = std::path::Path::new(&path).join(".gitmodules");
     let has_submodule_modified = gitmodules_path.exists()
         && parse_gitmodules(&gitmodules_path)
@@ -190,14 +194,14 @@ fn git_commit_and_push_impl(path: String, message: String) -> Result<CommitPushR
         }
 
         // 防御性检查：pull 前再次确认 HEAD 未 detached。
-        // 上方 line 53-63 已处理 stale state 场景，此处为安全冗余。
+        // 上方已处理 stale state 场景，此处为安全冗余。
+        // P1-1 修复：同上，修复失败上抛而非 warn 后继续（避免提交挂游离 HEAD）。
         if is_detached_head(&path) {
             if let Err(e) = fix_detached_head(&path) {
-                // 分叉需用户决策，上抛前端弹框
-                if is_diverged_error(&e) {
+                if is_protocol_error(&e) {
                     return Err(e);
                 }
-                warn!("[WARN] git_commit_and_push: fix_detached_head before pull failed ({}), continuing", e);
+                return Err(format!("Failed to fix detached HEAD before pull: {}", e));
             }
         }
 
@@ -213,16 +217,17 @@ fn git_commit_and_push_impl(path: String, message: String) -> Result<CommitPushR
         if let Err(e) = pull_result {
             // If it's a conflict, do NOT abort - preserve conflict state for UI.
             // Keep conflict markers in the working tree so the user must resolve them in ConflictResolver.
-            if is_conflict_error(&e) {
-                return Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers preserved in working tree. Use ConflictResolver to resolve.]", e));
-            }
-            // Auth errors during pull
+            // P2 修复：分类顺序与 pull.rs 统一为 auth → local_changes → conflict（对偶归一），
+            // 此前 commit.rs 先查 conflict——URL/路径含 "conflict" 的认证错误会被误路由到冲突面板
             if is_auth_error(&e) {
                 return Err(format!("AUTH_REQUIRED:{}", e));
             }
             // S-26：本地未提交改动会被 merge 覆盖——中止流程并提示用户先提交/暂存
             if is_local_changes_overwrite_error(&e) {
                 return Err(format!("LOCAL_CHANGES_OVERWRITE:{}", e));
+            }
+            if is_conflict_error(&e) {
+                return Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers preserved in working tree. Use ConflictResolver to resolve.]", e));
             }
             // git ≥2.27 分叉自愈：pull.rebase 未设置且本地/远端历史分叉时，裸 `git pull`
             // 拒绝执行（exit 128，"Need to specify how to reconcile divergent branches"）。
@@ -252,12 +257,13 @@ fn git_commit_and_push_impl(path: String, message: String) -> Result<CommitPushR
         }
 
         // Fix detached HEAD that rebase may have caused（rebase 后修复 detached HEAD 是合理场景，保留）
+        // P1-1 修复：修复失败上抛而非 warn 后继续——pull/rebase 已产生新提交，
+        // 挂在游离 HEAD 上时后续 push 必然失败且状态失实
         if let Err(e) = fix_detached_head(&path) {
-            // 分叉需用户决策，上抛前端弹框
-            if is_diverged_error(&e) {
+            if is_protocol_error(&e) {
                 return Err(e);
             }
-            warn!("[WARN] git_commit_and_push: fix_detached_head after pull failed ({}), continuing", e);
+            return Err(format!("Failed to fix detached HEAD after pull: {}", e));
         }
 
         // Check again after pull - if we're now in a conflict state, don't push
@@ -346,7 +352,13 @@ pub fn commit_submodules(path: &str, message: &str) -> Result<(), String> {
             run_git(&submodule_full_path, &["add", "-A"])?;
             if let Err(e) = run_git(&submodule_full_path, &["commit", "-m", message]) {
                 // 子模块无改动（nothing to commit）不算错误
-                if !e.contains("nothing to commit") && !e.contains("working tree clean") {
+                // P2 修复：补 "no changes added to commit"——porcelain 有行但内容与 HEAD
+                // 一致（如换行归一化）时 add 后无暂存内容，git 报该句，旧代码误报
+                // SUBMODULE_UNCOMMITTED 让前端弹出「子模块未提交」误提示
+                if !e.contains("nothing to commit")
+                    && !e.contains("working tree clean")
+                    && !e.contains("no changes added to commit")
+                {
                     return Err(e);
                 }
             }
@@ -400,10 +412,16 @@ fn should_amend_last_auto_save(repo_path: &str, file_name: &str, git_path: &str)
         return false;
     }
 
-    // 计数 >0 表示已领先 upstream；无 upstream（从未推送）视为可 amend
+    // 计数 >0 表示已领先 upstream；无 upstream（@{upstream} 解析失败）时保守回退：
+    // P2 修复——旧逻辑 Err 即视为可 amend，但「无 upstream ≠ 未推送」（push 可经
+    // 显式 refspec 完成），amend 已推送历史会造成本地/远端分叉。改为检查是否有
+    // 远程分支包含 HEAD：有（已推送）则禁止 amend；无（从未推送/无远程）才可 amend。
     match run_git(repo_path, &["rev-list", "--count", "@{upstream}..HEAD"]) {
         Ok(count) => count.trim().parse::<u64>().unwrap_or(0) > 0,
-        Err(_) => true,
+        Err(_) => match run_git(repo_path, &["branch", "-r", "--contains", "HEAD"]) {
+            Ok(branches) => branches.trim().is_empty(),
+            Err(_) => true,
+        },
     }
 }
 
@@ -766,6 +784,16 @@ fn git_force_upload_file_impl(file_path: String, repo_root: String) -> Result<()
         .map_err(|e| format!("{}: {}", i18n::t("backend.git.invalidRelativePath"), e))?;
     let git_path = to_git_path(relative_path);
 
+    // P1-5 修复：与 push.rs S-05 同款冲突态入口检查——冲突态下 `git add <file>`
+    // 会把 unmerged 文件标 resolved，冲突标记入库并可 force push 污染远端。
+    // 必须在 add 之前拒绝，让用户经冲突面板解决；stale state 先清理。
+    if is_rebase_or_merge_in_progress(repo_path) {
+        if has_real_conflicts(repo_path) {
+            return Err("REBASE_CONFLICT:Cannot force upload while rebase/merge is in progress. Please resolve conflicts first.".to_string());
+        }
+        cleanup_stale_rebase_state(repo_path);
+    }
+
     // Check if remote exists
     // G-05 修复：区分"无远程配置"和"远程读取失败"
     let remote_url = get_remote_url(repo_path)?;
@@ -802,36 +830,17 @@ fn git_force_upload_file_impl(file_path: String, repo_root: String) -> Result<()
     }
 
     // Force push (with detached HEAD handling)
+    // P2 修复（漂移收编）：detached HEAD 恢复重试逻辑与 push.rs 的
+    // retry_push_on_detached_head 完全等价，改为复用同一 helper，
+    // 避免两处实现漂移（此处原实现与 push.rs 行为已有细微差异）。
     let result = run_git(repo_path, &["push", "--force"]);
     match result {
         Ok(_) => Ok(()),
         Err(e) => {
-            // detached HEAD 时 `git push --force` 没有上游分支，会报
-            // "fatal: You are not currently on a branch"。此时改为
-            // `push --force origin HEAD:refs/heads/<branch>` 显式指定目标分支。
-            let err_lower = e.to_lowercase();
-            if err_lower.contains("not currently on a branch") || err_lower.contains("detached head") {
-                if let Some(branch) = resolve_push_target_branch(repo_path) {
-                    debug!("[INFO] git_force_upload_file: detached HEAD, pushing HEAD:refs/heads/{}", branch);
-                    let retry = run_git(
-                        repo_path,
-                        &["push", "--force", "origin", &format!("HEAD:refs/heads/{}", branch)],
-                    );
-                    return match retry {
-                        Ok(_) => Ok(()),
-                        Err(retry_err) => {
-                            if is_auth_error(&retry_err) {
-                                Err(format!("AUTH_REQUIRED:{}", retry_err))
-                            } else {
-                                Err(format!("Failed to force push: {}", retry_err))
-                            }
-                        }
-                    };
-                }
-                return Err(format!(
-                    "Failed to force push: repository is in detached HEAD state and no target branch could be resolved: {}",
-                    e
-                ));
+            if let Some(retry_result) =
+                super::push::retry_push_on_detached_head(repo_path, true, None, &e)
+            {
+                return retry_result;
             }
             if is_auth_error(&e) {
                 Err(format!("AUTH_REQUIRED:{}", e))

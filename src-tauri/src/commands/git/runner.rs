@@ -220,7 +220,12 @@ pub fn run_git_with_env_no_trim(path: &str, args: &[&str], env_vars: &[(&str, &s
 /// 语义），若恰好有等待该锁的并发 git 进程，可能使其提前进入（git 自身
 /// 通过锁互斥，此处只清理确定由超时进程留下的残留）。
 fn cleanup_stale_index_lock(path: &str) {
-    let lock_file = std::path::Path::new(path).join(".git/index.lock");
+    // P2 修复：linked worktree 的 index.lock 位于主 gitdir 的
+    // worktrees/<name>/index.lock（此时 `.git` 只是文件而非目录），直接拼
+    // path/.git/index.lock 会错位漏删。git_state_path 经
+    // `git rev-parse --git-path index.lock` 解析真实路径，
+    // 解析失败（如 path 已损坏）时回退到旧拼接方式。
+    let lock_file = super::paths::git_state_path(path, "index.lock");
     if lock_file.exists() {
         let _ = std::fs::remove_file(&lock_file);
     }

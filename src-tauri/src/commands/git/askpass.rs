@@ -50,9 +50,13 @@ pub fn cleanup_stale_askpass_scripts() {
 }
 
 /// 创建临时 askpass 脚本并返回路径与 RAII 守卫。
-/// - Unix: 脚本内嵌凭证，权限 0700（需 x 位供 git 作为 GIT_ASKPASS 执行；0600 会导致 git exec 失败），RAII 自动清理。
-/// - Windows: 脚本不含凭证，从环境变量 GIT_USERNAME/GIT_PASSWORD 读取，RAII 自动清理。
-///   即使脚本残留也不会泄露凭证。
+/// P2 修复（凭证注入面收编）：脚本改为【静态内容】，凭证一律经环境变量
+/// GIT_USERNAME/GIT_PASSWORD 传入——此前 Unix 脚本把凭证字符串拼接进脚本体，
+/// 密码含单引号/换行/反斜杠时转义复杂且易出错（引号被 escape 后 shell
+/// 语义改变可能导致认证失败甚至命令注入）；Windows bat 的 `%VAR%` 展开对
+/// 含 `& | < > ^` 的密码会破坏命令结构。env 方式下脚本零凭证、零注入面。
+/// - Unix: 静态脚本，权限 0700（需 x 位供 git 作为 GIT_ASKPASS 执行），RAII 自动清理。
+/// - Windows: 静态脚本，delayed expansion 读取环境变量（特殊字符安全），RAII 自动清理。
 #[allow(unused_variables)]
 pub fn create_askpass_script(
     prefix: &str,
@@ -67,16 +71,22 @@ pub fn create_askpass_script(
     #[cfg(target_os = "windows")]
     let askpass_script = temp_dir.join(format!("swallownote_{}_askpass_{}.bat", prefix, unique_id));
 
+    // P2 修复：锚定提示语前缀 ^Username for——git 的密码提示是
+    // "Password for 'https://<user>@host':"，若用户名含 "username" 子串，
+    // 无锚定 grep 会把密码提示误判为用户名提示 → 永远回传用户名当密码，认证必败。
+    // 脚本为静态内容：不含任何凭证，凭证经 GIT_USERNAME/GIT_PASSWORD 环境变量传入。
+    // Unix 用 printf '%s\n' 而非 echo——echo 对以 '-' 开头的值会被当作选项。
     #[cfg(not(target_os = "windows"))]
-    let script_content = format!(
-        "#!/bin/sh\nif echo \"$1\" | grep -qi 'username'; then\n  echo '{}'\nelse\n  echo '{}'\nfi",
-        username.replace('\'', "'\\''"),
-        password.replace('\'', "'\\''")
-    );
+    let script_content = "#!/bin/sh\nif printf '%s' \"$1\" | grep -qi '^Username for'; then\n  printf '%s\\n' \"$GIT_USERNAME\"\nelse\n  printf '%s\\n' \"$GIT_PASSWORD\"\nfi".to_string();
 
-    // Windows 下脚本不含凭证，从环境变量读取，残留也不泄露凭证
+    // Windows：setlocal enabledelayedexpansion + !VAR! 展开发生在解析之后，
+    // 值中的 & | < > ( ) ^ 等特殊字符不会被重新解析（!VAR! 形式）；
+    //（/b = 行首匹配，同 Unix 侧锚定修复）
+    // P1 修复（code review）：bat 的 if 只接受 ERRORLEVEL/==/EXIST/DEFINED 条件，
+    // 旧写法 `if echo %1 | findstr ...` 是非法语法，cmd 直接报错致 askpass 失效。
+    // 改为先执行 findstr 以退出码判定（0=命中 Username 提示）。
     #[cfg(target_os = "windows")]
-    let script_content = "@echo off\nif echo %1 | findstr /i \"username\" >nul 2>&1 (\n  echo %GIT_USERNAME%\n) else (\n  echo %GIT_PASSWORD%\n)".to_string();
+    let script_content = "@echo off\nsetlocal enabledelayedexpansion\necho %1 | findstr /b /i \"Username for\" >nul 2>&1\nif %errorlevel%==0 (\n  echo(!GIT_USERNAME!\n) else (\n  echo(!GIT_PASSWORD!\n)".to_string();
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -104,28 +114,19 @@ pub fn create_askpass_script(
 }
 
 /// 构建 askpass 相关环境变量。
-/// Windows 下额外传入 GIT_USERNAME/GIT_PASSWORD，供通用 askpass 脚本读取。
+/// P2 修复：凭证一律经 GIT_USERNAME/GIT_PASSWORD 传入（Unix 与 Windows 统一），
+/// askpass 脚本为静态内容，杜绝凭证字符串拼接进脚本体的转义/注入问题。
 pub fn build_askpass_env<'a>(
     askpass_path: &'a str,
     username: &'a str,
     password: &'a str,
 ) -> Vec<(&'a str, &'a str)> {
-    // vars 仅在 Windows 下被 push，非 Windows 平台编译器会告警 unused_mut，故加 allow。
-    #[allow(unused_mut)]
-    let mut vars: Vec<(&'a str, &'a str)> = vec![
+    vec![
         ("GIT_ASKPASS", askpass_path),
         ("GIT_TERMINAL_PROMPT", "0"),
-    ];
-    #[cfg(target_os = "windows")]
-    {
-        vars.push(("GIT_USERNAME", username));
-        vars.push(("GIT_PASSWORD", password));
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (username, password);
-    }
-    vars
+        ("GIT_USERNAME", username),
+        ("GIT_PASSWORD", password),
+    ]
 }
 
 /// 前端可调用的清理残留 askpass 脚本命令
@@ -151,5 +152,70 @@ mod tests {
         let path_buf = guard.0.clone();
         drop(guard);
         assert!(!path_buf.exists());
+    }
+
+    /// P2 回归：askpass 提示语判定必须锚定 ^Username for——
+    /// 密码提示 "Password for 'https://<user>@host':" 中若用户名含 "username"
+    /// 子串（如 myusername01），旧的无锚定 grep 会把密码提示误判为用户名提示，
+    /// 密码永远回传成用户名 → 认证必败
+    #[test]
+    fn askpass_script_should_anchor_username_prompt() {
+        let (path, guard) = create_askpass_script("test", "myusername01", "secret").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("grep -qi '^Username for'"),
+            "username prompt match must be anchored to prompt prefix, got: {}", content);
+        assert!(!content.contains("grep -qi 'username'"),
+            "unanchored substring match must be removed, got: {}", content);
+        drop(guard);
+    }
+
+    /// P2 回归：脚本必须为静态内容——凭证不得拼接进脚本体。含单引号/换行/
+    /// shell 特殊字符的密码若走字符串拼接会破坏脚本语义（转义地狱）甚至构成
+    /// 命令注入；凭证一律经 GIT_USERNAME/GIT_PASSWORD 环境变量传入
+    #[test]
+    fn askpass_script_should_not_embed_credentials() {
+        let (path, guard) =
+            create_askpass_script("test", "we'ird-user", "p'ass\nline&x;rm").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(!content.contains("p'ass"), "password must not be embedded in script: {}", content);
+        assert!(!content.contains("we'ird"), "username must not be embedded in script: {}", content);
+        assert!(content.contains("$GIT_USERNAME") && content.contains("$GIT_PASSWORD"),
+            "script must read credentials from env vars, got: {}", content);
+        drop(guard);
+    }
+
+    /// 功能回归：脚本在真实 sh 下按提示类型返回用户名/密码，
+    /// 密码含单引号/& 等特殊字符时也必须原样返回（旧拼接实现会在此损坏）
+    #[test]
+    fn askpass_script_functional_username_and_password() {
+        let (path, guard) = create_askpass_script("test", "u1", "p&x'z").unwrap();
+        let out_user = std::process::Command::new("sh")
+            .arg(&path)
+            .arg("Username for 'https://github.com': ")
+            .env("GIT_USERNAME", "u1")
+            .env("GIT_PASSWORD", "p&x'z")
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out_user.stdout).trim(), "u1");
+        let out_pass = std::process::Command::new("sh")
+            .arg(&path)
+            .arg("Password for 'https://u1@github.com': ")
+            .env("GIT_USERNAME", "u1")
+            .env("GIT_PASSWORD", "p&x'z")
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out_pass.stdout).trim(), "p&x'z");
+        drop(guard);
+    }
+
+    /// build_askpass_env 必须始终携带 GIT_USERNAME/GIT_PASSWORD
+    /// （Unix 与 Windows 脚本统一从环境变量取凭证）
+    #[test]
+    fn askpass_env_should_include_credentials() {
+        let vars = build_askpass_env("/tmp/askpass.sh", "u", "p");
+        assert!(vars.contains(&("GIT_USERNAME", "u")));
+        assert!(vars.contains(&("GIT_PASSWORD", "p")));
+        assert!(vars.contains(&("GIT_ASKPASS", "/tmp/askpass.sh")));
+        assert!(vars.contains(&("GIT_TERMINAL_PROMPT", "0")));
     }
 }

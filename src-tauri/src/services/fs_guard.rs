@@ -42,6 +42,14 @@ pub const EXEMPTED_COMMANDS: &[FsExemption] = &[
         command: "read_clipboard_file_paths",
         reason: "无路径入参，读取系统剪贴板中的文件路径列表",
     },
+    FsExemption {
+        command: "git_clone",
+        reason: "clone 目标路径由前端系统对话框/用户输入选择，可位于任意用户目录（工作区外为合法场景）；git 命令仅在目标目录内创建 .git 与检出文件（P2 审计：未过 fs_guard 白名单，评估后登记豁免）",
+    },
+    FsExemption {
+        command: "git_init",
+        reason: "init 目标为用户选择的目录（多为已打开工作区或其外部合法场景）；git 命令仅在目标目录内创建 .git（P2 审计：未过 fs_guard 白名单，评估后登记豁免）",
+    },
 ];
 
 /// 组装允许根列表：工作区根（若已打开）+ 应用数据目录。

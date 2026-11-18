@@ -19,7 +19,12 @@ import { useGitStore } from '@/stores/git'
  * @param pulledRepoPaths 本次 pull 实际参与的仓库路径（成功 + 冲突）
  */
 export async function refreshOpenTabsAfterSync(pulledRepoPaths: string[]): Promise<void> {
-  const repoPathSet = new Set(pulledRepoPaths)
+  // P2 修复：Windows 路径大小写不敏感（NTFS），tab.path 与仓库根路径大小写
+  // 不一致（如 C:\Notes vs C:\notes）时前缀匹配恒失败 → tab 漏刷新，
+  // 编辑器内容回退旧版。Windows 下统一小写比较；POSIX 大小写敏感保持原样。
+  const normalizePath = (p: string) =>
+    typeof process !== 'undefined' && process.platform === 'win32' ? p.toLowerCase() : p
+  const repoPathSet = new Set(pulledRepoPaths.map(normalizePath))
   const editorStore = useEditorStore.getState()
   const gitStore = useGitStore.getState()
 
@@ -33,11 +38,23 @@ export async function refreshOpenTabsAfterSync(pulledRepoPaths: string[]): Promi
     // 仅处理普通文件 tab（conflict/diff/plugin tab 无磁盘文件内容可加载）
     if (tab.type === 'conflict' || tab.type === 'diff' || tab.type === 'plugin') continue
     // 仅处理属于本次 pull 仓库的 tab
-    if (!repoPathSet.has(tab.path) && ![...repoPathSet].some((p) => tab.path.startsWith(p + '/'))) continue
+    const tabPath = normalizePath(tab.path)
+    if (!repoPathSet.has(tabPath) && ![...repoPathSet].some((p) => tabPath.startsWith(p + '/'))) continue
 
-    // 冲突文件：关闭普通 tab，用户通过冲突面板处理（不加载含标记内容）
+    // 冲突文件：工作树含标记，不得加载进普通 tab
     if (conflictFilePaths.has(tab.path)) {
-      editorStore.removeTab(tab.id)
+      // P0-1 修复：此分支原先位于 dirty 保护之前且无条件 removeTab——dirty tab
+      // 的未保存编辑随 tab 一起被静默丢弃（数据丢失）。
+      // 按用户约束分流（冲突文件只标记、冲突只能在冲突面板处理）：
+      // - dirty：保留 tab 与内存中未保存编辑（从未含冲突标记，不写任何冲突标识
+      //   进文件），仅标记外部变更提示磁盘已是冲突态；文件仍是 unmerged 状态，
+      //   冲突解决路径不变，仍只能走冲突面板。
+      // - 非 dirty：保持现行为，关闭 tab 引导用户从冲突面板处理。
+      if (tab.isDirty || tab.frontmatterDirty) {
+        editorStore.markExternalChange(tab.id)
+      } else {
+        editorStore.removeTab(tab.id)
+      }
       continue
     }
 

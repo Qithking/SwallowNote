@@ -21,8 +21,10 @@ pub fn should_use_rebase(path: &str) -> bool {
 
 /// 解析"应该把当前 HEAD 推送到哪个远程分支"。
 /// 优先级：rebase 状态记录的分支 > 当前分支（已处理 detached HEAD）> 远程默认分支。
+/// P2 修复：此处用 get_rebase_branch_strict（仅状态文件）——push 目标解析
+/// 禁止 ORIG_HEAD 回退，避免把 detached HEAD 推到残留记录指向的旧分支。
 pub fn resolve_push_target_branch(repo_path: &str) -> Option<String> {
-    if let Some(branch) = get_rebase_branch(repo_path) {
+    if let Some(branch) = get_rebase_branch_strict(repo_path) {
         if !branch.is_empty() && branch != "HEAD" {
             return Some(branch);
         }
@@ -74,7 +76,13 @@ pub fn get_branch(path: &str) -> Result<String, String> {
 
 /// Get the branch name that is being rebased, from the rebase state files
 /// This works even when HEAD is detached during a rebase
-pub fn get_rebase_branch(repo_path: &str) -> Option<String> {
+///
+/// P2 修复：新增严格模式 get_rebase_branch_strict——只信任 rebase 状态文件，
+/// 不做 ORIG_HEAD 回退。ORIG_HEAD 是"上一次操作前 HEAD"的残留记录，可能指向
+/// 早已不相关的旧分支；resolve_push_target_branch（push 场景）若用它会把
+/// detached HEAD 推到旧分支（误推历史）。ORIG_HEAD 回退只保留给
+/// fix_detached_head 的恢复场景（get_rebase_branch）。
+pub fn get_rebase_branch_strict(repo_path: &str) -> Option<String> {
     let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
     let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
 
@@ -98,6 +106,18 @@ pub fn get_rebase_branch(repo_path: &str) -> Option<String> {
                 return Some(branch.to_string());
             }
         }
+    }
+
+    None
+}
+
+/// Get the branch name that is being rebased, from the rebase state files
+/// This works even when HEAD is detached during a rebase
+/// 检查优先级：1) rebase 状态文件中的 head-name  2) ORIG_HEAD 回退（仅恢复场景）
+pub fn get_rebase_branch(repo_path: &str) -> Option<String> {
+    // 严格模式：状态文件存在时直接采用，不落入 ORIG_HEAD 回退
+    if let Some(branch) = get_rebase_branch_strict(repo_path) {
+        return Some(branch);
     }
 
     // Fallback: try reading ORIG_HEAD and checking if it matches a branch
@@ -223,10 +243,11 @@ fn force_remove_stale_state_files(repo_path: &str) {
 
 /// G-14 修复：检测当前是否处于 rebase 场景（统一三处重复的检测逻辑）。
 /// rebase 和 merge 场景下 stage 映射相反，必须正确区分。
+/// P0-3 修复：经 git_state_path（git rev-parse --git-path）解析状态文件路径，
+/// 支持 linked worktree（.git 为文件时状态在主 gitdir worktrees/<name>/ 下）。
 pub fn is_rebase_scenario(repo_path: &str) -> bool {
-    let rebase_merge = Path::new(&repo_path).join(".git/rebase-merge");
-    let rebase_apply = Path::new(&repo_path).join(".git/rebase-apply");
-    rebase_merge.exists() || rebase_apply.exists()
+    super::paths::git_state_path(repo_path, "rebase-merge").exists()
+        || super::paths::git_state_path(repo_path, "rebase-apply").exists()
 }
 
 /// Fix detached HEAD state by switching back to the correct branch.
@@ -448,6 +469,14 @@ fn stash_create(repo_path: &str) -> bool {
 /// 分叉决策一：checkout -B 把本地分支重置到当前 HEAD（丢弃分支独有提交），需前端确认。
 #[tauri::command]
 pub async fn git_attach_branch_to_head(path: String, branch: String) -> Result<(), String> {
+    // P1-2 修复：checkout -B 是写操作，与 commit/pull/push 等写命令并发会踩踏——
+    // 补 per-repo 互斥与 blocking 线程池（同 git_switch_to_local_branch 范式）。
+    let lock_key = path.clone();
+    run_git_blocking(move || with_repo_lock(&lock_key, || git_attach_branch_to_head_impl(path, branch)))
+        .await
+}
+
+fn git_attach_branch_to_head_impl(path: String, branch: String) -> Result<(), String> {
     let stashed = stash_create(&path);
     let res = run_git(&path, &["checkout", "-B", &branch, "HEAD"]);
     if stashed {
@@ -470,7 +499,17 @@ pub async fn git_switch_to_local_branch(path: String, branch: String) -> Result<
 fn git_switch_to_local_branch_impl(path: String, branch: String) -> Result<(), String> {
     let stashed = stash_create(&path);
     let res = run_git(&path, &["checkout", &branch]);
-    if stashed {
+    if res.is_ok() && stashed {
+        // P1-3 修复：stash pop 冲突不能吞掉返回 Ok（前端会误报切换成功）。
+        // 对齐 checkout_with_stash 范式：git 已在工作区写入冲突标记且 index 处于
+        // unmerged，复用 REBASE_CONFLICT 码让前端进入冲突面板；stash 条目保留，
+        // 用户解决冲突后可自行 drop。
+        if let Err(e) = run_git(&path, &["stash", "pop", "--quiet"]) {
+            warn!("[WARN] git_switch_to_local_branch: stash pop failed: {}. Stash retained.", e);
+            return Err(format!("REBASE_CONFLICT:Stash pop conflict. Stash retained for recovery: {}", e));
+        }
+    } else if res.is_err() && stashed {
+        // checkout 失败时把 stash pop 回来，还原工作区
         let _ = run_git(&path, &["stash", "pop", "--quiet"]);
     }
     res.map(|_| ()).map_err(|e| format!("Failed to switch to branch {}: {}", branch, e))
