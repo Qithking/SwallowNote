@@ -41,13 +41,21 @@ export function buildBackend(project: PluginProject, outputBinPath: string): voi
 /**
  * swallow-plugin build：
  *   vite build + （工程含 src-tauri 时）cargo build --release
- *   后端二进制放 <pluginDir>/backend/plugin_<id>（build.sh 约定，宿主运行期查找位置）。
+ *   后端二进制放 <pluginDir>/backend/plugin_<id>（build.sh 约定，宿主运行期查找位置），
+ *   同时复制到 <pluginDir>/dist/backend/plugin_<id>（package.sh 约定，zip 打包收集位置）。
+ *   vite build 会清空 dist/，必须在其之后写入，否则 dist/backend 缺失。
  */
 export function cmdBuild(pluginDir: string): void {
   const project = loadProject(pluginDir)
   runViteBuild(project.dir)
   if (project.hasBackend) {
-    buildBackend(project, join(project.dir, 'backend', `plugin_${project.pluginId}`))
+    const binName = `plugin_${project.pluginId}`
+    buildBackend(project, join(project.dir, 'backend', binName))
+    // 产物同步进 dist/backend（zip 打包收集位置；vite 清空 dist 后必须补写）
+    const distBackend = join(project.dir, 'dist', 'backend')
+    mkdirSync(distBackend, { recursive: true })
+    copyFileSync(join(project.dir, 'backend', binName), join(distBackend, binName))
+    console.log(`==> 后端二进制已同步 -> dist/backend/${binName}`)
   } else {
     console.log('==> 无 src-tauri，跳过后端构建')
   }

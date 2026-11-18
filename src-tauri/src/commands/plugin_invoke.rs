@@ -337,8 +337,17 @@ async fn spawn_plugin_process(
     plugin_path: String,
     app_data_dir: &std::path::Path,
 ) -> Result<Arc<PluginProcess>, PluginError> {
-    let binary = resolve_backend_binary(&plugin_id, &plugin_path)
-        .ok_or_else(|| PluginError::NotFound(format!("plugin backend not found (plugin_id={})", plugin_id)))?;
+    let binary = resolve_backend_binary(&plugin_id, &plugin_path).ok_or_else(|| {
+        // 诊断日志：打印实际解析路径与候选文件状态，便于定位"backend not found"
+        let backend_dir = std::path::Path::new(&plugin_path).join("backend");
+        warn!(
+            "[plugin] backend not found: plugin_path={}, backend_dir_exists={}, host_dir={}",
+            plugin_path,
+            backend_dir.is_dir(),
+            host_platform_dir()
+        );
+        PluginError::NotFound(format!("plugin backend not found (plugin_id={})", plugin_id))
+    })?;
 
     let mut cmd = build_command(binary.to_string_lossy().as_ref());
     // Pass the plugin id as the only argument so the child can sanity-

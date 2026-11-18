@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "swallow-plugin build",
+    "build": "swallow-plugin build && node ../../scripts/sync-backend-dist.cjs",
     "package": "swallow-plugin package",
     "typecheck": "tsc --noEmit"
   },
