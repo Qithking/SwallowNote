@@ -57,7 +57,7 @@ async function applyHostCompatibility(index: PluginIndex): Promise<PluginIndex> 
   return filterHostCompatibleEntries(index, await getHostVersionCached())
 }
 
-export const OFFICIAL_REPO_URL = 'https://raw.githubusercontent.com/Qithking/SwallowNote/refs/heads/main/plugins/repo.json'
+export const OFFICIAL_REPO_URL = 'https://github.com/Qithking/SwallowNotePlugins/releases/latest/download/repo.json'
 
 export interface RepoSource {
   name: string
