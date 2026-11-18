@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-11-18T07:30:12Z",
+  "updated_at": "2026-11-18T08:43:27Z",
   "plugins": [
     {
       "id": "com.swallownote.mindmap",
@@ -15,11 +15,11 @@
         "brainstorm"
       ],
       "download_url": "./mindmap/com.swallownote.mindmap.zip",
-      "sha256": "60efc7fed6df7cdbbee9edac2a9b9948757d7db42a3254d3761d6ea42d8c833f",
-      "changelog": "初版发布：从 host 抽出为独立插件，支持 .smm 文件编辑、5 大布局组（逻辑结构/思维导图/组织结构/时间轴/鱼骨图）、多种主题、外框/水印/节点样式",
-      "published_at": "2026-11-12T08:19:27Z",
+      "sha256": "947a3442ab5450495017a7aa8f400282752224aaedda427c0c0fc525209edbcb",
+      "changelog": "重新发布: 跨平台包布局(backend 平台子目录)",
+      "published_at": "2026-11-18T08:42:20Z",
       "dependencies": [],
-      "signature_b64": "hXe0ockdlunE+ddun4s2B1WqDh1HW/NYYmxvkiB+n0M2KeLjpWRK3GRb7beAUF4AuVgIgg1IX4jmGUHkoEkQDA==",
+      "signature_b64": "mk+p0XJWgNwRTRSdNRkvrXqeDyBBTz81iI+RMQK3r7MH59aCHLBPgJ9WN4RRg2G9TVOenNdtjV6IaPiXVTIkBQ==",
       "permissions": [
         "editor",
         "events",
@@ -40,11 +40,11 @@
         "html"
       ],
       "download_url": "./export/com.swallownote.export.zip",
-      "sha256": "a8dee7f6f3621e86b0f9fd37a1b70ec8185e3044daf86423184919edd7432d17",
-      "changelog": "v0.2.4: 同步 manifest 与构建产物；v0.2.0: 新增 HTML 导出菜单(高保真);Word 保真度提升 — DOCX 嵌入真实图片(markdown 相对路径)、DOCX 表格列宽与边框、mermaid/katex/markmap 代码块标记 (前端渲染);PDF 自定义块渲染(动态 import mermaid/katex/markmap);修复 PDF RangeError + Tauri window-size 报错;PDF 100 页+ 不 OOM",
-      "published_at": "2026-11-12T08:19:17Z",
+      "sha256": "7037fd6777ab1066f20f6b26aa3b174e027dc120b57eee8ebd169ae2c8987344",
+      "changelog": "重新发布: 跨平台包布局(backend 平台子目录)",
+      "published_at": "2026-11-18T08:43:26Z",
       "dependencies": [],
-      "signature_b64": "g4x4U75BtM5fu/wQhKtqWQBU3spU31lZQNTNtX0dIRvmn6wqOzMVFjSlUdf6q0/I+o91KVK2jTEN/VJ4r2f7Cw==",
+      "signature_b64": "JS25VsKfwfsg71BnqN8blBuNe3RTOXYNsK/aM9MLxWcSYUHqAgz0d4jMTIpSHNc5ScktxJeCe2TH5x1j4l8tCA==",
       "permissions": [
         "backend"
       ]
@@ -63,11 +63,11 @@
         "theme"
       ],
       "download_url": "./wenyan/com.swallownote.wenyan.zip",
-      "sha256": "7e10bba67363eff780df5d60555487653713323442ce6b315d55012f52785f09",
-      "changelog": "v0.1.8: 清理已废弃权限声明（clipboard），与新版权限模型对齐",
-      "published_at": "2026-11-17T05:39:18Z",
+      "sha256": "38499dbe13d1b2ab7c3c0f8c76e70221e63551afd2da9d4b4ccb425908f5d37e",
+      "changelog": "重新发布: 跨平台包布局(backend 平台子目录)",
+      "published_at": "2026-11-18T08:42:26Z",
       "dependencies": [],
-      "signature_b64": "+nPSGqPtdOQGOyRb+N6UgayThM//E1meGTQAzxYtGGLT3NFp49cz2+YLg2dvxnFOpVa3LBPVhG2FCl6s7GJOBg==",
+      "signature_b64": "7UvCM54qkpIDFd/mwWQDXraOpb4oIAoFyqdqPjyHYkOCSbTlaEq/sttn+AtitmICt9jQAn7TfTRK+x0PZLpmBw==",
       "permissions": [
         "storage",
         "events",
@@ -90,11 +90,11 @@
         "markdown"
       ],
       "download_url": "./picgo/com.swallownote.picgo.zip",
-      "sha256": "fabb66a1fb7b71c6768fefd0fea28f3051c481909eae1e87ad6420a7b42d31ba",
-      "changelog": "v0.1.4: 清理已废弃权限声明（network/clipboard），与新版权限模型对齐",
-      "published_at": "2026-11-17T05:39:06Z",
+      "sha256": "ac698978cb9eeafad4a5f8b4aa3c3c92d5ee479d2ad2dd753d65a3f434705db3",
+      "changelog": "重新发布: 跨平台包布局(backend 平台子目录)",
+      "published_at": "2026-11-18T08:42:22Z",
       "dependencies": [],
-      "signature_b64": "OdS8axt7ZTwBHR6sQ6BVzRtAX9TMhK8ygjhxUgKiO32i3CyzMAcon8YIVwotRvdBGnflLXellV59mXih0oztBQ==",
+      "signature_b64": "xOAUmW1Hoj5MIUJcrGwATnNBGL9h5HzgD3q94SiYIM25bc5grNxWnTLY31IdoSbpc4qeXt57NJfCMvv6ggpfCw==",
       "permissions": [
         "storage",
         "events"
@@ -114,11 +114,11 @@
         "markdown"
       ],
       "download_url": "./secret-disk/com.swallownote.secret-disk.zip",
-      "sha256": "143ca977af9783f5a595a1b4c2961b8a0a76544f1d85063253d52c6ed395ef28",
-      "changelog": "初版发布：加密的私有笔记空间，支持 SQLite 加密存储、密码管理、主编辑器打开密盘笔记、文件树右键操作及安全增强",
-      "published_at": "2026-11-18T07:29:56Z",
+      "sha256": "639c5b3a62be3f0a2e825468300fe0311e79323c140a0f41ba7e1c5dcb4ddab7",
+      "changelog": "重新发布: 跨平台包布局(backend 平台子目录)",
+      "published_at": "2026-11-18T08:43:27Z",
       "dependencies": [],
-      "signature_b64": "QaChOdSlCvexQQSVFIsFF+9n8uef9iSoy6hlx3xwX7aEzK+pjSFep/IigzLihnhhsmXb2WZZcYXljyw4bW5qCA==",
+      "signature_b64": "zobZ6HqXB7qUxazHGOS6upG2F2/ymKPNvtxsTa4HgxI33lzrzcc/8Gu2uPElGVHY7P89dfyolnHumSNxQM+nAQ==",
       "permissions": [
         "storage",
         "events",
@@ -139,12 +139,12 @@
         "writing"
       ],
       "download_url": "./ai/com.swallownote.ai.zip",
-      "sha256": "2c3a24ee0235064bcc926a947d946be05febd65cfb1d1f0f49be7a3dbda76f80",
-      "changelog": "初版发布：多会话对话与流式输出、编辑器右键 9 种角色动作、就地应用、@文件引用、多 Provider 接入（OpenAI 兼容 / Anthropic / Google / Ollama）、模型管理与密钥安全存储、历史数据迁移",
-      "published_at": "2026-11-12T08:18:59Z",
+      "sha256": "efe9aeaa263f279485265a409bc85d4d9789461be6811c9c646f63e8468e73c1",
+      "changelog": "重新发布: 跨平台包布局(backend 平台子目录)",
+      "published_at": "2026-11-18T08:43:24Z",
       "dependencies": [],
       "min_host_version": "0.1.0",
-      "signature_b64": "/PegBMgkweF+6ghE4qHLb22gzLtB/YATwZwjz7DaApChDnGvX9k/W5grGdj7TfpCBSX1O//qX0eJhGnb1rPXAA==",
+      "signature_b64": "Fj50Btsp2pFcbiecpPH3UDm+JauWtK/cwi8Unk2LwcmevLxmtsMGHpZypqWEtQsT813tvUyw5WRqDNjQOMx3DA==",
       "permissions": [
         "storage",
         "events",

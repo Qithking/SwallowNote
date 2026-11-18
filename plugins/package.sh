@@ -28,7 +28,7 @@ ZIP_PATH="$PLUGIN_DIR/com.swallownote.$PLUGIN_NAME.zip"
 [ -f "$PLUGIN_DIR/dist/index.js" ] || { echo "错误: 缺少 $PLUGIN_DIR/dist/index.js（请先构建）" >&2; exit 1; }
 
 python3 - "$PLUGIN_DIR" "$ZIP_PATH" <<'PYEOF'
-import json, os, sys, zipfile
+import json, os, platform, sys, zipfile
 
 plugin_dir, zip_path = sys.argv[1], sys.argv[2]
 dist = os.path.join(plugin_dir, "dist")
@@ -54,11 +54,45 @@ if os.path.isfile(top_settings):
     entries["settings.json"] = top_settings
 elif os.path.isfile(dist_settings):
     entries["settings.json"] = dist_settings
-# backend/: dist/backend 下的文件全部带上 backend/ 前缀
+# backend/: 递归收集 dist/backend（支持平台子目录布局 backend/<platform>/…）
 backend_dir = os.path.join(dist, "backend")
+
+def host_platform_dir():
+    s, m = platform.system(), platform.machine()
+    if s == "Darwin":
+        return "darwin-aarch64" if m == "arm64" else "darwin-x86_64"
+    if s == "Windows":
+        return "windows-x86_64"
+    if s == "Linux":
+        return "linux-aarch64" if m == "aarch64" else "linux-x86_64"
+    return "unknown"
+
+root_backend_files = []
 if os.path.isdir(backend_dir):
-    for name in sorted(os.listdir(backend_dir)):
-        entries[f"backend/{name}"] = os.path.join(backend_dir, name)
+    for root, _dirs, files in os.walk(backend_dir):
+        for name in sorted(files):
+            rel = os.path.relpath(os.path.join(root, name), backend_dir)
+            entries[f"backend/{rel}"] = os.path.join(root, name)
+            if "/" not in rel:
+                root_backend_files.append(rel)
+
+# 平台整理（跨平台单包布局）：根部二进制同时复制进 host 平台子目录，
+# 根文件保留为旧版 app 的兜底（旧 resolve 只认根布局）。
+host_dir = host_platform_dir()
+for rel in root_backend_files:
+    entries[f"backend/{host_dir}/{rel}"] = os.path.join(backend_dir, rel)
+
+# 兜底：部分构建流程会清空 dist/backend 但把产物留在插件根 backend/。
+# 若 dist 下没有任何 backend 条目，改从插件根 backend/ 收集。
+if not root_backend_files:
+    alt_backend = os.path.join(plugin_dir, "backend")
+    if os.path.isdir(alt_backend):
+        for root, _dirs, files in os.walk(alt_backend):
+            for name in sorted(files):
+                rel = os.path.relpath(os.path.join(root, name), alt_backend)
+                entries[f"backend/{rel}"] = os.path.join(root, name)
+                if "/" not in rel:
+                    entries[f"backend/{host_dir}/{rel}"] = os.path.join(root, name)
 
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:

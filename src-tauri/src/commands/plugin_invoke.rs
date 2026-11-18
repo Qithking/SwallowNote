@@ -279,8 +279,12 @@ fn build_command(program: &str) -> Command {
 }
 
 /// Resolve the backend binary path for a plugin. Tries, in order:
-/// 1. `<plugin_path>/backend/plugin_<id>` (+ `.exe` on Windows)
-/// 2. `<plugin_path>/backend/<id>`       (+ `.exe` on Windows)
+/// 1. `<plugin_path>/backend/<host_triple>/plugin_<id>` (+ `.exe` on Windows) — 新跨平台布局
+/// 2. `<plugin_path>/backend/plugin_<id>` (+ `.exe` on Windows)          — 旧单平台布局
+/// 3. `<plugin_path>/backend/<id>`       (+ `.exe` on Windows)
+///
+/// host_triple 由 `consts::OS + consts::ARCH` 映射（如 darwin-aarch64、
+/// windows-x86_64），与打包脚本的子目录命名约定一致。
 ///
 /// Returns `None` if no candidate exists; the caller is responsible
 /// for surfacing a user-friendly "backend not found" error.
@@ -292,17 +296,39 @@ fn resolve_backend_binary(plugin_id: &str, plugin_path: &str) -> Option<PathBuf>
 
     let exe_suffix = std::env::consts::EXE_SUFFIX;
 
+    // 1) 新跨平台布局：backend/<triple>/plugin_<id>[.exe]
+    let triple_dir = backend_dir.join(host_platform_dir());
+    let triple_bin = triple_dir.join(format!("plugin_{}{}", plugin_id, exe_suffix));
+    if triple_bin.is_file() {
+        return Some(triple_bin);
+    }
+
+    // 2) 旧单平台布局：backend/plugin_<id>[.exe]
     let primary = backend_dir.join(format!("plugin_{}{}", plugin_id, exe_suffix));
     if primary.is_file() {
         return Some(primary);
     }
 
+    // 3) 旧兜底：backend/<id>[.exe]
     let fallback = backend_dir.join(format!("{}{}", plugin_id, exe_suffix));
     if fallback.is_file() {
         return Some(fallback);
     }
 
     None
+}
+
+/// 当前宿主对应的打包平台子目录名（与 package.sh 的命名约定一致）。
+/// 只覆盖实际发布目标：macOS(aarch64/x86_64) 与 Windows(x86_64)。
+fn host_platform_dir() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "darwin-aarch64",
+        ("macos", "x86_64") => "darwin-x86_64",
+        ("windows", "x86_64") => "windows-x86_64",
+        ("linux", "x86_64") => "linux-x86_64",
+        ("linux", "aarch64") => "linux-aarch64",
+        _ => "unknown",
+    }
 }
 
 // 在持有外层 map mutex 时 spawn 子进程；进程死亡通过 stdout EOF 检测。
@@ -1005,6 +1031,38 @@ mod tests {
     fn resolve_backend_binary_missing_returns_none() {
         let dir = tempdir();
         assert!(resolve_backend_binary("demo", dir.to_str().unwrap()).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_backend_binary_prefers_host_platform_dir() {
+        // 新跨平台布局：backend/<host>/plugin_demo 优先于旧布局根文件
+        let dir = tempdir();
+        let backend = dir.join("backend");
+        let host_dir = backend.join(host_platform_dir());
+        std::fs::create_dir_all(&host_dir).unwrap();
+        std::fs::write(backend.join("plugin_demo"), "").unwrap(); // 旧布局
+        let bin = host_dir.join("plugin_demo");
+        std::fs::write(&bin, "").unwrap();
+        let resolved =
+            resolve_backend_binary("demo", dir.to_str().unwrap()).expect("resolve");
+        assert_eq!(resolved, bin);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_backend_binary_falls_back_to_legacy_when_platform_dir_absent() {
+        // 包内只有本机无关的旧布局时仍能解析（兼容旧包）
+        let dir = tempdir();
+        let backend = dir.join("backend");
+        let other = backend.join("windows-x86_64");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("plugin_demo.exe"), "").unwrap(); // 非本机平台
+        let bin = backend.join(format!("plugin_demo{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&bin, "").unwrap();
+        let resolved =
+            resolve_backend_binary("demo", dir.to_str().unwrap()).expect("resolve");
+        assert_eq!(resolved, bin);
     }
 
     /// Tiny helper to create a unique temp dir under the system temp
