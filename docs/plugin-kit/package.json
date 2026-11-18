@@ -1,0 +1,35 @@
+{
+  "name": "@swallow-note/plugin-kit",
+  "version": "0.1.0",
+  "description": "SwallowNote 插件共享构建工具：create / build / package 一条龙，收敛插件工程样板。",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "swallow-plugin": "./dist/cli.js"
+  },
+  "main": "./dist/vite-config.js",
+  "module": "./dist/vite-config.js",
+  "types": "./dist/vite-config.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/vite-config.d.ts",
+      "import": "./dist/vite-config.js"
+    },
+    "./cli": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "template",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}

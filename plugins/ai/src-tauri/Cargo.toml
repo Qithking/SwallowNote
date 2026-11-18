@@ -1,0 +1,20 @@
+[package]
+name = "swallownote-plugin-ai"
+version = "0.1.5"
+description = "SwallowNote AI plugin backend — LLM provider adapter"
+authors = ["SwallowNote"]
+edition = "2021"
+
+[[bin]]
+name = "plugin_com_swallownote_ai"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+# 明文本地库（§6.5：ai.db 明文 + 0600；key 不入库，走宿主 secureStorage）
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 同步 HTTP 客户端（用户已确认选型：ureq + 线程，无 async 运行时）
+ureq = "2"
+uuid = { version = "1", features = ["v4"] }

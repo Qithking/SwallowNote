@@ -1,0 +1,35 @@
+{
+  "name": "swallownote-plugin-export",
+  "version": "0.2.5",
+  "description": "Export Markdown documents to Word (.docx) or PDF format",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "swallow-plugin build && node ../../scripts/sync-backend-dist.cjs",
+    "package": "swallow-plugin package",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@swallow-note/plugin-sdk": "file:../../docs/plugin-sdk",
+    "jspdf": "^4.2.1",
+    "modern-screenshot": "^4.7.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@swallow-note/plugin-kit": "file:../../docs/plugin-kit",
+    "@tauri-apps/api": "^2.0",
+    "@tauri-apps/plugin-dialog": "^2.0",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "d3": "^7.9.0",
+    "i18next": "^23.0.0",
+    "katex": "^0.16.11",
+    "markmap-view": "^0.18.12",
+    "mermaid": "^11.4.0",
+    "react-i18next": "^14.0.0",
+    "sonner": "^1.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}

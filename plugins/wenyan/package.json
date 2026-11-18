@@ -1,0 +1,38 @@
+{
+  "name": "swallownote-plugin-wenyan",
+  "version": "0.1.7",
+  "description": "Wenyan Markdown typesetting plugin for WeChat Official Accounts",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "swallow-plugin build && node ../../scripts/sync-backend-dist.cjs",
+    "package": "swallow-plugin package",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-radio-group": "^1.3.0",
+    "@radix-ui/react-select": "^2.2.0",
+    "@radix-ui/react-slot": "^1.2.0",
+    "@swallow-note/plugin-sdk": "file:../../docs/plugin-sdk",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@wenyan-md/core": "^3.0.10",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "html2canvas": "^1.4.1",
+    "lucide-react": "^0.460.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tailwind-merge": "^2.5.0"
+  },
+  "devDependencies": {
+    "@swallow-note/plugin-kit": "file:../../docs/plugin-kit",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.3.0",
+    "sonner": "^1.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}

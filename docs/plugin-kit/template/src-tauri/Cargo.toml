@@ -1,0 +1,16 @@
+[package]
+name = "swallownote-plugin-__KEBAB__"
+version = "0.1.0"
+description = "__PLUGIN_DESCRIPTION__"
+authors = ["SwallowNote"]
+edition = "2021"
+
+[[bin]]
+name = "__BIN_NAME__"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 宿主插件 RPC 骨架 crate（仓库内 docs/plugin-rpc，create 时按相对位置写入路径）
+swallow-plugin-rpc = { path = "__RPC_DEP_PATH__" }

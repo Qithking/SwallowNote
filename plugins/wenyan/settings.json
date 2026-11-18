@@ -1,0 +1,81 @@
+{
+  "version": 2,
+  "title": "公众号推送设置",
+  "description": "配置微信公众号 API 凭据与推送默认参数。AppID/AppSecret 可在公众号后台「设置与开发 → 基本配置」获取。请确保已将本机公网 IP 加入公众号 IP 白名单。",
+  "fields": [
+    {
+      "key": "gzhSection",
+      "label": "公众号凭据",
+      "type": "string",
+      "required": false,
+      "description": "AppID 和 AppSecret 可在微信公众平台「设置与开发 → 基本配置」页面获取。AppSecret 仅用于在后端获取 access_token，不会暴露给前端。"
+    },
+    {
+      "key": "gzhAppId",
+      "label": "AppID",
+      "type": "string",
+      "required": true,
+      "description": "公众号的 AppID（应用ID）。"
+    },
+    {
+      "key": "gzhAppSecret",
+      "label": "AppSecret",
+      "type": "password",
+      "secret": true,
+      "required": true,
+      "description": "公众号的 AppSecret（应用密钥）。仅用于在后端获取 access_token，不会暴露给前端网络栈。"
+    },
+
+    {
+      "key": "gzhPushDefaultsSection",
+      "label": "推送默认参数",
+      "type": "string",
+      "required": false,
+      "description": "推送图文到草稿箱时使用的默认参数，可在推送确认对话框中临时修改。"
+    },
+    {
+      "key": "gzhDefaultAuthor",
+      "label": "默认作者",
+      "type": "string",
+      "required": false,
+      "description": "图文的作者名，留空则不填。"
+    },
+    {
+      "key": "gzhDefaultThumbMediaId",
+      "label": "封面图素材ID",
+      "type": "string",
+      "required": false,
+      "description": "已上传到公众号素材库的封面图片 media_id。可在公众号后台「素材管理」中获取。留空则不设封面（注意：公众号草稿箱要求封面图，留空可能导致推送失败）。"
+    },
+    {
+      "key": "gzhDefaultDigest",
+      "label": "默认摘要",
+      "type": "string-multiline",
+      "required": false,
+      "description": "图文摘要（120字以内），留空则公众号自动截取正文开头。"
+    },
+    {
+      "key": "gzhContentSourceUrl",
+      "label": "原文链接",
+      "type": "string",
+      "required": false,
+      "description": "「阅读原文」链接，留空则不显示。"
+    },
+    {
+      "key": "gzhNeedOpenComment",
+      "label": "开启评论",
+      "type": "boolean",
+      "default": false,
+      "required": false,
+      "description": "推送后是否允许评论。需公众号已开通评论功能。"
+    },
+    {
+      "key": "gzhOnlyFansCanComment",
+      "label": "仅粉丝可评论",
+      "type": "boolean",
+      "default": false,
+      "required": false,
+      "description": "是否仅关注者可评论（false=所有人，true=仅粉丝）。"
+    }
+  ]
+}

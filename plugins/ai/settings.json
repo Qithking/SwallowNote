@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "title": "AI 助手设置",
+  "description": "配置 AI 对话的系统提示词等选项。",
+  "fields": [
+    {
+      "key": "systemPrompt",
+      "label": "系统提示词",
+      "type": "string-multiline",
+      "required": false,
+      "description": "发送给模型的系统提示词，留空使用内置默认值。"
+    }
+  ]
+}
