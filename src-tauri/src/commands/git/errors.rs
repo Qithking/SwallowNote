@@ -38,6 +38,15 @@ pub fn is_auth_error(error: &str) -> bool {
         || lower.contains("fatal: unable to access") && (lower.contains("403") || lower.contains("401") || lower.contains("authentication") || lower.contains("credential"))
 }
 
+/// git ≥2.27：pull.rebase 未设置且本地/远端历史分叉时，裸 `git pull` 拒绝执行
+/// （exit 128，"You have divergent branches and need to specify how to reconcile them."）。
+/// 该错误不属于 conflict/auth/local-changes-overwrite，调用方需显式选择
+/// 合并策略（默认 merge → `pull --no-rebase`）重试，否则同步将永久失败。
+pub fn is_divergent_branches_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("divergent branches") || lower.contains("need to specify how to reconcile")
+}
+
 /// S-26：本地未提交改动会被 merge/pull 覆盖时的拒绝错误
 /// （git 提示 "please commit your changes or stash them"）。
 /// 此前未归类，落入通用失败分支，前端无法给出"提交或暂存本地改动"
@@ -216,5 +225,21 @@ mod tests {
         assert!(!is_local_changes_overwrite_error("authentication failed"));
         assert!(!is_local_changes_overwrite_error("Everything up-to-date"));
         assert!(!is_local_changes_overwrite_error(""));
+    }
+
+    /// git ≥2.27 分叉拒绝错误识别：hint 与 fatal 两种表述都必须命中，
+    /// 冲突/认证等其它错误不受影响
+    #[test]
+    fn test_is_divergent_branches_error_patterns() {
+        assert!(is_divergent_branches_error(
+            "hint: You have divergent branches and need to specify how to reconcile them.\nfatal: Need to specify how to reconcile divergent branches."
+        ));
+        assert!(is_divergent_branches_error("fatal: Need to specify how to reconcile divergent branches."));
+        assert!(is_divergent_branches_error("YOU HAVE DIVERGENT BRANCHES"));
+        // 非该模式：冲突、认证、成功等不误报
+        assert!(!is_divergent_branches_error("CONFLICT (content): Merge conflict"));
+        assert!(!is_divergent_branches_error("authentication failed"));
+        assert!(!is_divergent_branches_error("Everything up-to-date"));
+        assert!(!is_divergent_branches_error(""));
     }
 }

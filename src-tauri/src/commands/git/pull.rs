@@ -3,8 +3,8 @@ use super::runner::{run_git, run_git_with_env, run_git_blocking};
 use super::branch::{should_use_rebase, is_detached_head, fix_detached_head, get_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::get_remote_url;
 use super::askpass::{create_askpass_script, build_askpass_env};
-use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error};
-use log::warn;
+use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error, is_divergent_branches_error};
+use log::{debug, warn};
 
 /// Pull changes from remote with rebase by default.
 /// username/password 同时提供时使用临时 GIT_ASKPASS 脚本提供凭证。
@@ -72,17 +72,16 @@ fn git_pull_impl(
 
     // 凭证可选：同时提供时创建临时 askpass 脚本（Unix 内嵌凭证 0600；Windows 读环境变量）
     let creds = username.as_deref().zip(password.as_deref());
-    let result = match creds {
-        Some((u, p)) => {
-            let (askpass_path, _askpass_guard) = create_askpass_script("pull", u, p)?;
-            let env_vars = build_askpass_env(&askpass_path, u, p);
-            let r = run_git_with_env(&path, &pull_args, &env_vars);
-            // Clean up the askpass script immediately
-            let _ = std::fs::remove_file(&askpass_path);
-            r
-        }
-        None => run_git(&path, &pull_args),
-    };
+    let mut result = execute_pull(&path, &pull_args, creds);
+
+    // git ≥2.27 分叉自愈：pull.rebase 未设置且本地/远端历史分叉时，裸 `git pull`
+    // 拒绝执行（exit 128，"Need to specify how to reconcile divergent branches"）。
+    // 按设计约定默认 merge，显式 `pull --no-rebase` 重试一次；若合并产生冲突，
+    // 由下方 is_conflict_error 路径上抛 REBASE_CONFLICT 交给冲突面板。
+    if result.is_err() && !use_rebase && is_divergent_branches_error(result.as_ref().unwrap_err()) {
+        debug!("[INFO] git_pull: divergent branches detected, retrying with explicit merge (--no-rebase)");
+        result = execute_pull(&path, &["pull", "--no-rebase"], creds);
+    }
 
     match result {
         Ok(_) => {
@@ -117,6 +116,22 @@ fn git_pull_impl(
                 Err(format!("Failed to pull: {}", e))
             }
         }
+    }
+}
+
+/// 执行一次 pull（凭证可选：同时提供时经临时 askpass 脚本提供凭证）。
+/// run_git_with_env 返回 stdout 内容，此处只关心成败，映射为 ()。
+fn execute_pull(path: &str, args: &[&str], creds: Option<(&str, &str)>) -> Result<(), String> {
+    match creds {
+        Some((u, p)) => {
+            let (askpass_path, _askpass_guard) = create_askpass_script("pull", u, p)?;
+            let env_vars = build_askpass_env(&askpass_path, u, p);
+            let r = run_git_with_env(path, args, &env_vars).map(|_| ());
+            // Clean up the askpass script immediately
+            let _ = std::fs::remove_file(&askpass_path);
+            r
+        }
+        None => run_git(path, args).map(|_| ()),
     }
 }
 
@@ -196,7 +211,71 @@ fn git_force_pull_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::test_utils::git_cmd;
+    use super::super::test_utils::{git_cmd, setup_conflict_repo};
+
+    /// 构造双向分叉仓库（双方均有新提交，pull.rebase 未设置）：
+    /// bare origin ← work 已推送 base；第二个克隆向远端前进一个提交（模拟另一台设备），
+    /// work 本地前进一个提交。复现 git ≥2.27 裸 `git pull` 分叉时 exit 128 的场景。
+    fn setup_divergent_branches_repo() -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        tempfile::TempDir,
+        std::path::PathBuf,
+    ) {
+        let remote_tmp = tempfile::tempdir().unwrap();
+        git_cmd(remote_tmp.path(), &["init", "--bare", "-q", "-b", "main"]);
+
+        let work_tmp = setup_conflict_repo();
+        let work_repo = work_tmp.path().to_path_buf();
+        git_cmd(&work_repo, &["remote", "add", "origin", remote_tmp.path().to_str().unwrap()]);
+        git_cmd(&work_repo, &["push", "-q", "origin", "main"]);
+        git_cmd(&work_repo, &["branch", "--set-upstream-to=origin/main", "main"]);
+
+        // 第二个克隆：向远端前进一个提交
+        let clone_tmp = tempfile::tempdir().unwrap();
+        let clone_repo = clone_tmp.path().join("clone");
+        git_cmd(clone_tmp.path(), &["clone", "-q", remote_tmp.path().to_str().unwrap(), clone_repo.to_str().unwrap()]);
+        git_cmd(&clone_repo, &["config", "user.email", "other@example.com"]);
+        git_cmd(&clone_repo, &["config", "user.name", "Other"]);
+        std::fs::write(clone_repo.join("remote_only.txt"), "remote\n").unwrap();
+        git_cmd(&clone_repo, &["add", "remote_only.txt"]);
+        git_cmd(&clone_repo, &["commit", "-q", "-m", "remote-only"]);
+        git_cmd(&clone_repo, &["push", "-q", "origin", "main"]);
+
+        // work 仓库：本地前进一个提交 → 双方分叉
+        std::fs::write(work_repo.join("local_only.txt"), "local\n").unwrap();
+        git_cmd(&work_repo, &["add", "local_only.txt"]);
+        git_cmd(&work_repo, &["commit", "-q", "-m", "local-only"]);
+
+        (remote_tmp, clone_tmp, work_tmp, work_repo)
+    }
+
+    /// 分叉且 pull.rebase 未设置（默认 merge）时，git_pull 必须显式按 merge 策略整合，
+    /// 不能报 "Failed to pull: ... divergent branches"（git ≥2.27 裸 pull 拒绝分叉）。
+    #[tokio::test]
+    async fn test_git_pull_recovers_from_divergent_branches() {
+        let (_remote, _clone, _work, repo) = setup_divergent_branches_repo();
+        let repo_str = repo.to_str().unwrap();
+
+        if let Err(e) = git_pull(repo_str.to_string(), None, None).await {
+            panic!("git_pull should recover from divergent branches, got error: {}", e);
+        }
+
+        // merge 完成：origin/main 已是本地 main 的祖先（远端提交被整合），且包含远端独有的提交
+        let out = std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["merge-base", "--is-ancestor", "origin/main", "main"])
+            .status()
+            .unwrap();
+        assert!(
+            out.success(),
+            "pull must integrate remote commits (origin/main should be ancestor of main)"
+        );
+        assert!(
+            repo.join("remote_only.txt").exists(),
+            "merge must bring remote-only commit into working tree"
+        );
+    }
 
     /// Reproduces the user's bug: stale rebase state + detached HEAD causes
     /// git_pull to fail with "You are not currently on a branch".

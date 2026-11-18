@@ -5,7 +5,7 @@ use super::runner::{run_git, run_git_no_trim, run_git_blocking};
 use super::paths::to_git_path;
 use super::branch::{is_detached_head, fix_detached_head, should_use_rebase, resolve_push_target_branch, is_rebase_or_merge_in_progress, has_real_conflicts, cleanup_stale_rebase_state, is_diverged_error};
 use super::scan::{get_remote_url, parse_gitmodules};
-use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error};
+use super::errors::{is_conflict_error, is_auth_error, is_local_changes_overwrite_error, is_divergent_branches_error};
 use crate::i18n;
 use log::{debug, error, warn};
 
@@ -224,11 +224,31 @@ fn git_commit_and_push_impl(path: String, message: String) -> Result<CommitPushR
             if is_local_changes_overwrite_error(&e) {
                 return Err(format!("LOCAL_CHANGES_OVERWRITE:{}", e));
             }
-            // Non-conflict, non-auth error (network, zlib, etc.):
-            // Clean up stale rebase state that pull --rebase may have left.
-            // commit 已成功，pull 失败不阻塞，继续 push。
-            warn!("[WARN] git_commit_and_push: pull failed ({}), attempting direct push", e);
-            cleanup_stale_rebase_state(&path);
+            // git ≥2.27 分叉自愈：pull.rebase 未设置且本地/远端历史分叉时，裸 `git pull`
+            // 拒绝执行（exit 128，"Need to specify how to reconcile divergent branches"）。
+            // 按设计约定默认 merge，显式 `pull --no-rebase` 重试整合远端提交；
+            // 重试产生冲突则上抛 REBASE_CONFLICT，其余失败按原逻辑继续 push。
+            if !use_rebase && is_divergent_branches_error(&e) {
+                debug!("[INFO] git_commit_and_push: divergent branches detected, retrying with explicit merge (--no-rebase)");
+                match run_git(&path, &["pull", "--no-rebase"]) {
+                    Ok(_) => {
+                        debug!("[INFO] git_commit_and_push: divergent branches integrated via explicit merge pull");
+                    }
+                    Err(retry_e) => {
+                        if is_conflict_error(&retry_e) {
+                            return Err(format!("REBASE_CONFLICT:{} [Note: Conflict markers preserved in working tree. Use ConflictResolver to resolve.]", retry_e));
+                        }
+                        warn!("[WARN] git_commit_and_push: retry merge pull failed ({}), attempting direct push", retry_e);
+                        cleanup_stale_rebase_state(&path);
+                    }
+                }
+            } else {
+                // Non-conflict, non-auth error (network, zlib, etc.):
+                // Clean up stale rebase state that pull --rebase may have left.
+                // commit 已成功，pull 失败不阻塞，继续 push。
+                warn!("[WARN] git_commit_and_push: pull failed ({}), attempting direct push", e);
+                cleanup_stale_rebase_state(&path);
+            }
         }
 
         // Fix detached HEAD that rebase may have caused（rebase 后修复 detached HEAD 是合理场景，保留）
@@ -922,6 +942,71 @@ mod tests {
             .output()
             .unwrap();
         String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
+    }
+
+    /// 构造双向分叉仓库（双方均有新提交，pull.rebase 未设置）：
+    /// bare origin ← work 已推送 base；第二个克隆向远端前进一个提交（模拟另一台设备），
+    /// work 留一个未提交改动（模拟本机 Auto-save）。
+    /// 复现 git ≥2.27 裸 `git pull` 在分叉时报 exit 128 "divergent branches" 的场景。
+    fn setup_divergent_branches_repo() -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        tempfile::TempDir,
+        std::path::PathBuf,
+    ) {
+        let remote_tmp = tempfile::tempdir().unwrap();
+        git_cmd(remote_tmp.path(), &["init", "--bare", "-q", "-b", "main"]);
+
+        let work_tmp = setup_conflict_repo();
+        let work_repo = work_tmp.path().to_path_buf();
+        git_cmd(&work_repo, &["remote", "add", "origin", remote_tmp.path().to_str().unwrap()]);
+        git_cmd(&work_repo, &["push", "-q", "origin", "main"]);
+        git_cmd(&work_repo, &["branch", "--set-upstream-to=origin/main", "main"]);
+
+        // 第二个克隆：向远端前进一个提交
+        let clone_tmp = tempfile::tempdir().unwrap();
+        let clone_repo = clone_tmp.path().join("clone");
+        git_cmd(clone_tmp.path(), &["clone", "-q", remote_tmp.path().to_str().unwrap(), clone_repo.to_str().unwrap()]);
+        git_cmd(&clone_repo, &["config", "user.email", "other@example.com"]);
+        git_cmd(&clone_repo, &["config", "user.name", "Other"]);
+        std::fs::write(clone_repo.join("remote_only.txt"), "remote\n").unwrap();
+        git_cmd(&clone_repo, &["add", "remote_only.txt"]);
+        git_cmd(&clone_repo, &["commit", "-q", "-m", "remote-only"]);
+        git_cmd(&clone_repo, &["push", "-q", "origin", "main"]);
+
+        // work 仓库：只留未提交改动，由 git_commit_and_push 产生本地提交 → 双方分叉
+        std::fs::write(work_repo.join("local_only.txt"), "local\n").unwrap();
+
+        (remote_tmp, clone_tmp, work_tmp, work_repo)
+    }
+
+    /// 分叉且 pull.rebase 未设置（默认 merge）时，git_commit_and_push 必须自愈：
+    /// 显式 merge pull 整合远端提交后 push 成功，
+    /// 而不是陷入 pull exit 128 被吞 → push rejected → 下轮重试的永久死循环。
+    #[tokio::test]
+    async fn test_git_commit_and_push_recovers_from_divergent_branches() {
+        let (_remote, _clone, _work, repo) = setup_divergent_branches_repo();
+        let repo_str = repo.to_str().unwrap();
+
+        let res = git_commit_and_push(repo_str.to_string(), "sync".to_string()).await;
+        let (committed, pushed) = match res {
+            Ok(r) => (r.committed, r.pushed),
+            Err(e) => panic!("should recover from divergent branches, got error: {}", e),
+        };
+        assert!(committed, "should create a local commit from the dirty file");
+        assert!(
+            pushed,
+            "push must succeed after integrating remote commits, not defer to next sync"
+        );
+
+        // 远端整合结果：本地 main 已推送到 origin/main，且包含远端独有的提交
+        let local_head = rev_parse(&repo, "main");
+        let remote_head = rev_parse(&repo, "origin/main");
+        assert_eq!(local_head, remote_head, "local main must be pushed to origin/main");
+        assert!(
+            repo.join("remote_only.txt").exists(),
+            "merge must bring remote-only commit into working tree"
+        );
     }
 
     /// A1：同一文件连续 auto-save（仓库从未推送）应 amend 合并为一个提交。
