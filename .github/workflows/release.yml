@@ -124,56 +124,6 @@ jobs:
           npm run build
           npx tauri build --target x86_64-unknown-linux-gnu
 
-      # 插件后端构建：产出按宿主 host_platform_dir() 约定的平台目录布局，
-      # 与 zip 双布局（backend/<平台>/ 兜底 backend/根）配套。
-      - name: Build Plugin Backends (macOS)
-        if: matrix.platform == 'macos-15'
-        shell: bash
-        run: |
-          for p in plugins/*/; do
-            [ -d "$p/src-tauri" ] || continue
-            name=$(basename "$p")
-            echo "==> backend: $name"
-            (cd "$p/src-tauri" && cargo build --release --target aarch64-apple-darwin)
-            (cd "$p/src-tauri" && cargo build --release --target x86_64-apple-darwin)
-            mkdir -p "$p/dist/backend/darwin-aarch64" "$p/dist/backend/darwin-x86_64"
-            cp "$p"/src-tauri/target/aarch64-apple-darwin/release/plugin_* "$p/dist/backend/darwin-aarch64/"
-            cp "$p"/src-tauri/target/x86_64-apple-darwin/release/plugin_* "$p/dist/backend/darwin-x86_64/"
-          done
-
-      - name: Build Plugin Backends (Windows)
-        if: matrix.platform == 'windows-latest'
-        shell: bash
-        run: |
-          for p in plugins/*/; do
-            [ -d "$p/src-tauri" ] || continue
-            name=$(basename "$p")
-            echo "==> backend: $name"
-            (cd "$p/src-tauri" && cargo build --release)
-            mkdir -p "$p/dist/backend/windows-x86_64"
-            cp "$p/src-tauri/target/release/plugin_"*.exe "$p/dist/backend/windows-x86_64/"
-          done
-
-      - name: Build Plugin Backends (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          for p in plugins/*/; do
-            [ -d "$p/src-tauri" ] || continue
-            name=$(basename "$p")
-            echo "==> backend: $name"
-            (cd "$p/src-tauri" && cargo build --release)
-            mkdir -p "$p/dist/backend/linux-x86_64"
-            cp "$p/src-tauri/target/release/plugin_"* "$p/dist/backend/linux-x86_64/"
-          done
-
-      - name: Upload Plugin Backend Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: plugin-backends-${{ matrix.platform }}
-          path: plugins/*/dist/backend/**
-          retention-days: 7
-          if-no-files-found: ignore
-
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -204,41 +154,6 @@ jobs:
       - name: List Artifacts
         run: |
           find artifacts -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.deb" -o -name "*.AppImage" \)
-
-      # 插件发布：合并三平台 backend 产物 → package.sh 打包签名 → 上传 zip 到 Release
-      - name: Assemble Plugin Backends
-        run: |
-          for plat in macos-15 windows-latest ubuntu-22.04; do
-            if [ -d "artifacts/plugin-backends-$plat" ]; then
-              cp -R "artifacts/plugin-backends-$plat/." .
-            fi
-          done
-          find plugins/*/dist/backend -type f | sort
-
-      - name: Package & Sign Plugins
-        env:
-          SWALLOWNOTE_PLUGIN_SIGNING_KEY: ${{ secrets.SWALLOWNOTE_PLUGIN_SIGNING_KEY }}
-        run: |
-          cargo build --release --example sign_plugin --manifest-path src-tauri/Cargo.toml
-          # 签名密钥由 Secret 提供；未配置则插件包不带签名（市场侧校验会拒绝，需先配置）
-          for p in ai export mindmap picgo wenyan secret-disk; do
-            [ -d "plugins/$p" ] || continue
-            VER=$(node -p "require('./plugins/$p/package.json').version")
-            ./plugins/package.sh "$p" "v${VER} 插件发布（CI 自动构建，含全平台 backend）"
-          done
-          cat plugins/repo.json | head -40
-
-      - name: Upload Plugin Packages to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            plugins/*/com.swallownote.*.zip
-            plugins/repo.json
-          draft: false
-          prerelease: false
-          overwrite: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate Release Body
         id: release_body
