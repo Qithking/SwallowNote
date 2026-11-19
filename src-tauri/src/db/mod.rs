@@ -37,8 +37,11 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     conn.pragma_update(None, "mmap_size", 67108864)?;
     // Reduce page cache size to limit memory usage (2MB)
     conn.pragma_update(None, "cache_size", -2000)?;
-    // WAL 模式下使用 NORMAL 同步级别，避免每次事务都 fsync（默认 FULL 极慢）
-    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    // WAL 模式下必须使用 FULL 同步级别：NORMAL 提交不 fsync，硬关机/断电会
+    // 丢失自上次 OS 刷盘/checkpoint 起的全部已提交事务（曾导致重启后 tab 恢复全灭）。
+    // 本库写入为小事务（会话保存 500ms 防抖），FULL 的每事务一次 fsync 开销可忽略；
+    // 大事务仅有 frontmatter 扫描等低频写入，不受影响。
+    conn.pragma_update(None, "synchronous", "FULL")?;
 
     // folder_history table
     conn.execute(
@@ -118,4 +121,27 @@ pub fn init_db(app_data_dir: PathBuf) -> Result<Database> {
     Ok(Database {
         conn: Mutex::new(conn),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 会话状态（tabs 等）必须能扛住硬关机/断电：
+    /// WAL 模式下 synchronous=NORMAL 提交不 fsync，断电会丢失自上次
+    /// OS 刷盘/checkpoint 起的全部已提交事务（曾导致重启后 tab 全灭）。
+    /// 必须为 FULL（PRAGMA synchronous 返回 2）。
+    #[test]
+    fn test_synchronous_full_for_power_loss_durability() {
+        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let db = init_db(dir.path().to_path_buf()).expect("初始化数据库失败");
+        let mode: i64 = db
+            .conn_lock()
+            .query_row("PRAGMA synchronous", [], |r| r.get(0))
+            .expect("读取 PRAGMA synchronous 失败");
+        assert_eq!(
+            mode, 2,
+            "synchronous 必须为 FULL(2)：NORMAL(1) 在 WAL 模式下断电会丢失已提交的会话数据"
+        );
+    }
 }
