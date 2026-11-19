@@ -20,8 +20,35 @@ function removeHeavyVendorCssFromHtml(): Plugin {
   }
 }
 
+// KaTeX 字体去重：katex.min.css 会同时打包同一字体的 woff2/woff/ttf 三份副本，
+// 而构建目标平台 WebView（Chrome 105+ / Safari 13+）均支持 woff2，
+// 删除冗余的 woff/ttf 副本可减少约 0.6MB 前端产物体积。
+function dropRedundantFontFormats(): Plugin {
+  return {
+    name: 'drop-redundant-font-formats',
+    enforce: 'post',
+    apply: 'build',
+    generateBundle(_, bundle) {
+      // 先在 CSS 中移除 woff/ttf 的引用，再删除对应字体文件
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type === 'asset' && chunk.fileName.endsWith('.css')) {
+          let css = chunk.source as string
+          css = css.replace(/,\s*url\([^)]*\.woff\)\s*format\(['"]woff['"]\)/g, '')
+          css = css.replace(/,\s*url\([^)]*\.ttf\)\s*format\(['"]truetype['"]\)/g, '')
+          chunk.source = css
+        }
+      }
+      for (const name of Object.keys(bundle)) {
+        if (/KaTeX_.*\.(ttf|woff)$/.test(name)) {
+          delete bundle[name]
+        }
+      }
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), removeHeavyVendorCssFromHtml()],
+  plugins: [react(), removeHeavyVendorCssFromHtml(), dropRedundantFontFormats()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
