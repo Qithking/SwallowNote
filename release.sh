@@ -304,7 +304,7 @@ download_latest() {
     echo ""
     echo "选择下载类型:"
     echo "  1. macOS (DMG)"
-    echo "  2. Windows (MSI)"
+    echo "  2. Windows (EXE)"
     echo "  3. Linux (AppImage)"
     echo "  4. Linux (DEB)"
     read -p "请选择 (1-4): " download_type
@@ -314,7 +314,7 @@ download_latest() {
             asset_pattern="*-universal.dmg"
             ;;
         2)
-            asset_pattern="*-x64.msi"
+            asset_pattern="*-x64-setup.exe"
             ;;
         3)
             asset_pattern="*-x86_64.AppImage"

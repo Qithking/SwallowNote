@@ -40,8 +40,9 @@ uuid = { version = "1.0", features = ["v4"] }
 ignore = "0.4"
 regex = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
-zip = "2"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+# 只启用 deflate：日志导出/插件打包全部使用 Deflated 压缩，
+# 关闭默认的 xz/bzip2/zstd 可移除三套 C 压缩库（减体积且简化交叉编译）
+zip = { version = "2", default-features = false, features = ["deflate"] }
 dirs = "6"
 futures = "0.3"
 once_cell = "1"
@@ -64,6 +65,13 @@ rand = "0.8"
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
 objc = "0.2.7"
+# macOS 用系统 Security.framework（native-tls），零体积成本且信任系统证书链
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# TLS 按平台选择：Windows/Linux 用 rustls——Linux AppImage 会把 libssl 拷入包内、
+# Windows CI 需从源码编译 OpenSSL（依赖 Perl），rustls 纯 Rust 实现同时消除这两个问题
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "charset", "http2"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = ["Win32_Graphics_Dwm", "Win32_Foundation", "Win32_Storage_FileSystem"] }
