@@ -38,6 +38,19 @@ function logTime(stage: string, t0: number) {
 const mainT0 = performance.now()
 logTime('main_script_begin', mainT0)
 
+// 全局错误兜底：未被 ErrorBoundary / 局部 catch 捕获的错误统一进应用日志。
+// React 渲染错误会同时被 ErrorBoundary 记录（source=error-boundary），日志里
+// 两条并存（app-uncaught 为兜底视角），可按 source 过滤。
+window.addEventListener('error', (e) => {
+  // 资源加载错误（img/script 失败）无 error 对象细节，降噪跳过
+  const err = e.error ?? e.message
+  if (!err) return
+  logger.error('app-uncaught', 'window.onerror:', err)
+})
+window.addEventListener('unhandledrejection', (e) => {
+  logger.error('app-uncaught', 'unhandled promise rejection:', e.reason)
+})
+
 // Initialize plugin health monitor before rendering
 initHealthMonitor()
 logTime('health_monitor_init', mainT0)

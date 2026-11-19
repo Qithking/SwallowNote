@@ -16,6 +16,7 @@
  */
 import { create } from 'zustand'
 import { getVersion } from '@tauri-apps/api/app'
+import { logger } from '@/lib/logger'
 import type { PluginIndex, PluginIndexEntry, PluginUpdateInfo } from '@/types/plugin'
 import {
   fetchPluginIndexCached,
@@ -202,6 +203,7 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       set({ index: compatible, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
       if (e?.name === 'AbortError' || abort.signal.aborted) return
+      logger.error('plugin-market', 'fetch index failed:', url, e)
       set({
         isFetchingIndex: false,
         fetchError: e?.message ?? String(e),
@@ -232,6 +234,7 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
       set({ index: compatible, isFetchingIndex: false, fetchError: null, fetchProgress: 100 })
     } catch (e: any) {
       if (e?.name === 'AbortError' || abort.signal.aborted) return
+      logger.error('plugin-market', 'refresh index failed:', url, e)
       set({
         isFetchingIndex: false,
         fetchError: e?.message ?? String(e),
@@ -267,7 +270,8 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
     try {
       const updates = await checkPluginUpdates(url)
       set({ updates, isCheckingUpdates: false })
-    } catch {
+    } catch (e: any) {
+      logger.error('plugin-market', 'check updates failed:', url, e)
       set({ updates: [], isCheckingUpdates: false })
     }
   },

@@ -10,11 +10,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { usePluginMarketStore } from '@/stores/plugin-market'
 
-const { fetchPluginIndexCached, fetchWithProgress, checkPluginUpdates } = vi.hoisted(() => ({
+const { fetchPluginIndexCached, fetchWithProgress, checkPluginUpdates, loggerMock } = vi.hoisted(() => ({
   fetchPluginIndexCached: vi.fn(),
   fetchWithProgress: vi.fn(),
   checkPluginUpdates: vi.fn(),
+  loggerMock: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn(), trace: vi.fn() },
 }))
+
+vi.mock('@/lib/logger', () => ({ logger: loggerMock }))
 
 vi.mock('@/lib/plugin-market', () => ({
   fetchPluginIndexCached,
@@ -120,5 +123,36 @@ describe('C4 回归: 插件市场刷新共享 AbortController', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(usePluginMarketStore.getState().index).toEqual({ plugins: ['new'] })
     expect(usePluginMarketStore.getState().fetchProgress).toBe(100)
+  })
+})
+
+describe('错误日志契约: 市场链路失败必须写应用日志', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetStore()
+  })
+
+  it('refreshIndexWithProgress 失败时 logger.error(source=plugin-market)', async () => {
+    fetchWithProgress.mockRejectedValueOnce(new Error('HTTP 404 fetching repo'))
+    await usePluginMarketStore.getState().refreshIndexWithProgress()
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      'plugin-market',
+      'refresh index failed:',
+      'https://example.com/repo.json',
+      expect.any(Error),
+    )
+    expect(usePluginMarketStore.getState().fetchError).toBe('HTTP 404 fetching repo')
+  })
+
+  it('refreshUpdates 失败时 logger.error(source=plugin-market)', async () => {
+    checkPluginUpdates.mockRejectedValueOnce(new Error('boom'))
+    await usePluginMarketStore.getState().refreshUpdates()
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      'plugin-market',
+      'check updates failed:',
+      'https://example.com/repo.json',
+      expect.any(Error),
+    )
+    expect(usePluginMarketStore.getState().updates).toEqual([])
   })
 })
