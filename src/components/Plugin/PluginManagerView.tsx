@@ -14,7 +14,7 @@ import { usePluginStore, useUIStore, usePluginMarketStore } from '@/stores'
 import { DEFAULT_SHORTCUTS, matchShortcut, getShortcutKey } from '@/lib/shortcuts'
 import { useShallow } from 'zustand/react/shallow'
 import { scanPlugins, installPlugin, uninstallPlugin, togglePluginEnabled } from '@/lib/tauri'
-import { pluginHasUpdateAvailable } from '@/lib/plugin-market'
+import { pluginHasUpdateAvailable, getHostPlatformDirCached } from '@/lib/plugin-market'
 import { loadAllPlugins } from '@/lib/plugin-loader'
 import { createPluginPanelProps } from '@/lib/plugin-utils'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -104,6 +104,18 @@ function PluginManagerView() {
   const loadFailures = usePluginStore(useShallow((s) => s.loadFailures))
   const [isUploading, setIsUploading] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
+  // 宿主平台目录名：已安装插件详情（复用 PluginMarketDetail）的平台
+  // 兼容判定用；进程内不变，取一次即可；null = 取失败（保守放行）。
+  const [hostPlatformDir, setHostPlatformDir] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void getHostPlatformDirCached().then((dir) => {
+      if (!cancelled) setHostPlatformDir(dir)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const [activeTab, setActiveTab] = useState<PluginManagerTab>('manage')
   // 失败列表弹窗状态。
   const [failuresDialogOpen, setFailuresDialogOpen] = useState(false)
@@ -908,6 +920,7 @@ function PluginManagerView() {
             entry={toIndexEntry(detailPlugin)}
             index={toSyntheticIndex(detailPlugin)}
             localVersion={detailPlugin.version}
+            hostPlatformDir={hostPlatformDir}
             onClose={() => setDetailPlugin(null)}
           />
         </Suspense>

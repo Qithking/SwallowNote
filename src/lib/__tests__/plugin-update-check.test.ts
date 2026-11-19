@@ -11,6 +11,7 @@ import {
   pluginHasUpdateAvailable,
   isHostVersionCompatible,
   filterHostCompatibleEntries,
+  isPlatformCompatible,
   normaliseIndex,
 } from '../plugin-market'
 import type { PluginIndex, PluginUpdateInfo } from '@/types/plugin'
@@ -204,5 +205,53 @@ describe('normaliseIndex：min_host_version 字段转换', () => {
     const index = normaliseIndex(raw)
     expect(index.plugins[0]?.minHostVersion).toBe('0.1.0')
     expect(index.plugins[1]?.minHostVersion).toBeUndefined()
+  })
+
+  it('snake_case platforms 转 camelCase：非空字符串项保留，缺失/非数组为 undefined', () => {
+    const raw = {
+      schema_version: 1,
+      updated_at: '',
+      pubkey_b64: '',
+      plugins: [
+        {
+          id: 'a',
+          name: 'A',
+          version: '0.1.0',
+          download_url: './a.zip',
+          sha256: 'aa',
+          platforms: ['darwin-aarch64', '', 'windows-x86_64'],
+        },
+        { id: 'b', name: 'B', version: '0.1.0', download_url: './b.zip', sha256: 'bb' },
+        { id: 'c', name: 'C', version: '0.1.0', download_url: './c.zip', sha256: 'cc', platforms: 'not-array' },
+      ],
+    }
+    const index = normaliseIndex(raw)
+    expect(index.plugins[0]?.platforms).toEqual(['darwin-aarch64', 'windows-x86_64'])
+    expect(index.plugins[1]?.platforms).toBeUndefined()
+    expect(index.plugins[2]?.platforms).toBeUndefined()
+  })
+})
+
+describe('isPlatformCompatible：条目平台兼容判定（显示层门禁）', () => {
+  it('platforms 缺失/空/全空白 → 兼容（纯前端插件与旧格式索引）', () => {
+    expect(isPlatformCompatible('darwin-aarch64', undefined)).toBe(true)
+    expect(isPlatformCompatible('darwin-aarch64', [])).toBe(true)
+    expect(isPlatformCompatible('darwin-aarch64', ['', '   '])).toBe(true)
+  })
+
+  it('宿主平台未知 → 保守放行（取平台失败不误禁全部条目）', () => {
+    expect(isPlatformCompatible(null, ['windows-x86_64'])).toBe(true)
+    expect(isPlatformCompatible(undefined, ['windows-x86_64'])).toBe(true)
+  })
+
+  it('列表含宿主平台 → 兼容；仅其它平台 → 不兼容', () => {
+    expect(isPlatformCompatible('darwin-aarch64', ['darwin-aarch64'])).toBe(true)
+    expect(isPlatformCompatible('darwin-aarch64', ['windows-x86_64', 'darwin-aarch64'])).toBe(true)
+    expect(isPlatformCompatible('darwin-aarch64', ['windows-x86_64'])).toBe(false)
+  })
+
+  it('条目项空白 trim 后参与比较；大小写敏感（平台目录名约定全小写）', () => {
+    expect(isPlatformCompatible('darwin-aarch64', [' darwin-aarch64 '])).toBe(true)
+    expect(isPlatformCompatible('darwin-aarch64', ['Darwin-AARCH64'])).toBe(false)
   })
 })

@@ -174,6 +174,39 @@ export function filterHostCompatibleEntries(
   }
 }
 
+/**
+ * 条目平台兼容判定：platforms 缺失/空 = 全平台兼容（纯前端插件或
+ * 旧格式索引）；宿主平台未知（null）= 保守放行——该判定只服务
+ * 显示层（禁用安装按钮），真正的门禁在安装路径与更新检查。
+ */
+export function isPlatformCompatible(
+  hostPlatformDir: string | null | undefined,
+  platforms?: string[],
+): boolean {
+  const list = (platforms ?? [])
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+  if (list.length === 0) return true
+  if (!hostPlatformDir) return true
+  return list.includes(hostPlatformDir)
+}
+
+/** 宿主平台目录名缓存：undefined = 未取过，null = 取失败（判定保守放行）。 */
+let cachedHostPlatformDir: string | null | undefined
+
+/** 取当前宿主平台目录名（如 darwin-aarch64），失败返回 null。 */
+export async function getHostPlatformDirCached(): Promise<string | null> {
+  if (cachedHostPlatformDir === undefined) {
+    try {
+      cachedHostPlatformDir = await invoke<string>('get_host_platform_dir')
+    } catch (e) {
+      logger.warn('plugin-market', 'get_host_platform_dir failed', e)
+      cachedHostPlatformDir = null
+    }
+  }
+  return cachedHostPlatformDir
+}
+
 /** PL-7：市场仓库 URL 仅接受 https（Rust 侧 check_plugin_updates / add_market_source 同口径）。 */
 export function assertHttpsRepoUrl(url: string): void {
   if (!/^https:\/\//i.test(url.trim())) {
@@ -370,6 +403,10 @@ function normaliseEntry(raw: any): PluginIndexEntry {
     // 作者声明的权限（可选）：只保留非空字符串项，未知权限由 UI 端兜底展示。
     permissions: Array.isArray(raw.permissions)
       ? raw.permissions.filter((p: unknown): p is string => typeof p === 'string' && p.length > 0)
+      : undefined,
+    // 支持的平台目录名（可选）：只保留非空字符串项。
+    platforms: Array.isArray(raw.platforms)
+      ? raw.platforms.filter((p: unknown): p is string => typeof p === 'string' && p.length > 0)
       : undefined,
   }
 }

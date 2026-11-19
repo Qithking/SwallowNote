@@ -743,6 +743,7 @@
       "badgeInstall": "安装",
       "viewDetails": "查看详情",
       "installNow": "立即安装",
+      "unsupportedPlatform": "不支持当前平台",
       "tabOverview": "基本信息",
       "tabPermissions": "权限",
       "tabDependencies": "依赖",

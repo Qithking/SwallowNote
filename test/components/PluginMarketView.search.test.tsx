@@ -31,6 +31,8 @@ vi.mock('@/lib/plugin-market', () => ({
     refresh: vi.fn().mockResolvedValue(undefined),
   }),
   OFFICIAL_REPO_URL: 'https://official.example.com/repo.json',
+  getHostPlatformDirCached: vi.fn().mockResolvedValue(null),
+  isPlatformCompatible: vi.fn(() => true),
 }))
 
 describe('PluginMarketView search aria-label i18n', () => {

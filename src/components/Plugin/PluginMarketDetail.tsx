@@ -59,6 +59,7 @@ import {
   downloadPluginZip,
   installPluginFromBytes,
   effectivePubkey,
+  isPlatformCompatible,
 } from '@/lib/plugin-market'
 import { usePluginMarketStore, usePluginStore } from '@/stores'
 import { loadAllPlugins } from '@/lib/plugin-loader'
@@ -144,12 +145,15 @@ export function PluginMarketDetail({
   entry,
   index,
   localVersion,
+  hostPlatformDir,
   onClose,
   onInstalled,
 }: {
   entry: PluginIndexEntry
   index: PluginIndex
   localVersion: string | null
+  /** 宿主平台目录名（如 darwin-aarch64），平台兼容判定用；缺省/未知 = 保守放行。 */
+  hostPlatformDir?: string | null
   onClose: () => void
   /**
    * Called by the dialog right before closing, after a successful
@@ -215,6 +219,8 @@ export function PluginMarketDetail({
   const hasBlockingDependencyIssue =
     dependencyResolution.unsatisfied.length > 0 ||
     dependencyResolution.cycles.length > 0
+  // 平台不兼容（用户拍板：条目显示但禁用安装，不隐藏）。
+  const isPlatformSupported = isPlatformCompatible(hostPlatformDir, entry.platforms)
   // Whether the auto-resolve button can fire: there's at least
   // one missing dep whose `available` slot is filled by the
   // marketplace index. Missing deps with no index entry are
@@ -532,6 +538,13 @@ export function PluginMarketDetail({
                 <span>{error}</span>
               </div>
             )}
+            {/* 平台不兼容提示：条目可见但安装被禁用 */}
+            {!isPlatformSupported && (
+              <div className="pmd-error" data-testid="plugin-unsupported-platform">
+                <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{t('plugin.market.unsupportedPlatform')}</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -565,7 +578,7 @@ export function PluginMarketDetail({
           {!isInstalled && (
             <Button
               onClick={onInstall}
-              disabled={isInstalling || hasBlockingDependencyIssue}
+              disabled={isInstalling || hasBlockingDependencyIssue || !isPlatformSupported}
               data-testid="plugin-install"
             >
               {isInstalling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
@@ -575,7 +588,7 @@ export function PluginMarketDetail({
           {isUpdateAvailable && (
             <Button
               onClick={onInstall}
-              disabled={isInstalling || hasBlockingDependencyIssue}
+              disabled={isInstalling || hasBlockingDependencyIssue || !isPlatformSupported}
             >
               {isInstalling ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
               {t('plugin.market.updateTo', {

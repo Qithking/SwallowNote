@@ -743,6 +743,7 @@
       "badgeInstall": "Install",
       "viewDetails": "View details",
       "installNow": "Install now",
+      "unsupportedPlatform": "Not supported on this platform",
       "tabOverview": "Overview",
       "tabPermissions": "Permissions",
       "tabDependencies": "Dependencies",

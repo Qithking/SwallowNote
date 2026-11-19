@@ -25,6 +25,7 @@ import { PluginPermissionDialog } from './PluginPermissionDialog'
 import { VirtualizedCardGrid } from './VirtualizedCardGrid'
 import { initializePluginPermissions, getPluginPermissions } from '@/lib/plugin-permissions'
 import { setActiveMarketSource } from '@/lib/tauri'
+import { getHostPlatformDirCached, isPlatformCompatible } from '@/lib/plugin-market'
 import type {
   PluginIndexEntry,
   PluginPermission,
@@ -80,6 +81,19 @@ function PluginMarketView() {
   const removeRepoSource = usePluginMarketStore((s) => s.removeRepoSource)
 
   const [showSourceManager, setShowSourceManager] = useState(false)
+
+  // 宿主平台目录名（如 darwin-aarch64）：条目 platforms 兼容判定用，
+  // 进程内不变，取一次即可；null = 取失败（显示层保守放行）。
+  const [hostPlatformDir, setHostPlatformDir] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void getHostPlatformDirCached().then((dir) => {
+      if (!cancelled) setHostPlatformDir(dir)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // 启动时从 SQLite 加载来源列表
   useEffect(() => {
@@ -307,6 +321,7 @@ function PluginMarketView() {
               key={entry.id}
               entry={entry}
               localVersion={localVersionFor(entry.id)}
+              hostPlatformDir={hostPlatformDir}
               onClick={() => openDetail(entry.id)}
             />
           )}
@@ -319,6 +334,7 @@ function PluginMarketView() {
           entry={detailEntry}
           index={index}
           localVersion={localVersionFor(detailEntry.id) ?? null}
+          hostPlatformDir={hostPlatformDir}
           onClose={() => setDetailEntry(null)}
           onInstalled={handleInstalled}
         />
@@ -375,15 +391,19 @@ function EmptyState({
 const PluginMarketCard = memo(function PluginMarketCard({
   entry,
   localVersion,
+  hostPlatformDir,
   onClick,
 }: {
   entry: PluginIndexEntry
   localVersion: string | undefined
+  hostPlatformDir: string | null
   onClick: () => void
 }) {
   const { t } = useTranslation()
   const isInstalled = !!localVersion
   const isUpdateAvailable = isInstalled && localVersion !== entry.version
+  // 平台兼容判定（用户拍板：不兼容条目显示但禁用安装，不隐藏）
+  const isPlatformSupported = isPlatformCompatible(hostPlatformDir, entry.platforms)
 
   // 最新版本为 versions[0]
   const publishedAt =
@@ -423,8 +443,9 @@ const PluginMarketCard = memo(function PluginMarketCard({
     ? { cls: 'pa-market-badge is-installed', label: t('plugin.market.badgeInstalled') }
     : { cls: 'pa-market-badge is-install', label: t('plugin.market.badgeInstall') }
 
-  // 已安装且最新时不显示下载图标，仅显示详情图标
-  const showDownloadIcon = !isInstalled || isUpdateAvailable
+  // 已安装且最新时不显示下载图标，仅显示详情图标；
+  // 平台不兼容时也不显示下载入口（详情页内引导）。
+  const showDownloadIcon = (!isInstalled || isUpdateAvailable) && isPlatformSupported
 
   return (
     <article
@@ -469,6 +490,12 @@ const PluginMarketCard = memo(function PluginMarketCard({
           {tags.map((tag) => (
             <span key={tag.key} className={tag.cls}>{tag.label}</span>
           ))}
+          {/* 平台不兼容标注（条目仍可见，仅禁用安装入口） */}
+          {!isPlatformSupported && (
+            <span className="pa-market-badge is-update" data-testid="plugin-unsupported-platform">
+              {t('plugin.market.unsupportedPlatform')}
+            </span>
+          )}
         </div>
 
         {/* actions 行：stopPropagation 防止冒泡，仅保留图标按钮 */}

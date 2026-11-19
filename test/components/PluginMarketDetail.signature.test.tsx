@@ -85,6 +85,7 @@ vi.mock('@/lib/plugin-market', () => ({
   installPluginFromBytes: installMock,
   effectivePubkey: vi.fn((index: PluginIndex, entry: PluginIndexEntry) =>
     entry.pubkeyB64 || index.pubkeyB64),
+  isPlatformCompatible: vi.fn(() => true),
 }))
 
 vi.mock('@/lib/plugin-loader', () => ({

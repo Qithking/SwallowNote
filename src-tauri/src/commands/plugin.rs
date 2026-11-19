@@ -1182,6 +1182,11 @@ pub struct PluginIndexEntry {
     /// 避免提示一个安装路径必然拒绝的更新。
     #[serde(default)]
     pub min_host_version: Option<String>,
+    /// 插件支持的宿主平台目录名列表（如 "darwin-aarch64"），由 plugin-kit
+    /// pack 时检测 `backend/<平台>/` 目录自动推断。缺失/空 = 全平台兼容
+    /// （或纯前端插件）。更新检查用它跳过当前平台不满足的条目。
+    #[serde(default)]
+    pub platforms: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1574,6 +1579,11 @@ pub async fn check_plugin_updates(
         }
         // minHostVersion 门禁：宿主不满足的条目不参与更新检查。
         if !is_host_compatible(&host_version, entry.min_host_version.as_deref()) {
+            continue;
+        }
+        // platforms 门禁：当前平台不支持的条目不参与更新检查，
+        // 避免提示一个装上也跑不起来的更新。
+        if !super::plugin_invoke::is_entry_platform_compatible(entry.platforms.as_deref()) {
             continue;
         }
         let local = local_versions.get(&entry.id).cloned().unwrap_or_default();
@@ -2246,6 +2256,51 @@ mod tests {
         let without_min = r#"{"id":"com.example.p","name":"P","version":"0.1.0","description":"","author":"A","download_url":"./p.zip","sha256":"bb"}"#;
         let entry: PluginIndexEntry = serde_json::from_str(without_min).unwrap();
         assert!(entry.min_host_version.is_none());
+    }
+
+    /// 索引条目的 `platforms`：声明时透传；缺失时 serde default 为
+    /// None（旧格式索引不含该键，必须兼容）。
+    #[test]
+    fn test_parse_index_entry_platforms() {
+        let with_platforms = r#"{"id":"com.example.ai","name":"AI","version":"0.1.0","description":"","author":"A","download_url":"./a.zip","sha256":"aa","platforms":["darwin-aarch64","windows-x86_64"]}"#;
+        let entry: PluginIndexEntry = serde_json::from_str(with_platforms).unwrap();
+        assert_eq!(
+            entry.platforms.as_deref(),
+            Some(&["darwin-aarch64".to_string(), "windows-x86_64".to_string()][..])
+        );
+
+        let without_platforms = r#"{"id":"com.example.p","name":"P","version":"0.1.0","description":"","author":"A","download_url":"./p.zip","sha256":"bb"}"#;
+        let entry: PluginIndexEntry = serde_json::from_str(without_platforms).unwrap();
+        assert!(entry.platforms.is_none());
+    }
+
+    /// is_entry_platform_compatible 判定矩阵：缺失/空 = 全平台兼容；
+    /// 含宿主平台 = 兼容；仅含其它平台 = 不兼容；条目内空白项被
+    /// trim 后参与比较。
+    #[test]
+    fn test_is_entry_platform_compatible_matrix() {
+        use super::super::plugin_invoke::{host_platform_dir, is_entry_platform_compatible};
+        let host = host_platform_dir();
+
+        // 缺失 / 空 = 兼容（纯前端插件与旧格式索引）
+        assert!(is_entry_platform_compatible(None));
+        assert!(is_entry_platform_compatible(Some(&[])));
+        // 含宿主平台 = 兼容
+        assert!(is_entry_platform_compatible(Some(&[host.to_string()])));
+        // 混合列表含宿主 = 兼容
+        assert!(is_entry_platform_compatible(Some(&[
+            "not-a-platform".to_string(),
+            host.to_string()
+        ])));
+        // 仅其它平台 = 不兼容
+        let other = if host == "darwin-aarch64" {
+            "windows-x86_64"
+        } else {
+            "darwin-aarch64"
+        };
+        assert!(!is_entry_platform_compatible(Some(&[other.to_string()])));
+        // 空白项 trim 后仍可与宿主匹配
+        assert!(is_entry_platform_compatible(Some(&[format!("  {}  ", host)])));
     }
 
     /// manifest 中的 `min_host_version`：声明时保留原值；未声明时

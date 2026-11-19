@@ -75,6 +75,7 @@ vi.mock('@/components/ui/button', () => ({
 vi.mock('@/lib/plugin-market', () => ({
   downloadPluginZip: vi.fn(),
   installPluginFromBytes: vi.fn(),
+  isPlatformCompatible: vi.fn(() => true),
 }))
 
 vi.mock('@/lib/plugin-loader', () => ({

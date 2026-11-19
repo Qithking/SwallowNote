@@ -205,6 +205,8 @@ export interface PluginIndexEntry {
   minHostVersion?: string
   /** 作者声明的权限列表（与插件 manifest 一致），供安装前展示；缺失 = 索引未声明。 */
   permissions?: PluginPermission[]
+  /** 支持的宿主平台目录名列表（如 darwin-aarch64）；缺失/空 = 全平台兼容。 */
+  platforms?: string[]
 }
 
 export interface PluginIndexEntryVersion {

@@ -320,7 +320,7 @@ fn resolve_backend_binary(plugin_id: &str, plugin_path: &str) -> Option<PathBuf>
 
 /// 当前宿主对应的打包平台子目录名（与 package.sh 的命名约定一致）。
 /// 只覆盖实际发布目标：macOS(aarch64/x86_64) 与 Windows(x86_64)。
-fn host_platform_dir() -> &'static str {
+pub(crate) fn host_platform_dir() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "darwin-aarch64",
         ("macos", "x86_64") => "darwin-x86_64",
@@ -328,6 +328,26 @@ fn host_platform_dir() -> &'static str {
         ("linux", "x86_64") => "linux-x86_64",
         ("linux", "aarch64") => "linux-aarch64",
         _ => "unknown",
+    }
+}
+
+/// 暴露宿主平台目录名给前端，市场 UI 用它做条目 `platforms` 兼容判定。
+#[tauri::command]
+pub fn get_host_platform_dir() -> &'static str {
+    host_platform_dir()
+}
+
+/// 市场索引条目的平台兼容判定：`platforms` 缺失/空 = 全平台兼容；
+/// 否则要求列表包含宿主平台目录名（如 darwin-aarch64）。
+/// 该字段为提示性元数据（签名覆盖 zip，不覆盖索引），伪造无安全影响，
+/// 安装路径仍以 zip 内实际 backend 布局为准。
+pub(crate) fn is_entry_platform_compatible(platforms: Option<&[String]>) -> bool {
+    match platforms {
+        None => true,
+        Some(list) if list.is_empty() => true,
+        Some(list) => list
+            .iter()
+            .any(|p| p.trim() == host_platform_dir()),
     }
 }
 
