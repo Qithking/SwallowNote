@@ -26,7 +26,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       // 宿主直接引用 SDK 源码，确保类型一致
-      '@swallow-note/plugin-sdk': path.resolve(__dirname, './docs/plugin-sdk/src/index.ts'),
+      '@swallow-note/plugin-sdk': path.resolve(__dirname, './src/plugin/plugin-sdk.ts'),
     },
   },
   clearScreen: false,
