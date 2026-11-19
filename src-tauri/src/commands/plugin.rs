@@ -2135,6 +2135,67 @@ pub async fn import_plugin_configs(
         .map_err(|e| PluginError::Io(format!("import_plugin_configs join error: {}", e)))?
 }
 
+/// 市场资源拉取（索引 repo.json / 插件 zip），绕过 WebView CORS：
+/// GitHub release 资产下载链路（github.com 302 → release-assets.githubusercontent.com）
+/// 所有响应均不带 Access-Control-Allow-Origin 头，前端跨域 fetch 必然被拦截
+/// （表现为 "Load failed"）；raw.githubusercontent.com 有 CORS 头所以历史链路正常。
+/// 强制 https（与前端 assertHttpsRepoUrl 对齐）；进度百分比经 Channel 回传，
+/// 无 Content-Length 时仅在完成时发 100。
+#[tauri::command]
+pub async fn plugin_fetch_market_bytes(
+    url: String,
+    progress: tauri::ipc::Channel<f64>,
+) -> Result<Vec<u8>, PluginError> {
+    const MARKET_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+    if !url.trim().starts_with("https://") {
+        return Err(PluginError::InvalidInput(format!(
+            "market url must use https scheme: {url}"
+        )));
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(MARKET_HTTP_TIMEOUT)
+        .build()
+        .map_err(|e| PluginError::Io(format!("Failed to build http client: {}", e)))?;
+
+    let response = tokio::time::timeout(MARKET_HTTP_TIMEOUT, client.get(&url).send())
+        .await
+        .map_err(|_| PluginError::Io("Market request timed out".to_string()))?
+        .map_err(|e| PluginError::Io(format!("Failed to fetch market resource: {}", e)))?;
+
+    // 错误消息以 "HTTP <status>" 开头：前端 friendlyInstallError 依赖该形态
+    // 透传状态码（如 404 下载失败给用户看原始信息）。
+    let status = response.status();
+    if !status.is_success() {
+        return Err(PluginError::Io(format!(
+            "HTTP {} fetching {}",
+            status.as_u16(),
+            url
+        )));
+    }
+
+    let total = response.content_length();
+    let mut stream = response.bytes_stream();
+    let mut buf: Vec<u8> = Vec::with_capacity(total.unwrap_or(0).max(1024) as usize);
+    let mut received: usize = 0;
+    while let Some(chunk) = futures::StreamExt::next(&mut stream).await {
+        let chunk = chunk
+            .map_err(|e| PluginError::Io(format!("Failed to read market stream: {}", e)))?;
+        received += chunk.len();
+        buf.extend_from_slice(&chunk);
+        if let Some(t) = total {
+            if t > 0 {
+                let _ = progress.send((received as f64 / t as f64) * 100.0);
+            }
+        }
+    }
+    if total.is_none() {
+        let _ = progress.send(100.0);
+    }
+    Ok(buf)
+}
+
 /// Pull `manifest.json` out of an open zip archive and decode it.
 /// Returns a typed error variant the caller can surface to the UI
 /// without re-parsing the message string.

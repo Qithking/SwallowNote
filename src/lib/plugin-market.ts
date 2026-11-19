@@ -220,64 +220,37 @@ export async function fetchPluginIndex(url: string, signal?: AbortSignal): Promi
     throw new Error('repo url is empty')
   }
   assertHttpsRepoUrl(url)
-  const res = await fetch(url, { cache: 'no-store', signal })
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} fetching plugin index`)
-  }
-  const raw = await res.json()
+  // 走 Rust 侧拉取：release 资产 302 链路无 CORS 头，WebView fetch 必然
+  // "Load failed"（详见 plugin_fetch_market_bytes 注释）。
+  const text = await fetchWithProgress(url, () => {}, signal)
+  const raw = JSON.parse(text)
   return normaliseIndex(raw)
 }
 
-/** 带进度的 fetch，回调百分比 */
+/**
+ * 带进度的远端资源拉取（经 Rust 绕过 WebView CORS）。
+ * signal 无法中止 Rust 请求（invoke 无取消语义），取消语义由调用方在
+ * 返回后通过 aborted 复检丢弃结果实现（市场 store 已有代际保护）。
+ */
 export async function fetchWithProgress(
   url: string,
   onProgress: (percent: number) => void,
-  signal?: AbortSignal
+  // 历史签名保留（调用方仍传 AbortController.signal）；invoke 无取消语义，
+  // 仅作占位，取消语义由调用方在返回后通过 aborted 复检实现。
+  _signal?: AbortSignal
 ): Promise<string> {
   if (!url) {
     throw new Error('repo url is empty')
   }
   assertHttpsRepoUrl(url)
 
-  const res = await fetch(url, { cache: 'no-store', signal })
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} fetching plugin index`)
-  }
-
-  const contentLength = res.headers.get('content-length')
-  const total = contentLength ? parseInt(contentLength, 10) : 0
-
-  // 无 content-length 退回普通 fetch
-  if (!total || !res.body) {
-    const text = await res.text()
-    onProgress(100)
-    return text
-  }
-
-  const reader = res.body.getReader()
-  const chunks: Uint8Array[] = []
-  let received = 0
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-
-    chunks.push(value)
-    received += value.length
-
-    const percent = Math.round((received / total) * 100)
-    onProgress(percent)
-  }
-
-  // 合并分块
-  const allChunks = new Uint8Array(received)
-  let position = 0
-  for (const chunk of chunks) {
-    allChunks.set(chunk, position)
-    position += chunk.length
-  }
-
-  const text = new TextDecoder().decode(allChunks)
+  const channel = new Channel<number>()
+  channel.onmessage = onProgress
+  const bytes = await invoke<ArrayBuffer>('plugin_fetch_market_bytes', {
+    url,
+    progress: channel,
+  })
+  const text = new TextDecoder().decode(new Uint8Array(bytes))
   onProgress(100)
   return text
 }
@@ -323,15 +296,23 @@ export async function downloadPluginZip(
   const cached = await readZipFromCache(entry.sha256)
   if (cached) return cached
 
-  // 2) 基于 repoUrl 解析后下载
+  // 2) 基于 repoUrl 解析后经 Rust 拉取（绕过 WebView CORS，同索引链路）
   const url = resolveDownloadUrl(entry.downloadUrl, repoUrl)
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) {
-    throw new Error(
-      `HTTP ${res.status} downloading ${entry.id}@${entry.version}`
-    )
+  let bytes: ArrayBuffer
+  try {
+    bytes = await invoke<ArrayBuffer>('plugin_fetch_market_bytes', {
+      url,
+      progress: new Channel<number>(),
+    })
+  } catch (e) {
+    // 保持既有契约：错误消息形如 "HTTP <status> downloading <id>@<version>"，
+    // friendlyInstallError 依赖该形态透传状态码（404 等给用户看原始信息）
+    const m = /^HTTP (\d{3}) /.exec(String((e as Error)?.message ?? e))
+    if (m) {
+      throw new Error(`HTTP ${m[1]} downloading ${entry.id}@${entry.version}`)
+    }
+    throw e
   }
-  const bytes = await res.arrayBuffer()
 
   // 3) 仅摘要匹配才缓存
   const actual = await sha256Hex(bytes)
@@ -467,7 +448,7 @@ function normalisePluginVersion(raw: any): PluginVersionInfo {
 
 // Tauri 命令封装
 
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, Channel } from '@tauri-apps/api/core'
 
 /** 触发宿主从 zip 安装，宿主重新校验 SHA-256 + 签名。 */
 export async function installPluginFromBytes(args: {

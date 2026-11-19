@@ -235,6 +235,7 @@ pub fn run() {
             commands::plugin_invoke::invoke_plugin_stream,
             commands::plugin_invoke::prewarm_plugin,
             commands::plugin_invoke::get_host_platform_dir,
+            commands::plugin::plugin_fetch_market_bytes,
             commands::plugin_settings::read_plugin_settings,
             commands::plugin_settings::write_plugin_settings,
             commands::plugin_settings::delete_plugin_settings,
