@@ -6,7 +6,7 @@ const host = process.env.TAURI_DEV_HOST
 
 // 禁止把重依赖的 vendor CSS 在启动 HTML 中预加载；这些 CSS 只在对应 chunk 真正加载时注入。
 function removeHeavyVendorCssFromHtml(): Plugin {
-  const heavyCssPrefixes = ['vendor-blocknote', 'vendor-markmap', 'vendor-codemirror', 'vendor-katex', 'vendor-ai']
+  const heavyCssPrefixes = ['vendor-blocknote', 'vendor-markmap', 'vendor-codemirror', 'vendor-katex']
   const regex = new RegExp(
     `<link[^>]+rel=["']stylesheet["'][^>]+href=["'][^"']*(?:${heavyCssPrefixes.join('|')})[^"']*["'][^>]*>`,
     'g'
@@ -89,7 +89,7 @@ export default defineConfig({
     modulePreload: {
       resolveDependencies(filename, deps, context) {
         if (context.hostType !== 'html') return deps
-        const heavyVendors = ['vendor-blocknote', 'vendor-markmap', 'vendor-codemirror', 'vendor-katex', 'vendor-ai']
+        const heavyVendors = ['vendor-blocknote', 'vendor-markmap', 'vendor-codemirror', 'vendor-katex']
         return deps.filter((dep) => !heavyVendors.some((prefix) => dep.includes(prefix)))
       },
     },
@@ -127,7 +127,6 @@ export default defineConfig({
             if (id.includes('@radix-ui')) return 'vendor-radix'
             if (id.includes('react-dom')) return 'vendor-react'
             if (id.includes('lucide-react')) return 'vendor-lucide'
-            if (id.includes('ai-sdk') || id.includes('@ai-sdk')) return 'vendor-ai'
           }
         },
       },
