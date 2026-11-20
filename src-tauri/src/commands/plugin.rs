@@ -1466,6 +1466,27 @@ fn is_remote_version_newer(local: &str, remote: &str) -> bool {
     }
 }
 
+/// gh-proxy 兜底 URL：github.com 仓库直连失败时生成镜像前缀 URL；
+/// 自定义市场源（非 github.com）不做改写，返回 None。
+/// 与升级下载的 apply_update_channel（upgrade.rs）同一镜像机制。
+fn gh_proxy_fallback_url(repo_url: &str) -> Option<String> {
+    repo_url
+        .strip_prefix("https://github.com/")
+        .map(|rest| format!("https://gh-proxy.com/https://github.com/{}", rest))
+}
+
+/// 递归展开错误 source 链：reqwest 的底层原因（timed out / dns error / tls error）
+/// 藏在 source 里，format!("{}") 只显示顶层，用户无法自助判断问题。
+fn format_error_chain(e: &dyn std::error::Error) -> String {
+    let mut msg = e.to_string();
+    let mut src = e.source();
+    while let Some(s) = src {
+        msg.push_str(&format!(": {}", s));
+        src = s.source();
+    }
+    msg
+}
+
 // 对比本地与远程索引，返回有更新的插件列表。
 #[tauri::command]
 pub async fn check_plugin_updates(
@@ -1487,7 +1508,8 @@ pub async fn check_plugin_updates(
     static UPDATES_CACHE: OnceLock<Mutex<Option<UpdatesCacheEntry>>> = OnceLock::new();
     let cache = UPDATES_CACHE.get_or_init(|| Mutex::new(None));
     const UPDATES_CACHE_TTL: Duration = Duration::from_secs(30);
-    const UPDATES_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+    // 对齐升级下载的 10s 标准（原 5s 在 GitHub 直连抖动的网络下窗口太短）
+    const UPDATES_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
     {
         let guard = cache.lock().await;
@@ -1503,13 +1525,46 @@ pub async fn check_plugin_updates(
         .build()
         .map_err(|e| PluginError::Io(format!("Failed to build http client: {}", e)))?;
 
-    let response = tokio::time::timeout(UPDATES_HTTP_TIMEOUT, client.get(&repo_url).send())
-        .await
-        .map_err(|_| PluginError::Io("Plugin index request timed out".to_string()))?
-        .map_err(|e| PluginError::Io(format!("Failed to fetch plugin index: {}", e)))?;
-    let response = response
-        .error_for_status()
-        .map_err(|e| PluginError::Io(format!("Plugin index returned error: {}", e)))?;
+    let fetch_index = |url: String| {
+        let client = &client;
+        async move {
+            tokio::time::timeout(UPDATES_HTTP_TIMEOUT, client.get(&url).send())
+                .await
+                .map_err(|_| PluginError::Io("Plugin index request timed out".to_string()))?
+                .map_err(|e| {
+                    // 展开 source 链，露出底层原因（如 operation timed out / dns error）
+                    PluginError::Io(format!(
+                        "Failed to fetch plugin index: {}",
+                        format_error_chain(&e)
+                    ))
+                })?
+                .error_for_status()
+                .map_err(|e| {
+                    PluginError::Io(format!(
+                        "Plugin index returned error: {}",
+                        format_error_chain(&e)
+                    ))
+                })
+        }
+    };
+
+    // 直连拉取；github.com 源失败时走 gh-proxy 镜像兜底重试一次
+    // （对齐升级下载的 ghproxy 渠道机制；直连抖动/间歇不可达时由镜像完成拉取）
+    let response = match fetch_index(repo_url.clone()).await {
+        Ok(resp) => resp,
+        Err(primary) => match gh_proxy_fallback_url(&repo_url) {
+            Some(fallback_url) => {
+                log::warn!(
+                    "[plugin-market] primary fetch failed, trying gh-proxy fallback: {}",
+                    primary
+                );
+                fetch_index(fallback_url).await.map_err(|e| {
+                    PluginError::Io(format!("Plugin index fetch failed (direct + gh-proxy): {}", e))
+                })?
+            }
+            None => return Err(primary),
+        },
+    };
     let index: PluginIndex = response
         .json()
         .await
@@ -2216,6 +2271,52 @@ fn read_export_manifest<R: std::io::Read + std::io::Seek>(
 #[allow(dead_code)]
 mod tests {
     use super::*;
+
+    /// 回归（gh-proxy 兜底重试）：github.com 源生成镜像 URL，其它源不兜底。
+    #[test]
+    fn test_gh_proxy_fallback_url() {
+        let github_url = "https://github.com/Qithking/SwallowNotePlugins/releases/latest/download/repo.json";
+        assert_eq!(
+            gh_proxy_fallback_url(github_url),
+            Some(format!("https://gh-proxy.com/{}", github_url))
+        );
+        // 非 github.com 的自定义市场源：不做前缀改写
+        assert_eq!(
+            gh_proxy_fallback_url("https://gitlab.com/user/repo.json"),
+            None
+        );
+    }
+
+    /// 回归（错误链展开）：底层原因（如 operation timed out）必须出现在错误消息里，
+    /// 不能被 format!("{}") 吞掉，否则用户无法自助判断是网络问题。
+    #[test]
+    fn test_format_error_chain_includes_sources() {
+        use std::error::Error;
+        use std::fmt;
+        #[derive(Debug)]
+        struct Leaf;
+        impl fmt::Display for Leaf {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "operation timed out")
+            }
+        }
+        impl Error for Leaf {}
+        #[derive(Debug)]
+        struct Top;
+        impl fmt::Display for Top {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "error sending request for url")
+            }
+        }
+        impl Error for Top {
+            fn source(&self) -> Option<&(dyn Error + 'static)> {
+                Some(&Leaf)
+            }
+        }
+        let msg = format_error_chain(&Top);
+        assert!(msg.contains("error sending request for url"));
+        assert!(msg.contains("operation timed out"));
+    }
 
     /// PL-7 回归：repo_url 仅接受 https，http / 空 / 非 URL 一律拒绝。
     #[test]
