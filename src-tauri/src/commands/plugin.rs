@@ -2214,10 +2214,39 @@ pub async fn plugin_fetch_market_bytes(
         .build()
         .map_err(|e| PluginError::Io(format!("Failed to build http client: {}", e)))?;
 
-    let response = tokio::time::timeout(MARKET_HTTP_TIMEOUT, client.get(&url).send())
+    // 直连失败且为 github.com 源时走 gh-proxy 镜像兜底重试一次
+    // （与 check_plugin_updates 同策略；重试发生在连接阶段，进度回传不受影响）
+    let response = match tokio::time::timeout(MARKET_HTTP_TIMEOUT, client.get(&url).send())
         .await
         .map_err(|_| PluginError::Io("Market request timed out".to_string()))?
-        .map_err(|e| PluginError::Io(format!("Failed to fetch market resource: {}", e)))?;
+        .map_err(|e| {
+            // 展开 source 链，露出底层原因（如 operation timed out / dns error）
+            PluginError::Io(format!(
+                "Failed to fetch market resource: {}",
+                format_error_chain(&e)
+            ))
+        })
+    {
+        Ok(resp) => resp,
+        Err(primary) => match gh_proxy_fallback_url(&url) {
+            Some(fallback_url) => {
+                log::warn!(
+                    "[plugin-market] primary fetch failed, trying gh-proxy fallback: {}",
+                    primary
+                );
+                tokio::time::timeout(MARKET_HTTP_TIMEOUT, client.get(&fallback_url).send())
+                    .await
+                    .map_err(|_| PluginError::Io("Market request timed out (gh-proxy)".to_string()))?
+                    .map_err(|e| {
+                        PluginError::Io(format!(
+                            "Market fetch failed (direct + gh-proxy): {}",
+                            format_error_chain(&e)
+                        ))
+                    })?
+            }
+            None => return Err(primary),
+        },
+    };
 
     // 错误消息以 "HTTP <status>" 开头：前端 friendlyInstallError 依赖该形态
     // 透传状态码（如 404 下载失败给用户看原始信息）。
