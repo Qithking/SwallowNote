@@ -4,6 +4,7 @@
  */
 import { Plugin, PluginKey, TextSelection } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
+import { logger } from '@/lib/logger'
 
 /** ProseMirror 位置解析结果的最小类型 */
 interface PMResolvedPosLike {
@@ -55,7 +56,8 @@ export function getBNProseMirrorView(editor: unknown): PMViewLike | null {
     if (!tiptapEditor) return null
     const view = tiptapEditor.view
     return view ?? null
-  } catch {
+  } catch (e) {
+    logger.warn('blocknote-search', 'getBNProseMirrorView failed', e)
     return null
   }
 }
@@ -71,8 +73,9 @@ export function scrollMatchIntoView(view: PMViewLike, from: number): void {
     // 无 coordsAtPos 时回退到原生 scrollIntoView
     try {
       pmView.dispatch?.(pmView.state.tr.scrollIntoView())
-    } catch {
-      // ignore
+    } catch (e) {
+      // 无 coordsAtPos 时的回退滚动失败：不影响替换结果
+      logger.debug('blocknote-search', 'fallback scrollIntoView failed', e)
     }
     return
   }
@@ -82,8 +85,9 @@ export function scrollMatchIntoView(view: PMViewLike, from: number): void {
   if (!viewport) {
     try {
       pmView.dispatch?.(pmView.state.tr.scrollIntoView())
-    } catch {
-      // ignore
+    } catch (e) {
+      // 无 coordsAtPos 时的回退滚动失败：不影响替换结果
+      logger.debug('blocknote-search', 'fallback scrollIntoView failed', e)
     }
     return
   }
@@ -192,7 +196,7 @@ export function replaceCurrentMatch(view: PMViewLike, matches: MatchRange[], rep
     view.dispatch(tr)
     return true
   } catch (e) {
-    console.warn('[blocknoteSearch] replaceCurrentMatch failed', (e as Error).message, e)
+    logger.warn('blocknote-search', 'replaceCurrentMatch failed', (e as Error).message, e)
     return false
   }
 }
@@ -221,7 +225,7 @@ export function replaceAllMatches(view: PMViewLike, matches: MatchRange[], repla
     }
     return sorted.length
   } catch (e) {
-    console.warn('[blocknoteSearch] replaceAllMatches failed', (e as Error).message, e)
+    logger.warn('blocknote-search', 'replaceAllMatches failed', (e as Error).message, e)
     return 0
   }
 }

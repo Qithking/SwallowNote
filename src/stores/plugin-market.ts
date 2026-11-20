@@ -46,7 +46,9 @@ async function getHostVersionCached(): Promise<string | null> {
   if (cachedHostVersion === undefined) {
     try {
       cachedHostVersion = await getVersion()
-    } catch {
+    } catch (e) {
+      // 取宿主版本失败会让 minHostVersion 过滤保守放行，需留痕
+      logger.warn('plugin-market', 'getVersion failed, host version unknown', e)
       cachedHostVersion = null
     }
   }
@@ -154,21 +156,32 @@ export const usePluginMarketStore = create<PluginMarketState>((set, get) => ({
         repoSources,
         repoUrl: activeSource?.url ?? OFFICIAL_REPO_URL,
       })
-    } catch {
-      // SQLite 不可用时回退到官网
+    } catch (e) {
+      // SQLite 不可用时回退到官网，但需留痕（自定义来源会全部消失）
+      logger.warn('plugin-market', 'load repo sources failed, fallback to official repo', e)
       set({ repoSources: [], repoUrl: OFFICIAL_REPO_URL })
     }
   },
   addRepoSource: async (source) => {
-    await tauriAddSource(source.name, source.url)
+    try {
+      await tauriAddSource(source.name, source.url)
+    } catch (e) {
+      logger.error('plugin-market', `add repo source failed: ${source.name} ${source.url}`, e)
+      throw e
+    }
     // 重新加载来源列表
     await get().loadRepoSources()
   },
   removeRepoSource: async (url) => {
-    await tauriRemoveSource(url)
-    // 如果删除的是当前活跃来源，切回官网
-    if (get().repoUrl === url) {
-      await tauriSetActiveSource(OFFICIAL_REPO_URL)
+    try {
+      await tauriRemoveSource(url)
+      // 如果删除的是当前活跃来源，切回官网
+      if (get().repoUrl === url) {
+        await tauriSetActiveSource(OFFICIAL_REPO_URL)
+      }
+    } catch (e) {
+      logger.error('plugin-market', `remove repo source failed: ${url}`, e)
+      throw e
     }
     await get().loadRepoSources()
   },

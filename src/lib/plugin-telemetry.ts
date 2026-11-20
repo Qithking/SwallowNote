@@ -95,8 +95,9 @@ function bumpMetricsVersion(): void {
     for (const sub of Array.from(metricsVersionSubscribers)) {
       try {
         sub()
-      } catch {
-        // 吞掉订阅者异常，避免破坏记录路径。
+      } catch (e) {
+        // 吞掉订阅者异常，避免破坏记录路径；但订阅者 bug 需留痕
+        logger.warn('plugin-telemetry', 'metrics version subscriber failed', e)
       }
     }
   }

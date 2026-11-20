@@ -110,8 +110,9 @@ async function initFromBackend() {
         cloneCompleted: false,
       })
     }
-  } catch {
-    // 后端命令可能未注册，忽略
+  } catch (e) {
+    // 后端命令可能未注册；克隆状态恢复失败会表现为"刷新后丢失进度"，需留痕
+    logger.warn('clone-store', 'init clone state from backend failed', e)
   }
 }
 
@@ -168,6 +169,10 @@ export const useCloneStore = create<CloneState>((set, get) => ({
       return true
     } catch (e) {
       const wasCancelled = _cancelled
+      if (!wasCancelled) {
+        // 克隆失败：toast 会消失，日志保留 url/path 供排查网络或权限问题（不记录凭证）
+        logger.error('clone-store', `clone failed: ${url} -> ${localPath}`, e)
+      }
       set({
         isCloning: false,
         clonePercent: null,
@@ -186,8 +191,9 @@ export const useCloneStore = create<CloneState>((set, get) => ({
     _cancelled = true
     try {
       await gitCloneCancel()
-    } catch {
-      // ignore cancel errors
+    } catch (e) {
+      // 取消失败通常无害（进程可能已退出），但保留痕迹便于排查克隆卡死
+      logger.warn('clone-store', 'cancel clone failed', e)
     }
     set({
       isCloning: false,

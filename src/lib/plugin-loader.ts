@@ -248,8 +248,9 @@ async function loadPluginModuleWithRefInner(
     let currentMtime: string | undefined
     try {
       currentMtime = (await getFileMetadata(indexJsPath)).modified_time
-    } catch {
+    } catch (e) {
       // mtime 不可用时跳过缓存复用
+      logger.warn('plugin-loader', `获取插件 mtime 失败，跳过缓存复用: ${pluginPath}`, e)
     }
 
     const cached = currentMtime ? pluginBlobUrlCache.get(pluginPath) : undefined
@@ -264,10 +265,11 @@ async function loadPluginModuleWithRefInner(
           logger.warn('plugin-loader', `No manifest found in module from ${pluginPath}`)
         }
         return { manifest, module }
-      } catch {
+      } catch (e) {
+        // 缓存的 blob URL 加载失败（文件可能已损坏）：驱逐缓存并落入完整加载流程
+        logger.warn('plugin-loader', `缓存 blob 加载失败，驱逐后重新加载: ${pluginPath}`, e)
         URL.revokeObjectURL(cached.blobUrl)
         pluginBlobUrlCache.delete(pluginPath)
-        // 落入下方完整加载流程
       }
     }
 
@@ -322,6 +324,7 @@ async function loadPluginModuleWithRefInner(
       // import 失败时清除缓存
       if (currentMtime) pluginBlobUrlCache.delete(pluginPath)
       URL.revokeObjectURL(blobUrl)
+      logger.error('plugin-loader', `plugin module import failed: ${pluginPath}`, err)
       throw err
     }
     // mtime 不可用时未缓存，import 成功后立即 revoke 释放内存

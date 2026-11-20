@@ -8,13 +8,15 @@
  * 本模块在事件冒泡末尾重写 text/plain 为选区纯文本；
  * text/html 与 blocknote/html 保持 BlockNote 原值，编辑器内/富文本粘贴不回归。
  */
+import { logger } from '@/lib/logger'
 
 /** 判断事件是否由 BlockNote 编辑器内部复制触发（其插件会写入专有类型 blocknote/html） */
 function isBlockNoteCopy(clipboardData: DataTransfer | null): boolean {
   if (!clipboardData) return false
   try {
     return Array.from(clipboardData.types).includes('blocknote/html')
-  } catch {
+  } catch (e) {
+    logger.debug('editor-clipboard', 'read clipboard types failed', e)
     return false
   }
 }
@@ -40,8 +42,9 @@ export function rewritePlainTextFromSelection(
     // 块间用空行分隔，贴近 markdown 对多段落复制的语义
     const plainText = tiptapEditor.state.doc.textBetween(from, to, '\n\n')
     clipboardData?.setData('text/plain', plainText)
-  } catch {
-    // 选区读取失败时保持 BlockNote 原值，不破坏复制
+  } catch (e) {
+    // 选区读取失败时保持 BlockNote 原值，不破坏复制；留 debug 便于排查复制格式问题
+    logger.debug('editor-clipboard', 'rewrite plain text from selection failed', e)
   }
 }
 

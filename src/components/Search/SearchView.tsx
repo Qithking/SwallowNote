@@ -208,7 +208,11 @@ export async function searchFrontmatterByRoots(
   if (roots.length === 0) return []
   const perRoot = await Promise.all(
     roots.map((root) =>
-      invoke<YamlFilterResult[]>('search_frontmatter', { filters, pathPrefix: root }).catch(() => [])
+      invoke<YamlFilterResult[]>('search_frontmatter', { filters, pathPrefix: root }).catch((e) => {
+        // 单个根查询失败不阻塞其他根，但会让该根结果缺失，必须留痕
+        logger.warn('search', `frontmatter search failed for root: ${root}`, e)
+        return []
+      })
     )
   )
   const merged = new Map<string, YamlFilterResult>()

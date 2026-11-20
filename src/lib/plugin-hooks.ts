@@ -13,6 +13,7 @@ import {
   listPluginCommands,
   subscribePluginCommands,
 } from './plugin-commands'
+import { logger } from './logger'
 
 export const usePluginStorage = sdkUsePluginStorage
 export const usePluginEvent = sdkUsePluginEvent
@@ -46,7 +47,9 @@ export function usePluginCommands(): PluginCommand[] {
         if (cmd.when) {
           try {
             return cmd.when()
-          } catch {
+          } catch (e) {
+            // 命令可见性谓词抛错按可见处理，但需留痕（插件作者可定位 bug）
+            logger.warn('plugin-hooks', `command when() failed: ${cmd.id}`, e)
             return true
           }
         }

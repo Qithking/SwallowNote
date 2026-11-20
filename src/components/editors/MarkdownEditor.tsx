@@ -229,7 +229,8 @@ function BlockNoteInner({
     if (!editor) return null
     try {
       return (editor as unknown as { _tiptapEditor?: TiptapEditorLike })._tiptapEditor ?? null
-    } catch {
+    } catch (e) {
+      logger.debug('markdown-editor', 'read _tiptapEditor failed', e)
       return null
     }
   }, [editor])
@@ -243,7 +244,8 @@ function BlockNoteInner({
       const { from, to, empty } = tiptapEditor.state.selection
       if (empty) return ''
       return tiptapEditor.state.doc.textBetween(from, to, '\n')
-    } catch {
+    } catch (e) {
+      logger.debug('markdown-editor', 'getSelectedText failed', e)
       return ''
     }
   }, [editor, getTiptapEditor])
@@ -275,8 +277,9 @@ function BlockNoteInner({
           view.dispatch(tr)
           view.focus()
         }
-      } catch {
+      } catch (e) {
         // 位置无效（如落在块边界），跳过恢复
+        logger.debug('markdown-editor', 'restore cursor anchor failed', e)
       }
     }
     raf = requestAnimationFrame(attempt)
@@ -292,7 +295,9 @@ function BlockNoteInner({
     const handler = () => {
       try {
         setCursorAnchorCache(activeTabId, captureCursorAnchor(tiptap.state.selection, tiptap.state.doc))
-      } catch { /* 忽略 */ }
+      } catch (e) {
+        logger.debug('markdown-editor', 'capture cursor anchor failed', e)
+      }
     }
     tiptap.on('selectionUpdate', handler)
     return () => tiptap.off?.('selectionUpdate', handler)

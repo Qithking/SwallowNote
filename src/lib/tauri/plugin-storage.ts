@@ -144,8 +144,9 @@ export async function getPluginStorageSize(pluginId: string): Promise<number> {
     // getFileMetadata 内部注入 workspaceRoot；插件存储位于 app data，恒在允许集内
     const meta = await getFileMetadata(path)
     return meta?.file_size ?? 0
-  } catch {
-    // 插件可能已卸载或尚未写入
+  } catch (e) {
+    // 插件可能已卸载或尚未写入；按 0 处理但留 debug 痕迹便于诊断
+    logger.debug('tauri', `getPluginStorageSize failed: ${pluginId}`, e)
     return 0
   }
 }

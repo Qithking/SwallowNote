@@ -135,6 +135,7 @@ function buildOverridesForPlugin(plugin: PluginDefinition): HostOverrides {
         // B4：结构化错误帧（__pluginError）→ SDK PluginError，其余原样透传。
         const normalized = normalizePluginBackendError(err)
         errorMsg = String(normalized)
+        logger.error('plugin-backend', `invoke failed: ${pluginId} ${cmd}`, normalized)
         throw normalized
       } finally {
         const durationMs = performance.now() - start

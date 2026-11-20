@@ -313,6 +313,12 @@ export function PluginMarketDetail({
         onClose()
       }
     } catch (e: any) {
+      // 安装/更新失败：error 文案只留在弹窗内，关闭后不可追溯，必须进日志
+      logger.error(
+        'plugin-market',
+        `install failed: ${entry.id}@${entry.version} source=${repoUrl}`,
+        e,
+      )
       setError(friendlyInstallError(e, t))
     } finally {
       setIsInstalling(false)
@@ -364,6 +370,12 @@ export function PluginMarketDetail({
           await installEntry(depEntry)
           succeeded++
         } catch (e) {
+          // 依赖安装失败：toast 只展示首个，完整错误必须逐条进日志
+          logger.error(
+            'plugin-market',
+            `auto-resolve dependency install failed: ${depEntry.id}@${depEntry.version}`,
+            e,
+          )
           failures.push({
             id: depEntry.id,
             name: depEntry.name || depEntry.id,
@@ -398,6 +410,7 @@ export function PluginMarketDetail({
         )
       }
     } catch (e: any) {
+      logger.error('plugin-market', `auto-resolve dependencies failed for ${entry.id}`, e)
       setError(friendlyInstallError(e, t))
     } finally {
       setIsAutoResolving(false)

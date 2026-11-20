@@ -223,8 +223,9 @@ function StatusBar() {
         setVersionStatus('download-ready')
         versionStatusRef.current = 'download-ready'
       }
-    } catch {
-      // update check is best-effort; ignore network/parse errors
+    } catch (e) {
+      // 探测已下载安装包失败（网络/权限/命令缺失）：不阻塞 UI，但需留痕
+      logger.warn('statusbar', 'check downloaded installer failed', e)
     }
   }
 
@@ -253,7 +254,8 @@ function StatusBar() {
           setVersionStatus('check-failed')
           versionStatusRef.current = 'check-failed'
         }
-      } catch {
+      } catch (e) {
+        logger.error('statusbar', 'manual update check failed', e)
         setVersionStatus('check-failed')
         versionStatusRef.current = 'check-failed'
       }
@@ -323,13 +325,16 @@ function StatusBar() {
         }
       } catch (e) {
         const errorMsg = String(e)
+        // 安装/重启失败必须进日志：用户往往在失败后应用退出/重启，toast 已不可追溯
+        logger.error('statusbar', `install update failed: ${downloadedPath}`, e)
         // If install_and_restart failed, fall back to open_installer
         if (downloadedPath.endsWith('.dmg')) {
           try {
             await openInstaller(downloadedPath)
             return
-          } catch {
+          } catch (fallbackError) {
             // Both methods failed
+            logger.error('statusbar', `open installer fallback failed: ${downloadedPath}`, fallbackError)
           }
         }
         showToast(t('statusBar.installFailed', { error: errorMsg }))
@@ -346,7 +351,8 @@ function StatusBar() {
   const handleRepoLinkClick = async () => {
     try {
       await open('https://github.com/Qithking/SwallowNote')
-    } catch {
+    } catch (e) {
+      logger.warn('statusbar', 'open repository link failed', e)
       showToast(t('statusBar.openLinkFailed'))
     }
   }

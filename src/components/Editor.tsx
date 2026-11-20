@@ -399,7 +399,9 @@ export function EditorView() {
       // 防止旧链把位置写到已被新 tab 复用的容器上
       const abort = new AbortController()
       const raf = requestAnimationFrame(() => {
-        restoreScrollTop(editorContainerRef.current, savedTop, 3000, abort.signal).catch(() => { /* noop */ })
+        restoreScrollTop(editorContainerRef.current, savedTop, 3000, abort.signal).catch((e) => {
+          logger.debug('editor', 'restoreScrollTop failed', e)
+        })
       })
       return () => {
         cancelAnimationFrame(raf)

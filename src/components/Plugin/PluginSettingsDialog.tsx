@@ -55,6 +55,7 @@ import {
   type PluginSettingsField,
   type PluginSettingsView,
 } from '@/lib/plugin-settings'
+import { logger } from '@/lib/logger'
 
 interface Props {
   pluginId: string
@@ -112,6 +113,7 @@ export function PluginSettingsDialog({
       })
       .catch((e) => {
         if (cancelled) return
+        logger.error('plugin-settings', `load settings failed: ${pluginId}`, e)
         toast.error(t('plugin.pa.settings.loadFailed', { error: String(e) }))
         onOpenChange(false)
       })
@@ -158,6 +160,7 @@ export function PluginSettingsDialog({
       setSavedOnce(true)
       toast.success(t('plugin.pa.settings.saved'))
     } catch (e) {
+      logger.error('plugin-settings', `save settings failed: ${pluginId}`, e)
       toast.error(t('plugin.pa.settings.saveFailed', { error: String(e) }))
     } finally {
       setSaving(false)

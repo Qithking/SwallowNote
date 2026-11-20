@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/dialog'
 import { uninstallPlugin, scanPlugins } from '@/lib/tauri'
 import { loadAllPlugins } from '@/lib/plugin-loader'
+import { logger } from '@/lib/logger'
 import { usePluginStore, useUIStore } from '@/stores'
 import { useShallow } from 'zustand/react/shallow'
 import type { PluginLoadFailure } from '@/types/plugin'
@@ -162,6 +163,7 @@ export function PluginLoadFailuresDialog({
       // banner).
       clearLoadFailure(id)
     } catch (err) {
+      logger.error('plugin-manager', `uninstall failed plugin from dialog failed: ${id}`, err)
       toast.error(t('plugin.uninstallFailed'), { description: String(err) })
     } finally {
       setBusy(null)

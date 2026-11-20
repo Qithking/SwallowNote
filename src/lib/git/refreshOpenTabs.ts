@@ -13,6 +13,7 @@
  */
 import { useEditorStore } from '@/stores/editor'
 import { useGitStore } from '@/stores/git'
+import { logger } from '@/lib/logger'
 
 /**
  * 同步完成后刷新已打开的普通 tab。
@@ -60,7 +61,10 @@ export async function refreshOpenTabsAfterSync(pulledRepoPaths: string[]): Promi
 
     // 非 dirty：强制重载磁盘最新内容（S-01 核心）
     if (!tab.isDirty && !tab.frontmatterDirty) {
-      await editorStore.loadTabContent(tab.id, 0, true).catch(() => {})
+      await editorStore.loadTabContent(tab.id, 0, true).catch((e) => {
+        // git 切换后重载失败会导致 tab 内容与磁盘不一致，必须留痕
+        logger.warn('git-refresh-tabs', `重载 tab 内容失败: ${tab.id}`, e)
+      })
       continue
     }
 

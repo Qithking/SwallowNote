@@ -75,7 +75,9 @@ async function readZipFromCache(sha256: string): Promise<ArrayBuffer | null> {
       }
       req.onerror = () => reject(req.error)
     })
-  } catch {
+  } catch (e) {
+    // IndexedDB 缓存读取失败（浏览器存储损坏/配额）：按 miss 处理但需留痕
+    logger.warn('plugin-market', 'zip 缓存读取失败，按缓存未命中处理', e)
     return null
   }
 }

@@ -325,7 +325,9 @@ function PluginManagerView() {
       .then((bytes) => {
         if (!cancelled) setCap(bytes)
       })
-      .catch(() => {
+      .catch((e) => {
+        // 存储容量查询失败只影响容量条显示，但需留痕
+        logger.warn('plugin-manager', 'getStorageCap failed, cap unknown', e)
         if (!cancelled) setCap(null)
       })
     return () => {
@@ -450,6 +452,8 @@ function PluginManagerView() {
         })
       }
     } catch (err) {
+      // 本地 zip 安装失败（选择器/解压/校验）：toast 之后无迹可查，必须进日志
+      logger.error('plugin-manager', 'install plugin from zip failed', err)
       toast.error(t('plugin.installFailed'), { description: String(err) })
     } finally {
       setIsUploading(false)
@@ -503,6 +507,7 @@ function PluginManagerView() {
       toast.success(t('plugin.uninstallSuccess', { name: plugin.name }))
       await handleReload()
     } catch (err) {
+      logger.error('plugin-manager', `uninstall plugin failed: ${plugin.id}`, err)
       toast.error(t('plugin.uninstallFailed'), { description: String(err) })
     }
   }, [t, handleReload])
@@ -513,6 +518,7 @@ function PluginManagerView() {
       usePluginStore.getState().setPluginEnabled(plugin.id, enabled)
       toast.success(enabled ? t('plugin.enabled', { name: plugin.name }) : t('plugin.disabled', { name: plugin.name }))
     } catch (err) {
+      logger.error('plugin-manager', `toggle plugin failed: ${plugin.id} enabled=${enabled}`, err)
       toast.error(t('plugin.toggleFailed'), { description: String(err) })
       // P1 修复：rethrow 把失败传给卡片开关，UI 才能回滚乐观翻转的状态
       throw err

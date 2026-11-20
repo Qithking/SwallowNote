@@ -21,7 +21,11 @@ export function useEditorPasteUpload() {
     const folder = filePath.split(/[\\/]/).slice(0, -1).join('/')
     const root = rootPath || folder
     let userRoot = ''
-    try { userRoot = await getHomeDir() } catch { userRoot = folder }
+    try { userRoot = await getHomeDir() } catch (e) {
+      // 无法取 home 时 $userRootPath 回退到当前文件夹，需留痕
+      logger.warn('markdown-editor', 'getHomeDir failed, $userRootPath falls back to folder', e)
+      userRoot = folder
+    }
 
     if (!uploadPath.trim()) return folder
 
@@ -96,7 +100,8 @@ export function useEditorPasteUpload() {
         return url
       }
       return convertFileSrc(absolutePath)
-    } catch {
+    } catch (e) {
+      logger.warn('markdown-editor', `resolveFileUrl failed, return original url: ${url}`, e)
       return url
     }
   }, [activeTabPath, rootPath])
@@ -198,7 +203,9 @@ export function useEditorPasteUpload() {
         }
         // If no file paths found, do nothing — nothing to paste
       })
-      .catch(() => {})
+      .catch((e) => {
+        logger.error('markdown-editor', 'read clipboard file paths failed', e)
+      })
 
     // Return undefined to indicate we handled the paste asynchronously (no default paste)
     return undefined

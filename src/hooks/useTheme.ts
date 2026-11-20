@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useUIStore } from '@/stores'
+import { logger } from '@/lib/logger'
 
 function hexToHSL(hex: string): { h: number; s: number; l: number } {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
@@ -101,8 +102,9 @@ function buildCssVars(
 function persistTheme(theme: string, darkCssVars: Record<string, string>, lightCssVars: Record<string, string>) {
   try {
     localStorage.setItem('sn-theme', JSON.stringify({ theme, darkCssVars, lightCssVars }))
-  } catch {
-    // localStorage 不可用时忽略
+  } catch (e) {
+    // localStorage 不可用时忽略；会导致刷新后主题闪回，需留痕
+    logger.warn('theme', 'persist theme to localStorage failed', e)
   }
 }
 

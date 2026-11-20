@@ -111,7 +111,8 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
           try {
             const { zoomIdentity } = await import('d3-zoom')
             instance.zoom.transform(svgRef.current, zoomIdentity.scale(scale))
-          } catch {
+          } catch (e) {
+            logger.warn('markmap', 'apply saved zoom failed, fallback to fit', e)
             await instance.fit()
           }
         } else {
@@ -137,12 +138,13 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
               editor.updateBlock(block, {
                 props: { diagram: newDiagram, scale: currentScale },
               })
-            } catch {
-              /* noop */
+            } catch (e) {
+              logger.warn('markmap', 'persist zoom scale to block failed', e)
             }
           }
         }
-      } catch {
+      } catch (e) {
+        logger.error('markmap', 'render markmap failed', e)
         if (active) setHasError(true)
       }
     })()
@@ -177,7 +179,8 @@ export function MarkmapBlockEditor({ diagram, source, width, height, scale, bloc
         await instance.setData(root ?? { type: 'heading', depth: 0, value: '' })
         await instance.fit()
         dialogMarkmapRef.current = instance
-      } catch {
+      } catch (e) {
+        logger.error('markmap', 'render markmap failed', e)
         if (active) setHasError(true)
       }
     })

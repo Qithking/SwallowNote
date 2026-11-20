@@ -245,7 +245,8 @@ export const useGitStore = create<GitState>((set, get) => ({
           if (r.status === 'fulfilled') {
             results.push(r.value)
           } else {
-            // 理论上不会走到这里（内部已 try/catch），兜底处理
+            // 理论上不会走到这里（内部已 try/catch），兜底处理并留痕
+            logger.warn('git', `pull 批量任务异常兜底触发: ${String(r.reason)}`)
             results.push({ path: '', name: '', success: false, error: String(r.reason) })
           }
         }

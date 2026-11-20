@@ -52,7 +52,10 @@ export function useEditorLinkHandling(
       if (openFileWithConflictGuard(filePath)) return
       const [content, meta] = await Promise.all([
         readFile(filePath),
-        getFileMetadata(filePath).catch(() => null),
+        getFileMetadata(filePath).catch((e) => {
+          logger.debug('markdown-editor', `getFileMetadata failed for link target: ${filePath}`, e)
+          return null
+        }),
       ])
       const fileName = filePath.split('/').pop() || filePath
       addTabRef.current({

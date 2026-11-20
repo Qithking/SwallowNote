@@ -2,6 +2,7 @@
 
 import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
 import { setGranted, clearGranted } from './plugin-permission-guard'
+import { logger } from './logger'
 
 // 存储键
 const PERMISSIONS_KEY = 'plugin_permissions'
@@ -16,7 +17,9 @@ export async function getPluginPermissions(pluginId: string): Promise<PluginPerm
     if (!stored) return []
     
     return JSON.parse(stored)
-  } catch {
+  } catch (e) {
+    // 权限状态读取失败会回退为"未授权"，影响权限判定，必须留痕
+    logger.warn('plugin-permissions', `读取插件权限状态失败: ${pluginId}`, e)
     return []
   }
 }
@@ -139,8 +142,9 @@ async function logPermissionAction(
     }
 
     await window.localStorage.setItem(AUDIT_LOG_KEY, JSON.stringify(logs))
-  } catch {
-    // 审计日志静默失败
+  } catch (e) {
+    // 审计日志写入失败：审计链路缺失属于安全可观测性问题，必须留痕
+    logger.warn('plugin-permissions', `写入权限审计日志失败: ${pluginId} ${action}`, e)
   }
 }
 
@@ -149,7 +153,8 @@ export async function getPermissionAuditLogs(): Promise<PermissionAuditLogEntry[
   try {
     const stored = await window.localStorage.getItem(AUDIT_LOG_KEY)
     return stored ? JSON.parse(stored) : []
-  } catch {
+  } catch (e) {
+    logger.warn('plugin-permissions', '读取权限审计日志失败', e)
     return []
   }
 }

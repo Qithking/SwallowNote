@@ -170,7 +170,9 @@ export function hydrateAutoUpdateFromLocalStorage(): void {
       const raw = window.localStorage.getItem(key)
       record[id] = raw === 'true'
     }
-  } catch {
+  } catch (err) {
+    // 持久化记录恢复失败（隐私模式/配额）：降级为空记录，但需留痕便于诊断
+    logger.warn('plugin-update', 'auto-update 持久化记录恢复失败', err)
     /* private mode / quota — start with an empty map */
   }
   usePluginStore.getState().hydratePluginAutoUpdate(record)
@@ -201,6 +203,8 @@ export async function undoAutoUpdate(args: {
     void refreshInstalledPlugins()
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err)
+    // 撤销自动更新失败：toast 只面向当前用户，日志保证事后可追溯
+    logger.error('plugin-update', `undoAutoUpdate 回滚失败: ${args.pluginId}@${args.previousVersion}`, reason)
     toast.error(
       t('plugin.pa.autoUpdate.undoFailed', {
         name: args.pluginName,

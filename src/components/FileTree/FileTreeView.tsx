@@ -50,7 +50,9 @@ export type FileTreeSortMode = 'default' | 'updated-desc' | 'title-asc'
 export async function resolveNodeModifiedTime(path: string): Promise<string | undefined> {
   try {
     return (await getFileMetadata(path)).modified_time
-  } catch {
+  } catch (e) {
+    // 失败返回 undefined（保持字段缺省），留痕便于排查"修改时间不更新"
+    logger.debug('file-tree', `getFileMetadata failed: ${path}`, e)
     return undefined
   }
 }
@@ -542,8 +544,9 @@ const { t } = useTranslation()
             next.set(savedPath, fm)
             return next
           })
-        } catch {
-          // ignore
+        } catch (e) {
+          // 保存后 frontmatter 刷新失败：树上的标签会短暂陈旧
+          logger.warn('file-tree', `getFileFrontmatter after save failed: ${savedPath}`, e)
         }
       }
     }

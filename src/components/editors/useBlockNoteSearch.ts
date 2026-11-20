@@ -17,6 +17,7 @@ import {
   type MatchRange,
   type PMViewLike,
 } from './blocknoteSearch'
+import { logger } from '@/lib/logger'
 
 interface UseBlockNoteSearchArgs {
   editor: unknown
@@ -55,15 +56,15 @@ export function useBlockNoteSearch({ editor }: UseBlockNoteSearchArgs) {
         if (filtered.length !== tiptap.state.plugins.length) {
           tiptap.view.updateState(tiptap.state.reconfigure({ plugins: filtered }))
         }
-      } catch {
-        // ignore
+      } catch (e) {
+        logger.warn('blocknote-search', 'remove stale find/replace plugin failed', e)
       }
       const plugin = createFindReplacePlugin()
       pluginRef.current = plugin
       try {
         tiptap.registerPlugin(plugin)
       } catch (e) {
-        console.warn('[useBlockNoteSearch] registerPlugin failed', e)
+        logger.warn('blocknote-search', 'registerPlugin failed', e)
       }
     }
 
@@ -80,7 +81,7 @@ export function useBlockNoteSearch({ editor }: UseBlockNoteSearchArgs) {
       try {
         tiptap.unregisterPlugin(findReplacePluginKey)
       } catch (e) {
-        console.warn('[useBlockNoteSearch] unregisterPlugin failed', e)
+        logger.warn('blocknote-search', 'unregisterPlugin failed', e)
       }
     }
   }, [editor])
@@ -99,7 +100,7 @@ export function useBlockNoteSearch({ editor }: UseBlockNoteSearchArgs) {
       const tr = view.state.tr.setMeta(findReplacePluginKey, { matches, currentIdx })
       view.dispatch(tr)
     } catch (e) {
-      console.warn('[useBlockNoteSearch] updateDecorations failed', e)
+      logger.warn('blocknote-search', 'updateDecorations failed', e)
     }
   }, [])
 
@@ -130,7 +131,7 @@ export function useBlockNoteSearch({ editor }: UseBlockNoteSearchArgs) {
         view.dispatch(tr)
         scrollMatchIntoView(view, first.from)
       } catch (e) {
-        console.warn('[useBlockNoteSearch] setQuery scroll failed', e)
+        logger.warn('blocknote-search', 'setQuery scroll failed', e)
       }
     }
   }, [refreshView, updateDecorations])
@@ -155,7 +156,7 @@ export function useBlockNoteSearch({ editor }: UseBlockNoteSearchArgs) {
       view.dispatch(tr)
       scrollMatchIntoView(view, next.from)
     } catch (e) {
-      console.warn('[useBlockNoteSearch] findNext dispatch failed', e)
+      logger.warn('blocknote-search', 'findNext dispatch failed', e)
     }
   }, [refreshView, updateDecorations])
 
@@ -176,7 +177,7 @@ export function useBlockNoteSearch({ editor }: UseBlockNoteSearchArgs) {
       view.dispatch(tr)
       scrollMatchIntoView(view, prev.from)
     } catch (e) {
-      console.warn('[useBlockNoteSearch] findPrev dispatch failed', e)
+      logger.warn('blocknote-search', 'findPrev dispatch failed', e)
     }
   }, [refreshView, updateDecorations])
 
@@ -223,7 +224,7 @@ export function useBlockNoteSearch({ editor }: UseBlockNoteSearchArgs) {
       view.dispatch(tr)
       scrollMatchIntoView(view, match.from)
     } catch (e) {
-      console.warn('[useBlockNoteSearch] replaceNext scroll failed', e)
+      logger.warn('blocknote-search', 'replaceNext scroll failed', e)
     }
   }, [refreshView, updateDecorations, query, options])
 

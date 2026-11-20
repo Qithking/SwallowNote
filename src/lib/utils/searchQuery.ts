@@ -3,6 +3,7 @@
  */
 import type { NoteFrontmatter } from '@/lib/types/frontmatter'
 import { invoke } from '@tauri-apps/api/core'
+import { logger } from '@/lib/logger'
 
 /// 后端 FrontmatterRecord 类型（与 Rust 侧 FrontmatterRecord 对应）
 export interface FrontmatterRecord {
@@ -32,8 +33,9 @@ export async function getFileFrontmatter(filePath: string): Promise<NoteFrontmat
     if (record) {
       return recordToFrontmatter(record)
     }
-  } catch {
+  } catch (e) {
     // 后端查询失败，回退到文件读取
+    logger.warn('search', `frontmatter 后端查询失败，回退文件解析: ${filePath}`, e)
   }
 
   // 回退：直接读取文件解析（索引可能尚未完成）
@@ -43,7 +45,9 @@ export async function getFileFrontmatter(filePath: string): Promise<NoteFrontmat
     const { parseFrontmatter } = await import('@/lib/utils/frontmatter')
     const { data } = parseFrontmatter(content)
     return data
-  } catch {
+  } catch (e) {
+    // 回退也失败：该文件元数据在搜索中缺失，需留痕
+    logger.warn('search', `frontmatter 文件回退解析也失败: ${filePath}`, e)
     return {}
   }
 }
@@ -64,13 +68,17 @@ function recordToFrontmatter(record: FrontmatterRecord): NoteFrontmatter {
   if (record.tags) {
     try {
       result.tags = JSON.parse(record.tags)
-    } catch { /* ignore */ }
+    } catch (e) {
+      logger.warn('search', `frontmatter tags 字段 JSON 损坏: ${record.file_path}`, e)
+    }
   }
 
   if (record.categories) {
     try {
       result.categories = JSON.parse(record.categories)
-    } catch { /* ignore */ }
+    } catch (e) {
+      logger.warn('search', `frontmatter categories 字段 JSON 损坏: ${record.file_path}`, e)
+    }
   }
 
   // 合并 extra_yaml 中的非标准字段
@@ -80,7 +88,9 @@ function recordToFrontmatter(record: FrontmatterRecord): NoteFrontmatter {
       if (typeof extra === 'object' && extra !== null) {
         Object.assign(result, extra)
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      logger.warn('search', `frontmatter extra_yaml 字段 JSON 损坏: ${record.file_path}`, e)
+    }
   }
 
   return result
@@ -94,8 +104,9 @@ function recordToFrontmatter(record: FrontmatterRecord): NoteFrontmatter {
 export async function invalidateFrontmatterCache(filePath: string, workspaceRoot: string | null): Promise<void> {
   try {
     await invoke('trigger_frontmatter_scan', { path: filePath, workspaceRoot })
-  } catch {
-    // 静默失败，索引线程会通过文件监听器自动处理
+  } catch (e) {
+    // 触发失败后索引线程可能不会自动补偿，导致搜索数据滞后，需留痕
+    logger.warn('search', `触发 frontmatter 重索引失败: ${filePath}`, e)
   }
 }
 
@@ -106,8 +117,8 @@ export async function invalidateFrontmatterCache(filePath: string, workspaceRoot
 export async function triggerFrontmatterScan(path: string, workspaceRoot: string | null): Promise<void> {
   try {
     await invoke('trigger_frontmatter_scan', { path, workspaceRoot })
-  } catch {
-    // 静默失败
+  } catch (e) {
+    logger.warn('search', `触发目录 frontmatter 扫描失败: ${path}`, e)
   }
 }
 
@@ -117,7 +128,9 @@ export async function triggerFrontmatterScan(path: string, workspaceRoot: string
 export async function queryFrontmatterByPrefix(pathPrefix: string): Promise<FrontmatterRecord[]> {
   try {
     return await invoke<FrontmatterRecord[]>('query_frontmatter_by_prefix', { pathPrefix })
-  } catch {
+  } catch (e) {
+    // 查询失败返回空数组会让用户误以为"无匹配"，需留痕
+    logger.warn('search', `按前缀查询 frontmatter 失败: ${pathPrefix}`, e)
     return []
   }
 }
@@ -137,8 +150,9 @@ export async function getFileFrontmattersByPrefix(pathPrefix: string): Promise<M
     for (const record of records) {
       cache.set(record.file_path, recordToFrontmatter(record))
     }
-  } catch {
-    // 后端查询失败，返回空 cache
+  } catch (e) {
+    // 后端查询失败，返回空 cache（调用方会回退逐文件读取，但失败原因需留痕）
+    logger.warn('search', `批量查询 frontmatter 失败: ${pathPrefix}`, e)
   }
   return cache
 }
@@ -149,7 +163,8 @@ export async function getFileFrontmattersByPrefix(pathPrefix: string): Promise<M
 export async function queryFrontmatterByTag(tag: string): Promise<FrontmatterRecord[]> {
   try {
     return await invoke<FrontmatterRecord[]>('query_frontmatter_by_tag', { tag })
-  } catch {
+  } catch (e) {
+    logger.warn('search', `按标签查询 frontmatter 失败: ${tag}`, e)
     return []
   }
 }

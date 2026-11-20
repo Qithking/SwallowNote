@@ -16,6 +16,7 @@ import {
   SearchCursor,
   RegExpCursor,
 } from '@codemirror/search'
+import { logger } from '@/lib/logger'
 
 /** 查询参数(与 BlockNote 共用语义) */
 export interface CMSearchQuery {
@@ -69,7 +70,8 @@ function countMatches(
       count++
     }
     return count
-  } catch {
+  } catch (e) {
+    logger.warn('code-editor-search', 'countMatches failed', e)
     return 0
   }
 }
@@ -110,7 +112,8 @@ function computeCurrentMatchIndex(
       if (selectionFrom >= from && selectionFrom <= to) return index
     }
     return index
-  } catch {
+  } catch (e) {
+    logger.warn('code-editor-search', 'computeCurrentMatchIndex failed', e)
     return 0
   }
 }
@@ -180,7 +183,7 @@ export function useCodeMirrorSearch({ viewRef }: UseCodeMirrorSearchArgs) {
       }
     } catch (e) {
       const message = q.regexp ? t('editorToolbar.findReplace.invalidRegex') : String(e)
-      console.warn('[useCodeMirrorSearch] setQuery failed', e)
+      logger.warn('code-editor-search', 'setQuery failed', e)
       setMatchCount({ current: 0, total: 0 })
       dispatchFindReplaceError(message)
     }
@@ -222,7 +225,7 @@ export function useCodeMirrorSearch({ viewRef }: UseCodeMirrorSearchArgs) {
       })
       view.dispatch({ effects: setSearchQuery.of(sq) })
     } catch (e) {
-      console.warn('[useCodeMirrorSearch] setReplaceText failed', e)
+      logger.warn('code-editor-search', 'setReplaceText failed', e)
     }
   }, [viewRef])
 
@@ -247,7 +250,7 @@ export function useCodeMirrorSearch({ viewRef }: UseCodeMirrorSearchArgs) {
       const current = computeCurrentMatchIndex(view.state.doc, q, view.state.selection.main.from)
       setMatchCount((prev) => ({ current, total: prev.total }))
     } catch (e) {
-      console.warn('[useCodeMirrorSearch] findNext failed', e)
+      logger.warn('code-editor-search', 'findNext failed', e)
     }
   }, [viewRef])
 
@@ -269,7 +272,7 @@ export function useCodeMirrorSearch({ viewRef }: UseCodeMirrorSearchArgs) {
       const current = computeCurrentMatchIndex(view.state.doc, q, view.state.selection.main.from)
       setMatchCount((prev) => ({ current, total: prev.total }))
     } catch (e) {
-      console.warn('[useCodeMirrorSearch] findPrev failed', e)
+      logger.warn('code-editor-search', 'findPrev failed', e)
     }
   }, [viewRef])
 
@@ -292,7 +295,7 @@ export function useCodeMirrorSearch({ viewRef }: UseCodeMirrorSearchArgs) {
       // 替换后总匹配数 -1
       setMatchCount((prev) => ({ current: prev.current, total: Math.max(0, prev.total - 1) }))
     } catch (e) {
-      console.warn('[useCodeMirrorSearch] replaceNext failed', e)
+      logger.warn('code-editor-search', 'replaceNext failed', e)
     }
   }, [viewRef])
 
@@ -313,7 +316,7 @@ export function useCodeMirrorSearch({ viewRef }: UseCodeMirrorSearchArgs) {
       cmReplaceAll(view)
       setMatchCount({ current: 0, total: 0 })
     } catch (e) {
-      console.warn('[useCodeMirrorSearch] replaceAll failed', e)
+      logger.warn('code-editor-search', 'replaceAll failed', e)
     }
   }, [viewRef])
 

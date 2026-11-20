@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { exportLogs, openLogDir, saveLogExportDialog } from '@/lib/tauri/file-dialogs'
+import { logger } from '@/lib/logger'
 import { SettingRow } from '../SettingRow'
 
 // 日志占用上限档位（MB），与 spec 一致：5/10/20/50
@@ -45,6 +46,8 @@ export function DevelopmentSettings({
       if (String(e).includes('NO_LOGS')) {
         toast.info(t('settings.development.log.exportNone'))
       } else {
+        // 导出日志失败：连日志导出都失败时本地日志是唯一线索
+        logger.error('settings', 'export logs failed', e)
         toast.error(t('settings.development.log.exportFailed'))
       }
     } finally {
@@ -56,7 +59,8 @@ export function DevelopmentSettings({
   const handleOpenLogDir = async () => {
     try {
       await openLogDir()
-    } catch {
+    } catch (e) {
+      logger.warn('settings', 'open log directory failed', e)
       toast.error(t('settings.development.log.openFailed'))
     }
   }

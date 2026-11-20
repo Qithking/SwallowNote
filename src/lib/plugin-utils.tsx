@@ -286,6 +286,8 @@ export function createPluginPanelProps(
         // PluginError.toString() 输出纯 message，遥测格式与旧字符串路径一致。
         const normalized = normalizePluginBackendError(err)
         errorMsg = String(normalized)
+        // 插件后端调用失败：命令与插件 id 是排查根因的最小上下文
+        logger.error('plugin-backend', `invoke failed: ${pluginId} ${command}`, normalized)
         throw normalized
       } finally {
         // Record backend metrics for the diagnostics panel. Lazy-import
@@ -468,6 +470,8 @@ export function createToolbarButtonProps(
         // PluginError.toString() 输出纯 message，遥测格式与旧字符串路径一致。
         const normalized = normalizePluginBackendError(err)
         errorMsg = String(normalized)
+        // 插件后端调用失败：命令与插件 id 是排查根因的最小上下文
+        logger.error('plugin-backend', `invoke failed: ${pluginId} ${command}`, normalized)
         throw normalized
       } finally {
         const durationMs = performance.now() - start

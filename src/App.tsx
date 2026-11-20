@@ -149,12 +149,12 @@ function App() {
       // Sync current i18n language to the Rust backend (fire-and-forget)
       import('i18next').then(({ default: i18n }) => {
         setAppLocale(i18n.language).catch((e) => logger.warn('app', 'setAppLocale failed', e))
-      }).catch(() => {})
+      }).catch((e) => logger.warn('app', 'load i18next for locale sync failed', e))
 
       // 窗口可见后发射 app:ready（fire-and-forget，不阻塞）
       import('@/lib/plugin-host').then(({ emitAppReady }) => {
         emitAppReady()
-      }).catch(() => { /* ignore */ })
+      }).catch((e) => logger.warn('app', 'load plugin-host for app:ready failed', e))
 
       // 窗口显示后立即启动插件加载和后台服务（macrotask 让出当前 init 渲染帧）
       // 实测插件加载自身仅 ~0.5s 且不阻塞编辑器渲染，固定延迟只会
@@ -255,7 +255,9 @@ function App() {
         } else {
           setTimeout(() => { void preloadPluginManager() }, 3000)
         }
-      } catch { /* ignore */ }
+      } catch (e) {
+        logger.warn('app', 'schedule plugin manager preload failed', e)
+      }
     }
     init()
   }, [])
@@ -290,7 +292,9 @@ function App() {
       try {
         const { emitAppExit } = await import('@/lib/plugin-host')
         emitAppExit()
-      } catch { /* ignore */ }
+      } catch (e) {
+        logger.warn('app', 'emitAppExit on close failed', e)
+      }
 
       // 退出前刷新所有插件 storage 缓存到磁盘，避免防抖/飞行中写入丢失
       try {

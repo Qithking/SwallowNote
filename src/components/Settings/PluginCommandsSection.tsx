@@ -20,6 +20,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { usePluginCommands } from '@/lib/plugin-hooks'
 import { usePluginStore } from '@/stores/plugin'
+import { logger } from '@/lib/logger'
 import { PluginCommandRecorder } from './PluginCommandRecorder'
 import type { PluginCommand } from '@/types/plugin'
 
@@ -83,7 +84,8 @@ export function PluginCommandsSection() {
               : (() => {
                   try {
                     return cmd.when()
-                  } catch {
+                  } catch (e) {
+                    logger.warn('settings', `plugin command when() failed: ${cmd.id}`, e)
                     return true
                   }
                 })()

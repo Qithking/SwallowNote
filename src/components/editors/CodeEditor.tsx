@@ -202,8 +202,9 @@ function resolveLanguageExtension(lang: string): any | Promise<any> {
   if (result instanceof Promise) {
     result.then((ext: any) => {
       setDynamicExtension(lang, ext)
-    }).catch(() => {
+    }).catch((e) => {
       // Remove from cache if import failed so it can be retried
+      logger.warn('code-editor', `load language extension failed: ${lang}`, e)
       dynamicExtensionCache.delete(lang)
     })
   }
@@ -402,7 +403,10 @@ export function CodeEditor({ content, filename, onChange, className = '', scroll
 
     // If the language extension is a Promise (dynamic import), wait for it
     if (langResult instanceof Promise) {
-      langResult.then((ext: any) => createEditor(ext)).catch(() => createEditor([]))
+      langResult.then((ext: any) => createEditor(ext)).catch((e) => {
+        logger.warn('code-editor', `load language extension failed, fallback to plain text: ${filename}`, e)
+        createEditor([])
+      })
     } else {
       createEditor(langResult)
     }

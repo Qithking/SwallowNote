@@ -11,6 +11,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import 'katex/dist/katex.min.css'
 import { Code2, Maximize2 } from 'lucide-react'
+import { logger } from '@/lib/logger'
 import {
   Dialog,
   DialogContent,
@@ -77,9 +78,13 @@ function renderKatex(formula: string, display: boolean): Promise<{ html: string;
       }
       return result
     } catch (e) {
+      logger.error('katex', 'render formula failed', e)
       return { html: '', error: e instanceof Error ? e.message : String(e) }
     }
-  }).catch(() => ({ html: '', error: 'Failed to load KaTeX' }))
+  }).catch((e) => {
+    logger.error('katex', 'load katex module failed', e)
+    return { html: '', error: 'Failed to load KaTeX' }
+  })
 }
 
 export function KatexBlockEditor({ source, formula, display, width, height, block, editor }: KatexBlockEditorProps) {

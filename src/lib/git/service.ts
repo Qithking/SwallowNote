@@ -63,6 +63,8 @@ export async function withCredentialFallback(
   } catch (e) {
     const errorMessage = String(e).trim()
     const error = parseGitError(errorMessage)
+    // 操作失败（含 AUTH_REQUIRED/冲突/网络）：调用方只拿到结果对象，日志是唯一事后线索
+    logger.warn('git-service', `git ${op} failed: ${repo.path}`, errorMessage)
 
     if (error.code === GitErrorCode.AuthRequired) {
       try {
@@ -77,6 +79,7 @@ export async function withCredentialFallback(
             // caller（GitView）跳过冲突处理误弹凭证框。仅错误仍为 AuthRequired 时才标记。
             const credErrorMessage = String(credError).trim()
             const credParsed = parseGitError(credErrorMessage)
+            logger.warn('git-service', `git ${op} with saved credential failed: ${repo.path}`, credErrorMessage)
             return {
               success: false,
               error: credErrorMessage,
@@ -111,6 +114,8 @@ export async function commitAndPushRepo(
   } catch (e) {
     const errorMessage = String(e).trim()
     const error = parseGitError(errorMessage)
+    // commit+push 失败：区分提交失败/推送失败是排查关键，先记录原始错误
+    logger.warn('git-service', `git commit+push failed: ${repo.path}`, errorMessage)
 
     if (error.code === GitErrorCode.AuthRequired) {
       try {
@@ -126,6 +131,7 @@ export async function commitAndPushRepo(
             // 凭证有效但冲突/网络失败时让 caller 按 errorCode 处理而非误弹凭证框
             const credErrorMessage = String(credError).trim()
             const credParsed = parseGitError(credErrorMessage)
+            logger.warn('git-service', `git pull+push with saved credential failed: ${repo.path}`, credErrorMessage)
             return {
               success: false,
               error: credErrorMessage,

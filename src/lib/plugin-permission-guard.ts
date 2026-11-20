@@ -62,8 +62,9 @@ function eagerHydrateFromLocalStorage(): void {
     let raw: string | null
     try {
       raw = localStorage.getItem(key)
-    } catch {
-      // localStorage 异常时跳过当前项
+    } catch (e) {
+      // localStorage 异常时跳过当前项，但需留痕（可能影响权限同步完整性）
+      logger.warn('plugin-permission-guard', `读取权限同步记录失败: ${pluginId}`, e)
       continue
     }
     if (!raw) continue

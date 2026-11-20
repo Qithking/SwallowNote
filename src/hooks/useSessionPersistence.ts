@@ -174,8 +174,9 @@ export function useSessionPersistence() {
                 return x >= mx - 200 && x < mx + mw &&
                        y >= my - 200 && y < my + mh
               })
-            } catch {
-              // 显示器 API 不可用时退化为基本范围检查
+            } catch (e) {
+              // 显示器 API 不可用时退化为基本范围检查，需留痕（多显示器定位可能异常）
+              logger.warn('session', 'window position validation via monitors failed, fallback to screen bounds', e)
               // 上限使用宽松倍数以兼容多显示器横向/纵向排列
               positionValid = x >= -200 && y >= -200 &&
                 x < window.screen.width * 4 &&

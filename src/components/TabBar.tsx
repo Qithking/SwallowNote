@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { PluginContextMenuItems } from '@/components/Plugin/PluginContextMenuItems'
 import { flushAllEditors } from '@/lib/editor-flush'
+import { logger } from '@/lib/logger'
 
 /** Fields from EditorTab that TabBar actually needs for rendering.
  *  Excludes `content` (the only field that changes on every keystroke)
@@ -140,7 +141,8 @@ function TabBar() {
     try {
       await navigator.clipboard.writeText(tab.path)
       showToast(t('tabBar.pathCopied'))
-    } catch {
+    } catch (e) {
+      logger.warn('tabbar', `copy path failed: ${tab.path}`, e)
       showToast(t('tabBar.copyFailed'))
     }
   }
@@ -149,7 +151,8 @@ function TabBar() {
     try {
       await navigator.clipboard.writeText(getRelativePath(tab.path))
       showToast(t('tabBar.relativePathCopied'))
-    } catch {
+    } catch (e) {
+      logger.warn('tabbar', `copy path failed: ${tab.path}`, e)
       showToast(t('tabBar.copyFailed'))
     }
   }
@@ -158,7 +161,8 @@ function TabBar() {
     try {
       // 统一走 file-ops 包装：按 tab 路径所属的工作区根过 fs_guard 白名单
       await openInFinder(tab.path)
-    } catch {
+    } catch (e) {
+      logger.warn('tabbar', `show in finder failed: ${tab.path}`, e)
       showToast(t('tabBar.openFailed'))
     }
   }

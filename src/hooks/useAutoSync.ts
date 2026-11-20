@@ -153,7 +153,10 @@ export function useAutoSync(
               ? (wsState.workspaceFolders || [])
               : (wsState.rootPath ? [wsState.rootPath] : [])
             const scanPromises = scanPaths.map(async (path) => {
-              try { return await scanGitRepos(path) } catch { return [] }
+              try { return await scanGitRepos(path) } catch (e) {
+                logger.warn('app', `scanGitRepos failed during auto sync refresh: ${path}`, e)
+                return []
+              }
             })
             const scanResults = await Promise.all(scanPromises)
             const freshRepos = mapRepoInfosToRepositories(scanResults.flat())
@@ -245,8 +248,9 @@ export function useAutoSync(
           let ran = true
           try {
             ran = await doSync()
-          } catch {
-            // doSync 异常按已完成处理，避免重试风暴
+          } catch (e) {
+            // doSync 异常按已完成处理避免重试风暴，但异常本身必须留痕
+            logger.error('auto-sync', '启动自动同步执行异常', e)
           }
           if (!ran) {
             // 被互斥跳过：10s 后重试，不消耗一次性的启动同步机会

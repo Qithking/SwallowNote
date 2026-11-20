@@ -47,8 +47,9 @@ export async function normalizeWorkspacePath(input: string): Promise<string> {
     if (!cachedHomeDir) {
       try {
         cachedHomeDir = await getHomeDir()
-      } catch {
-        // home 获取失败保留原样，交由后端 fs_guard fail-closed 拒绝
+      } catch (e) {
+        // home 获取失败保留原样，交由后端 fs_guard fail-closed 拒绝；留痕便于定位路径异常
+        logger.warn('workspace-store', 'getHomeDir failed while expanding ~ path', e)
       }
     }
     if (cachedHomeDir) p = cachedHomeDir + p.slice(1)
@@ -221,6 +222,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       await saveFolderHistory(pathToSave)
       set({ currentWorkspacePath: pathToSave })
     } catch (err) {
+      logger.error('workspace-store', `Failed to save workspace: ${pathToSave}`, err)
       set({ error: `Failed to save workspace: ${err}` })
     }
   },

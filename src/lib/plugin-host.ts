@@ -449,6 +449,7 @@ class PluginStorageImpl implements PluginStorage {
     } catch (err) {
       success = false
       errorMsg = String(err)
+      logger.warn('plugin-host', `storage get failed for ${this.pluginId}`, err)
       throw err
     } finally {
       this.recordMetric('get', 1, 0, performance.now() - start, success, errorMsg)
@@ -479,6 +480,7 @@ class PluginStorageImpl implements PluginStorage {
     } catch (err) {
       success = false
       errorMsg = String(err)
+      logger.warn('plugin-host', `storage set failed for ${this.pluginId}`, err)
       throw err
     } finally {
       // Pass the *delta* of new − old, so the size tracker subtracts
@@ -524,6 +526,7 @@ class PluginStorageImpl implements PluginStorage {
     } catch (err) {
       success = false
       errorMsg = String(err)
+      logger.warn('plugin-host', `storage delete failed for ${this.pluginId}`, err)
       throw err
     } finally {
       this.recordMetric('delete', 1, dataSize, performance.now() - start, success, errorMsg)
@@ -559,6 +562,7 @@ class PluginStorageImpl implements PluginStorage {
     } catch (err) {
       success = false
       errorMsg = String(err)
+      logger.warn('plugin-host', `storage clear failed for ${this.pluginId}`, err)
       throw err
     } finally {
       this.recordMetric('clear', 0, dataSize, performance.now() - start, success, errorMsg)
@@ -576,6 +580,7 @@ class PluginStorageImpl implements PluginStorage {
     } catch (err) {
       success = false
       errorMsg = String(err)
+      logger.warn('plugin-host', `storage keys failed for ${this.pluginId}`, err)
       throw err
     } finally {
       this.recordMetric('keys', 0, 0, performance.now() - start, success, errorMsg)

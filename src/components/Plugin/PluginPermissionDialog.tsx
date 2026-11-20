@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next'
 import { Shield, Check, AlertTriangle } from 'lucide-react'
 import type { PluginPermission, PluginPermissionStatus } from '@/types/plugin'
 import { grantPluginPermissions, revokePluginPermissions } from '@/lib/plugin-permissions'
+import { logger } from '@/lib/logger'
 import { usePluginStore } from '@/stores'
 import {
   Dialog,
@@ -92,7 +93,8 @@ export function PluginPermissionDialog({
 
       onGrant?.(selectedPermissions)
       onClose()
-    } catch {
+    } catch (e) {
+      logger.error('plugin-permission', `save permissions failed: ${pluginId}`, e)
       setError(t('plugin.permission.saveFailed'))
     } finally {
       setIsSubmitting(false)

@@ -5,7 +5,7 @@
  * 展示前端 + 后端 + 插件三端合并日志，支持级别过滤、来源过滤、搜索、复制、导出 .jsonl
  */
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
-import { logStore, type LogEntry, type LogLevel } from '@/lib/logger'
+import { logStore, logger, type LogEntry, type LogLevel } from '@/lib/logger'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -83,8 +83,9 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
     const text = filtered.map((e) => `[${formatLogTimestamp(e.timestamp)}] [${e.level}] [${e.source}] ${e.message}`).join('\n')
     try {
       await navigator.clipboard.writeText(text)
-    } catch {
-      // clipboard 不可用时静默降级
+    } catch (e) {
+      // clipboard 不可用时静默降级，但留痕便于排查复制功能失效
+      logger.warn('log-viewer', 'copy logs failed', e)
     }
   }, [filtered])
 
@@ -100,7 +101,7 @@ export function LogViewer({ open, onOpenChange }: LogViewerProps) {
       // export_text_file：后端唯一放行工作区外写入的导出命令
       await invoke('export_text_file', { path: filePath, content: jsonl })
     } catch (e) {
-      console.error('[LogViewer] export failed', e)
+      logger.error('log-viewer', 'export logs failed', e)
     }
   }, [filtered])
 

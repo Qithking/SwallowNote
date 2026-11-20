@@ -265,6 +265,7 @@ export function CommitSection({
       // 凭证错误：弹出下一个待处理仓库（当前仓库留在 errorPaths，可再次同步）
       setCredentialDialogQueue((q) => q.slice(1))
       const errorMessage = String(e).trim()
+      logger.error('git-view', `Force sync with credentials failed: ${activeCredential.repoName}`, e)
       showToast(`${activeCredential.repoName}: ${errorMessage || t('git.unknownError')}`, 'error')
     } finally {
       setIsPushingWithCredentials(false)
@@ -468,6 +469,7 @@ export function CommitSection({
       // 当前仓库处理失败：弹出下一个（P2 队列），本仓库留在 errorPaths
       setDivergedDialogQueue((q) => q.slice(1))
       const msg = String(e).trim()
+      logger.error('git-view', `Resolve diverged failed: ${repoName}`, e)
       showToast(`${repoName}: ${msg || t('git.unknownError')}`, 'error')
     } finally {
       setIsResolvingDiverged(false)
@@ -630,6 +632,7 @@ export function RepositoryItem({
       await onRefresh()
     } catch (e) {
       const errorMessage = String(e).trim()
+      logger.error('git-view', `Credential ${credentialDialog.action} failed: ${repo.name}`, e)
       showToast(
         credentialDialog.action === 'forcePush'
           ? t('git.forcePushFailed', { repo: repo.name, error: errorMessage || t('git.unknownError') })
@@ -651,6 +654,7 @@ export function RepositoryItem({
       setShowForgetCredential(false)
     } catch (e) {
       const errorMessage = String(e).trim()
+      logger.error('git-view', `Forget credential failed: ${repo.path}`, e)
       showToast(t('git.forgetCredentialFailed', { error: errorMessage || t('git.unknownError') }), 'error')
     } finally {
       setIsForgettingCredential(false)
@@ -954,6 +958,7 @@ const GitView = memo(function GitView() {
       await handleRefresh()
     } catch (e) {
       const errorMessage = String(e).trim()
+      logger.error('git-view', `Pull with credentials failed: ${pullCredentialDialog.repoName}`, e)
       showToast(`${pullCredentialDialog.repoName}: ${errorMessage || t('git.unknownError')}`, 'error')
     } finally {
       setIsPullCredentialLoading(false)
@@ -1009,7 +1014,10 @@ const GitView = memo(function GitView() {
           : (rootPath ? [rootPath] : [])
         const scanResults = await Promise.all(
           scanPaths.map(async (p) => {
-            try { return await scanGitRepos(p) } catch { return [] }
+            try { return await scanGitRepos(p) } catch (e) {
+              logger.warn('git-view', `scanGitRepos failed during post-pull refresh: ${p}`, e)
+              return []
+            }
           })
         )
         const freshRepos = mapRepoInfosToRepositories(scanResults.flat())

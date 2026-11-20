@@ -72,6 +72,8 @@ export async function invokePluginBackendStream<T = unknown, R = unknown>(
     // PluginError（携带 code/data）；通知帧 error 语义仍由响应帧终结。
     const normalized = normalizePluginBackendError(err)
     errorMsg = String(normalized)
+    // 流式调用失败：插件 id / 命令是定位问题的关键上下文
+    logger.error('plugin-stream', `invokeBackendStream failed: ${pluginId} ${command}`, normalized)
     throw normalized
   } finally {
     const durationMs = performance.now() - start

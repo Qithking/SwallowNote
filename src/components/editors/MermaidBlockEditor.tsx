@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { useBlockResize } from '@/hooks/useBlockResize'
 import { BlockResizeHandles } from './BlockResizeHandles'
 import { renderMermaidDiagram } from '@/lib/mermaid-render'
+import { logger } from '@/lib/logger'
 
 interface MermaidBlockEditorProps {
   diagram: string
@@ -102,7 +103,8 @@ export function MermaidBlockEditor({ diagram, source, width, height, block, edit
       .then((svg) => {
         if (active) setState({ diagram, svg, error: false })
       })
-      .catch(() => {
+      .catch((e) => {
+        logger.error('mermaid', 'render diagram failed', e)
         if (active) setState({ diagram, svg: '', error: true })
       })
 

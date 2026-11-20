@@ -62,6 +62,8 @@ export function downloadLatestRelease(
       // 两个监听器均已注册，安全地触发后端下载（渠道决定下载 URL 是否走 gh-proxy）
       await invoke('download_latest_release', { channel })
     } catch (e) {
+      // 应用更新下载失败：除 UI 回调外必须落入日志，便于事后排查渠道/网络问题
+      logger.error('upgrade', '应用更新下载失败', e)
       onError(String(e))
       cleanup()
     }

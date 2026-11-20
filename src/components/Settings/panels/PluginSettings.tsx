@@ -43,6 +43,7 @@ export function PluginSettings() {
       )
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
+      logger.error('settings', 'export plugin configs failed', e)
       toast.error(t('settings.plugins.configs.exportFailed') + ' · ' + message)
     } finally {
       setPluginConfigsExporting(false)
@@ -89,6 +90,7 @@ export function PluginSettings() {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
+      logger.error('settings', 'import plugin configs failed', e)
       toast.error(message)
     } finally {
       setPluginConfigsImporting(false)

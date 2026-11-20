@@ -660,7 +660,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       } else {
         set({ workspaceMode: 'folder' })
       }
-    } catch {
+    } catch (e) {
+      logger.warn('ui-store', 'initWorkspaceMode failed, fallback to folder', e)
       set({ workspaceMode: 'folder' })
     }
   },
@@ -928,7 +929,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       if (s.customShortcuts) {
         try {
           customShortcuts = JSON.parse(s.customShortcuts)
-        } catch {
+        } catch (e) {
+          logger.warn('ui-store', 'custom shortcuts JSON.parse failed, using empty map', e)
           customShortcuts = {}
         }
       }
@@ -942,7 +944,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       if (s.pluginCommandShortcuts) {
         try {
           pluginCommandShortcuts = JSON.parse(s.pluginCommandShortcuts)
-        } catch {
+        } catch (e) {
+          logger.warn('ui-store', 'plugin command shortcuts JSON.parse failed, using empty map', e)
           pluginCommandShortcuts = {}
         }
       }
@@ -966,8 +969,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       let actualAutoStart = s.autoStart === 'true'
       try {
         actualAutoStart = await isAutoStartEnabled()
-      } catch {
-        // OS 查询失败时退回读取设置值
+      } catch (e) {
+        // OS 查询失败时退回读取设置值，需留痕避免"自启状态不同步"无从排查
+        logger.warn('ui-store', 'isAutoStartEnabled failed, fallback to stored setting', e)
       }
 
       set({
@@ -1003,8 +1007,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       if (s.appLocale === 'en' || s.appLocale === 'zh-CN') {
         i18n.changeLanguage(s.appLocale)
       }
-    } catch {
-      // DB not ready, use defaults
+    } catch (e) {
+      // DB not ready / 设置读取失败：使用默认值，但需留痕（主题/语言等会异常回落）
+      logger.warn('ui-store', 'load settings failed, using defaults', e)
     }
   },
 }))

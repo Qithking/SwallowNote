@@ -34,6 +34,7 @@ import type {
 import type { PluginMetadataRust } from '@/lib/tauri'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { logger } from '@/lib/logger'
 
 // 提取为常量避免每次渲染分配新对象
 const ICON_STYLE = { marginRight: 3, verticalAlign: -1 } as const
@@ -104,7 +105,10 @@ function PluginMarketView() {
   const handleSourceChange = useCallback(
     (url: string) => {
       setRepoUrl(url)
-      void setActiveMarketSource(url)
+      void setActiveMarketSource(url).catch((e) => {
+        // 活跃来源持久化失败：本次切换仍生效，但下次启动会回退旧来源
+        logger.error('plugin-market', `set active market source failed: ${url}`, e)
+      })
     },
     [setRepoUrl],
   )
@@ -152,18 +156,23 @@ function PluginMarketView() {
     // previous one as its trigger element and Radix logs a warning.
     queueMicrotask(() => {
       void (async () => {
-        const installed = usePluginStore
-          .getState()
-          .plugins.find((p) => p.id === meta.id)
-        const requested =
-          installed?.permissions ?? []
-        if (requested.length === 0) return
-        await initializePluginPermissions(meta.id, requested)
-        setPendingPermissionGrant({
-          pluginId: meta.id,
-          pluginName: meta.name || meta.id,
-          requested,
-        })
+        try {
+          const installed = usePluginStore
+            .getState()
+            .plugins.find((p) => p.id === meta.id)
+          const requested =
+            installed?.permissions ?? []
+          if (requested.length === 0) return
+          await initializePluginPermissions(meta.id, requested)
+          setPendingPermissionGrant({
+            pluginId: meta.id,
+            pluginName: meta.name || meta.id,
+            requested,
+          })
+        } catch (e) {
+          // 安装成功但权限初始化失败：插件可加载但权限门控会异常，必须留痕
+          logger.error('plugin-market', `post-install permission init failed: ${meta.id}`, e)
+        }
       })()
     })
   }
@@ -360,8 +369,13 @@ function PluginMarketView() {
             handleSourceChange(url)
             setShowSourceManager(false)
           }}
-          onAdd={(source) => addRepoSource(source)}
-          onRemove={(url) => removeRepoSource(url)}
+          onAdd={(source) => {
+            // 失败已由 store 记录；此处仅阻止 unhandled rejection
+            void addRepoSource(source).catch(() => {})
+          }}
+          onRemove={(url) => {
+            void removeRepoSource(url).catch(() => {})
+          }}
           onClose={() => setShowSourceManager(false)}
         />
       )}
