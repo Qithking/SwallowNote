@@ -2196,6 +2196,9 @@ pub async fn import_plugin_configs(
 /// （表现为 "Load failed"）；raw.githubusercontent.com 有 CORS 头所以历史链路正常。
 /// 强制 https（与前端 assertHttpsRepoUrl 对齐）；进度百分比经 Channel 回传，
 /// 无 Content-Length 时仅在完成时发 100。
+/// 市场下载空闲超时：stall_timeout 内无任何数据到达才判失败，与文件大小解耦。
+const MARKET_DOWNLOAD_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[tauri::command]
 // 返回 raw 二进制响应：Vec<u8> 默认走 JSON 序列化会变成百万级 number 数组，
 // 且前端 crypto.subtle.digest 需要真实 ArrayBuffer（raw 模式下 invoke 直接返回）
@@ -2203,9 +2206,8 @@ pub async fn plugin_fetch_market_bytes(
     url: String,
     progress: tauri::ipc::Channel<f64>,
 ) -> Result<tauri::ipc::Response, PluginError> {
-    // 总超时覆盖整个传输周期：9MB 插件 zip 经慢速镜像可能 60s+ 传不完，
-    // 60s 会把正常慢速传输中途掐断（表现为 body 阶段 operation timed out）
-    const MARKET_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+    // 不设 client 总超时：总超时覆盖整个传输周期，会错杀慢速但正常的大文件传输
+    // （如 20MB 插件）。传输层用 fetch_market_bytes_once 内的空闲超时（stall）兜底
 
     if !url.trim().starts_with("https://") {
         return Err(PluginError::InvalidInput(format!(
@@ -2214,7 +2216,6 @@ pub async fn plugin_fetch_market_bytes(
     }
 
     let client = reqwest::Client::builder()
-        .timeout(MARKET_HTTP_TIMEOUT)
         // 连接阶段单独快速超时：把重试预算留给传输，连接失败不占满总超时
         .connect_timeout(std::time::Duration::from_secs(10))
         .build()
@@ -2240,7 +2241,7 @@ pub async fn plugin_fetch_market_bytes(
             &client,
             &candidates[round / ATTEMPTS_PER_CANDIDATE],
             &progress,
-            MARKET_HTTP_TIMEOUT,
+            MARKET_DOWNLOAD_STALL_TIMEOUT,
         )
         .await
         {
@@ -2265,18 +2266,16 @@ async fn fetch_market_bytes_once(
     client: &reqwest::Client,
     url: &str,
     progress: &tauri::ipc::Channel<f64>,
-    timeout: std::time::Duration,
+    stall_timeout: std::time::Duration,
 ) -> Result<Vec<u8>, PluginError> {
-    let response = tokio::time::timeout(timeout, client.get(url).send())
-        .await
-        .map_err(|_| PluginError::Io(format!("Market request timed out: {url}")))?
-        .map_err(|e| {
-            // 展开 source 链，露出底层原因（如 operation timed out / dns error）
-            PluginError::Io(format!(
-                "Failed to fetch market resource: {}",
-                format_error_chain(&e)
-            ))
-        })?;
+    // 连接阶段超时由 client 的 connect_timeout(10s) 承担，超时原因经错误链展开可见
+    let response = client.get(url).send().await.map_err(|e| {
+        // 展开 source 链，露出底层原因（如 operation timed out / dns error）
+        PluginError::Io(format!(
+            "Failed to fetch market resource: {}",
+            format_error_chain(&e)
+        ))
+    })?;
 
     // 错误消息以 "HTTP <status>" 开头：前端 friendlyInstallError 依赖该形态
     // 透传状态码（如 404 下载失败给用户看原始信息）。
@@ -2293,13 +2292,31 @@ async fn fetch_market_bytes_once(
     let mut stream = response.bytes_stream();
     let mut buf: Vec<u8> = Vec::with_capacity(total.unwrap_or(0).max(1024) as usize);
     let mut received: usize = 0;
-    while let Some(chunk) = futures::StreamExt::next(&mut stream).await {
-        let chunk = chunk.map_err(|e| {
-            PluginError::Io(format!(
-                "Failed to read market stream: {}",
-                format_error_chain(&e)
-            ))
-        })?;
+    // 空闲超时：stall_timeout 内有数据到达就继续，与文件大小彻底解耦（20MB 慢速
+    // 传输也能传完）；流停滞才判失败并触发候选重试。替代固定总超时——总超时会
+    // 错杀慢速但正常的大文件传输
+    loop {
+        let next = match tokio::time::timeout(stall_timeout, futures::StreamExt::next(&mut stream))
+            .await
+        {
+            Ok(item) => item,
+            Err(_) => {
+                return Err(PluginError::Io(format!(
+                    "Market download stalled (no data for {}s, got {received} bytes) from {}",
+                    stall_timeout.as_secs(),
+                    url
+                )))
+            }
+        };
+        let chunk = match next {
+            Some(chunk) => chunk.map_err(|e| {
+                PluginError::Io(format!(
+                    "Failed to read market stream: {}",
+                    format_error_chain(&e)
+                ))
+            })?,
+            None => break,
+        };
         received += chunk.len();
         buf.extend_from_slice(&chunk);
         if let Some(t) = total {
@@ -2344,6 +2361,116 @@ fn read_export_manifest<R: std::io::Read + std::io::Seek>(
 #[allow(dead_code)]
 mod tests {
     use super::*;
+
+    /// 空闲超时（stall）验证的服务器工具：手写 HTTP 响应，支持分段发送。
+    /// prefix 在响应头后立即发送；hold_secs > 0 时保持连接停滞（不发数据也不关闭）；
+    /// suffix 在停滞期后发送（hold_secs=0 则不发，直接关闭连接模拟截断）。
+    async fn spawn_segmented_http_server(
+        total_len: usize,
+        prefix: Vec<u8>,
+        hold_secs: u64,
+        suffix: Vec<u8>,
+    ) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_secs(5), sock.read(&mut buf)).await;
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\n\r\n",
+                total_len
+            );
+            let _ = sock.write_all(head.as_bytes()).await;
+            let _ = sock.write_all(&prefix).await;
+            if hold_secs > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(hold_secs)).await;
+                let _ = sock.write_all(&suffix).await;
+            }
+            // drop(sock) 关闭连接
+        });
+        format!("http://{addr}/x.zip")
+    }
+
+    fn test_progress() -> tauri::ipc::Channel<f64> {
+        tauri::ipc::Channel::new(|_| Ok(()))
+    }
+
+    /// 验证 1：慢速但持续流动的传输不被掐——前半段后停滞 < stall_timeout，
+    /// 再发后半段，应当完整收到全部字节（大文件慢速传输场景，与大小解耦）。
+    #[tokio::test]
+    async fn test_slow_stream_completes() {
+        let client = reqwest::Client::new();
+        let url = spawn_segmented_http_server(
+            20,
+            vec![b'a'; 10],
+            2, // 停滞 2s（< stall_timeout 5s），随后继续发送
+            vec![b'b'; 10],
+        )
+        .await;
+        let bytes = fetch_market_bytes_once(
+            &client,
+            &url,
+            &test_progress(),
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect("slow but flowing stream must complete");
+        assert_eq!(bytes.len(), 20);
+        assert!(bytes[..10].iter().all(|&b| b == b'a'));
+        assert!(bytes[10..].iter().all(|&b| b == b'b'));
+    }
+
+    /// 验证 2：流停滞（无数据也不关闭）超过 stall_timeout 判失败——真实断连/限流
+    /// 停止场景应在 ~stall_timeout 内报错而非无限等待。
+    #[tokio::test]
+    async fn test_stall_times_out() {
+        let client = reqwest::Client::new();
+        let url = spawn_segmented_http_server(100, vec![b'a'; 10], 30, vec![]).await;
+        let started = std::time::Instant::now();
+        let err = fetch_market_bytes_once(
+            &client,
+            &url,
+            &test_progress(),
+            std::time::Duration::from_secs(3),
+        )
+        .await
+        .expect_err("stalled stream must fail");
+        let elapsed = started.elapsed();
+        assert!(
+            err.to_string().contains("stalled"),
+            "error should mention stall: {}",
+            err
+        );
+        // 应在 ~3s 触发（允许调度余量 5s），而非等到服务器 30s 放开
+        assert!(elapsed < std::time::Duration::from_secs(8), "elapsed {elapsed:?}");
+    }
+
+    /// 验证 3：连接提前关闭导致字节数不符 Content-Length —— 必须报错，
+    /// 不能把残缺数据当成功返回。异常关闭走流错误分支（"market stream"），
+    /// 优雅 EOF 走截断感知分支（"truncated"），两种形态均视为符合预期。
+    #[tokio::test]
+    async fn test_truncated_stream_fails() {
+        let client = reqwest::Client::new();
+        // hold_secs=0：发完 prefix 直接关闭 → 10/20 截断
+        let url = spawn_segmented_http_server(20, vec![b'a'; 10], 0, vec![]).await;
+        let err = fetch_market_bytes_once(
+            &client,
+            &url,
+            &test_progress(),
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect_err("truncated stream must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("truncated") || msg.contains("market stream"),
+            "error should indicate incomplete transfer: {}",
+            msg
+        );
+    }
 
     /// 回归（gh-proxy 兜底重试）：github.com 源生成镜像 URL，其它源不兜底。
     #[test]
