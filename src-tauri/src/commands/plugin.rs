@@ -2197,11 +2197,15 @@ pub async fn import_plugin_configs(
 /// 强制 https（与前端 assertHttpsRepoUrl 对齐）；进度百分比经 Channel 回传，
 /// 无 Content-Length 时仅在完成时发 100。
 #[tauri::command]
+// 返回 raw 二进制响应：Vec<u8> 默认走 JSON 序列化会变成百万级 number 数组，
+// 且前端 crypto.subtle.digest 需要真实 ArrayBuffer（raw 模式下 invoke 直接返回）
 pub async fn plugin_fetch_market_bytes(
     url: String,
     progress: tauri::ipc::Channel<f64>,
-) -> Result<Vec<u8>, PluginError> {
-    const MARKET_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+) -> Result<tauri::ipc::Response, PluginError> {
+    // 总超时覆盖整个传输周期：9MB 插件 zip 经慢速镜像可能 60s+ 传不完，
+    // 60s 会把正常慢速传输中途掐断（表现为 body 阶段 operation timed out）
+    const MARKET_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
     if !url.trim().starts_with("https://") {
         return Err(PluginError::InvalidInput(format!(
@@ -2211,42 +2215,68 @@ pub async fn plugin_fetch_market_bytes(
 
     let client = reqwest::Client::builder()
         .timeout(MARKET_HTTP_TIMEOUT)
+        // 连接阶段单独快速超时：把重试预算留给传输，连接失败不占满总超时
+        .connect_timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| PluginError::Io(format!("Failed to build http client: {}", e)))?;
 
-    // 直连失败且为 github.com 源时走 gh-proxy 镜像兜底重试一次
-    // （与 check_plugin_updates 同策略；重试发生在连接阶段，进度回传不受影响）
-    let response = match tokio::time::timeout(MARKET_HTTP_TIMEOUT, client.get(&url).send())
+    // 候选 URL：直连优先，github.com 源附 gh-proxy 镜像兜底
+    // （与 check_plugin_updates 同策略；重试发生在连接/传输阶段，进度回传不受影响）
+    let mut candidates: Vec<String> = vec![url.clone()];
+    if let Some(mirror) = gh_proxy_fallback_url(&url) {
+        candidates.push(mirror);
+    }
+
+    // gh-proxy 免费镜像对大 zip 转发常被截断（实测同一 URL 多次下载大小不一），
+    // 每个候选最多 2 轮；流读取失败或字节数与 Content-Length 不符均视为该候选失败
+    const ATTEMPTS_PER_CANDIDATE: usize = 2;
+    let total_attempts = candidates.len() * ATTEMPTS_PER_CANDIDATE;
+    let mut last_err: Option<PluginError> = None;
+    for round in 0..total_attempts {
+        if round > 0 {
+            let _ = progress.send(0.0);
+        }
+        match fetch_market_bytes_once(
+            &client,
+            &candidates[round / ATTEMPTS_PER_CANDIDATE],
+            &progress,
+            MARKET_HTTP_TIMEOUT,
+        )
         .await
-        .map_err(|_| PluginError::Io("Market request timed out".to_string()))?
+        {
+            Ok(bytes) => return Ok(tauri::ipc::Response::new(bytes)),
+            Err(e) => {
+                log::warn!(
+                    "[plugin-market] fetch attempt {}/{} failed for {}: {}",
+                    round + 1,
+                    total_attempts,
+                    candidates[round / ATTEMPTS_PER_CANDIDATE],
+                    e
+                );
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| PluginError::Io("market fetch failed".to_string())))
+}
+
+/// 单次市场资源下载：连接、状态校验、流式读取（含截断感知）。
+async fn fetch_market_bytes_once(
+    client: &reqwest::Client,
+    url: &str,
+    progress: &tauri::ipc::Channel<f64>,
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>, PluginError> {
+    let response = tokio::time::timeout(timeout, client.get(url).send())
+        .await
+        .map_err(|_| PluginError::Io(format!("Market request timed out: {url}")))?
         .map_err(|e| {
             // 展开 source 链，露出底层原因（如 operation timed out / dns error）
             PluginError::Io(format!(
                 "Failed to fetch market resource: {}",
                 format_error_chain(&e)
             ))
-        })
-    {
-        Ok(resp) => resp,
-        Err(primary) => match gh_proxy_fallback_url(&url) {
-            Some(fallback_url) => {
-                log::warn!(
-                    "[plugin-market] primary fetch failed, trying gh-proxy fallback: {}",
-                    primary
-                );
-                tokio::time::timeout(MARKET_HTTP_TIMEOUT, client.get(&fallback_url).send())
-                    .await
-                    .map_err(|_| PluginError::Io("Market request timed out (gh-proxy)".to_string()))?
-                    .map_err(|e| {
-                        PluginError::Io(format!(
-                            "Market fetch failed (direct + gh-proxy): {}",
-                            format_error_chain(&e)
-                        ))
-                    })?
-            }
-            None => return Err(primary),
-        },
-    };
+        })?;
 
     // 错误消息以 "HTTP <status>" 开头：前端 friendlyInstallError 依赖该形态
     // 透传状态码（如 404 下载失败给用户看原始信息）。
@@ -2264,14 +2294,28 @@ pub async fn plugin_fetch_market_bytes(
     let mut buf: Vec<u8> = Vec::with_capacity(total.unwrap_or(0).max(1024) as usize);
     let mut received: usize = 0;
     while let Some(chunk) = futures::StreamExt::next(&mut stream).await {
-        let chunk = chunk
-            .map_err(|e| PluginError::Io(format!("Failed to read market stream: {}", e)))?;
+        let chunk = chunk.map_err(|e| {
+            PluginError::Io(format!(
+                "Failed to read market stream: {}",
+                format_error_chain(&e)
+            ))
+        })?;
         received += chunk.len();
         buf.extend_from_slice(&chunk);
         if let Some(t) = total {
             if t > 0 {
                 let _ = progress.send((received as f64 / t as f64) * 100.0);
             }
+        }
+    }
+    // 截断感知：Content-Length 已知但字节数不符 = 传输不完整（镜像限流/中断的典型形态），
+    // 必须失败触发重试，不能把残缺数据当成功返回（zip 解包/sha256 校验是最后防线）
+    if let Some(t) = total {
+        if t > 0 && received != t as usize {
+            return Err(PluginError::Io(format!(
+                "Market download truncated: received {} of {} bytes from {}",
+                received, t, url
+            )));
         }
     }
     if total.is_none() {
