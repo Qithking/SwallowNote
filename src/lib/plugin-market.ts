@@ -302,10 +302,13 @@ export async function downloadPluginZip(
   const url = resolveDownloadUrl(entry.downloadUrl, repoUrl)
   let bytes: ArrayBuffer
   try {
-    bytes = await invoke<ArrayBuffer>('plugin_fetch_market_bytes', {
+    const raw = await invoke<ArrayBuffer | number[]>('plugin_fetch_market_bytes', {
       url,
       progress: new Channel<number>(),
     })
+    // macOS 上 tauri 对 ipc::Response 的 raw 响应经 eval 以 JSON number 数组
+    // 回传（非 ArrayBuffer），统一归一化后再参与 sha256/缓存/安装链路
+    bytes = raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer
   } catch (e) {
     // 保持既有契约：错误消息形如 "HTTP <status> downloading <id>@<version>"，
     // friendlyInstallError 依赖该形态透传状态码（404 等给用户看原始信息）
