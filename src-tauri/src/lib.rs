@@ -209,6 +209,10 @@ pub fn run() {
             commands::upgrade::get_platform_extension,
             commands::upgrade::get_download_dir,
             commands::upgrade::cancel_download,
+            commands::export::export_docx,
+            commands::export::export_html,
+            commands::export::generate_export_html,
+            commands::export::open_print_preview,
             services::file_watcher::watch_directory,
             services::file_watcher::unwatch_directory,
             mac_rounded_corners::enable_rounded_corners,
@@ -287,6 +291,9 @@ pub fn run() {
             // 应用启动时清理上次崩溃可能残留的 askpass 脚本，防止明文凭证泄露
             commands::git::cleanup_stale_askpass_scripts();
             info!("[STARTUP-TIME] askpass_cleanup_done t={}", startup_t0.elapsed().as_millis());
+
+            // 启动时清空打印预览临时目录（异常退出残留兜底，见 export 模块）
+            commands::export::cleanup_print_preview_files(app.handle());
 
             // 初始化后端 i18n 翻译
             crate::i18n::init_translations();

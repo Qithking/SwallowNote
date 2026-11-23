@@ -35,6 +35,18 @@ function logTime(stage: string, t0: number) {
 ;(window as unknown as { __snCreatePluginLogger: (id: string) => unknown }).__snCreatePluginLogger =
   (id: string) => createPluginLogger(id)
 
+// 导出桥（宿主原语路线）：薄壳导出插件经此调用宿主的主题采集与
+// 自定义块渲染能力，渲染库复用宿主依赖、不再打进插件 bundle
+import { collectExportTheme } from '@/lib/export-theme'
+import { renderCustomBlocks } from '@/lib/export-service'
+import { workspaceRootFor } from '@/lib/tauri/file-ops'
+;(window as unknown as { __snExportBridge: Record<string, unknown> }).__snExportBridge = {
+  collectExportTheme,
+  renderCustomBlocks,
+  // 供导出插件解析当前笔记所属工作区根（后端 fs_guard 图片读取校验用）
+  getWorkspaceRoot: workspaceRootFor,
+}
+
 const mainT0 = performance.now()
 logTime('main_script_begin', mainT0)
 

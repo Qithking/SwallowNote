@@ -60,6 +60,11 @@ semver = "1"
 libc = "0.2"
 url = "2"
 rand = "0.8"
+# 导出原语（宿主原语路线 C1）：Markdown → DOCX/HTML 转换 + LaTeX → OMML
+pulldown-cmark = "0.12"
+docx-rs = "0.4"
+pulldown-latex = "0.7"
+quick-xml = "0.37"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"

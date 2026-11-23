@@ -50,6 +50,18 @@ pub const EXEMPTED_COMMANDS: &[FsExemption] = &[
         command: "git_init",
         reason: "init 目标为用户选择的目录（多为已打开工作区或其外部合法场景）；git 命令仅在目标目录内创建 .git（P2 审计：未过 fs_guard 白名单，评估后登记豁免）",
     },
+    FsExemption {
+        command: "export_docx",
+        reason: "导出经系统保存对话框选择存储位置（默认预填下载目录），用户对落盘位置有明确意图，白名单校验不适用；图片等输入读取仍走 ensure_path_allowed",
+    },
+    FsExemption {
+        command: "export_html",
+        reason: "导出经系统保存对话框选择存储位置（默认预填下载目录），用户对落盘位置有明确意图，白名单校验不适用；图片等输入读取仍走 ensure_path_allowed",
+    },
+    FsExemption {
+        command: "open_print_preview",
+        reason: "打印预览临时 HTML 写入 app_cache_dir/print_preview/（应用数据目录白名单内），窗口关闭即清理，无需白名单校验",
+    },
 ];
 
 /// 组装允许根列表：工作区根（若已打开）+ 应用数据目录。

@@ -1,6 +1,7 @@
 pub mod app;
 pub mod autostart;
 pub mod error;
+pub mod export;
 pub mod file;
 pub mod folder_history;
 pub mod frontmatter;
